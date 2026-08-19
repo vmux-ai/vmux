@@ -140,7 +140,7 @@ impl PluginGroup for FeaturePlugins {
             .add(vmux_team::TeamPlugin)
             .add(vmux_space::SpacePlugin)
             .add(vmux_service::plugin::ServicePlugin)
-            .add(vmux_layout::start::StartPlugin)
+            .add(vmux_start::StartPlugin)
             .add(ToolsPlugin)
     }
 }

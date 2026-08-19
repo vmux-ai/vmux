@@ -68,11 +68,6 @@ tools-result-linked = { $name } ਜੋੜਿਆ ਗਿਆ
 tools-result-unlinked = { $name } ਦਾ ਜੋੜ ਹਟਾਇਆ ਗਿਆ
 vault-title = Vault
 vault-encrypted = ਐਂਡ-ਟੂ-ਐਂਡ ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ ਗਿਆ
-vault-passkey = ਪਾਸਕੀ
-vault-passkey-description = ਬਿਨਾਂ ਪਾਸਵਰਡ ਦੇ ਹੋਰ ਡਿਵਾਈਸਾਂ 'ਤੇ ਇਸ ਵਾਲਟ ਨੂੰ ਅਨਲੌਕ ਕਰੋ।
-vault-passkey-add = ਪਾਸਕੀ ਸ਼ਾਮਲ ਕਰੋ
-vault-passkey-unlock = ਅਨਲੌਕ ਕਰੋ
-vault-passkey-provider-unsupported = ਇਹ ਪਾਸਕੀ ਪ੍ਰਦਾਤਾ ਅਜੇ ਤੱਕ ਏਨਕ੍ਰਿਪਟ ਕੀਤੇ ਵਾਲਟ ਅਨਲੌਕ ਦਾ ਸਮਰਥਨ ਨਹੀਂ ਕਰਦਾ ਹੈ।
 vault-recovery-key = ਰਿਕਵਰੀ ਕੁੰਜੀ
 vault-recovery-key-description = ਇੱਕ ਨਵੀਂ ਡਿਵਾਈਸ 'ਤੇ ਇਸ ਵਾਲਟ ਨੂੰ ਮੁੜ ਪ੍ਰਾਪਤ ਕਰਨ ਲਈ ਬਿਟਵਾਰਡਨ ਜਾਂ ਕਿਸੇ ਹੋਰ ਪਾਸਵਰਡ ਮੈਨੇਜਰ ਵਿੱਚ ਇੱਕ ਕੁੰਜੀ ਨੂੰ ਸੁਰੱਖਿਅਤ ਕਰੋ।
 vault-recovery-key-create = ਕੁੰਜੀ ਬਣਾਓ
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ਇੰਸਟਾਲ ਕਰੋ
 setup-run-install = ਇੰਸਟਾਲ ਕਮਾਂਡ ਚਲਾਓ
 setup-auto-reload = Vmux ਇਸਨੂੰ ਟਰਮੀਨਲ ਵਿੱਚ ਚਲਾਉਂਦਾ ਹੈ ਅਤੇ { $command } ਤਿਆਰ ਹੋਣ 'ਤੇ ਮੁੜ ਲੋਡ ਕਰਦਾ ਹੈ।
 
-debug-title = ਡੀਬੱਗ
-debug-auto-update = ਆਟੋ-ਅੱਪਡੇਟ
-debug-simulate-update = ਅੱਪਡੇਟ ਉਪਲਬਧ ਹੋਣ ਦੀ ਨਕਲ ਕਰੋ
-debug-simulate-download = ਡਾਊਨਲੋਡ ਦੀ ਨਕਲ ਕਰੋ
-debug-clear-update = ਅੱਪਡੇਟ ਸਾਫ਼ ਕਰੋ
-debug-trigger-restart = ਰੀਸਟਾਰਟ ਟ੍ਰਿਗਰ ਕਰੋ
 
 command-manage-spaces = ਸਪੇਸਾਂ ਦਾ ਪ੍ਰਬੰਧ ਕਰੋ…
 command-pane-stack-location = ਪੇਨ { $pane } / ਸਟੈਕ { $stack }

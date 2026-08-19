@@ -23,10 +23,9 @@ use vmux_layout::{
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
-use vmux_setting::Settings;
 use vmux_setting::event::SETTINGS_PAGE_URL;
+use vmux_space::ActiveSpace;
 use vmux_space::event::SPACES_PAGE_URL;
-use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -547,7 +546,10 @@ pub(crate) fn rebuild_space_views(
                 .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    vmux_terminal::processes_monitor::ProcessesMonitor::new(),
+                    vmux_layout::cef::Browser::native_page(
+                        SERVICES_PAGE_URL,
+                        "Background Services",
+                    ),
                     ChildOf(entity),
                 ));
             } else if meta
@@ -600,12 +602,21 @@ pub(crate) fn rebuild_space_views(
                     }
                 }
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
-                commands.spawn((Spaces::new(), ChildOf(entity)));
+                commands.spawn((
+                    vmux_layout::cef::Browser::native_page(SPACES_PAGE_URL, "Spaces"),
+                    ChildOf(entity),
+                ));
             } else if meta
                 .url
                 .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
-                commands.spawn((Settings::new(), ChildOf(entity)));
+                commands.spawn((
+                    vmux_layout::cef::Browser::native_page(
+                        vmux_setting::event::SETTINGS_PAGE_URL,
+                        "Settings",
+                    ),
+                    ChildOf(entity),
+                ));
             } else if meta.url.starts_with("file:") {
                 if let Some(bundle) = vmux_editor::restore_file_view_bundle(&meta.url) {
                     commands.spawn((bundle, ChildOf(entity)));

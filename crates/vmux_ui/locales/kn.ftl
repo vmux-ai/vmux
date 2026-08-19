@@ -68,11 +68,6 @@ tools-result-linked = { $name } ಸಂಪರ್ಕಿಸಲಾಗಿದೆ
 tools-result-unlinked = { $name } ಸಂಪರ್ಕ ತೆಗೆದುಹಾಕಲಾಗಿದೆ
 vault-title = Vault
 vault-encrypted = ಎಂಡ್-ಟು-ಎಂಡ್ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಲಾಗಿದೆ
-vault-passkey = ಪಾಸ್ಕೀ
-vault-passkey-description = ಪಾಸ್‌ವರ್ಡ್ ಇಲ್ಲದೆಯೇ ಇತರ ಸಾಧನಗಳಲ್ಲಿ ಈ ವಾಲ್ಟ್ ಅನ್ನು ಅನ್‌ಲಾಕ್ ಮಾಡಿ.
-vault-passkey-add = ಪಾಸ್‌ಕೀ ಸೇರಿಸಿ
-vault-passkey-unlock = ಅನ್ಲಾಕ್ ಮಾಡಿ
-vault-passkey-provider-unsupported = ಈ ಪಾಸ್‌ಕೀ ಪೂರೈಕೆದಾರರು ಇನ್ನೂ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಲಾದ ವಾಲ್ಟ್ ಅನ್‌ಲಾಕ್ ಅನ್ನು ಬೆಂಬಲಿಸುವುದಿಲ್ಲ.
 vault-recovery-key = ಮರುಪ್ರಾಪ್ತಿ ಕೀ
 vault-recovery-key-description = ಹೊಸ ಸಾಧನದಲ್ಲಿ ಈ ವಾಲ್ಟ್ ಅನ್ನು ಮರುಪಡೆಯಲು ಒಂದು ಕೀಲಿಯನ್ನು ಬಿಟ್‌ವಾರ್ಡನ್ ಅಥವಾ ಇನ್ನೊಂದು ಪಾಸ್‌ವರ್ಡ್ ನಿರ್ವಾಹಕದಲ್ಲಿ ಉಳಿಸಿ.
 vault-recovery-key-create = ಕೀಲಿಯನ್ನು ರಚಿಸಿ
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ಇನ್‌ಸ್ಟಾಲ್ ಮ
 setup-run-install = ಇನ್‌ಸ್ಟಾಲ್ ಕಮಾಂಡ್ ಚಲಾಯಿಸಿ
 setup-auto-reload = Vmux ಇದನ್ನು ಟರ್ಮಿನಲ್‌ನಲ್ಲಿ ಚಲಾಯಿಸಿ, { $command } ಸಿದ್ಧವಾದಾಗ ಮರುಲೋಡ್ ಮಾಡುತ್ತದೆ.
 
-debug-title = ಡೀಬಗ್
-debug-auto-update = ಸ್ವಯಂ-ಅಪ್‌ಡೇಟ್
-debug-simulate-update = ಅಪ್‌ಡೇಟ್ ಲಭ್ಯವಿದೆ ಎಂದು ಅನುಕರಿಸಿ
-debug-simulate-download = ಡೌನ್‌ಲೋಡ್ ಅನುಕರಿಸಿ
-debug-clear-update = ಅಪ್‌ಡೇಟ್ ತೆರವುಗೊಳಿಸಿ
-debug-trigger-restart = ಮರುಪ್ರಾರಂಭ ಟ್ರಿಗರ್ ಮಾಡಿ
 
 command-manage-spaces = ಸ್ಪೇಸ್‌ಗಳನ್ನು ನಿರ್ವಹಿಸಿ…
 command-pane-stack-location = ಪೇನ್ { $pane } / ಸ್ಟ್ಯಾಕ್ { $stack }

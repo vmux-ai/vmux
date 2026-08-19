@@ -68,11 +68,6 @@ tools-result-linked = { $name } vinculado
 tools-result-unlinked = { $name } desvinculado
 vault-title = Vault
 vault-encrypted = Cifrado de extremo a extremo
-vault-passkey = Llave maestra
-vault-passkey-description = Desbloquee esta Bóveda en otros dispositivos sin contraseña.
-vault-passkey-add = Agregar clave de acceso
-vault-passkey-unlock = Descubrir
-vault-passkey-provider-unsupported = Este proveedor de claves de acceso aún no admite el desbloqueo cifrado de Vault.
 vault-recovery-key = Clave de recuperación
 vault-recovery-key-description = Guarde una clave en Bitwarden u otro administrador de contraseñas para recuperar esta Bóveda en un nuevo dispositivo.
 vault-recovery-key-create = Crear clave
@@ -680,12 +675,6 @@ setup-install-homebrew = Instalar Homebrew + { $name }
 setup-run-install = Ejecutar comando de instalación
 setup-auto-reload = Vmux lo ejecuta en una terminal y recarga cuando { $command } esté listo.
 
-debug-title = Depuración
-debug-auto-update = Actualización automática
-debug-simulate-update = Simular actualización disponible
-debug-simulate-download = Simular descarga
-debug-clear-update = Borrar actualización
-debug-trigger-restart = Activar reinicio
 
 command-manage-spaces = Gestionar espacios…
 command-pane-stack-location = panel { $pane } / pila { $stack }

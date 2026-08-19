@@ -68,11 +68,6 @@ tools-result-linked = { $name } ကို ချိတ်ဆက်ပြီး�
 tools-result-unlinked = { $name } ၏ ချိတ်ဆက်မှုကို ဖြုတ်ပြီးပါပြီ
 vault-title = Vault
 vault-encrypted = အစမှအဆုံး ကုဒ်ဝှက်ထားသည်
-vault-passkey = သော့တံ
-vault-passkey-description = စကားဝှက်မပါဘဲ အခြားစက်များတွင် ဤ Vault ကို လော့ခ်ဖွင့်ပါ။
-vault-passkey-add = သော့တံထည့်ပါ။
-vault-passkey-unlock = သော့ဖွင့်ပါ။
-vault-passkey-provider-unsupported = ဤသော့ခတ်ပေးသူသည် ကုဒ်ဝှက်ထားသော Vault လော့ခ်ဖွင့်ခြင်းကို မပံ့ပိုးနိုင်သေးပါ။
 vault-recovery-key = ပြန်လည်ရယူရေးကီး
 vault-recovery-key-description = စက်ပစ္စည်းအသစ်တွင် ဤ Vault ကို ပြန်လည်ရယူရန် Bitwarden သို့မဟုတ် အခြားသော စကားဝှက်မန်နေဂျာတွင် သော့တစ်ခုကို သိမ်းဆည်းပါ။
 vault-recovery-key-create = သော့ဖန်တီး
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ထည့်သွင်းရန�
 setup-run-install = ထည့်သွင်းအမိန့် run
 setup-auto-reload = Vmux သည် ၎င်းကို တာမီနယ်တွင် run ပြီး { $command } အသင့်ဖြစ်သောအခါ ပြန်ဖွင့်ပါမည်။
 
-debug-title = Debug
-debug-auto-update = အလိုအလျောက် အပ်ဒိတ်
-debug-simulate-update = အပ်ဒိတ် ရနိုင်သည်ဟု စမ်းသပ်ပြုလုပ်
-debug-simulate-download = ဒေါင်းလုဒ် စမ်းသပ်ပြုလုပ်
-debug-clear-update = အပ်ဒိတ် ရှင်း
-debug-trigger-restart = ပြန်စတင်မှု စတင်စေ
 
 command-manage-spaces = စပေ့စ်များကို စီမံရန်…
 command-pane-stack-location = အကန့် { $pane } / အထပ် { $stack }

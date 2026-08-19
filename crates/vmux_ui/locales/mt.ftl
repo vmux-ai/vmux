@@ -68,11 +68,6 @@ tools-result-linked = { $name } ġie llinkjat
 tools-result-unlinked = Il-link ta’ { $name } tneħħa
 vault-title = Vault
 vault-encrypted = Ikkriptat minn tarf sa tarf
-vault-passkey = Passkey
-vault-passkey-description = Nisfrutta dan il-Vault fuq apparati oħra mingħajr password.
-vault-passkey-add = Żid passkey
-vault-passkey-unlock = Nisfruttaw
-vault-passkey-provider-unsupported = Dan il-fornitur tal-passkey għadu ma jappoġġjax il-ftuħ tal-Vault encrypted.
 vault-recovery-key = Ċavetta tal-Irkupru
 vault-recovery-key-description = Ħlief ċavetta waħda f'Bitwarden jew maniġer ieħor tal-password biex tirkupra dan il-Vault fuq apparat ġdid.
 vault-recovery-key-create = Oħloq ċavetta
@@ -680,12 +675,6 @@ setup-install-homebrew = Installa Homebrew + { $name }
 setup-run-install = Ħaddem il-kmand tal-installazzjoni
 setup-auto-reload = Vmux iħaddmu f’terminal u jerġa’ jtella’ meta { $command } ikun lest.
 
-debug-title = Debug
-debug-auto-update = Aġġornament awtomatiku
-debug-simulate-update = Issimula aġġornament disponibbli
-debug-simulate-download = Issimula tniżżil
-debug-clear-update = Neħħi l-aġġornament
-debug-trigger-restart = Skatta restart
 
 command-manage-spaces = Immaniġġja l-ispazji…
 command-pane-stack-location = żona { $pane } / saff { $stack }

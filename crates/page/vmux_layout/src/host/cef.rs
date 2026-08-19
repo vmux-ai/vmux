@@ -7,7 +7,7 @@ pub struct LayoutCefPlugin;
 impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
-        app.world_mut().spawn(crate::DEBUG_PAGE_MANIFEST);
+
         app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
     }
 }
@@ -150,20 +150,26 @@ impl Browser {
         )
     }
 
-    pub fn new_error(source_url: &str, display_url: &str, title: &str) -> impl Bundle {
+    /// A pane whose page runs in the host process, with no CEF browser behind it.
+    ///
+    /// The same shape as [`Self::new_with_title`] minus the two components that say "CEF owns
+    /// this": without `WebviewSource` no browser is created for it, and `HostsPage` is how every
+    /// reader that used to ask "is there a page here?" by looking for a source still gets a true
+    /// answer.
+    ///
+    /// `PageMetadata` is complete here rather than filled in later, because the CEF callback that
+    /// would supply a title and icon never fires for a page CEF is not rendering.
+    pub fn native_page(url: &str, title: &str) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
-            WebviewWindowedNativeFocus,
-            WebviewOpaqueWindowedBackground,
+            vmux_core::host::page::HostsPage,
             vmux_core::PageMetadata {
                 title: title.to_string(),
-                url: display_url.to_string(),
+                url: url.to_string(),
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(source_url),
-            ResolvedWebviewUri(source_url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             Node {
@@ -193,6 +199,10 @@ impl Browser {
 pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
         LayoutCef,
+        // No `WebviewSource`: this page's components run in the host process. The marker is how
+        // anything that used to ask "is there a page here?" by looking for a source still gets a
+        // true answer.
+        vmux_core::host::page::HostsPage,
         vmux_core::launcher::RendersLauncherPanel,
         HostWindow(host_window),
         Node {

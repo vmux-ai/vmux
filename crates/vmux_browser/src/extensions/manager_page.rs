@@ -14,22 +14,23 @@ use vmux_core::event::{
     ExtUninstallRequest, ExtensionsEvent,
 };
 use vmux_core::extension::store;
-use vmux_core::page::PrewarmPage;
+
+/// The `vmux://extensions/` view, marked so this module's systems find it without matching urls.
+#[derive(Component, Default)]
+pub struct Extensions;
+
+impl vmux_layout::native_open::HostedPage for Extensions {
+    const HOST: &'static str = "extensions";
+    const URL: &'static str = EXTENSIONS_PAGE_URL;
+    const TITLE: &'static str = "Extensions";
+}
 
 pub struct ExtensionsPlugin;
 
 impl Plugin for ExtensionsPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            PrewarmPage {
-                host: "extensions",
-                url: EXTENSIONS_PAGE_URL,
-                title: "Extensions",
-                pool_size: 1,
-            },
-        ));
-        vmux_core::register_host_spawn(app, "extensions");
+        app.world_mut().spawn(PAGE_MANIFEST);
+        app.add_plugins(vmux_layout::native_open::HostedPagePlugin::<Extensions>::default());
         app.init_resource::<ExtOutbox>()
             .init_resource::<ExtSubscribers>()
             .init_resource::<WebStoreInjectors>()
@@ -487,7 +488,7 @@ fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut command
         q.drain(..).collect()
     };
     for (entity, msg) in drained {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         match msg {

@@ -68,11 +68,6 @@ tools-result-linked = { $name } əlaqələndirildi
 tools-result-unlinked = { $name } əlaqədən çıxarıldı
 vault-title = Vault
 vault-encrypted = Başdan-başa şifrələnib
-vault-passkey = Keçid açarı
-vault-passkey-description = Parol olmadan digər cihazlarda bu Vault kilidini açın.
-vault-passkey-add = Keçid açarı əlavə edin
-vault-passkey-unlock = Kilidi aç
-vault-passkey-provider-unsupported = Bu açar provayderi hələ şifrələnmiş Vault kilidini açmağı dəstəkləmir.
 vault-recovery-key = Bərpa Açarı
 vault-recovery-key-description = Bu Vault-u yeni cihazda bərpa etmək üçün bir açarı Bitwarden-də və ya başqa parol menecerində saxlayın.
 vault-recovery-key-create = Açar yarat
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } quraşdır
 setup-run-install = Quraşdırma əmrini işə sal
 setup-auto-reload = Vmux bunu terminalda işə salır və { $command } hazır olanda yenidən yükləyir.
 
-debug-title = Sazlama
-debug-auto-update = Avtomatik yenilə
-debug-simulate-update = Yeniləmə əlçatanlığını simulyasiya et
-debug-simulate-download = Endirməni simulyasiya et
-debug-clear-update = Yeniləməni təmizlə
-debug-trigger-restart = Yenidən başlatmanı işə sal
 
 command-manage-spaces = Məkanları idarə et…
 command-pane-stack-location = panel { $pane } / qat { $stack }

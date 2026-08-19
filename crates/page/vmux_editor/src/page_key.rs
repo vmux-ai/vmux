@@ -29,7 +29,7 @@
 //! never claims a printable key pressed alone, because a claim set one context behind would swallow
 //! a character. The arrow keys beside them are rebindable; these two aliases are not.
 
-use crate::page::{Mode, focus_file_input, reveal_current_in_explorer, toggle_explorer};
+use crate::page::{ExplorerPane, Mode, focus_file_input};
 use dioxus::prelude::*;
 use vmux_core::event::{
     CompletionItem, FILE_KEY_EVENT, FileCompletionCommit, FileGotoRequest, FileKey, FileLine,
@@ -210,11 +210,7 @@ impl FilePanel {
 #[derive(Clone, Copy)]
 pub struct FilePage {
     pub mode: Signal<Mode>,
-    pub explorer_visible: Signal<bool>,
-    pub explorer_preferred_visible: Signal<bool>,
-    pub explorer_width: Signal<u32>,
-    pub explorer_client_id: Signal<u64>,
-    pub explorer_request_id: Signal<u64>,
+    pub explorer: ExplorerPane,
     pub completion_open: Signal<bool>,
     pub completion_selection: Signal<usize>,
     pub completion_anchor: Signal<(u32, u32)>,
@@ -253,25 +249,11 @@ impl FilePage {
     }
 
     fn toggle_explorer(&self) {
-        toggle_explorer(
-            self.explorer_visible,
-            self.explorer_preferred_visible,
-            self.explorer_width,
-            self.explorer_client_id,
-            self.explorer_request_id,
-            self.mode,
-        );
+        self.explorer.toggle(self.mode);
     }
 
     fn reveal_in_explorer(&self) {
-        reveal_current_in_explorer(
-            self.explorer_visible,
-            self.explorer_preferred_visible,
-            self.explorer_width,
-            self.explorer_client_id,
-            self.explorer_request_id,
-            self.mode,
-        );
+        self.explorer.reveal_current(self.mode);
     }
 }
 

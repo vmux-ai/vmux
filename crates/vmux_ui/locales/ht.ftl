@@ -68,11 +68,6 @@ tools-result-linked = { $name } lye
 tools-result-unlinked = { $name } delye
 vault-title = Vault
 vault-encrypted = Chifre bout-a-bout
-vault-passkey = Passkey
-vault-passkey-description = Debloke Vault sa a sou lòt aparèy san yon modpas.
-vault-passkey-add = Ajoute passkey
-vault-passkey-unlock = Debloke
-vault-passkey-provider-unsupported = Founisè passkey sa a poko sipòte debloke Vault ki ankripte.
 vault-recovery-key = Recovery Key
 vault-recovery-key-description = Sove yon kle nan Bitwarden oswa yon lòt manadjè modpas pou rekipere vout sa a sou yon nouvo aparèy.
 vault-recovery-key-create = Kreye kle
@@ -680,12 +675,6 @@ setup-install-homebrew = Enstale Homebrew + { $name }
 setup-run-install = Kouri kòmand enstalasyon
 setup-auto-reload = Vmux kouri li nan yon tèminal epi li rechaje lè { $command } pare.
 
-debug-title = Debogaj
-debug-auto-update = Mizajou otomatik
-debug-simulate-update = Simile mizajou disponib
-debug-simulate-download = Simile telechajman
-debug-clear-update = Efase mizajou
-debug-trigger-restart = Deklanche rekòmansman
 
 command-manage-spaces = Jere espas yo…
 command-pane-stack-location = panèl { $pane } / pil { $stack }

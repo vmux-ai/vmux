@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_service::event::*;
@@ -10,13 +9,11 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
-use vmux_flex::prelude::*;
 use vmux_layout::{
-    cef::Browser,
     event::SERVICES_PAGE_URL,
+    native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
     stack::{ActiveTabParam, Stack, focused_stack, stack_bundle},
-    warm_page::{WarmPage, WarmPagePlugin, WarmPageSpare},
 };
 
 pub struct ProcessesMonitorPlugin;
@@ -51,53 +48,19 @@ impl Plugin for ProcessesMonitorPlugin {
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
             .add_observer(on_process_kill_all)
-            .add_plugins(WarmPagePlugin::<ProcessesMonitor>::default());
+            .add_plugins(HostedPagePlugin::<ProcessesMonitor>::default());
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct ProcessesMonitor;
 
-impl ProcessesMonitor {
-    pub fn new() -> impl Bundle {
-        (
-            (
-                Self,
-                Browser,
-                WebviewSource::new(SERVICES_PAGE_URL),
-                ResolvedWebviewUri(SERVICES_PAGE_URL.to_string()),
-                PageMetadata {
-                    title: "Background Services".to_string(),
-                    url: SERVICES_PAGE_URL.to_string(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-            ),
-            (
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                Visibility::Visible,
-            ),
-        )
-    }
-}
+impl ProcessesMonitor {}
 
-impl WarmPage for ProcessesMonitor {
+impl HostedPage for ProcessesMonitor {
     const HOST: &'static str = "services";
     const URL: &'static str = SERVICES_PAGE_URL;
     const TITLE: &'static str = "Background Services";
-
-    fn spawn(commands: &mut Commands) -> Entity {
-        commands.spawn(ProcessesMonitor::new()).id()
-    }
 }
 
 #[derive(Resource, Default)]
@@ -165,7 +128,7 @@ fn request_process_list(
     time: Res<Time>,
     mut timer: ResMut<ProcessesPollTimer>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
 ) {
     if monitors.is_empty() {
@@ -182,7 +145,7 @@ fn request_process_list(
 fn sample_process_usage(
     time: Res<Time>,
     mut timer: ResMut<SysinfoPollTimer>,
-    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     process_list: Res<ServiceProcessList>,
     mut sys: ResMut<SysinfoState>,
@@ -253,14 +216,7 @@ fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     usage: Res<ProcessUsage>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<
-        Entity,
-        (
-            With<ProcessesMonitor>,
-            With<PageReady>,
-            Without<WarmPageSpare>,
-        ),
-    >,
+    monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
@@ -286,7 +242,7 @@ fn broadcast_to_monitors(
     };
 
     for entity in &monitors {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 PROCESSES_LIST_EVENT,

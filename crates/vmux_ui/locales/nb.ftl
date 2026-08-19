@@ -68,11 +68,6 @@ tools-result-linked = { $name } koblet
 tools-result-unlinked = { $name } koblet fra
 vault-title = Vault
 vault-encrypted = Ende-til-ende-kryptert
-vault-passkey = Passnøkkel
-vault-passkey-description = Lås opp dette hvelvet på andre enheter uten passord.
-vault-passkey-add = Legg til passord
-vault-passkey-unlock = Låse opp
-vault-passkey-provider-unsupported = Denne passordleverandøren støtter ikke kryptert Vault-opplåsing ennå.
 vault-recovery-key = Gjenopprettingsnøkkel
 vault-recovery-key-description = Lagre én nøkkel i Bitwarden eller en annen passordbehandling for å gjenopprette dette hvelvet på en ny enhet.
 vault-recovery-key-create = Opprett nøkkel
@@ -680,12 +675,6 @@ setup-install-homebrew = Installer Homebrew + { $name }
 setup-run-install = Kjør installasjonskommando
 setup-auto-reload = Vmux kjører den i en terminal og laster inn på nytt når { $command } er klar.
 
-debug-title = Feilsøking
-debug-auto-update = Automatisk oppdatering
-debug-simulate-update = Simuler tilgjengelig oppdatering
-debug-simulate-download = Simuler nedlasting
-debug-clear-update = Fjern oppdatering
-debug-trigger-restart = Utløs omstart
 
 command-manage-spaces = Administrer arbeidsområder …
 command-pane-stack-location = rute { $pane } / stabel { $stack }

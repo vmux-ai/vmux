@@ -68,11 +68,6 @@ tools-result-linked = { $name } imeunganishwa
 tools-result-unlinked = { $name } imetenganishwa
 vault-title = Vault
 vault-encrypted = Imesimbwa kutoka mwanzo hadi mwisho
-vault-passkey = Nenosiri
-vault-passkey-description = Fungua Vault hii kwenye vifaa vingine bila nenosiri.
-vault-passkey-add = Ongeza nenosiri
-vault-passkey-unlock = Fungua
-vault-passkey-provider-unsupported = Mtoa huduma huyu wa nenosiri bado hatumii kufungua kwa Vault kwa njia fiche.
 vault-recovery-key = Ufunguo wa Kuokoa
 vault-recovery-key-description = Hifadhi ufunguo mmoja katika Bitwarden au kidhibiti kingine cha nenosiri ili kurejesha Vault hii kwenye kifaa kipya.
 vault-recovery-key-create = Unda ufunguo
@@ -680,12 +675,6 @@ setup-install-homebrew = Sakinisha Homebrew + { $name }
 setup-run-install = Endesha amri ya kusakinisha
 setup-auto-reload = Vmux huiendesha kwenye teminali na kupakia upya { $command } ikiwa tayari.
 
-debug-title = Tatua
-debug-auto-update = Sasisho otomatiki
-debug-simulate-update = Iga sasisho linapatikana
-debug-simulate-download = Iga upakuaji
-debug-clear-update = Futa sasisho
-debug-trigger-restart = Anzisha upya sasa
 
 command-manage-spaces = Dhibiti nafasi…
 command-pane-stack-location = kidirisha { $pane } / tabaka { $stack }

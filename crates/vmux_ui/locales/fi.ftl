@@ -68,11 +68,6 @@ tools-result-linked = { $name } linkitetty
 tools-result-unlinked = Kohteen { $name } linkitys poistettu
 vault-title = Vault
 vault-encrypted = Päästä päähän salattu
-vault-passkey = Passkey
-vault-passkey-description = Avaa tämän Holvin lukitus muilla laitteilla ilman salasanaa.
-vault-passkey-add = Lisää salasana
-vault-passkey-unlock = Avata
-vault-passkey-provider-unsupported = Tämä salasanan tarjoaja ei tue vielä salattua Holvin lukituksen avausta.
 vault-recovery-key = Palautusavain
 vault-recovery-key-description = Tallenna yksi avain Bitwardeniin tai toiseen salasanojen hallintaan palauttaaksesi tämän Holvin uuteen laitteeseen.
 vault-recovery-key-create = Luo avain
@@ -680,12 +675,6 @@ setup-install-homebrew = Asenna Homebrew + { $name }
 setup-run-install = Suorita asennuskomento
 setup-auto-reload = Vmux suorittaa sen päätteessä ja lataa uudelleen, kun { $command } on valmis.
 
-debug-title = Vianmääritys
-debug-auto-update = Automaattinen päivitys
-debug-simulate-update = Simuloi saatavilla oleva päivitys
-debug-simulate-download = Simuloi lataus
-debug-clear-update = Tyhjennä päivitys
-debug-trigger-restart = Käynnistä uudelleen
 
 command-manage-spaces = Hallitse tiloja…
 command-pane-stack-location = paneeli { $pane } / pino { $stack }

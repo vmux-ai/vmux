@@ -7,9 +7,6 @@ publish = false
 build = "../build_cfg_git.rs"
 
 [dependencies]
-
-# Native, iOS included: deliberately not a host block, which would drop these from the phone.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 chrono = { workspace = true }
 ring = "0.17"
 ron = { workspace = true }
@@ -17,6 +14,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 zeroize = "1"
+
+# Native, iOS included: deliberately not a host block, which would drop these from the phone.
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"

@@ -62,8 +62,12 @@ polling = "3.11"
 tungstenite = "0.28"
 url = "2"
 notify = "6"
+# No "web" here, and nothing in this workspace should add it. Dioxus declares `dioxus-web` in a
+# plain `[dependencies]` block — it carries no `[target.*]` sections at all — so the feature is not
+# target-gated, and every crate inheriting this spec would drag the wasm renderer into the iOS
+# build. Nothing here compiles to wasm any more, which makes the mistake cost-free to make and
+# just as expensive to ship.
 dioxus = { version = "=0.7.9", default-features = false, features = [
-    "web",
     "minimal",
     "document",
     "asset",
@@ -72,7 +76,6 @@ dioxus = { version = "=0.7.9", default-features = false, features = [
 fluent-bundle = "0.16"
 unic-langid = "0.9"
 sys-locale = "0.3"
-wasm-bindgen = "0.2"
 regex = "1"
 smallvec = "1"
 
@@ -124,18 +127,6 @@ opt-level = 3
 [profile.dev.package.vmux_service]
 codegen-units = 1
 
-# `dx build` compiles the web bundle under this profile, inventing its own if we do not
-# declare one. Same failure as bevy_cef and vmux_service above, one target further out:
-# `wasm-ld` drops an internal `alloc::fmt::format.llvm.*` defined in one CGU while a
-# reference from another survives, so wasm-bindgen emits `import * as import1 from "env"`
-# for the unresolved symbol and every page dies at load with `Failed to resolve module
-# specifier "env"` — no render, no window, splash times out. Nothing type-checks this:
-# `cargo check` does not link, and `cargo build --target wasm32-unknown-unknown` links
-# clean under the plain `dev` profile.
-[profile.wasm-dev]
-inherits = "dev"
-codegen-units = 1
-
 [profile.release]
 strip = true
 lto = "thin"
@@ -148,15 +139,9 @@ lto = "off"
 opt-level = "z"
 codegen-units = 1
 
-[profile.release.package.vmux_page]
-opt-level = "z"
-codegen-units = 1
-
 [profile.release.package.vmux_ui]
 opt-level = "z"
 codegen-units = 1
-
-
 
 [profile.release.package.vmux_command]
 opt-level = "z"

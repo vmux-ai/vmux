@@ -68,11 +68,6 @@ tools-result-linked = { $name } nasctha
 tools-result-unlinked = { $name } dínasctha
 vault-title = Vault
 vault-encrypted = Criptithe ó cheann ceann
-vault-passkey = Pas eochair
-vault-passkey-description = Díghlasáil an cruinneachán seo ar ghléasanna eile gan pasfhocal.
-vault-passkey-add = Cuir pasfhocal leis
-vault-passkey-unlock = Díghlasáil
-vault-passkey-provider-unsupported = Ní thacaíonn an soláthraí pas-eochair seo le díghlasáil Vault criptithe go fóill.
 vault-recovery-key = Eochair Athshlánaithe
 vault-recovery-key-description = Sábháil eochair amháin in Bitwarden nó bainisteoir pasfhocail eile chun an Cruinneachán seo a ghnóthú ar ghléas nua.
 vault-recovery-key-create = Cruthaigh eochair
@@ -680,12 +675,6 @@ setup-install-homebrew = Suiteáil Homebrew + { $name }
 setup-run-install = Rith ordú suiteála
 setup-auto-reload = Ritheann Vmux é i dteirminéal agus athlódálann sé nuair atá { $command } réidh.
 
-debug-title = Dífhabhtú
-debug-auto-update = Uath-nuashonrú
-debug-simulate-update = Insamhail nuashonrú ar fáil
-debug-simulate-download = Insamhail íoslódáil
-debug-clear-update = Glan nuashonrú
-debug-trigger-restart = Spreag atosú
 
 command-manage-spaces = Bainistigh spásanna…
 command-pane-stack-location = pána { $pane } / cruach { $stack }

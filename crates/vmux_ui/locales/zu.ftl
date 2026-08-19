@@ -68,11 +68,6 @@ tools-result-linked = { $name } ixhunyanisiwe
 tools-result-unlinked = { $name } inqanyuliwe
 vault-title = Vault
 vault-encrypted = Kubethelwe ngasese kusukela ekuqaleni kuya ekugcineni
-vault-passkey = Ukhiye wokungena
-vault-passkey-description = Vula le Vault kwamanye amadivayisi ngaphandle kwephasiwedi.
-vault-passkey-add = Engeza ukhiye wokudlula
-vault-passkey-unlock = Vula
-vault-passkey-provider-unsupported = Lo mhlinzeki wokhiye wokudlula akakusekeli i-Vault ebethelwe okwamanje.
 vault-recovery-key = Ukhiye Wokubuyisela
 vault-recovery-key-description = Londoloza ukhiye owodwa ku-Bitwarden noma omunye umphathi wephasiwedi ukuze ubuyisele le Vault kudivayisi entsha.
 vault-recovery-key-create = Dala ukhiye
@@ -680,12 +675,6 @@ setup-install-homebrew = Faka i-Homebrew + { $name }
 setup-run-install = Qalisa umyalo wokufaka
 setup-auto-reload = I-Vmux iyisebenzisa kutheminali futhi ilayisha kabusha uma i-{ $command } isilungile.
 
-debug-title = Lungisa amaphutha
-debug-auto-update = Ukubuyekeza okuzenzakalelayo
-debug-simulate-update = Lingisa ukuthi isibuyekezo siyatholakala
-debug-simulate-download = Lingisa ukulanda
-debug-clear-update = Sula isibuyekezo
-debug-trigger-restart = Qalisa ukuqalisa kabusha
 
 command-manage-spaces = Phatha izikhala…
 command-pane-stack-location = ifasitelana { $pane } / isitaki { $stack }

@@ -68,11 +68,6 @@ tools-result-linked = Txuas { $name } lawm
 tools-result-unlinked = Tshem kev txuas ntawm { $name } lawm
 vault-title = Vault
 vault-encrypted = Muab zais tag nrho txij ib kawg mus rau ib kawg
-vault-passkey = Passkey
-vault-passkey-description = Xauv lub Vault no ntawm lwm yam khoom siv yam tsis muaj tus password.
-vault-passkey-add = Ntxiv tus password
-vault-passkey-unlock = Xauv
-vault-passkey-provider-unsupported = Tus neeg muab ntawv hla tebchaws no tseem tsis tau txhawb nqa encrypted Vault xauv tsis tau.
 vault-recovery-key = Rov qab Cov Ntsiab Lus
 vault-recovery-key-description = Txuag ib tus yuam sij hauv Bitwarden lossis lwm tus neeg saib xyuas tus password kom rov qab tau lub Vault ntawm lub cuab yeej tshiab.
 vault-recovery-key-create = Tsim tus yuam sij
@@ -680,12 +675,6 @@ setup-install-homebrew = Nruab Homebrew + { $name }
 setup-run-install = Khiav install command
 setup-auto-reload = Vmux khiav nws hauv terminal thiab rov thauj thaum { $command } npaj lawm.
 
-debug-title = Debug
-debug-auto-update = Update nws tus kheej
-debug-simulate-update = Sim ua muaj update
-debug-simulate-download = Sim download
-debug-clear-update = Tshem update
-debug-trigger-restart = Ua kom rov qhib
 
 command-manage-spaces = Tswj cov chaw…
 command-pane-stack-location = pane { $pane } / stack { $stack }

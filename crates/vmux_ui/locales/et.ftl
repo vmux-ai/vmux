@@ -68,11 +68,6 @@ tools-result-linked = { $name } lingitud
 tools-result-unlinked = { $name } link eemaldatud
 vault-title = Vault
 vault-encrypted = Otspunktkrüptega
-vault-passkey = Pääsu
-vault-passkey-description = Avage see Vault teistes seadmetes ilma paroolita.
-vault-passkey-add = Lisa parool
-vault-passkey-unlock = Avage lukustus
-vault-passkey-provider-unsupported = See pääsukoodi pakkuja ei toeta veel krüptitud Vaulti avamist.
 vault-recovery-key = Taastevõti
 vault-recovery-key-description = Salvestage üks võti Bitwardenis või mõnes teises paroolihalduris, et taastada see Vault uues seadmes.
 vault-recovery-key-create = Loo võti
@@ -680,12 +675,6 @@ setup-install-homebrew = Installi Homebrew + { $name }
 setup-run-install = Käivita installikäsk
 setup-auto-reload = Vmux käivitab selle terminalis ja laadib uuesti, kui { $command } on valmis.
 
-debug-title = Silumine
-debug-auto-update = Automaatne värskendamine
-debug-simulate-update = Simuleeri saadaolevat värskendust
-debug-simulate-download = Simuleeri allalaadimist
-debug-clear-update = Tühjenda värskendus
-debug-trigger-restart = Käivita taaskäivitus
 
 command-manage-spaces = Halda ruume…
 command-pane-stack-location = paan { $pane } / virn { $stack }

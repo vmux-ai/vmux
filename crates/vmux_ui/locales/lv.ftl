@@ -68,11 +68,6 @@ tools-result-linked = { $name } saistīts
 tools-result-unlinked = { $name } atsaistīts
 vault-title = Vault
 vault-encrypted = Pilnīga šifrēšana
-vault-passkey = Ieejas atslēga
-vault-passkey-description = Atbloķējiet šo Vault citās ierīcēs bez paroles.
-vault-passkey-add = Pievienojiet piekļuves atslēgu
-vault-passkey-unlock = Atbloķēt
-vault-passkey-provider-unsupported = Šis piekļuves atslēgas nodrošinātājs vēl neatbalsta šifrētu Vault atbloķēšanu.
 vault-recovery-key = Atkopšanas atslēga
 vault-recovery-key-description = Saglabājiet vienu atslēgu Bitwarden vai citā paroļu pārvaldniekā, lai atjaunotu šo Vault jaunā ierīcē.
 vault-recovery-key-create = Izveidot atslēgu
@@ -680,12 +675,6 @@ setup-install-homebrew = Instalēt Homebrew + { $name }
 setup-run-install = Palaist instalēšanas komandu
 setup-auto-reload = Vmux palaiž to terminālī un pārlādē, kad { $command } ir gatavs.
 
-debug-title = Atkļūdošana
-debug-auto-update = Automātiska atjaunināšana
-debug-simulate-update = Simulēt pieejamu atjauninājumu
-debug-simulate-download = Simulēt lejupielādi
-debug-clear-update = Notīrīt atjauninājumu
-debug-trigger-restart = Aktivizēt restartēšanu
 
 command-manage-spaces = Pārvaldīt telpas…
 command-pane-stack-location = panelis { $pane } / steks { $stack }

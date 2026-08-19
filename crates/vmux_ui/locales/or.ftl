@@ -68,11 +68,6 @@ tools-result-linked = { $name } ସଂଯୁକ୍ତ ହେଲା
 tools-result-unlinked = { $name }ର ସଂଯୋଗ ହଟାଗଲା
 vault-title = Vault
 vault-encrypted = ଏଣ୍ଡ-ଟୁ-ଏଣ୍ଡ ଏନ୍‌କ୍ରିପ୍ଟ ହୋଇଛି
-vault-passkey = ପାସ୍କି |
-vault-passkey-description = ପାସୱାର୍ଡ ବିନା ଅନ୍ୟ ଡିଭାଇସରେ ଏହି ଭାଲ୍ଟକୁ ଅନଲକ୍ କରନ୍ତୁ |
-vault-passkey-add = ପାସ୍କି ଯୋଡନ୍ତୁ |
-vault-passkey-unlock = ଅନଲକ୍ କରନ୍ତୁ |
-vault-passkey-provider-unsupported = ଏହି ପାସ୍କି ପ୍ରଦାନକାରୀ ଏପର୍ଯ୍ୟନ୍ତ ଏନକ୍ରିପ୍ଟ ହୋଇଥିବା ଭାଲ୍ଟ ଅନଲକ୍ କୁ ସମର୍ଥନ କରେନାହିଁ |
 vault-recovery-key = ପୁନରୁଦ୍ଧାର କି
 vault-recovery-key-description = ଏକ ନୂତନ ଡିଭାଇସରେ ଏହି ଭାଲ୍ଟ ପୁନରୁଦ୍ଧାର ପାଇଁ ବିଟୱାର୍ଡନ୍ କିମ୍ବା ଅନ୍ୟ ପାସୱାର୍ଡ ମ୍ୟାନେଜର୍ ରେ ଗୋଟିଏ ଚାବି ସଞ୍ଚୟ କରନ୍ତୁ |
 vault-recovery-key-create = ଚାବି ସୃଷ୍ଟି କରନ୍ତୁ |
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ଇନ୍‌ଷ୍ଟଲ୍ କର
 setup-run-install = ଇନ୍‌ଷ୍ଟଲ୍ କମାଣ୍ଡ ଚଲାନ୍ତୁ
 setup-auto-reload = Vmux ଏହାକୁ ଟର୍ମିନାଲ୍‌ରେ ଚଲାଏ ଏବଂ { $command } ପ୍ରସ୍ତୁତ ହେଲେ ପୁଣି ଲୋଡ୍ କରେ।
 
-debug-title = ଡିବଗ୍
-debug-auto-update = ଅଟୋ-ଅପଡେଟ୍
-debug-simulate-update = ଉପଲବ୍ଧ ଅପଡେଟ୍ ସିମ୍ୟୁଲେଟ୍ କରନ୍ତୁ
-debug-simulate-download = ଡାଉନଲୋଡ୍ ସିମ୍ୟୁଲେଟ୍ କରନ୍ତୁ
-debug-clear-update = ଅପଡେଟ୍ ସଫା କରନ୍ତୁ
-debug-trigger-restart = ପୁଣି ଆରମ୍ଭ ଟ୍ରିଗର୍ କରନ୍ତୁ
 
 command-manage-spaces = ସ୍ପେସ୍‌ଗୁଡ଼ିକ ପରିଚାଳନା କରନ୍ତୁ…
 command-pane-stack-location = ପେନ୍ { $pane } / ଷ୍ଟାକ୍ { $stack }

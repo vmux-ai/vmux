@@ -68,11 +68,6 @@ tools-result-linked = { $name } लिंक किया गया
 tools-result-unlinked = { $name } का लिंक हटाया गया
 vault-title = Vault
 vault-encrypted = एंड-टू-एंड एन्क्रिप्टेड
-vault-passkey = सर्व-कुंजी
-vault-passkey-description = इस वॉल्ट को अन्य डिवाइस पर बिना पासवर्ड के अनलॉक करें।
-vault-passkey-add = पासकी जोड़ें
-vault-passkey-unlock = अनलॉक
-vault-passkey-provider-unsupported = यह पासकी प्रदाता अभी तक एन्क्रिप्टेड वॉल्ट अनलॉक का समर्थन नहीं करता है।
 vault-recovery-key = पुनर्प्राप्ति कुंजी
 vault-recovery-key-description = इस वॉल्ट को नए डिवाइस पर पुनर्प्राप्त करने के लिए बिटवर्डन या किसी अन्य पासवर्ड मैनेजर में एक कुंजी सहेजें।
 vault-recovery-key-create = कुंजी बनाएं
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } इंस्टॉल करें
 setup-run-install = इंस्टॉल कमांड चलाएँ
 setup-auto-reload = Vmux इसे टर्मिनल में चलाता है और { $command } तैयार होने पर फिर लोड करता है।
 
-debug-title = डीबग
-debug-auto-update = ऑटो-अपडेट
-debug-simulate-update = अपडेट उपलब्ध होना सिम्युलेट करें
-debug-simulate-download = डाउनलोड सिम्युलेट करें
-debug-clear-update = अपडेट साफ़ करें
-debug-trigger-restart = रीस्टार्ट ट्रिगर करें
 
 command-manage-spaces = स्पेस प्रबंधित करें…
 command-pane-stack-location = पेन { $pane } / स्टैक { $stack }

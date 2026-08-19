@@ -68,11 +68,6 @@ tools-result-linked = تم ربط { $name }
 tools-result-unlinked = تم إلغاء ربط { $name }
 vault-title = Vault
 vault-encrypted = مشفّر من طرف إلى طرف
-vault-passkey = مفتاح المرور
-vault-passkey-description = قم بإلغاء قفل هذا Vault على الأجهزة الأخرى بدون كلمة مرور.
-vault-passkey-add = إضافة مفتاح المرور
-vault-passkey-unlock = فتح
-vault-passkey-provider-unsupported = لا يدعم موفر مفتاح المرور هذا فتح Vault المشفر حتى الآن.
 vault-recovery-key = مفتاح الاسترداد
 vault-recovery-key-description = احفظ مفتاحًا واحدًا في Bitwarden أو مدير كلمات مرور آخر لاستعادة هذا Vault على جهاز جديد.
 vault-recovery-key-create = إنشاء مفتاح
@@ -680,12 +675,6 @@ setup-install-homebrew = تثبيت Homebrew + { $name }
 setup-run-install = تشغيل أمر التثبيت
 setup-auto-reload = يشغّله Vmux في طرفية ويعيد التحميل عندما يصبح { $command } جاهزًا.
 
-debug-title = تصحيح الأخطاء
-debug-auto-update = التحديث التلقائي
-debug-simulate-update = محاكاة توفر تحديث
-debug-simulate-download = محاكاة التنزيل
-debug-clear-update = مسح التحديث
-debug-trigger-restart = تشغيل إعادة التشغيل
 
 command-manage-spaces = إدارة المساحات…
 command-pane-stack-location = الجزء { $pane } / المكدس { $stack }

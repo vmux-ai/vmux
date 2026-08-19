@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -29,14 +30,10 @@ const MANIFEST_VERSION: u32 = 3;
 const MANIFEST_FILE: &str = "vault.ron";
 const INDEX_FILE: &str = "index.enc";
 const OBJECTS_DIR: &str = "objects";
-const PASSKEYS_DIR: &str = "keys/passkeys";
 const RECOVERY_DIR: &str = "keys/recovery";
 const RECOVERY_FILE: &str = "default.ron";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
-const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
-const PASSKEY_KDF_PREFIX: &[u8] = b"vmux-vault-passkey-kdf-v1\0";
-const PASSKEY_PRF_PREFIX: &[u8] = b"vmux-vault-passkey-prf-v1\0";
 const RECOVERY_AAD_PREFIX: &[u8] = b"vmux-vault-recovery-v1\0";
 const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
@@ -60,8 +57,6 @@ pub struct VaultStatus {
     pub encrypted: bool,
     pub unlocked: bool,
     pub vault_id: String,
-    pub passkey_credentials: Vec<String>,
-    pub passkey_salt: Vec<u8>,
     pub recovery_enabled: bool,
     pub remote: String,
     pub branch: String,
@@ -171,13 +166,6 @@ struct RemoteManifest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct PasskeyEnvelope {
-    version: u32,
-    credential_id: String,
-    wrapped_key: Vec<u8>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct RecoveryEnvelope {
     version: u32,
     wrapped_key: Vec<u8>,
@@ -185,6 +173,7 @@ struct RecoveryEnvelope {
 
 struct RecoveryKeyLength;
 
+#[derive(Debug)]
 pub struct RecoveryKeyCreation {
     pub pending_upload: bool,
 }
@@ -447,35 +436,47 @@ pub fn initialize() -> Result<(), String> {
     initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
 }
 
-pub fn add_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, String> {
-    add_passkey_paths(
-        &repository_dir(),
-        &SystemKeyStore,
-        credential_id,
-        prf_output,
-    )
+/// The Recovery Key this process generated and has not yet committed.
+///
+/// The page is shown the key so the user can save it, but never hands it back. A key arriving
+/// from the page could be one an attacker already knows, and wrapping the master key with it
+/// would open the Vault to them; taking it from here means the key that does the wrapping is
+/// provably the one this process drew from the system CSPRNG.
+static PENDING_RECOVERY_KEY: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
+
+fn pending_recovery_key() -> std::sync::MutexGuard<'static, Option<Zeroizing<String>>> {
+    PENDING_RECOVERY_KEY.lock().unwrap_or_else(|poisoned| {
+        PENDING_RECOVERY_KEY.clear_poison();
+        poisoned.into_inner()
+    })
 }
 
-pub fn prepare_passkey() -> Result<String, String> {
-    let repository = repository_dir();
-    let manifest = read_manifest(&repository)?;
-    let key = load_repository_key(&repository, &SystemKeyStore, &manifest.vault_id)?;
-    load_encrypted_snapshot(&repository, &key)?;
-    Ok("Vault unlocked".to_string())
+/// Draw a new Recovery Key and hold it until [`create_recovery_key`] commits it.
+///
+/// 256 bits from `ring`'s `SystemRandom`, rendered in the grouped form the user sees and pastes
+/// back. Replaces any key drawn earlier and never committed.
+pub fn generate_recovery_key() -> Result<Zeroizing<String>, String> {
+    let mut bytes = Zeroizing::new(vec![0_u8; KEY_LEN]);
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| "failed to generate secure random data".to_string())?;
+    let encoded = Zeroizing::new(hex(&bytes));
+    let groups = encoded
+        .as_bytes()
+        .chunks(4)
+        .map(|group| std::str::from_utf8(group).unwrap_or_default())
+        .collect::<Vec<_>>();
+    let key = Zeroizing::new(format!("vmux-{}", groups.join("-")));
+    *pending_recovery_key() = Some(key.clone());
+    Ok(key)
 }
 
-pub fn unlock_with_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, String> {
-    unlock_with_passkey_paths(
-        &root_dir(),
-        &repository_dir(),
-        &SystemKeyStore,
-        credential_id,
-        prf_output,
-    )
-}
-
-pub fn create_recovery_key(recovery_key: &str) -> Result<RecoveryKeyCreation, String> {
-    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, recovery_key)
+/// Commit the key [`generate_recovery_key`] drew, once the user has confirmed saving it.
+pub fn create_recovery_key() -> Result<RecoveryKeyCreation, String> {
+    let key = pending_recovery_key()
+        .take()
+        .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
+    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, &key)
 }
 
 pub fn unlock_with_recovery_key(recovery_key: &str) -> Result<String, String> {
@@ -506,16 +507,6 @@ fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> VaultS
     };
     if let Some(manifest) = manifest {
         status.vault_id = manifest.vault_id.clone();
-        status.passkey_salt = passkey_salt(&manifest.vault_id).to_vec();
-        match read_passkey_envelopes(repository) {
-            Ok(envelopes) => {
-                status.passkey_credentials = envelopes
-                    .into_values()
-                    .map(|envelope| envelope.credential_id)
-                    .collect();
-            }
-            Err(error) => status.error = error,
-        }
         match read_recovery_envelope(repository) {
             Ok(envelope) => status.recovery_enabled = envelope.is_some(),
             Err(error) => status.error = error,
@@ -811,71 +802,6 @@ fn initialize_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Re
     commit_changes(repository, "Initialize vmux Vault")
 }
 
-fn add_passkey_paths<K: KeyStore>(
-    repository: &Path,
-    keys: &K,
-    credential_id: &str,
-    prf_output: &[u8],
-) -> Result<String, String> {
-    validate_credential_id(credential_id)?;
-    let mut manifest = read_manifest(repository)?;
-    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
-    let wrapping_key = derive_passkey_wrapping_key(prf_output, &manifest.vault_id, credential_id)?;
-    let wrapped_key = encrypt_bytes(
-        &wrapping_key,
-        &passkey_aad(&manifest.vault_id, credential_id),
-        &key,
-    )?;
-    let envelope = PasskeyEnvelope {
-        version: FORMAT_VERSION,
-        credential_id: credential_id.to_string(),
-        wrapped_key,
-    };
-    let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
-        .map_err(|error| error.to_string())?;
-    let directory = repository.join(PASSKEYS_DIR);
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    write_atomic(
-        &directory.join(passkey_envelope_name(credential_id)),
-        format!("{source}\n").as_bytes(),
-    )?;
-    manifest.version = MANIFEST_VERSION;
-    write_manifest(repository, &manifest)?;
-    validate_encrypted_worktree(repository)?;
-    commit_changes(repository, "Add Vault passkey")?;
-    if !git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
-        let branch = current_branch(repository)?;
-        git(repository, &["push", "-u", "origin", &branch])?;
-    }
-    Ok("Vault passkey added".to_string())
-}
-
-fn unlock_with_passkey_paths<K: KeyStore>(
-    root: &Path,
-    repository: &Path,
-    keys: &K,
-    credential_id: &str,
-    prf_output: &[u8],
-) -> Result<String, String> {
-    validate_credential_id(credential_id)?;
-    let manifest = read_manifest(repository)?;
-    let envelope = read_passkey_envelopes(repository)?
-        .remove(credential_id)
-        .ok_or_else(|| "This passkey is not authorized for the Vault".to_string())?;
-    let wrapping_key = derive_passkey_wrapping_key(prf_output, &manifest.vault_id, credential_id)?;
-    let key = Zeroizing::new(decrypt_bytes(
-        &wrapping_key,
-        &passkey_aad(&manifest.vault_id, credential_id),
-        &envelope.wrapped_key,
-    )?);
-    validate_key(&key)?;
-    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
-    keys.store(&manifest.vault_id, &key)?;
-    reconcile_local(root, &BTreeMap::new(), &remote_files)?;
-    write_local_state(root, repository)?;
-    Ok("Vault unlocked".to_string())
-}
-
 fn create_recovery_key_paths<K: KeyStore>(
     repository: &Path,
     keys: &K,
@@ -947,37 +873,6 @@ fn unlock_with_recovery_key_paths<K: KeyStore>(
     Ok("Vault unlocked".to_string())
 }
 
-fn read_passkey_envelopes(repository: &Path) -> Result<BTreeMap<String, PasskeyEnvelope>, String> {
-    let directory = repository.join(PASSKEYS_DIR);
-    if !directory.exists() {
-        return Ok(BTreeMap::new());
-    }
-    let mut envelopes = BTreeMap::new();
-    for entry in std::fs::read_dir(&directory).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
-            return Err("invalid Vault passkey recipient".to_string());
-        }
-        let source = std::fs::read_to_string(entry.path()).map_err(|error| error.to_string())?;
-        let envelope = ron::from_str::<PasskeyEnvelope>(&source)
-            .map_err(|error| format!("invalid Vault passkey recipient: {error}"))?;
-        if envelope.version != FORMAT_VERSION {
-            return Err("unsupported Vault passkey recipient".to_string());
-        }
-        validate_credential_id(&envelope.credential_id)?;
-        if entry.file_name().to_string_lossy() != passkey_envelope_name(&envelope.credential_id) {
-            return Err("Vault passkey recipient identifier mismatch".to_string());
-        }
-        if envelopes
-            .insert(envelope.credential_id.clone(), envelope)
-            .is_some()
-        {
-            return Err("duplicate Vault passkey recipient".to_string());
-        }
-    }
-    Ok(envelopes)
-}
-
 fn read_recovery_envelope(repository: &Path) -> Result<Option<RecoveryEnvelope>, String> {
     let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
     if !path.exists() {
@@ -998,59 +893,15 @@ fn load_repository_key<K: KeyStore>(
     vault_id: &str,
 ) -> Result<Zeroizing<Vec<u8>>, String> {
     keys.load(vault_id).map_err(|error| {
-        let has_passkey = read_passkey_envelopes(repository)
-            .is_ok_and(|envelopes| !envelopes.is_empty());
-        let has_recovery = read_recovery_envelope(repository).is_ok_and(|envelope| envelope.is_some());
-        if !has_passkey && !has_recovery {
-            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key or passkey."
+        let has_recovery =
+            read_recovery_envelope(repository).is_ok_and(|envelope| envelope.is_some());
+        if !has_recovery {
+            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key."
                 .to_string()
         } else {
             error
         }
     })
-}
-
-fn passkey_envelope_name(credential_id: &str) -> String {
-    format!(
-        "{}.ron",
-        hex(digest::digest(&digest::SHA256, credential_id.as_bytes()).as_ref())
-    )
-}
-
-fn passkey_salt(vault_id: &str) -> [u8; KEY_LEN] {
-    let mut input = Vec::with_capacity(PASSKEY_PRF_PREFIX.len() + vault_id.len());
-    input.extend_from_slice(PASSKEY_PRF_PREFIX);
-    input.extend_from_slice(vault_id.as_bytes());
-    let digest = digest::digest(&digest::SHA256, &input);
-    digest.as_ref().try_into().unwrap()
-}
-
-fn derive_passkey_wrapping_key(
-    prf_output: &[u8],
-    vault_id: &str,
-    credential_id: &str,
-) -> Result<[u8; KEY_LEN], String> {
-    if prf_output.len() != KEY_LEN {
-        return Err("passkey did not return an encryption-capable PRF result".to_string());
-    }
-    let key = hmac::Key::new(hmac::HMAC_SHA256, prf_output);
-    let mut input =
-        Vec::with_capacity(PASSKEY_KDF_PREFIX.len() + vault_id.len() + credential_id.len() + 1);
-    input.extend_from_slice(PASSKEY_KDF_PREFIX);
-    input.extend_from_slice(vault_id.as_bytes());
-    input.push(0);
-    input.extend_from_slice(credential_id.as_bytes());
-    Ok(hmac::sign(&key, &input).as_ref().try_into().unwrap())
-}
-
-fn passkey_aad(vault_id: &str, credential_id: &str) -> Vec<u8> {
-    let mut aad =
-        Vec::with_capacity(PASSKEY_AAD_PREFIX.len() + vault_id.len() + credential_id.len() + 1);
-    aad.extend_from_slice(PASSKEY_AAD_PREFIX);
-    aad.extend_from_slice(vault_id.as_bytes());
-    aad.push(0);
-    aad.extend_from_slice(credential_id.as_bytes());
-    aad
 }
 
 fn derive_recovery_wrapping_key(
@@ -1103,19 +954,6 @@ fn parse_recovery_key(source: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let key = decode_hex(encoded).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
     validate_key(&key).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
     Ok(Zeroizing::new(key))
-}
-
-fn validate_credential_id(credential_id: &str) -> Result<(), String> {
-    if credential_id.is_empty()
-        || credential_id.len() > 4096
-        || !credential_id.len().is_multiple_of(2)
-        || !credential_id
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err("invalid Vault passkey credential".to_string());
-    }
-    Ok(())
 }
 
 fn validate_empty_vault_repository(repository: &Path) -> Result<(), String> {
@@ -2011,7 +1849,6 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
                 || entry
                     .strip_prefix(&format!("{OBJECTS_DIR}/"))
                     .is_some_and(|name| name.len() == 64 && !name.contains('/'))
-                || valid_passkey_path(entry)
                 || valid_recovery_path(entry)
         });
     if !valid {
@@ -2068,9 +1905,6 @@ fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
                 return Err("invalid encrypted Vault key recipients".to_string());
             }
             match entry.file_name().to_str() {
-                Some("passkeys") => {
-                    let _ = read_passkey_envelopes(repository)?;
-                }
                 Some("recovery") => {
                     let entries = std::fs::read_dir(entry.path())
                         .map_err(|error| error.to_string())?
@@ -2091,17 +1925,6 @@ fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn valid_passkey_path(path: &str) -> bool {
-    let Some(name) = path.strip_prefix(&format!("{PASSKEYS_DIR}/")) else {
-        return false;
-    };
-    name.len() == 68
-        && name.ends_with(".ron")
-        && name[..64]
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn valid_recovery_path(path: &str) -> bool {
@@ -2633,6 +2456,35 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// One test owns `PENDING_RECOVERY_KEY`, because it is process-wide and the suite is parallel.
+    #[test]
+    fn a_recovery_key_is_committed_only_when_this_process_drew_it() {
+        pending_recovery_key().take();
+        assert!(
+            create_recovery_key()
+                .unwrap_err()
+                .contains("No Recovery Key"),
+            "committing without drawing one first must refuse, or a key from anywhere else could \
+             wrap the master key"
+        );
+
+        let key = generate_recovery_key().unwrap();
+        assert!(
+            parse_recovery_key(&key).is_ok(),
+            "the displayed form has to be the one the unlock path parses back"
+        );
+
+        let again = generate_recovery_key().unwrap();
+        assert_ne!(*key, *again, "each draw must be independent");
+        assert_eq!(
+            pending_recovery_key().as_deref().map(|held| held.as_str()),
+            Some(again.as_str()),
+            "the held key is the newest draw, so an abandoned one cannot be committed later"
+        );
+
+        pending_recovery_key().take();
+    }
+
     struct FixedKeyStore {
         key: Vec<u8>,
     }
@@ -2695,26 +2547,25 @@ mod tests {
 
         assert_eq!(
             load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
-            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key or passkey."
+            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key."
         );
 
-        let credential_id = "00";
-        let envelope = PasskeyEnvelope {
+        let envelope = RecoveryEnvelope {
             version: FORMAT_VERSION,
-            credential_id: credential_id.to_string(),
             wrapped_key: vec![1, 2, 3],
         };
-        let directory = repository.path().join(PASSKEYS_DIR);
+        let directory = repository.path().join(RECOVERY_DIR);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
-            directory.join(passkey_envelope_name(credential_id)),
+            directory.join(RECOVERY_FILE),
             ron::to_string(&envelope).unwrap(),
         )
         .unwrap();
 
         assert_eq!(
             load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
-            "key unavailable"
+            "key unavailable",
+            "with a recovery method on record the real error surfaces, not the no-method advice"
         );
     }
 
@@ -2859,73 +2710,6 @@ mod tests {
         let mut tampered = encrypted;
         *tampered.last_mut().unwrap() ^= 1;
         assert!(decrypt_bytes(&key, b"path", &tampered).is_err());
-    }
-
-    #[test]
-    fn passkey_unlocks_a_fetched_vault_without_the_original_device_key() {
-        let first = tempfile::tempdir().unwrap();
-        std::fs::write(first.path().join("settings.ron"), "(shared: true)\n").unwrap();
-        let first_repository = prepare_repository(first.path());
-        let original_keys = FixedKeyStore::new(42);
-        initialize_paths(first.path(), &first_repository, &original_keys).unwrap();
-        let credential_id = "a1".repeat(32);
-        let prf_output = [9_u8; KEY_LEN];
-        add_passkey_paths(
-            &first_repository,
-            &original_keys,
-            &credential_id,
-            &prf_output,
-        )
-        .unwrap();
-
-        let remote = tempfile::tempdir().unwrap();
-        let remote_path = remote.path().join("vault.git");
-        create_bare_remote(&remote_path);
-        git(
-            &first_repository,
-            &["remote", "add", "origin", remote_path.to_str().unwrap()],
-        )
-        .unwrap();
-        git(&first_repository, &["push", "-u", "origin", "main"]).unwrap();
-
-        let second = tempfile::tempdir().unwrap();
-        let second_repository = prepare_repository(second.path());
-        let second_keys = MemoryKeyStore::default();
-        connect_remote_paths(
-            second.path(),
-            &second_repository,
-            remote_path.to_str().unwrap(),
-            &second_keys,
-        )
-        .unwrap();
-        assert!(!second.path().join("settings.ron").exists());
-
-        unlock_with_passkey_paths(
-            second.path(),
-            &second_repository,
-            &second_keys,
-            &credential_id,
-            &prf_output,
-        )
-        .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(second.path().join("settings.ron")).unwrap(),
-            "(shared: true)\n"
-        );
-        assert_eq!(
-            second_keys.load("ignored").unwrap().as_slice(),
-            &[42; KEY_LEN]
-        );
-        assert!(
-            unlock_with_passkey_paths(
-                second.path(),
-                &second_repository,
-                &MemoryKeyStore::default(),
-                &credential_id,
-                &[8_u8; KEY_LEN],
-            )
-            .is_err()
-        );
     }
 
     #[test]

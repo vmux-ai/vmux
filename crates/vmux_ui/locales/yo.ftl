@@ -68,11 +68,6 @@ tools-result-linked = A ti so { $name }
 tools-result-unlinked = A ti yọ ìsopọ̀ { $name }
 vault-title = Vault
 vault-encrypted = Ti paroko lati opin si opin
-vault-passkey = Bọtini igbanu
-vault-passkey-description = Ṣii ifinkan yii sori awọn ẹrọ miiran laisi ọrọ igbaniwọle kan.
-vault-passkey-add = Fi bọtini iwọle kun
-vault-passkey-unlock = Ṣii silẹ
-vault-passkey-provider-unsupported = Olupese bọtini iwọle yii ko ṣe atilẹyin ṣiṣii Vault ti paroko sibẹsibẹ.
 vault-recovery-key = Bọtini imularada
 vault-recovery-key-description = Ṣafipamọ bọtini kan ni Bitwarden tabi oluṣakoso ọrọ igbaniwọle miiran lati gba Vault yii pada sori ẹrọ tuntun kan.
 vault-recovery-key-create = Ṣẹda bọtini
@@ -680,12 +675,6 @@ setup-install-homebrew = Fi Homebrew + { $name } sori ẹrọ
 setup-run-install = Ṣiṣe àṣẹ fífi sori ẹrọ
 setup-auto-reload = Vmux ń ṣiṣẹ́ rẹ̀ nínú tẹ́míńà, ó sì tún ṣí nígbà tí { $command } bá ṣetán.
 
-debug-title = Ṣàtúnṣe aṣìṣe
-debug-auto-update = Ìmúdójúìwọ̀n aládàáṣiṣẹ́
-debug-simulate-update = Ṣe àfihàn pé ìmúdójúìwọ̀n wà
-debug-simulate-download = Ṣe àfihàn gbígbà sílẹ̀
-debug-clear-update = Nu ìmúdójúìwọ̀n
-debug-trigger-restart = Fa ìtúnbẹ̀rẹ̀ ṣẹ́
 
 command-manage-spaces = Ṣàkóso àwọn ààyè…
 command-pane-stack-location = pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }

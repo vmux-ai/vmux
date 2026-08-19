@@ -68,11 +68,6 @@ tools-result-linked = { $name } ተገናኝቷል
 tools-result-unlinked = { $name } ግንኙነቱ ተቋርጧል
 vault-title = Vault
 vault-encrypted = ከጫፍ እስከ ጫፍ የተመሰጠረ
-vault-passkey = የይለፍ ቁልፍ
-vault-passkey-description = ይህን ቮልት ያለይለፍ ቃል በሌሎች መሳሪያዎች ላይ ይክፈቱት።
-vault-passkey-add = የይለፍ ቁልፍ ጨምር
-vault-passkey-unlock = ክፈት
-vault-passkey-provider-unsupported = ይህ የይለፍ ቁልፍ አቅራቢ እስካሁን የተመሰጠረ የቮልት መክፈቻን አይደግፍም።
 vault-recovery-key = የመልሶ ማግኛ ቁልፍ
 vault-recovery-key-description = ይህንን ቮልት በአዲስ መሳሪያ ላይ ለማግኘት አንድ ቁልፍ በ Bitwarden ወይም ሌላ የይለፍ ቃል አስተዳዳሪ ያስቀምጡ።
 vault-recovery-key-create = ቁልፍ ፍጠር
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ጫን
 setup-run-install = የመጫኛ ትዕዛዝ አሂድ
 setup-auto-reload = Vmux በተርሚናል ያስኬደዋል፣ { $command } ሲዘጋጅም ዳግም ይጫናል።
 
-debug-title = ማረሚያ
-debug-auto-update = ራስ-ሰር ዝማኔ
-debug-simulate-update = ዝማኔ እንዳለ አስመስል
-debug-simulate-download = ማውረድን አስመስል
-debug-clear-update = ዝማኔ አጽዳ
-debug-trigger-restart = ዳግም ማስጀመር አስነሳ
 
 command-manage-spaces = ቦታዎችን አስተዳድር…
 command-pane-stack-location = ክፍል { $pane } / ቁልል { $stack }

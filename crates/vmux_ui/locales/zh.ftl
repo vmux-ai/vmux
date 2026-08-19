@@ -68,11 +68,6 @@ tools-result-linked = 已链接 { $name }
 tools-result-unlinked = 已取消链接 { $name }
 vault-title = Vault
 vault-encrypted = 端到端加密
-vault-passkey = 万能钥匙
-vault-passkey-description = 无需密码即可在其他设备上解锁此保管库。
-vault-passkey-add = 添加密钥
-vault-passkey-unlock = 开锁
-vault-passkey-provider-unsupported = 此密钥提供商尚不支持加密的保管库解锁。
 vault-recovery-key = 恢复密钥
 vault-recovery-key-description = 在 Bitwarden 或其他密码管理器中保存一个密钥，以便在新设备上恢复此保管库。
 vault-recovery-key-create = 创建密钥
@@ -680,12 +675,6 @@ setup-install-homebrew = 安装 Homebrew + { $name }
 setup-run-install = 运行安装命令
 setup-auto-reload = Vmux 会在终端中运行它，并在 { $command } 就绪后重新加载。
 
-debug-title = 调试
-debug-auto-update = 自动更新
-debug-simulate-update = 模拟有可用更新
-debug-simulate-download = 模拟下载
-debug-clear-update = 清除更新
-debug-trigger-restart = 触发重启
 
 command-manage-spaces = 管理空间…
 command-pane-stack-location = 窗格 { $pane } / 堆栈 { $stack }

@@ -11,7 +11,6 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use std::sync::atomic::Ordering;
 use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
@@ -34,9 +33,8 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 
 use crate::{
-    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap,
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED, NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb,
-    decode_premultiplied, hex_to_rgb,
+    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap, NATIVE_COMMAND_BAR_ROUTE,
+    VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
 };
 
 #[cfg(target_os = "macos")]
@@ -48,7 +46,7 @@ pub(crate) struct PresentPlugin;
 
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<PaneFrames>().add_systems(
             PostUpdate,
             (
                 sync_keyboard_target,
@@ -107,13 +105,17 @@ fn sync_keyboard_target(
         return;
     }
 
-    if let Ok(layout) = layout_keyboard_q.single() {
+    // The layout has no CEF browser — its page runs in the host process and its view is handed
+    // keys by AppKit — so there is no target to give `CefKeyboardTarget` to. Taking it off every
+    // browser is the whole job: what must not happen is a pane still holding it and reading the
+    // keystrokes meant for the chrome.
+    //
+    // This used to look for the layout inside `content_q` and hand it the marker. That query is
+    // `With<Browser>`, which the layout has not had since it left CEF, so the comparison could
+    // never be true and the right thing happened only because the loop fell through to `else`.
+    if layout_keyboard_q.single().is_ok() {
         for (browser_e, has_kb) in &content_q {
-            if browser_e == layout {
-                if !has_kb {
-                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                }
-            } else if has_kb {
+            if has_kb {
                 commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
@@ -412,18 +414,18 @@ pub(crate) fn sync_windowed_frames(
     header_rect: Query<&ComputedNode, (With<Header>, With<Open>)>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
-    mut last_visible_pages: Local<Vec<Entity>>,
+    mut memory: Local<FrameSyncMemory>,
     mut last_windowed_pages: Local<Vec<Entity>>,
-    mut visible_frames: Local<Vec<WindowedFrameRect>>,
+    mut pane_frames: ResMut<PaneFrames>,
 ) {
+    pane_frames.0.clear();
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
     let header_frame = header_rect.iter().find_map(WindowedFrameRect::of);
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
-    visible_frames.clear();
+    memory.visible_frames.clear();
     for (entity, tf, self_computed, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
@@ -443,7 +445,10 @@ pub(crate) fn sync_windowed_frames(
             layout_hidden.0,
             visible_pane_count,
         );
-        let became_visible = !last_visible_pages.contains(&entity);
+        if let Some(logical) = PaneFrame::of(frame, scale) {
+            pane_frames.0.insert(entity, logical);
+        }
+        let became_visible = !memory.visible_pages.contains(&entity);
         if became_visible {
             browsers.set_windowed_hidden(&entity, false);
         }
@@ -493,14 +498,14 @@ pub(crate) fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browsers.has_browser(entity) {
-            visible_frames.push(frame);
+            memory.visible_frames.push(frame);
             let key = (
                 frame.left.round() as i32,
                 frame.top.round() as i32,
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = last_raised_frame.insert(entity, key) != Some(key);
+            let changed = memory.raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible {
                 browsers.raise_windowed_to_front(&entity);
             }
@@ -512,14 +517,16 @@ pub(crate) fn sync_windowed_frames(
         .copied()
         .filter(|entity| !last_windowed_pages.contains(entity))
         .collect();
-    let ever_shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
-    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown, &newly_windowed)
+    let ever_shown: Vec<Entity> = memory.raised_frame.keys().copied().collect();
+    for entity in
+        windowed_pages_to_hide(&hidden, &memory.visible_pages, &ever_shown, &newly_windowed)
     {
         browsers.set_windowed_hidden(&entity, true);
     }
-    *last_visible_pages = visible;
+    memory.visible_pages = visible;
     *last_windowed_pages = current_windowed;
-    *visible_frames = NativeBridge::set_windowed_page_frames(std::mem::take(&mut *visible_frames));
+    memory.visible_frames =
+        NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -528,6 +535,64 @@ pub(crate) struct WindowedFrameRect {
     pub(crate) top: f32,
     pub(crate) width: f32,
     pub(crate) height: f32,
+}
+
+/// What the frame sync has to remember between runs.
+///
+/// One `Local` rather than three: Bevy caps a system's parameters, and three separate slots of
+/// remembered state spend that budget on something that is one thing.
+#[derive(Default)]
+pub(crate) struct FrameSyncMemory {
+    /// The rectangle each page was last raised to, so an unchanged one is not raised again.
+    raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
+    /// The pages visible on the previous run, which is how a page that has just become visible is
+    /// told apart from one that always was.
+    visible_pages: Vec<Entity>,
+    visible_frames: Vec<WindowedFrameRect>,
+}
+
+/// Where each windowed page sits, in the units wry speaks.
+///
+/// `sync_windowed_frames` already answers this question for CEF, in physical pixels plus a separate
+/// scale, because that is what CEF's own API takes. A page hosted in this process needs the same
+/// rectangle in logical pixels — and deriving it a second time from `ComputedNode` is how two
+/// answers to one question start disagreeing about where a pane is.
+///
+/// A page with no entry is one the frame sync did not reach this run: hidden, or no longer a pane.
+#[derive(Resource, Default)]
+pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
+
+impl PaneFrames {
+    /// Filled on every target, read only where there is a native page surface to place.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
+        self.0.get(&page).copied()
+    }
+}
+
+/// One page's rectangle in logical pixels.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct PaneFrame {
+    pub(crate) left: f32,
+    pub(crate) top: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+impl PaneFrame {
+    /// `frame` is physical, as everything downstream of `ComputedNode` is.
+    fn of(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+
+        Some(Self {
+            left: frame.left / scale,
+            top: frame.top / scale,
+            width: frame.width / scale,
+            height: frame.height / scale,
+        })
+    }
 }
 
 impl WindowedFrameRect {
@@ -678,9 +743,6 @@ fn publish_native_command_bar_route(
         frame,
         scale,
     };
-    if !owns_input {
-        NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
-    }
 }
 
 fn command_bar_windowed_frame(
@@ -1323,14 +1385,8 @@ mod tests {
         assert_eq!(width, 0.0);
     }
 
+    use crate::native_command_bar_route;
     use crate::tests::test_app_settings_with_radius;
-    use crate::{
-        command_bar_windowed_click_should_dismiss, native_command_bar_route,
-        request_native_dismiss, request_native_dismiss_for_mouse_down,
-        take_native_command_bar_dismiss_requested,
-    };
-    use bevy::input::ButtonState;
-    use vmux_command::shortcut::KeyCombo;
 
     #[test]
     fn osr_webview_hides_when_window_is_hidden() {
@@ -1727,45 +1783,6 @@ mod tests {
         assert!((frame.height_px - 440.0).abs() < 0.01);
     }
 
-    #[test]
-    fn windowed_command_bar_outside_click_dismisses() {
-        let frame = CommandBarWindowedFrame {
-            left_px: 100.0,
-            top_px: 50.0,
-            width_px: 200.0,
-            height_px: 100.0,
-        };
-
-        assert!(command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(150.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Right,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            false,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-    }
-
     /// One test, because every case here mutates the process-wide published route and the test
     /// runner is multi-threaded.
     #[test]
@@ -1783,37 +1800,8 @@ mod tests {
         assert_eq!(published.generation, before.wrapping_add(1));
         assert_eq!(published.scale, 2.0);
 
-        // A frame published by a bar that no longer owns input must not turn an unrelated click
-        // into a dismiss.
         publish_native_command_bar_route(false, Some(frame), 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        publish_native_command_bar_route(true, Some(frame), 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(120.0, 60.0));
-        assert!(!take_native_command_bar_dismiss_requested());
-        assert!(request_native_dismiss_for_mouse_down(90.0, 60.0));
-        assert!(take_native_command_bar_dismiss_requested());
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        // Revealing: owns input, but no rectangle is on screen to click outside of yet.
-        publish_native_command_bar_route(true, None, 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
-
-        // A key the bar does not close on is left for the keymap even while it owns input.
-        assert!(!request_native_dismiss(&KeyCombo {
-            key: bevy::input::keyboard::KeyCode::KeyJ,
-            modifiers: Default::default(),
-        }));
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        // Closing drops a dismiss that was requested while open.
-        assert!(request_native_dismiss(&KeyCombo {
-            key: bevy::input::keyboard::KeyCode::Escape,
-            modifiers: Default::default(),
-        }));
-        publish_native_command_bar_route(false, None, 1.0);
-        assert!(!take_native_command_bar_dismiss_requested());
+        assert!(!native_command_bar_route().owns_input);
     }
 
     #[test]

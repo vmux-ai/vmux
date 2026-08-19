@@ -68,11 +68,6 @@ tools-result-linked = Iniugnay ang { $name }
 tools-result-unlinked = Inalis ang ugnay ng { $name }
 vault-title = Vault
 vault-encrypted = Naka-encrypt nang end-to-end
-vault-passkey = Passkey
-vault-passkey-description = I-unlock ang Vault na ito sa iba pang device na walang password.
-vault-passkey-add = Magdagdag ng passkey
-vault-passkey-unlock = I-unlock
-vault-passkey-provider-unsupported = Hindi pa sinusuportahan ng passkey provider na ito ang naka-encrypt na Vault unlock.
 vault-recovery-key = Susi sa Pagbawi
 vault-recovery-key-description = Mag-save ng isang key sa Bitwarden o isa pang tagapamahala ng password upang mabawi ang Vault na ito sa isang bagong device.
 vault-recovery-key-create = Lumikha ng susi
@@ -680,12 +675,6 @@ setup-install-homebrew = I-install ang Homebrew + { $name }
 setup-run-install = Patakbuhin ang install command
 setup-auto-reload = Pinapatakbo ito ng Vmux sa terminal at nire-reload kapag handa na ang { $command }.
 
-debug-title = Debug
-debug-auto-update = Auto-update
-debug-simulate-update = Gayahin na may available na update
-debug-simulate-download = Gayahin ang download
-debug-clear-update = I-clear ang update
-debug-trigger-restart = I-trigger ang restart
 
 command-manage-spaces = Pamahalaan ang mga space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

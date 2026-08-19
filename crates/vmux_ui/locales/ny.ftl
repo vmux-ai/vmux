@@ -68,11 +68,6 @@ tools-result-linked = { $name } yalumikizidwa
 tools-result-unlinked = Ulalo wa { $name } wachotsedwa
 vault-title = Vault
 vault-encrypted = Zotetezedwa kuchokera kumapeto mpaka kumapeto
-vault-passkey = Passkey
-vault-passkey-description = Tsegulani Vault iyi pazida zina popanda mawu achinsinsi.
-vault-passkey-add = Onjezani chinsinsi
-vault-passkey-unlock = Tsegulani
-vault-passkey-provider-unsupported = Wopereka makiyi achinsinsiwa sagwirizananso ndi encrypted Vault unlock panobe.
 vault-recovery-key = Recovery Key
 vault-recovery-key-description = Sungani kiyi imodzi mu Bitwarden kapena manejala wina wachinsinsi kuti mubwezeretse Vault iyi pachida chatsopano.
 vault-recovery-key-create = Pangani kiyi
@@ -680,12 +675,6 @@ setup-install-homebrew = Ikani Homebrew + { $name }
 setup-run-install = Yendetsani lamulo loyika
 setup-auto-reload = Vmux imaliyendetsa mu teminali ndipo imatsegulanso { $command } ikakonzeka.
 
-debug-title = Kukonza zolakwika
-debug-auto-update = Kusintha zokha
-debug-simulate-update = Yeserani ngati zosintha zilipo
-debug-simulate-download = Yeserani kutsitsa
-debug-clear-update = Chotsani zosintha
-debug-trigger-restart = Yambitsani kuyambiranso
 
 command-manage-spaces = Samalira malo…
 command-pane-stack-location = gawo { $pane } / mulu { $stack }

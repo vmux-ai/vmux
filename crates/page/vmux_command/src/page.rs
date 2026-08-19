@@ -7,11 +7,10 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    COMMAND_BAR_KEY_EVENT, COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarKey,
-    CommandBarOpenEvent, CommandBarQuery, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
-    HistorySuggestionsRequest, HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE,
-    PathCompleteRequest, PathCompleteResponse, PathEntry, StartSelectWorkspace, is_data_uri,
+    COMMAND_BAR_KEY_EVENT, CommandBarActionEvent, CommandBarKey, CommandBarOpenEvent,
+    CommandBarQuery, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
+    HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    PathCompleteResponse, PathEntry, StartSelectWorkspace, is_data_uri,
 };
 use crate::open_target::OpenTarget;
 use crate::prompt_media::{
@@ -20,348 +19,39 @@ use crate::prompt_media::{
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query,
     merge_chat_attachments, replace_inline_media_query,
 };
-use crate::size::{CommandBarSize, CommandBarSizeEmissionState};
 use dioxus::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use vmux_core::input::{PageKeyContext, Unclaimed};
-use vmux_start::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
-use vmux_start::results::{
-    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
-    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
-    space_switch_results, start_page_results,
-};
-use vmux_start::row::ResultRow;
-use vmux_start::style::{
-    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_list_class,
-};
-use vmux_start::style::{command_bar_root_class, command_bar_shell_class};
 use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::caret::TextCaret;
+use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener, use_theme};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
+use vmux_ui::launcher::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
+use vmux_ui::launcher::results::{
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
+    space_switch_results, start_page_results,
+};
+use vmux_ui::launcher::row::ResultRow;
+use vmux_ui::launcher::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    result_list_class,
+};
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
-std::thread_local! {
-    static COMMAND_BAR_SIZE_EMISSION: RefCell<CommandBarSizeEmissionState> = RefCell::new(CommandBarSizeEmissionState::default());
-}
-
-/// The Cmd+K command-bar modal page: renders [`CommandPalette`] in a modal shell and
-/// owns the open/ack/reveal handshake, native sizing, and outside-pointer dismiss.
-#[component]
-pub fn Page() -> Element {
-    use_theme();
-    let mut state = use_signal(CommandBarOpenEvent::default);
-    let mut is_open = use_signal(|| false);
-    let mut current_open_id = use_signal(|| OpenId::NONE);
-    let mut last_rendered_open_id = use_signal(|| OpenId::NONE);
-    let mut render_ack_scheduled_open_id = use_signal(|| OpenId::NONE);
-    let mut ready_sent = use_signal(|| false);
-    let mut observed_size_open_id = use_signal(|| None::<OpenId>);
-
-    let open_listener =
-        use_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
-            let open_id = data.open_id;
-            let should_reset_input = open_id.should_reset_input(current_open_id());
-            if !should_reset_input {
-                return;
-            }
-            current_open_id.set(open_id);
-            state.set(data);
-            is_open.set(true);
-            if open_id.is_open() {
-                last_rendered_open_id.set(OpenId::NONE);
-                render_ack_scheduled_open_id.set(OpenId::NONE);
-            }
-        });
-
-    use_effect(move || {
-        if !(open_listener.is_loading)() && !ready_sent() && send(&CommandBarReadyEvent).is_ok() {
-            ready_sent.set(true);
-        }
-    });
-
-    use_effect(move || {
-        let open = is_open();
-        let open_id = current_open_id();
-        if open
-            && open_id.is_open()
-            && last_rendered_open_id() != open_id
-            && render_ack_scheduled_open_id() != open_id
-        {
-            render_ack_scheduled_open_id.set(open_id);
-            if !schedule_command_bar_rendered_emit(
-                open_id,
-                2,
-                last_rendered_open_id,
-                render_ack_scheduled_open_id,
-            ) {
-                render_ack_scheduled_open_id.set(OpenId::NONE);
-            }
-        }
-    });
-
-    // `Rc` because `use_hook` clones its value out on every render and a listener must have one
-    // owner — two would each try to remove it, and the second removal is the one that silently
-    // does nothing.
-    use_hook(|| Rc::new(command_bar_outside_pointer(is_open)));
-
-    let mut size_observer = use_signal(|| Option::<SizeObserver>::None);
-    use_effect(move || {
-        if !is_open() {
-            return;
-        }
-        let open_id = current_open_id();
-        if observed_size_open_id() == Some(open_id) {
-            return;
-        }
-        if let Some(observer) = SizeObserver::on_command_bar_shell(current_open_id) {
-            size_observer.set(Some(observer));
-            observed_size_open_id.set(Some(open_id));
-        }
-    });
-
-    if !is_open() {
-        return rsx! { div { class: "h-full w-full" } };
-    }
-
-    let native_windowed = state().native_windowed;
-
-    rsx! {
-        div {
-            class: command_bar_root_class(native_windowed),
-            onclick: move |_| { dismiss_command_bar(is_open); },
-            div {
-                id: "command-bar-shell",
-                class: command_bar_shell_class(native_windowed),
-                onclick: move |e| { e.stop_propagation(); },
-                div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
-                CommandPalette {
-                    state,
-                    variant: PaletteVariant::Modal,
-                    on_close: move |_| {},
-                    on_dismiss: move |_| { dismiss_command_bar(is_open); },
-                    on_activity: move |_| {
-                        schedule_command_bar_size_emit(current_open_id());
-                    },
-                }
-            }
-        }
-    }
-}
-
-fn dismiss_command_bar(is_open: Signal<bool>) {
-    if !is_open() {
-        return;
-    }
-    let _ = send(&CommandBarActionEvent::Dismiss);
-}
-
-/// Dismiss the command bar when a pointer goes down anywhere outside its shell.
-fn command_bar_outside_pointer(is_open: Signal<bool>) -> Option<DocumentListener> {
-    DocumentListener::capture("pointerdown", move |event| {
-        if !is_open() {
-            return;
-        }
-        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-            return;
-        };
-        let Some(shell) = document.get_element_by_id("command-bar-shell") else {
-            return;
-        };
-        let Some(target) = event.target() else {
-            return;
-        };
-        let inside_shell = target
-            .dyn_ref::<web_sys::Node>()
-            .is_some_and(|node| shell.contains(Some(node)));
-        if inside_shell {
-            return;
-        }
-        dismiss_command_bar(is_open);
-    })
-}
-
-fn emit_command_bar_size(open_id: OpenId) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id("command-bar-shell") else {
-        return;
-    };
-    let shell: web_sys::HtmlElement = el.unchecked_into();
-    let shell_rect = shell.get_bounding_client_rect();
-    let shell_left = shell_rect.left().round() as i32;
-    let shell_top = shell_rect.top().round() as i32;
-    let shell_width = shell_rect.width().round().max(1.0) as u32;
-    let shell_height = shell_rect.height().round().max(1.0) as u32;
-    let document_width = document
-        .document_element()
-        .map(|el| el.scroll_width())
-        .unwrap_or(0);
-    let body_width = document.body().map(|body| body.scroll_width()).unwrap_or(0);
-    let result_list_extra_height = command_bar_results_extra_height(&document);
-    let width = shell
-        .offset_width()
-        .max(shell.scroll_width())
-        .max(document_width)
-        .max(body_width)
-        .max(1) as u32;
-    let height = shell
-        .offset_height()
-        .max(shell.scroll_height() + result_list_extra_height)
-        .max(1) as u32;
-    let size = CommandBarSize {
-        width,
-        height,
-        shell_left,
-        shell_top,
-        shell_width,
-        shell_height,
-    };
-    let should_emit =
-        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow().should_emit(open_id, size));
-    if !should_emit {
-        return;
-    }
-    if send(&CommandBarSizeEvent {
-        width,
-        height,
-        shell_left,
-        shell_top,
-        shell_width,
-        shell_height,
-    })
-    .is_ok()
-    {
-        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().mark_emitted(open_id, size));
-    }
-}
-
-fn command_bar_results_extra_height(document: &web_sys::Document) -> i32 {
-    let Some(el) = document.get_element_by_id("command-bar-results") else {
-        return 0;
-    };
-    let list: web_sys::HtmlElement = el.clone().unchecked_into();
-    let max_outer_height = web_sys::window()
-        .and_then(|window| window.get_computed_style(&el).ok().flatten())
-        .and_then(|style| style.get_property_value("max-height").ok())
-        .and_then(|value| css_px_value(&value))
-        .map(|height| height.ceil() as i32);
-    let border_height = (list.offset_height() - list.client_height()).max(0);
-    let natural_outer_height = list.scroll_height() + border_height;
-    let ideal_outer_height = max_outer_height
-        .map(|height| natural_outer_height.min(height))
-        .unwrap_or(natural_outer_height);
-    (ideal_outer_height - list.offset_height()).max(0)
-}
-
-fn css_px_value(value: &str) -> Option<f64> {
-    let value = value.trim().strip_suffix("px")?.parse::<f64>().ok()?;
-    value.is_finite().then_some(value.max(0.0))
-}
-
-fn schedule_command_bar_size_emit(open_id: OpenId) {
-    emit_command_bar_size(open_id);
-    let should_schedule = COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().schedule());
-    if !should_schedule {
-        return;
-    }
-    let Some(window) = web_sys::window() else {
-        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().finish_schedule());
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().finish_schedule());
-        emit_command_bar_size(open_id);
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn schedule_command_bar_rendered_emit(
-    open_id: OpenId,
-    frames_left: u8,
-    mut last_rendered_open_id: Signal<OpenId>,
-    mut scheduled_open_id: Signal<OpenId>,
-) -> bool {
-    let Some(window) = web_sys::window() else {
-        return false;
-    };
-    let callback = Closure::once(move || {
-        if frames_left > 1 {
-            if !schedule_command_bar_rendered_emit(
-                open_id,
-                frames_left - 1,
-                last_rendered_open_id,
-                scheduled_open_id,
-            ) {
-                scheduled_open_id.set(OpenId::NONE);
-            }
-        } else if send(&CommandBarRenderedEvent { open_id }).is_ok() {
-            last_rendered_open_id.set(open_id);
-        } else {
-            scheduled_open_id.set(OpenId::NONE);
-        }
-    });
-    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
-        Ok(_) => {
-            callback.forget();
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-/// A `ResizeObserver` on the command-bar shell, disconnected when this value is dropped.
-///
-/// Leaking it is worse here than for a document listener: nothing latches the install, so every
-/// remount left another live observer behind, each one still holding the previous component's
-/// `current_open_id` and reading it on the next resize.
-struct SizeObserver {
-    observer: web_sys::ResizeObserver,
-    _callback: Closure<dyn FnMut(JsValue)>,
-}
-
-impl Drop for SizeObserver {
-    fn drop(&mut self) {
-        self.observer.disconnect();
-    }
-}
-
-impl SizeObserver {
-    /// `None` while the shell is not in the document yet, which is why the caller retries.
-    fn on_command_bar_shell(current_open_id: Signal<OpenId>) -> Option<Self> {
-        let document = web_sys::window()?.document()?;
-        let shell = document.get_element_by_id("command-bar-shell")?;
-        schedule_command_bar_size_emit(current_open_id());
-        let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-            schedule_command_bar_size_emit(current_open_id());
-        }) as Box<dyn FnMut(JsValue)>);
-        let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()).ok()?;
-        observer.observe(&shell);
-        Some(Self {
-            observer,
-            _callback: callback,
-        })
-    }
-}
-
+/// The shared command-bar body: input, live-filtered results, file-path completion,
+/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
+/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
@@ -601,7 +291,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
             } else {
-                focus_and_install_ctrl_bindings();
+                focus_command_bar_input();
             }
         }
     });
@@ -609,8 +299,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     // `Rc` because `use_hook` clones its value out on every render and a listener must have one
     // owner — two would each try to remove it, and the second removal is the one that silently
     // does nothing.
-    use_hook(|| Rc::new(is_start.then(|| start_menu_click_outside(target_menu_open))));
-
     use_effect(move || {
         let _ = query();
         let _ = selected();
@@ -1123,7 +811,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     start_keydown_nav
                         || prompt_target_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
-                            && vmux_start::results::terminal_matches_query(&start_keydown_q))
+                            && vmux_ui::launcher::results::terminal_matches_query(&start_keydown_q))
                 }) {
                     execute(item);
                 } else if let Some(item) = start_keydown_default_agent.as_ref() {
@@ -1160,7 +848,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let modal_keydown_q = q.clone();
     let modal_keydown_results = results.clone();
+    let modal_keydown_ghost = ghost_text.clone();
     let modal_keydown = move |e: KeyboardEvent| {
+        if handle_readline_chord(&e, query, &modal_keydown_ghost) {
+            return;
+        }
         let ctrl = e.modifiers().contains(Modifiers::CONTROL);
         if space_switch
             && !ctrl
@@ -1309,7 +1001,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     || action_nav
                                     || prompt_target_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
-                                        && vmux_start::results::terminal_matches_query(&action_query))
+                                        && vmux_ui::launcher::results::terminal_matches_query(&action_query))
                             }) {
                                 execute(item);
                             } else if !action_query.trim().is_empty()
@@ -1750,21 +1442,9 @@ impl PaletteKeys {
         drop(rows);
         self.query.set(completed.clone());
         self.selected.set(0);
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(COMMAND_BAR_INPUT_ID))
-        else {
-            return;
-        };
-        let input: web_sys::HtmlInputElement = element.unchecked_into();
-        input.set_value(&completed);
         TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(completed.len());
     }
 }
-
-/// The shared command-bar body: input, live-filtered results, file-path completion,
-/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
-/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 
 /// What the user has typed, and which row is selected.
 struct PaletteInput {
@@ -1930,125 +1610,95 @@ fn select_start_media_entry(
 
 const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
-fn focus_and_install_ctrl_bindings() {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id(COMMAND_BAR_INPUT_ID) else {
-        return;
-    };
-    let input: web_sys::HtmlInputElement = el.unchecked_into();
+/// Claim focus for the query field and offer its contents for overtyping.
+///
+/// The Ctrl chords this used to install as a capture-phase DOM listener are now part of the
+/// field's own `onkeydown` — see [`handle_readline_chord`].
+fn focus_command_bar_input() {
     FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
-
-    if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let _ = js_sys::Reflect::set(&input, &JsValue::from_str("_ctrlBound"), &JsValue::TRUE);
-
-    let input2 = input.clone();
-    let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
-        if handle_plain_meta_a(&e) {
-            return;
-        }
-        if !e.ctrl_key() {
-            return;
-        }
-        let action = match ctrl_key_capture_for_code(&e.code()) {
-            CtrlKeyCapture::Ignore => return,
-            CtrlKeyCapture::PassToDioxus => {
-                e.prevent_default();
-                return;
-            }
-            CtrlKeyCapture::Edit(action) => action,
-        };
-        e.prevent_default();
-        e.stop_immediate_propagation();
-        apply_ctrl_edit(&input2, action);
-    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-
-    let target: &web_sys::EventTarget = input.as_ref();
-    let opts = web_sys::AddEventListenerOptions::new();
-    opts.set_capture(true);
-    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
-        "keydown",
-        closure.as_ref().unchecked_ref(),
-        &opts,
-    );
-    closure.forget();
 }
 
-/// Run a readline edit against the input, then put the caret where it landed.
+/// Put the caret in the launcher's prompt field.
 ///
-/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. What is left
-/// here is writing the value to the element and telling Dioxus afterwards, which is only
-/// necessary because the input is uncontrolled: Dioxus does not see a change it did not make.
-/// Both of those lines go away when it becomes controlled.
-fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
-    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
-    let value = input.value();
-    let ghost = match action {
-        CtrlEditAction::End => input.get_attribute("data-ghost").unwrap_or_default(),
-        _ => String::new(),
-    };
-
-    let edited = action.apply(&value, caret.position(), &ghost);
-    let changed = edited.value != value;
-    if changed {
-        input.set_value(&edited.value);
-    }
-    caret.place(edited.caret);
-    if changed {
-        dispatch_input_event(input);
-    }
+/// The launcher owns the gesture and this crate owns the field, so the id stays here rather than
+/// being spelled out by every caller that wants the composer focused.
+pub fn focus_prompt_input() {
+    focus_prompt_end(PROMPT_INPUT_ID);
 }
 
-/// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
-/// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
-/// on the trigger (`#start-agent-selector-trigger`) are left alone.
-fn start_menu_click_outside(mut menu_open: Signal<bool>) -> Option<DocumentListener> {
-    DocumentListener::capture("mousedown", move |event| {
-        if !menu_open() {
-            return;
-        }
-        let inside = event
-            .target()
-            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-            .and_then(|element| {
-                element
-                    .closest("#start-agent-selector, #start-agent-selector-trigger")
-                    .ok()
-                    .flatten()
-            })
-            .is_some();
-        if !inside {
-            menu_open.set(false);
-        }
-    })
-}
-
-/// Cmd+A with no other modifier selects the query rather than the page.
-fn handle_plain_meta_a(e: &web_sys::KeyboardEvent) -> bool {
-    if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
+/// Cmd+A and the Ctrl readline chords, offered the key before the field's own handling.
+///
+/// Returns whether the key was consumed.
+///
+/// This was a capture-phase listener on the input element, installed once behind a `_ctrlBound`
+/// latch, because Chromium's macOS readline emulation acts on Ctrl+A/E and the handler had to run
+/// first to preempt it. Dioxus dispatches on the bubble phase, so whether `prevent_default` still
+/// wins that race is the one thing here no test settles — it needs a keyboard.
+fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost: &str) -> bool {
+    if handle_plain_meta_a(event) {
+        return true;
+    }
+    if !event.modifiers().contains(Modifiers::CONTROL) {
         return false;
     }
-    e.prevent_default();
-    e.stop_immediate_propagation();
-    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
+
+    let action = match ctrl_key_capture_for_code(&event.code().to_string()) {
+        CtrlKeyCapture::Ignore => return false,
+        // Preempt the browser, then let the field's own handler read the same key.
+        CtrlKeyCapture::PassToDioxus => {
+            event.prevent_default();
+            return false;
+        }
+        CtrlKeyCapture::Edit(action) => action,
+    };
+
+    event.prevent_default();
+    event.stop_propagation();
+    apply_ctrl_edit(
+        &mut query,
+        action,
+        ghost,
+        EventSelection::caret_in(COMMAND_BAR_INPUT_ID),
+    );
     true
 }
 
-/// Dispatch a synthetic "input" event so Dioxus picks up value changes.
-fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
-    let init = web_sys::EventInit::new();
-    init.set_bubbles(true);
-    if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
-        let _ = el.dispatch_event(&evt);
+/// Run a readline edit against the query, then put the caret where it landed.
+///
+/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is the one the key arrived with,
+/// which is why it is a parameter: it can only be read while a handler is running, so a function
+/// that fetched it for itself would be right only for the callers that happen to be in one. The
+/// value goes through the signal the field is bound to, so there is nothing to tell Dioxus
+/// afterwards — the element write and the synthetic `input` event that used to follow it existed
+/// only because the field was uncontrolled.
+fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str, caret: usize) {
+    let value = query.peek().clone();
+    let ghost = match action {
+        CtrlEditAction::End => ghost,
+        _ => "",
+    };
+
+    let edited = action.apply(&value, caret, ghost);
+    if edited.value != value {
+        query.set(edited.value);
     }
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(edited.caret);
+}
+
+/// Cmd+A with no other modifier selects the query rather than the page.
+fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
+    let modifiers = event.modifiers();
+    let plain_meta = modifiers.contains(Modifiers::META)
+        && !modifiers.contains(Modifiers::CONTROL)
+        && !modifiers.contains(Modifiers::ALT)
+        && !modifiers.contains(Modifiers::SHIFT);
+    if !plain_meta || event.code() != Code::KeyA {
+        return false;
+    }
+
+    event.prevent_default();
+    event.stop_propagation();
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
+    true
 }

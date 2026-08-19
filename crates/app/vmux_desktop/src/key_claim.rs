@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
+use vmux_core::host::page::HostsPage;
 use vmux_core::input::{KEY_CLAIMS_EVENT, KeyClaims, PageKeyContext};
 
 /// Tells each page which strokes it must hand over, and keeps that answer current as its context
@@ -28,7 +29,13 @@ impl Plugin for KeyClaimPlugin {
 /// bindings that apply everywhere. And it leaves [`receive_page_context`] with nothing to insert —
 /// only a value to replace — which keeps the publish path off `Commands` entirely.
 fn start_page_context(
-    pages: Query<Entity, (With<WebviewSource>, Without<KeyContext>)>,
+    pages: Query<
+        Entity,
+        (
+            Or<(With<WebviewSource>, With<HostsPage>)>,
+            Without<KeyContext>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for entity in pages.iter() {
@@ -65,7 +72,7 @@ fn reclaim_on_page_ready(
 /// Pushes each page its claimed set, when the answer for that page has changed.
 fn push_key_claims(
     keymap: Option<Res<Keymap>>,
-    contexts: Query<(Entity, Ref<KeyContext>), With<WebviewSource>>,
+    contexts: Query<(Entity, Ref<KeyContext>), Or<(With<WebviewSource>, With<HostsPage>)>>,
     mut commands: Commands,
 ) {
     let Some(keymap) = keymap else {
@@ -190,6 +197,13 @@ mod tests {
             entity
         }
 
+        /// A page whose components run in the host process, so it has no source to be found by.
+        fn hosted_page(app: &mut App) -> Entity {
+            let entity = app.world_mut().spawn(HostsPage).id();
+            app.update();
+            entity
+        }
+
         fn publish(app: &mut App, page: Entity, keys: &[&str]) {
             app.world_mut().trigger(BinReceive {
                 webview: page,
@@ -222,6 +236,27 @@ mod tests {
             ]
         );
         assert!(app.world().resource::<Rejected>().0.is_empty());
+    }
+
+    /// A page whose components run in the host process is still a page.
+    ///
+    /// The two queries here used to filter on `WebviewSource`, which was a fair way to ask "is
+    /// there a page here?" while every page was a URL a browser loaded. The layout stopped being
+    /// one, and skipping it is silent: it publishes a context nobody reads and is pushed a claimed
+    /// set that never arrives, so every context-scoped binding on it is dead while the keymap
+    /// looks fine.
+    #[test]
+    fn a_page_with_no_webview_is_claimed_for_like_any_other() {
+        let mut app = Seam::app();
+        let page = Seam::hosted_page(&mut app);
+        let before = Pushed::codes(app.world(), page).len();
+
+        Seam::publish(&mut app, page, &["chat", "chat.selector"]);
+
+        assert_eq!(
+            Pushed::codes(app.world(), page).split_off(before),
+            vec![vec!["Escape".to_string(), "KeyX".to_string()]],
+        );
     }
 
     /// A page that finished listening only after its claims were computed has to be told again. A

@@ -1,21 +1,29 @@
-//! The one place a browser `keydown` becomes a [`KeyStroke`].
+//! The one place a `keydown` becomes a [`KeyStroke`].
 //!
-//! Every page encodes through [`WebKey`], so a keystroke leaving any page looks the same to the
-//! core. There used to be a copy of this per page, and they disagreed — one checked for IME
+//! Every page encodes through [`PressedKey`], so a keystroke leaving any page looks the same to
+//! the core. There used to be a copy of this per page, and they disagreed — one checked for IME
 //! composition and one did not, so the same key was deliverable mid-composition on one page and
 //! swallowed on another.
 //!
 //! Encoding is all this does. Whether a key is worth sending, and what it goes on to mean, is not
 //! decided here.
 
+use dioxus::prelude::KeyboardData;
+use dioxus::prelude::ModifiersInteraction;
+use dioxus::prelude::keyboard_types::Modifiers;
 use vmux_core::input::{KeyModifiers, KeyStroke};
 
-/// A `keydown` as the browser delivered it, before anything has read meaning into it.
-pub struct WebKey<'a>(&'a web_sys::KeyboardEvent);
+/// A `keydown` as Dioxus delivered it, before anything has read meaning into it.
+///
+/// Reads Dioxus's own event data rather than a `web_sys::KeyboardEvent`. The downcast to a
+/// platform event answers `None` off the web, and `on_keydown` returned early on that — so a page
+/// running its components outside a browser had no keyboard at all, silently and with nothing to
+/// see in a build log.
+pub struct PressedKey<'a>(&'a KeyboardData);
 
-impl<'a> WebKey<'a> {
-    pub fn new(raw: &'a web_sys::KeyboardEvent) -> Self {
-        Self(raw)
+impl<'a> PressedKey<'a> {
+    pub fn new(data: &'a KeyboardData) -> Self {
+        Self(data)
     }
 
     /// The keystroke to send, or `None` while an IME is composing.
@@ -31,23 +39,27 @@ impl<'a> WebKey<'a> {
         if self.0.is_composing() {
             return None;
         }
-        let key = self.0.key();
+
+        let key = self.0.key().to_string();
         let text = (key.chars().count() == 1).then(|| key.clone());
+
         Some(KeyStroke {
             key,
-            code: self.0.code(),
+            code: self.0.code().to_string(),
             mods: self.mods(),
             text,
-            repeat: self.0.repeat(),
+            repeat: self.0.is_auto_repeating(),
         })
     }
 
     fn mods(&self) -> KeyModifiers {
+        let modifiers = self.0.modifiers();
+
         KeyModifiers {
-            ctrl: self.0.ctrl_key(),
-            shift: self.0.shift_key(),
-            alt: self.0.alt_key(),
-            super_key: self.0.meta_key(),
+            ctrl: modifiers.contains(Modifiers::CONTROL),
+            shift: modifiers.contains(Modifiers::SHIFT),
+            alt: modifiers.contains(Modifiers::ALT),
+            super_key: modifiers.contains(Modifiers::META),
         }
     }
 }

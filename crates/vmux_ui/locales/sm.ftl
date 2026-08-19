@@ -68,11 +68,6 @@ tools-result-linked = Ua fesootaʻi { $name }
 tools-result-unlinked = Ua tatala le sootaga o { $name }
 vault-title = Vault
 vault-encrypted = Fa'ailoga faalilolilo mai le amataga i le fa'ai'uga
-vault-passkey = Passkey
-vault-passkey-description = Tatala lenei Vault i isi masini e aunoa ma se upu faataga.
-vault-passkey-add = Fa'aopoopo le passkey
-vault-passkey-unlock = Tatala
-vault-passkey-provider-unsupported = E le'o lagolagoina e lenei tagata e tu'uina atu passkey le tatalaina o le Vault.
 vault-recovery-key = Toe Fa'aleleia Ki
 vault-recovery-key-description = Faasaoina se tasi ki i Bitwarden poʻo se isi pule faʻaupuga e toe faʻaleleia ai lenei Vault i luga o se masini fou.
 vault-recovery-key-create = Fausia ki
@@ -680,12 +675,6 @@ setup-install-homebrew = Fa‘apipi‘i Homebrew + { $name }
 setup-run-install = Fa‘agaioi le poloa‘iga fa‘apipi‘i
 setup-auto-reload = E fa‘agaioi e Vmux i se terminal ma toe uta pe a sauni { $command }.
 
-debug-title = Debug
-debug-auto-update = Fa‘afou otometi
-debug-simulate-update = Fa‘ata‘ita‘i ua avanoa se fa‘afouga
-debug-simulate-download = Fa‘ata‘ita‘i le la‘u mai
-debug-clear-update = Fa‘amamā fa‘afouga
-debug-trigger-restart = Fa‘atupu toe amata
 
 command-manage-spaces = Pulea avanoa…
 command-pane-stack-location = vaega { $pane } / faaputuga { $stack }

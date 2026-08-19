@@ -1,260 +1,191 @@
-//! Matrix-style digital rain canvas rendered behind the agent loading console.
-
-use std::cell::RefCell;
-use std::rc::Rc;
+//! Matrix-style digital rain behind the agent loading console.
+//!
+//! Drawn as falling columns of text rather than into a canvas. The canvas version ran a
+//! `requestAnimationFrame` loop that repainted every glyph and laid a translucent rectangle over
+//! the whole surface each frame to leave the trail — an idiom with no equivalent here, since a page
+//! running in this process reaches its document through render batches and not through a 2D
+//! context. Columns fall on a CSS animation instead, so the trail is a gradient mask, the motion is
+//! the compositor's, and no frame of it costs the page anything.
 
 use dioxus::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
 const FONT_PX: f64 = 16.0;
-const DROP_ROWS_PER_SECOND: f64 = 60.0;
-const RESET_RATE_PER_SECOND: f64 = 1.5;
+/// Enough columns to cover a wide pane; the container clips whatever overhangs a narrow one.
+const COLUMNS: usize = 120;
+/// Glyphs in one column. Its height is what the trail fades across.
+const COLUMN_GLYPHS: usize = 28;
 const GLYPHS: &str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
 
-/// Full-bleed Matrix rain. `accent_rgb` is a `"r g b"` triple (from
-/// `AgentAccent::rain_rgb`); `words` are uppercased agent tokens woven into a few
-/// columns so the agent name stays legible in the rain.
+/// Full-bleed Matrix rain. `accent_rgb` is a `"r g b"` triple (from `AgentAccent::rain_rgb`);
+/// `words` are uppercased agent tokens woven into a few columns so the agent name stays legible.
 #[component]
 pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
-    let canvas_id = use_hook(|| format!("matrix-rain-{}", (js_sys::Math::random() * 1.0e9) as u64));
-    let running: Rc<RefCell<bool>> = use_hook(|| Rc::new(RefCell::new(true)));
-    let raf: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
-        use_hook(|| Rc::new(RefCell::new(None)));
-    let handle: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
-
-    use_effect({
-        let canvas_id = canvas_id.clone();
-        let accent_rgb = accent_rgb.clone();
-        let words = words.clone();
-        let running = running.clone();
-        let raf = raf.clone();
-        let handle = handle.clone();
-        move || {
-            start_rain(
-                canvas_id.clone(),
-                accent_rgb.clone(),
-                words.clone(),
-                running.clone(),
-                raf.clone(),
-                handle.clone(),
-            );
-        }
-    });
-
-    use_drop({
-        let running = running.clone();
-        let raf = raf.clone();
-        let handle = handle.clone();
-        move || {
-            *running.borrow_mut() = false;
-            if let Some(id) = handle.borrow_mut().take()
-                && let Some(win) = web_sys::window()
-            {
-                let _ = win.cancel_animation_frame(id);
-            }
-            *raf.borrow_mut() = None;
-        }
-    });
+    let head = format!(
+        "light-dark(rgb({}), {})",
+        Accent::darkened(&accent_rgb, 42),
+        Accent::brightened(&accent_rgb)
+    );
+    let trail = format!(
+        "light-dark(rgb({} / 0.55), rgb({} / 0.5))",
+        Accent::darkened(&accent_rgb, 55),
+        accent_rgb
+    );
+    let words: Vec<Vec<char>> = words
+        .iter()
+        .filter(|word| !word.is_empty())
+        .map(|word| word.chars().collect())
+        .collect();
 
     rsx! {
-        canvas { id: "{canvas_id}", class: "absolute inset-0 h-full w-full" }
-    }
-}
+        div {
+            class: "absolute inset-0 overflow-hidden",
+            style: "font:{FONT_PX}px monospace;line-height:{FONT_PX}px;color:{trail};",
 
-fn brighten(accent_rgb: &str) -> String {
-    let parts: Vec<u16> = accent_rgb
-        .split_whitespace()
-        .filter_map(|p| p.parse::<u16>().ok())
-        .collect();
-    if parts.len() != 3 {
-        return "rgb(220 230 255)".to_string();
-    }
-    let mix = |c: u16| -> u16 { c + (255 - c) * 7 / 10 };
-    format!("rgb({} {} {})", mix(parts[0]), mix(parts[1]), mix(parts[2]))
-}
+            style { {RainColumn::KEYFRAMES} }
 
-/// Scale an `"r g b"` accent toward black by `pct`%, returning a bare `"r g b"`
-/// triple (no wrapper) so callers can build `rgb(...)` or `rgb(... / a)`. Used
-/// for the light-mode rain, where the dark-mode `brighten` would vanish.
-fn darken(accent_rgb: &str, pct: u16) -> String {
-    let parts: Vec<u16> = accent_rgb
-        .split_whitespace()
-        .filter_map(|p| p.parse::<u16>().ok())
-        .collect();
-    if parts.len() != 3 {
-        return "20 24 33".to_string();
-    }
-    let mix = |c: u16| -> u16 { c * pct / 100 };
-    format!("{} {} {}", mix(parts[0]), mix(parts[1]), mix(parts[2]))
-}
-
-fn pick_glyph(glyphs: &[char], words: &[Vec<char>], col: usize, head_row: f64) -> char {
-    if !words.is_empty() && col % 7 == 3 {
-        let word = &words[col % words.len()];
-        if !word.is_empty() {
-            let idx = (head_row.max(0.0) as usize) % word.len();
-            return word[idx];
+            for index in 0..COLUMNS {
+                {
+                    let column = RainColumn::at(index, &words);
+                    rsx! {
+                        div {
+                            key: "{index}",
+                            class: "absolute top-0 whitespace-pre motion-reduce:animate-none",
+                            style: "{column.style}",
+                            "{column.trail}"
+                            span { style: "color:{head};", "{column.head}" }
+                        }
+                    }
+                }
+            }
         }
     }
-    let r = (js_sys::Math::random() * glyphs.len() as f64) as usize;
-    glyphs[r.min(glyphs.len() - 1)]
 }
 
-fn start_rain(
-    canvas_id: String,
-    accent_rgb: String,
-    words: Vec<String>,
-    running: Rc<RefCell<bool>>,
-    raf: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
-    handle: Rc<RefCell<Option<i32>>>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id(&canvas_id) else {
-        return;
-    };
-    let Ok(canvas) = el.dyn_into::<web_sys::HtmlCanvasElement>() else {
-        return;
-    };
-    let Ok(Some(ctx_obj)) = canvas.get_context("2d") else {
-        return;
-    };
-    let Ok(ctx) = ctx_obj.dyn_into::<web_sys::CanvasRenderingContext2d>() else {
-        return;
-    };
+/// One falling column, resolved to the text it shows and the animation that drops it.
+///
+/// Every value is derived from the column's index rather than drawn at random, so a column looks
+/// the same each time the splash appears and nothing here needs a source of randomness — which the
+/// page does not have anyway, now that it is not running in a JS engine of its own.
+struct RainColumn {
+    trail: String,
+    head: char,
+    style: String,
+}
 
-    let dpr = window.device_pixel_ratio().clamp(1.0, 1.5);
+impl RainColumn {
+    /// `100vh` rather than the container's height because the splash fills the pane, and the
+    /// column's own `-100%` is what starts it fully above the top edge.
+    const KEYFRAMES: &'static str =
+        "@keyframes vmux-rain{from{transform:translateY(-100%)}to{transform:translateY(100vh)}}";
 
-    let reduced = window
-        .match_media("(prefers-reduced-motion: reduce)")
-        .ok()
-        .flatten()
-        .map(|m| m.matches())
-        .unwrap_or(false);
+    fn at(index: usize, words: &[Vec<char>]) -> Self {
+        let glyphs: Vec<char> = GLYPHS.chars().collect();
+        let word = (!words.is_empty() && index % 7 == 3).then(|| &words[index % words.len()]);
 
-    let dark = window
-        .match_media("(prefers-color-scheme: dark)")
-        .ok()
-        .flatten()
-        .map(|m| m.matches())
-        .unwrap_or(true);
-    // Match the shared app background token (`--background` in theme.css) so the
-    // rain canvas reads the same as every other vmux:// / file:// page. Keep these
-    // in sync with that token.
-    let bg = if dark {
-        "oklch(0.145 0 0)"
-    } else {
-        "oklch(0.88 0 0)"
-    };
-    let fade = if dark {
-        "oklch(0.145 0 0 / 0.08)"
-    } else {
-        "oklch(0.88 0 0 / 0.1)"
-    };
+        let mut column = String::new();
+        for row in 0..COLUMN_GLYPHS {
+            let glyph = match word {
+                Some(word) => word[row % word.len()],
+                None => glyphs[Self::noise(index * 97 + row) as usize % glyphs.len()],
+            };
+            column.push(glyph);
+            column.push('\n');
+        }
+        let head = column.pop().map(|_| column.pop()).unwrap_or_default();
 
-    if reduced {
-        let w = canvas.client_width().max(1) as f64;
-        let h = canvas.client_height().max(1) as f64;
-        canvas.set_width((w * dpr) as u32);
-        canvas.set_height((h * dpr) as u32);
-        let _ = ctx.scale(dpr, dpr);
-        ctx.set_fill_style_str(bg);
-        ctx.fill_rect(0.0, 0.0, w, h);
-        return;
+        let seconds = 3.0 + (Self::noise(index) % 1000) as f64 / 200.0;
+        let delay = (Self::noise(index * 31) % 1000) as f64 / 160.0;
+        Self {
+            trail: column,
+            head: head.unwrap_or(' '),
+            style: format!(
+                "left:{}px;animation:vmux-rain {seconds:.2}s linear {delay:.2}s infinite;\
+                 mask-image:linear-gradient(to bottom,transparent,#000 60%,#000 100%);",
+                index as f64 * FONT_PX
+            ),
+        }
     }
 
-    let glyphs: Vec<char> = GLYPHS.chars().collect();
-    let word_chars: Vec<Vec<char>> = words
-        .iter()
-        .filter(|w| !w.is_empty())
-        .map(|w| w.chars().collect())
-        .collect();
-    let head_color = if dark {
-        brighten(&accent_rgb)
-    } else {
-        format!("rgb({})", darken(&accent_rgb, 42))
-    };
-    let font = format!("{FONT_PX}px monospace");
-    ctx.set_font(&font);
-    ctx.set_text_baseline("top");
+    fn noise(seed: usize) -> u64 {
+        let mut x = (seed as u64)
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        x ^= x >> 33;
+        x = x.wrapping_mul(0xff51afd7ed558ccd);
+        x ^ (x >> 33)
+    }
+}
 
-    let mut cols = (canvas.client_width().max(1) as f64 / FONT_PX)
-        .floor()
-        .max(1.0) as usize;
-    let mut drops: Vec<f64> = (0..cols)
-        .map(|_| -(js_sys::Math::random() * 40.0))
-        .collect();
+/// The `"r g b"` triples the rain is tinted with.
+struct Accent;
 
-    let win = window.clone();
-    let raf_inner = raf.clone();
-    let running_inner = running.clone();
-    let handle_inner = handle.clone();
-    let mut last_frame_ms = 0.0;
-    let closure = Closure::wrap(Box::new(move |now: f64| {
-        let delta_ms = if last_frame_ms == 0.0 {
-            1000.0 / 60.0
-        } else {
-            (now - last_frame_ms).clamp(0.0, 50.0)
+impl Accent {
+    /// Toward white, for the head glyph against a dark background.
+    fn brightened(accent_rgb: &str) -> String {
+        let Some([r, g, b]) = Self::parse(accent_rgb) else {
+            return "rgb(220 230 255)".to_string();
         };
-        last_frame_ms = now;
-        let delta_seconds = delta_ms / 1000.0;
-        let drop_step = DROP_ROWS_PER_SECOND * delta_seconds;
-        let reset_chance = 1.0 - (-RESET_RATE_PER_SECOND * delta_seconds).exp();
-        let w = canvas.client_width().max(1) as f64;
-        let h = canvas.client_height().max(1) as f64;
-        let want_w = (w * dpr) as u32;
-        let want_h = (h * dpr) as u32;
-        if canvas.width() != want_w || canvas.height() != want_h {
-            canvas.set_width(want_w);
-            canvas.set_height(want_h);
-            let _ = ctx.reset_transform();
-            let _ = ctx.scale(dpr, dpr);
-            ctx.set_font(&font);
-            ctx.set_text_baseline("top");
-            let new_cols = (w / FONT_PX).floor().max(1.0) as usize;
-            if new_cols != cols {
-                drops.resize_with(new_cols, || -(js_sys::Math::random() * 40.0));
-                cols = new_cols;
-            }
-        }
+        let mix = |c: u16| c + (255 - c) * 7 / 10;
+        format!("rgb({} {} {})", mix(r), mix(g), mix(b))
+    }
 
-        ctx.set_fill_style_str(fade);
-        ctx.fill_rect(0.0, 0.0, w, h);
-        ctx.set_fill_style_str(&head_color);
+    /// Toward black by `pct`%, as a bare triple. The light-mode rain needs this, where
+    /// [`Self::brightened`] would vanish into the background.
+    fn darkened(accent_rgb: &str, pct: u16) -> String {
+        let Some([r, g, b]) = Self::parse(accent_rgb) else {
+            return "20 24 33".to_string();
+        };
+        let mix = |c: u16| c * pct / 100;
+        format!("{} {} {}", mix(r), mix(g), mix(b))
+    }
 
-        for (i, drop) in drops.iter_mut().enumerate().take(cols) {
-            let x = i as f64 * FONT_PX;
-            let head_row = *drop;
-            let y = head_row * FONT_PX;
-            if y >= 0.0 {
-                let mut buffer = [0; 4];
-                let ch = pick_glyph(&glyphs, &word_chars, i, head_row);
-                let _ = ctx.fill_text(ch.encode_utf8(&mut buffer), x, y);
-            }
-            if y > h && js_sys::Math::random() < reset_chance {
-                *drop = 0.0;
-            } else {
-                *drop += drop_step;
-            }
-        }
+    fn parse(accent_rgb: &str) -> Option<[u16; 3]> {
+        let mut parts = accent_rgb.split_whitespace();
+        let mut channel = || parts.next()?.parse::<u16>().ok();
+        let rgb = [channel()?, channel()?, channel()?];
+        parts.next().is_none().then_some(rgb)
+    }
+}
 
-        if *running_inner.borrow()
-            && let Some(cb) = raf_inner.borrow().as_ref()
-            && let Ok(id) = win.request_animation_frame(cb.as_ref().unchecked_ref())
-        {
-            *handle_inner.borrow_mut() = Some(id);
-        }
-    }) as Box<dyn FnMut(f64)>);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    *raf.borrow_mut() = Some(closure);
-    if let Some(cb) = raf.borrow().as_ref()
-        && let Ok(id) = window.request_animation_frame(cb.as_ref().unchecked_ref())
-    {
-        *handle.borrow_mut() = Some(id);
+    /// A column woven with an agent name has to spell it: the whole point of the weave is that
+    /// "CLAUDE" stays readable in the rain, and an off-by-one in the head/trail split would eat
+    /// its last character.
+    #[test]
+    fn a_woven_column_reads_as_the_word_it_was_given() {
+        let words = vec!["CLAUDE".chars().collect::<Vec<_>>()];
+        let column = RainColumn::at(3, &words);
+
+        let shown: String = column
+            .trail
+            .chars()
+            .filter(|c| *c != '\n')
+            .chain(std::iter::once(column.head))
+            .collect();
+        assert_eq!(shown.chars().count(), COLUMN_GLYPHS);
+        assert!(shown.starts_with("CLAUDE"), "got {shown}");
+    }
+
+    /// Neighbouring columns falling in lockstep read as a curtain rather than as rain, so the
+    /// per-column timings must actually differ.
+    #[test]
+    fn adjacent_columns_do_not_share_a_fall() {
+        let first = RainColumn::at(10, &[]);
+        let second = RainColumn::at(11, &[]);
+
+        assert_ne!(first.style, second.style);
+        assert_ne!(first.trail, second.trail);
+    }
+
+    #[test]
+    fn a_malformed_accent_falls_back_rather_than_producing_broken_css() {
+        assert_eq!(Accent::parse("1 2"), None);
+        assert_eq!(Accent::parse("1 2 3 4"), None);
+        assert_eq!(Accent::parse("no such colour"), None);
+        assert_eq!(Accent::brightened("oops"), "rgb(220 230 255)");
+        assert_eq!(Accent::darkened("oops", 42), "20 24 33");
     }
 }

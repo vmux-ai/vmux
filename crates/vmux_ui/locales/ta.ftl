@@ -68,11 +68,6 @@ tools-result-linked = { $name } இணைக்கப்பட்டது
 tools-result-unlinked = { $name } இணைப்பு நீக்கப்பட்டது
 vault-title = Vault
 vault-encrypted = முனை முதல் முனை வரை மறைகுறியாக்கப்பட்டது
-vault-passkey = பாஸ்கி
-vault-passkey-description = கடவுச்சொல் இல்லாத பிற சாதனங்களில் இந்த வால்ட்டைத் திறக்கவும்.
-vault-passkey-add = கடவுச் சாவியைச் சேர்க்கவும்
-vault-passkey-unlock = திறக்கவும்
-vault-passkey-provider-unsupported = இந்த பாஸ்கீ வழங்குநர் இன்னும் என்க்ரிப்ட் செய்யப்பட்ட வால்ட் அன்லாக்கை ஆதரிக்கவில்லை.
 vault-recovery-key = மீட்பு விசை
 vault-recovery-key-description = புதிய சாதனத்தில் இந்த வால்ட்டை மீட்டெடுக்க, ஒரு விசையை Bitwarden அல்லது மற்றொரு கடவுச்சொல் நிர்வாகியில் சேமிக்கவும்.
 vault-recovery-key-create = விசையை உருவாக்கவும்
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } நிறுவு
 setup-run-install = நிறுவல் கட்டளையை இயக்கு
 setup-auto-reload = Vmux அதை முனையத்தில் இயக்கி, { $command } தயாரானதும் மீளேற்றும்.
 
-debug-title = Debug
-debug-auto-update = தானியக்க புதுப்பிப்பு
-debug-simulate-update = புதுப்பிப்பு கிடைப்பதைப் போல உருவகப்படுத்து
-debug-simulate-download = பதிவிறக்கத்தை உருவகப்படுத்து
-debug-clear-update = புதுப்பிப்பை அழி
-debug-trigger-restart = மறுதொடக்கத்தைத் தூண்டு
 
 command-manage-spaces = ஸ்பேஸ்களை நிர்வகி…
 command-pane-stack-location = பலகம் { $pane } / அடுக்கு { $stack }

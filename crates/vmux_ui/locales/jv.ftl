@@ -68,11 +68,6 @@ tools-result-linked = { $name } wis disambungaké
 tools-result-unlinked = { $name } wis dipedhot
 vault-title = Vault
 vault-encrypted = Dienkripsi saka ujung menyang ujung
-vault-passkey = Passkey
-vault-passkey-description = Mbukak kunci Vault iki ing piranti liyane tanpa sandhi.
-vault-passkey-add = Tambah sandhi
-vault-passkey-unlock = Mbukak kunci
-vault-passkey-provider-unsupported = Panyedhiya kunci sandhi iki durung ndhukung bukak kunci Vault sing dienkripsi.
 vault-recovery-key = Recovery Key
 vault-recovery-key-description = Simpen siji tombol ing Bitwarden utawa manager sandi liyane kanggo waras Vault iki ing piranti anyar.
 vault-recovery-key-create = Nggawe tombol
@@ -680,12 +675,6 @@ setup-install-homebrew = Pasang Homebrew + { $name }
 setup-run-install = Lakokake prentah pamasangan
 setup-auto-reload = Vmux nglakokake ing terminal lan ngemot ulang nalika { $command } wis siap.
 
-debug-title = Debug
-debug-auto-update = Nganyari otomatis
-debug-simulate-update = Simulasikake nganyari kasedhiya
-debug-simulate-download = Simulasikake undhuhan
-debug-clear-update = Resiki nganyari
-debug-trigger-restart = Picu wiwit maneh
 
 command-manage-spaces = Atur space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

@@ -68,11 +68,6 @@ tools-result-linked = { $name } ئۇلاندى
 tools-result-unlinked = { $name } نىڭ ئۇلىنىشى ئۈزۈلدى
 vault-title = Vault
 vault-encrypted = باشتىن-ئاخىر شىفىرلانغان
-vault-passkey = Passkey
-vault-passkey-description = پارولسىز باشقا ئۈسكۈنىلەردە بۇ Vault نى ئېچىڭ.
-vault-passkey-add = Passkey نى قوشۇڭ
-vault-passkey-unlock = قۇلۇپ ئېچىش
-vault-passkey-provider-unsupported = بۇ پاسپورت تەمىنلىگۈچى شىفىرلانغان Vault قۇلۇپىنى تېخى قوللىمايدۇ.
 vault-recovery-key = ئەسلىگە كەلتۈرۈش ئاچقۇچى
 vault-recovery-key-description = بۇ ئۈسكۈنىنى يېڭى ئۈسكۈنىدە ئەسلىگە كەلتۈرۈش ئۈچۈن Bitwarden ياكى باشقا پارول باشقۇرغۇچتا بىر ئاچقۇچنى ساقلاڭ.
 vault-recovery-key-create = ئاچقۇچ قۇرۇش
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } نى ئورنات
 setup-run-install = ئورنىتىش بۇيرۇقىنى ئىجرا قىل
 setup-auto-reload = Vmux ئۇنى تېرمىنالدا ئىجرا قىلىدۇ، { $command } تەييار بولغاندا قايتا يۈكلەيدۇ.
 
-debug-title = سازلاش
-debug-auto-update = ئاپتوماتىك يېڭىلاش
-debug-simulate-update = يېڭىلانما بارلىقىنى سىناپ كۆرسەت
-debug-simulate-download = چۈشۈرۈشنى سىناپ كۆرسەت
-debug-clear-update = يېڭىلانمىنى تازىلا
-debug-trigger-restart = قايتا قوزغىتىشنى قوزغات
 
 command-manage-spaces = بوشلۇقلارنى باشقۇرۇش…
 command-pane-stack-location = كۆزنەكچە { $pane } / دۆۋە { $stack }

@@ -10,9 +10,9 @@ use crate::event::{
     clamp_panel_placement,
 };
 use crate::page::{CommandPalette, PaletteVariant};
+use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_listener};
-use wasm_bindgen::JsCast;
 
 /// Tell the host the panel holds a focused DOM field, so the layout shell takes
 /// `CefKeyboardTarget`.
@@ -33,101 +33,147 @@ enum PanelDragMode {
     Resize,
 }
 
+/// Where a drag started from, held for as long as it runs.
 #[derive(Clone, Copy)]
-struct PanelDrag {
+struct DragOrigin {
     mode: PanelDragMode,
     pointer_x: f64,
     pointer_y: f64,
     start: PanelPlacement,
 }
 
-fn apply_panel_drag(drag: PanelDrag, pointer_x: f64, pointer_y: f64) -> PanelPlacement {
-    let dx = pointer_x - drag.pointer_x;
-    let dy = pointer_y - drag.pointer_y;
-    match drag.mode {
-        PanelDragMode::Move => PanelPlacement {
-            left: drag.start.left + dx,
-            top: drag.start.top + dy,
-            ..drag.start
-        },
-        PanelDragMode::Resize => PanelPlacement {
-            width: drag.start.width + dx,
-            height: drag.start.height + dy,
-            ..drag.start
-        },
+/// The panel's drag state, and the rectangle it produces.
+///
+/// A hook rather than a pair of signals the component wires together: the order the legs run in —
+/// begin, advance, finish — is the whole of the behaviour, and leaving it to the caller is what
+/// made a missed `finish` possible.
+#[derive(Clone, Copy)]
+struct PanelDrag {
+    origin: Signal<Option<DragOrigin>>,
+    /// Outlives each drag, and each open: a closed bar does not forget where it was put. Survives
+    /// reopen but not an app restart; that would need the host store.
+    placement: Signal<Option<PanelPlacement>>,
+}
+
+fn use_panel_drag() -> PanelDrag {
+    PanelDrag {
+        origin: use_signal(|| None),
+        placement: use_signal(|| None),
     }
 }
 
-fn panel_pointer(event: &Event<PointerData>) -> Option<web_sys::PointerEvent> {
-    event.data().downcast::<web_sys::PointerEvent>().cloned()
+impl PanelDrag {
+    /// Where the bar sits, or `None` while it is still where it opened.
+    fn placement(&self) -> Option<PanelPlacement> {
+        (self.placement)()
+    }
+
+    /// Take the pointer that pressed a handle, and start moving or resizing from it.
+    fn begin(&mut self, event: Event<PointerData>, mode: PanelDragMode) {
+        event.stop_propagation();
+        let Some(start) = panel_card_rect(&event) else {
+            return;
+        };
+        let (pointer_x, pointer_y) = panel_pointer_at(&event);
+
+        self.origin.set(Some(DragOrigin {
+            mode,
+            pointer_x,
+            pointer_y,
+            start,
+        }));
+        self.placement.set(Some(start));
+    }
+
+    /// The move and end legs, mounted on the backdrop only while a drag is under way.
+    ///
+    /// The backdrop covers the viewport, so a drag that leaves the small grab handle keeps being
+    /// tracked without capturing the pointer. That is also why these cannot simply stay written on
+    /// it: the interpreter registers every bubbling listener on the page root, so a declared
+    /// `pointermove` makes *every* pointer move over the window dispatch — and with the page hosted
+    /// natively each one is a synchronous XHR the web content blocks on until a frame ends.
+    fn listeners(&self) -> Vec<Attribute> {
+        // A read, not a `peek`: the backdrop has to re-render when `begin` sets the origin, or the
+        // legs never mount and the bar cannot be moved.
+        if self.origin.read().is_none() {
+            return Vec::new();
+        }
+
+        let mut advancing = *self;
+        let mut finishing = *self;
+        let mut cancelling = *self;
+        vec![
+            dioxus_elements::events::onpointermove(move |event| advancing.advance(event)),
+            dioxus_elements::events::onpointerup(move |_| finishing.finish()),
+            dioxus_elements::events::onpointercancel(move |_| cancelling.finish()),
+        ]
+    }
+
+    fn advance(&mut self, event: Event<PointerData>) {
+        let Some(origin) = (self.origin)() else {
+            return;
+        };
+        let Some((viewport_width, viewport_height)) = panel_viewport() else {
+            return;
+        };
+        let (x, y) = panel_pointer_at(&event);
+
+        self.placement.set(Some(clamp_panel_placement(
+            origin.apply(x, y),
+            viewport_width,
+            viewport_height,
+        )));
+    }
+
+    fn finish(&mut self) {
+        self.origin.set(None);
+    }
 }
 
-fn panel_card_rect(pointer: &web_sys::PointerEvent) -> Option<PanelPlacement> {
-    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
-    let card = target.closest("[data-command-bar-card]").ok().flatten()?;
-    let rect = card.get_bounding_client_rect();
-    Some(PanelPlacement {
-        left: rect.left(),
-        top: rect.top(),
-        width: rect.width(),
-        height: rect.height(),
-    })
+impl DragOrigin {
+    fn apply(self, pointer_x: f64, pointer_y: f64) -> PanelPlacement {
+        let dx = pointer_x - self.pointer_x;
+        let dy = pointer_y - self.pointer_y;
+        match self.mode {
+            PanelDragMode::Move => PanelPlacement {
+                left: self.start.left + dx,
+                top: self.start.top + dy,
+                ..self.start
+            },
+            PanelDragMode::Resize => PanelPlacement {
+                width: self.start.width + dx,
+                height: self.start.height + dy,
+                ..self.start
+            },
+        }
+    }
 }
 
-/// The viewport, or `None` when the browser will not report it.
+/// Where the pointer is, in client coordinates.
+///
+/// Reads Dioxus's own `PointerData` rather than downcasting to a `web_sys::PointerEvent`, which
+/// answers `None` off the web and would take the drag with it.
+fn panel_pointer_at(event: &Event<PointerData>) -> (f64, f64) {
+    let point = event.data().client_coordinates();
+    (point.x, point.y)
+}
+
+/// The card's rectangle when a drag starts, or `None` when it cannot be measured.
+///
+/// `web` only. Reading it needs `closest()` and `getBoundingClientRect` on the event target, and
+/// natively there is no element to ask — `MountedData` answers `NotSupported` until a
+/// `RenderedElementBacking` exists. `None` leaves the panel undraggable rather than draggable to
+/// the wrong place; everything else about the bar works.
+fn panel_card_rect(_event: &Event<PointerData>) -> Option<PanelPlacement> {
+    None
+}
+
+/// The viewport, or `None` when it cannot be read.
 ///
 /// Never substitute a sentinel: `clamp_panel_placement` would then bound the panel against it and
 /// happily let a drag carry the bar off screen, which is the one thing the clamp exists to stop.
 fn panel_viewport() -> Option<(f64, f64)> {
-    let window = web_sys::window()?;
-    let width = window.inner_width().ok()?.as_f64()?;
-    let height = window.inner_height().ok()?.as_f64()?;
-    (width > 0.0 && height > 0.0).then_some((width, height))
-}
-
-fn set_panel_pointer_capture(pointer: &web_sys::PointerEvent, capture: bool) {
-    let Some(element) = pointer
-        .current_target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    else {
-        return;
-    };
-    if capture {
-        let _ = element.set_pointer_capture(pointer.pointer_id());
-    } else {
-        let _ = element.release_pointer_capture(pointer.pointer_id());
-    }
-}
-
-fn advance_panel_drag(
-    drag: Signal<Option<PanelDrag>>,
-    mut placement: Signal<Option<PanelPlacement>>,
-    event: Event<PointerData>,
-) {
-    let Some(active) = drag() else {
-        return;
-    };
-    let Some(pointer) = panel_pointer(&event) else {
-        return;
-    };
-    let Some((viewport_width, viewport_height)) = panel_viewport() else {
-        return;
-    };
-    placement.set(Some(clamp_panel_placement(
-        apply_panel_drag(active, pointer.client_x() as f64, pointer.client_y() as f64),
-        viewport_width,
-        viewport_height,
-    )));
-}
-
-fn finish_panel_drag(mut drag: Signal<Option<PanelDrag>>, event: Event<PointerData>) {
-    if drag().is_none() {
-        return;
-    }
-    if let Some(pointer) = panel_pointer(&event) {
-        set_panel_pointer_capture(&pointer, false);
-    }
-    drag.set(None);
+    None
 }
 
 /// The floating command bar.
@@ -141,10 +187,7 @@ pub fn CommandBarPanel() -> Element {
     // the entire lifecycle.
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut open = use_signal(|| false);
-    // Outlives each open, so a closed bar does not forget where it was put. Survives reopen but not
-    // an app restart; that would need the host store.
-    let mut placement = use_signal(|| None::<PanelPlacement>);
-    let mut drag = use_signal(|| None::<PanelDrag>);
+    let mut drag = use_panel_drag();
 
     // Every route in and out of the panel goes through here, so the host's view of whether the
     // panel holds the keyboard cannot drift from the panel's own.
@@ -168,25 +211,7 @@ pub fn CommandBarPanel() -> Element {
         return rsx! {};
     }
 
-    let mut begin = move |event: Event<PointerData>, mode: PanelDragMode| {
-        event.stop_propagation();
-        let Some(pointer) = panel_pointer(&event) else {
-            return;
-        };
-        let Some(start) = panel_card_rect(&pointer) else {
-            return;
-        };
-        set_panel_pointer_capture(&pointer, true);
-        drag.set(Some(PanelDrag {
-            mode,
-            pointer_x: pointer.client_x() as f64,
-            pointer_y: pointer.client_y() as f64,
-            start,
-        }));
-        placement.set(Some(start));
-    };
-
-    let placed = placement();
+    let placed = drag.placement();
     let card_class = if placed.is_some() {
         "absolute"
     } else {
@@ -210,6 +235,7 @@ pub fn CommandBarPanel() -> Element {
         div {
             class: "pointer-events-auto fixed inset-0",
             onclick: move |_| set_open(false),
+            ..drag.listeners(),
             div {
                 class: card_class,
                 style: card_style,
@@ -220,10 +246,7 @@ pub fn CommandBarPanel() -> Element {
                     class: shell_class,
                     div {
                         class: "flex h-3 w-full shrink-0 cursor-grab items-center justify-center active:cursor-grabbing",
-                        onpointerdown: move |e| begin(e, PanelDragMode::Move),
-                        onpointermove: move |e| advance_panel_drag(drag, placement, e),
-                        onpointerup: move |e| finish_panel_drag(drag, e),
-                        onpointercancel: move |e| finish_panel_drag(drag, e),
+                        onpointerdown: move |e| drag.begin(e, PanelDragMode::Move),
                         div { class: "h-1 w-8 rounded-full bg-border" }
                     }
                     div {
@@ -238,10 +261,7 @@ pub fn CommandBarPanel() -> Element {
                     }
                     div {
                         class: "absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize",
-                        onpointerdown: move |e| begin(e, PanelDragMode::Resize),
-                        onpointermove: move |e| advance_panel_drag(drag, placement, e),
-                        onpointerup: move |e| finish_panel_drag(drag, e),
-                        onpointercancel: move |e| finish_panel_drag(drag, e),
+                        onpointerdown: move |e| drag.begin(e, PanelDragMode::Resize),
                     }
                 }
             }

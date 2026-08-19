@@ -68,11 +68,6 @@ tools-result-linked = { $name } وتړل شو
 tools-result-unlinked = د { $name } تړاو لرې شو
 vault-title = Vault
 vault-encrypted = له پیل څخه تر پایه کوډ شوی
-vault-passkey = پاسکی
-vault-passkey-description = دا والټ په نورو وسیلو کې پرته له پاسورډ خلاص کړئ.
-vault-passkey-add = پاسکی اضافه کړئ
-vault-passkey-unlock = خلاصول
-vault-passkey-provider-unsupported = دا پاسکي چمتو کونکی لاهم د کوډ شوي والټ انلاک ملاتړ نه کوي.
 vault-recovery-key = د بیا رغونې کیلي
 vault-recovery-key-description = یوه کیلي په بټوارډن یا بل پاسورډ مدیر کې خوندي کړئ ترڅو دا والټ په نوي وسیله بیرته ترلاسه کړئ.
 vault-recovery-key-create = کلید جوړ کړئ
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } لګول
 setup-run-install = د لګولو قومانده چلول
 setup-auto-reload = Vmux یې په ترمینل کې چلوي او کله چې { $command } چمتو شي، بیا یې پورته کوي.
 
-debug-title = ډیبګ
-debug-auto-update = اتومات اوسمهالنه
-debug-simulate-update = د شته اوسمهالنې تقلید
-debug-simulate-download = د ښکته کولو تقلید
-debug-clear-update = اوسمهالنه پاکول
-debug-trigger-restart = بیاپیلول راپارول
 
 command-manage-spaces = سپېسونه مدیریت کړئ…
 command-pane-stack-location = پین { $pane } / سټک { $stack }

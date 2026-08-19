@@ -68,11 +68,6 @@ tools-result-linked = { $name } baglandy
 tools-result-unlinked = { $name } baglanyşygy aýryldy
 vault-title = Vault
 vault-encrypted = Baştan-aýak şifrlenen
-vault-passkey = Passkey
-vault-passkey-description = Bu Vault-y parolsyz beýleki enjamlarda açyň.
-vault-passkey-add = Passkey goş
-vault-passkey-unlock = Gulpy aç
-vault-passkey-provider-unsupported = Bu açar üpjün ediji entek kodlanan Vault gulpuny goldamaýar.
 vault-recovery-key = Dikeldiş açary
 vault-recovery-key-description = Bu enjamy täze enjamda dikeltmek üçin Bitwarden ýa-da başga bir parol dolandyryjysynda saklaň.
 vault-recovery-key-create = Düwme dörediň
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } gur
 setup-run-install = Gurnama buýrugyny işlet
 setup-auto-reload = Vmux ony terminalda işledýär we { $command } taýýar bolanda täzeden ýükleýär.
 
-debug-title = Debug
-debug-auto-update = Awtomatiki täzelenme
-debug-simulate-update = Täzelenme bar ýaly görkez
-debug-simulate-download = Göçürmäni simulirle
-debug-clear-update = Täzelenmäni arassala
-debug-trigger-restart = Täzeden başlatmany işjeň et
 
 command-manage-spaces = Giňişlikleri dolandyr…
 command-pane-stack-location = panel { $pane } / gatlak { $stack }

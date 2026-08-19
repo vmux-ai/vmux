@@ -5,9 +5,6 @@
 
 pub mod event;
 
-#[cfg(web)]
-pub mod page;
-
 #[cfg(host)]
 pub mod plugin;
 #[cfg(host)]

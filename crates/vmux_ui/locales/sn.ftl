@@ -68,11 +68,6 @@ tools-result-linked = { $name } yabatanidzwa
 tools-result-unlinked = Chinongedzo che{ $name } chabviswa
 vault-title = Vault
 vault-encrypted = Yakavharidzirwa kubva kumagumo kusvika kumagumo
-vault-passkey = Passkey
-vault-passkey-description = Vhura iyi Vault pane mamwe maturusi pasina password.
-vault-passkey-add = Wedzera password
-vault-passkey-unlock = Kiinura
-vault-passkey-provider-unsupported = Uyu mupi wepasskey haatsigire encrypted Vault kiinura parizvino.
 vault-recovery-key = Recovery Key
 vault-recovery-key-description = Sevha kiyi imwe muBitwarden kana imwe password maneja kuti udzore iyi Vault pane chishandiso chitsva.
 vault-recovery-key-create = Gadzira kiyi
@@ -680,12 +675,6 @@ setup-install-homebrew = Isa Homebrew + { $name }
 setup-run-install = Mhanyisa murairo wekuisa
 setup-auto-reload = Vmux inoimhanyisa muteminari uye inorodhazve kana { $command } yagadzirira.
 
-debug-title = Debug
-debug-auto-update = Kuzvivandudza otomatiki
-debug-simulate-update = Tevedzera update iripo
-debug-simulate-download = Tevedzera kudhawunirodha
-debug-clear-update = Bvisa update
-debug-trigger-restart = Konzera kutangazve
 
 command-manage-spaces = Ronga nzvimbo…
 command-pane-stack-location = pani { $pane } / staki { $stack }

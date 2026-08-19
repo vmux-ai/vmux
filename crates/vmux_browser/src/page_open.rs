@@ -5,6 +5,8 @@
 //! handler that claims a page always runs before the fallback that would open it blindly.
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
+use vmux_wire::error::ErrorPageData;
+
 use vmux_core::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
@@ -169,9 +171,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
         if let Some(error) = error {
             attach_error_page_to_stack(
                 task.stack,
-                &task.url,
-                "Page failed to load",
-                &error.message,
+                ErrorPageData::failed_to_load(&task.url, &error.message),
                 &children_q,
                 &mut commands,
             );
@@ -179,9 +179,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
         } else if task.url.starts_with("vmux://error/") {
             attach_error_page_to_stack(
                 task.stack,
-                &task.url,
-                "Page failed to load",
-                &task.url,
+                ErrorPageData::failed_to_load(&task.url, &task.url),
                 &children_q,
                 &mut commands,
             );
@@ -193,9 +191,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
             }
             attach_error_page_to_stack(
                 task.stack,
-                &task.url,
-                "Page not found",
-                "",
+                ErrorPageData::not_found(&task.url),
                 &children_q,
                 &mut commands,
             );

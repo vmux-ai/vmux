@@ -19,7 +19,7 @@ full = [
     "tray",
     "updater",
 ]
-package = ["full", "web-bundle"]
+package = ["full"]
 screen-capture-backend = [
     "dep:image",
     "dep:objc2-screen-capture-kit",
@@ -63,7 +63,6 @@ recording = [
 screenshots = ["screen-capture-backend"]
 tray = ["dep:tray-icon"]
 updater = ["dep:cargo-packager-updater", "dep:semver"]
-web-bundle = ["dep:vmux_page"]
 
 [[bin]]
 name = "vmux_desktop"
@@ -95,6 +94,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
 vmux_browser = { path = "../../vmux_browser" }
+vmux_clipboard = { path = "../../vmux_clipboard" }
 vmux_command = { path = "../../page/vmux_command" }
 vmux_core = { path = "../../vmux_core" }
 vmux_editor = { path = "../../page/vmux_editor" }
@@ -103,9 +103,9 @@ vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../../page/vmux_history" }
 vmux_knowledge = { path = "../../page/vmux_knowledge" }
 vmux_layout = { path = "../../page/vmux_layout" }
-vmux_page = { path = "../../vmux_page", optional = true }
 vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../../page/vmux_setting" }
+vmux_start = { path = "../../page/vmux_start" }
 vmux_space = { path = "../../page/vmux_space" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }

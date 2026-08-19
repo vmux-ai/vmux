@@ -17,7 +17,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_command::event::CommandBarActionEvent;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
@@ -25,9 +24,7 @@ use vmux_layout::LayoutCef;
 
 use crate::{
     CefPointerRegionQuery, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
-    cef_pointer_regions_contains, command_bar_windowed_click_should_dismiss,
-    native_command_bar_route, pointer_button_from_mouse_button,
-    take_native_command_bar_dismiss_requested,
+    cef_pointer_regions_contains, pointer_button_from_mouse_button,
 };
 
 pub(crate) struct InputPlugin;
@@ -39,9 +36,6 @@ impl Plugin for InputPlugin {
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
-                    dismiss_command_bar_from_native_monitor,
-                    dismiss_windowed_command_bar_on_outside_click
-                        .run_if(on_message::<MouseButtonInput>),
                     forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                     forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
                 )
@@ -214,70 +208,6 @@ fn forward_layout_cef_mouse_button(
             *captured = false;
         }
     }
-}
-
-fn dismiss_windowed_command_bar_on_outside_click(
-    mut events: MessageReader<MouseButtonInput>,
-    windows: Query<&Window>,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
-    modal_q: Query<(Entity, Option<&HostWindow>), (With<WindowOverlay>, With<WebviewWindowed>)>,
-    mut commands: Commands,
-) {
-    let Ok((modal_e, host_window)) = modal_q.single() else {
-        for _ in events.read() {}
-        return;
-    };
-    // Read the same published rectangle the AppKit monitor tests against. Recomputing it here
-    // gave one click two different answers depending on which path saw it first.
-    let route = native_command_bar_route();
-    let window_entity = host_window
-        .map(|h| h.0)
-        .or_else(|| primary_window.single().ok());
-    let Some(window_entity) = window_entity else {
-        for _ in events.read() {}
-        return;
-    };
-    let Ok(window) = windows.get(window_entity) else {
-        for _ in events.read() {}
-        return;
-    };
-    for event in events.read() {
-        if event.window != window_entity {
-            continue;
-        }
-        let cursor = window
-            .physical_cursor_position()
-            .map(|pos| Vec2::new(pos.x, pos.y));
-        if command_bar_windowed_click_should_dismiss(
-            route.owns_input,
-            event.button,
-            event.state,
-            cursor,
-            route.frame,
-        ) {
-            commands.trigger(BinReceive::<CommandBarActionEvent> {
-                webview: modal_e,
-                payload: CommandBarActionEvent::Dismiss,
-            });
-            break;
-        }
-    }
-}
-
-fn dismiss_command_bar_from_native_monitor(
-    modal_q: Query<Entity, With<WindowOverlay>>,
-    mut commands: Commands,
-) {
-    if !take_native_command_bar_dismiss_requested() {
-        return;
-    }
-    let Ok(modal_e) = modal_q.single() else {
-        return;
-    };
-    commands.trigger(BinReceive::<CommandBarActionEvent> {
-        webview: modal_e,
-        payload: CommandBarActionEvent::Dismiss,
-    });
 }
 
 #[derive(Resource, Default)]

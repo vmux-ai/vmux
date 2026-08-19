@@ -2,7 +2,7 @@
 //!
 //! Shared bin-ipc payloads for the `vmux://agents` manager page (browse the ACP registry).
 //! Ungated: it is the one part both halves compile, and the reason neither has to know how the
-//! other is built. Compiled for both native (Bevy host) and wasm (Dioxus page); rkyv on the wire.
+//! other is built. Compiled for both the Bevy host and the Dioxus page; rkyv on the wire.
 //! The chat page's own vocabulary lives in [`vmux_chat::event`].
 
 /// Bin-event id: native → page, the registry catalog to render.

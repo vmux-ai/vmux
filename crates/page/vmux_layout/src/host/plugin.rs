@@ -9,6 +9,7 @@ use crate::cef::LayoutCefPlugin;
 use crate::contract::LayoutContractPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
+use crate::native_open::NativeOpenPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
@@ -51,11 +52,6 @@ impl Plugin for LayoutPlugin {
                 Update,
                 (apply::apply_layout_requests, apply::serve_snapshot_requests),
             )
-            .add_systems(
-                Update,
-                crate::debug::handle_debug_page_open
-                    .in_set(vmux_core::PageOpenSet::HandleKnownPages),
-            )
             .add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
                 PAGE_READY_BIN_EVENT_ID,
             ))
@@ -77,6 +73,7 @@ impl Plugin for LayoutPlugin {
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
+                NativeOpenPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
                 crate::workspace_snapshot_publish::WorkspaceSnapshotPlugin,

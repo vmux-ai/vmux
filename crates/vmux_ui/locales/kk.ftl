@@ -68,11 +68,6 @@ tools-result-linked = { $name } байланыстырылды
 tools-result-unlinked = { $name } байланысы үзілді
 vault-title = Vault
 vault-encrypted = Басынан аяғына дейін шифрланған
-vault-passkey = Құпия кілт
-vault-passkey-description = Құпия сөзсіз басқа құрылғыларда бұл қойманың құлпын ашыңыз.
-vault-passkey-add = Рұқсат кілтін қосыңыз
-vault-passkey-unlock = Құлыпты ашу
-vault-passkey-provider-unsupported = Бұл рұқсат кілті провайдері шифрланған Vault құлпын ашуды әлі қолдамайды.
 vault-recovery-key = Қалпына келтіру кілті
 vault-recovery-key-description = Бұл қойманы жаңа құрылғыда қалпына келтіру үшін Bitwarden қолданбасында бір кілтті немесе басқа құпия сөз реттеушісінде сақтаңыз.
 vault-recovery-key-create = Кілтті жасау
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } орнату
 setup-run-install = Орнату командасын орындау
 setup-auto-reload = Vmux оны терминалда орындайды және { $command } дайын болғанда қайта жүктейді.
 
-debug-title = Жөндеу
-debug-auto-update = Автожаңарту
-debug-simulate-update = Жаңарту қолжетімді екенін имитациялау
-debug-simulate-download = Жүктеуді имитациялау
-debug-clear-update = Жаңартуды тазалау
-debug-trigger-restart = Қайта іске қосуды бастау
 
 command-manage-spaces = Кеңістіктерді басқару…
 command-pane-stack-location = панель { $pane } / қабат { $stack }

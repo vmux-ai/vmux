@@ -68,11 +68,6 @@ tools-result-linked = Ua hoʻohui ʻia { $name }
 tools-result-unlinked = Ua wehe ʻia ka hoʻohui o { $name }
 vault-title = Vault
 vault-encrypted = Hoʻopāʻālua ʻia mai kekahi ʻaoʻao a i kekahi
-vault-passkey = Kīwī
-vault-passkey-description = Wehe i kēia Vault ma nā polokalamu ʻē aʻe me ka ʻole o ka ʻōlelo huna.
-vault-passkey-add = Pākuʻi passkey
-vault-passkey-unlock = Wehe
-vault-passkey-provider-unsupported = ʻAʻole kākoʻo kēia mea hāʻawi passkey i ka wehe ʻana o Vault i hoʻopili ʻia.
 vault-recovery-key = Kī Hoʻihoʻi
 vault-recovery-key-description = E mālama i hoʻokahi kī ma Bitwarden a i ʻole ka luna ʻōlelo huna e hoʻihoʻi i kēia Vault ma kahi mea hou.
 vault-recovery-key-create = E hana i ke kī
@@ -680,12 +675,6 @@ setup-install-homebrew = Hoʻouka iā Homebrew + { $name }
 setup-run-install = Holo i ke kauoha hoʻouka
 setup-auto-reload = Hoʻoholo ʻo Vmux iā ia ma ke kahua kauoha a hoʻouka hou ke mākaukau ʻo { $command }.
 
-debug-title = Huli hewa
-debug-auto-update = Hōʻano hou ʻakomi
-debug-simulate-update = Hoʻohālike i ka loaʻa o ka hōʻano hou
-debug-simulate-download = Hoʻohālike hoʻoiho
-debug-clear-update = Holoi hōʻano hou
-debug-trigger-restart = Hoʻomaka hou koke
 
 command-manage-spaces = Hoʻokele i nā space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

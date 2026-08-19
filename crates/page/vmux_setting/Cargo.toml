@@ -18,7 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 # Dioxus does.
 # The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
 # manifest cannot use it. The settings page reaches no further than Dioxus, so it renders wherever
@@ -34,7 +34,7 @@ vmux_flex = { path = "../../vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 
 [dev-dependencies]

@@ -68,11 +68,6 @@ tools-result-linked = { $name } లింక్ చేయబడింది
 tools-result-unlinked = { $name } లింక్ తొలగించబడింది
 vault-title = Vault
 vault-encrypted = ఎండ్-టు-ఎండ్ ఎన్‌క్రిప్ట్ చేయబడింది
-vault-passkey = పాస్కీ
-vault-passkey-description = పాస్‌వర్డ్ లేకుండా ఇతర పరికరాలలో ఈ వాల్ట్‌ని అన్‌లాక్ చేయండి.
-vault-passkey-add = పాస్‌కీని జోడించండి
-vault-passkey-unlock = అన్‌లాక్ చేయండి
-vault-passkey-provider-unsupported = ఈ పాస్‌కీ ప్రొవైడర్ ఎన్‌క్రిప్టెడ్ వాల్ట్ అన్‌లాక్‌కి ఇంకా మద్దతు ఇవ్వలేదు.
 vault-recovery-key = రికవరీ కీ
 vault-recovery-key-description = కొత్త పరికరంలో ఈ వాల్ట్‌ని రికవర్ చేయడానికి ఒక కీని బిట్‌వార్డెన్‌లో లేదా మరొక పాస్‌వర్డ్ మేనేజర్‌లో సేవ్ చేయండి.
 vault-recovery-key-create = కీని సృష్టించండి
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ఇన్‌స్టాల్ చ
 setup-run-install = ఇన్‌స్టాల్ కమాండ్ నడపండి
 setup-auto-reload = Vmux దాన్ని టెర్మినల్‌లో నడిపి, { $command } సిద్ధమైనప్పుడు మళ్లీ లోడ్ చేస్తుంది.
 
-debug-title = డీబగ్
-debug-auto-update = ఆటో-అప్‌డేట్
-debug-simulate-update = అప్‌డేట్ అందుబాటులో ఉన్నట్టు అనుకరించు
-debug-simulate-download = డౌన్‌లోడ్ అనుకరించు
-debug-clear-update = అప్‌డేట్ క్లియర్ చేయి
-debug-trigger-restart = రీస్టార్ట్ ట్రిగ్గర్ చేయి
 
 command-manage-spaces = స్పేస్‌లను నిర్వహించు…
 command-pane-stack-location = పేన్ { $pane } / స్టాక్ { $stack }

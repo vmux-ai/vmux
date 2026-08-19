@@ -68,11 +68,6 @@ tools-result-linked = { $name } lotu da
 tools-result-unlinked = { $name } askatu da
 vault-title = Vault
 vault-encrypted = Muturretik muturrera zifratuta
-vault-passkey = Pasahitza
-vault-passkey-description = Desblokeatu Vault hau beste gailu batzuetan pasahitzik gabe.
-vault-passkey-add = Gehitu pasahitza
-vault-passkey-unlock = Desblokeatu
-vault-passkey-provider-unsupported = Pasahitza-hornitzaile honek ez du onartzen enkriptatutako Vault desblokeatzea oraindik.
 vault-recovery-key = Berreskuratzeko gakoa
 vault-recovery-key-description = Gorde gako bat Bitwarden-en edo beste pasahitz-kudeatzaile batean, Bóta hau gailu berri batean berreskuratzeko.
 vault-recovery-key-create = Sortu gakoa
@@ -680,12 +675,6 @@ setup-install-homebrew = Instalatu Homebrew + { $name }
 setup-run-install = Exekutatu instalazio-komandoa
 setup-auto-reload = Vmux-ek terminal batean exekutatzen du, eta { $command } prest dagoenean berriro kargatzen du.
 
-debug-title = Arazketa
-debug-auto-update = Eguneratze automatikoa
-debug-simulate-update = Simulatu eguneraketa erabilgarri
-debug-simulate-download = Simulatu deskarga
-debug-clear-update = Garbitu eguneraketa
-debug-trigger-restart = Eragin berrabiaraztea
 
 command-manage-spaces = Kudeatu espazioak…
 command-pane-stack-location = panela { $pane } / pila { $stack }

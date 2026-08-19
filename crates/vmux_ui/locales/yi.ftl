@@ -68,11 +68,6 @@ tools-result-linked = { $name } פֿאַרבונדן
 tools-result-unlinked = { $name } אָפּגעבונדן
 vault-title = Vault
 vault-encrypted = פֿון־עק־צו־עק פֿאַרשליסלט
-vault-passkey = Passkey
-vault-passkey-description = ופשליסן דעם וואָלט אויף אנדערע דעוויסעס אָן אַ פּאַראָל.
-vault-passkey-add = לייג אַ פּאַראָל
-vault-passkey-unlock = ופשליסן
-vault-passkey-provider-unsupported = דער פּאַסקיי שפּייַזער שטיצט נאָך נישט ינקריפּטיד וואָלט ופשליסן.
 vault-recovery-key = רעקאָווערי שליסל
 vault-recovery-key-description = היט איין שליסל אין Bitwarden אָדער אן אנדער פּאַראָל פאַרוואַלטער צו צוריקקריגן דעם וואָלט אויף אַ נייַע מיטל.
 vault-recovery-key-create = שאַפֿן שליסל
@@ -680,12 +675,6 @@ setup-install-homebrew = אינסטאַלירן Homebrew + { $name }
 setup-run-install = לויפֿן אינסטאַליר־באַפֿעל
 setup-auto-reload = Vmux לויפֿט עס אין אַ טערמינאַל און לאָדט ווידער ווען { $command } איז גרייט.
 
-debug-title = דעבאַג
-debug-auto-update = אויטאָ־דערהײַנטיקן
-debug-simulate-update = סימולירן דערהײַנטיקונג פֿאַראַן
-debug-simulate-download = סימולירן אַראָפּלאָדן
-debug-clear-update = אויסרייניקן דערהײַנטיקונג
-debug-trigger-restart = אַרויסרופֿן ווידער־אָנהייב
 
 command-manage-spaces = פֿאַרוואַלטן ספּייסעס…
 command-pane-stack-location = פּאַן { $pane } / סטאַק { $stack }

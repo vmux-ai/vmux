@@ -3,7 +3,9 @@ pub fn bootstrap_profile_name() -> String {
     {
         vmux_core::profile::display_name()
     }
-    #[cfg(ui)]
+    // `not(host)`, not `ui`: the desktop is both at once, and the question here is whether there
+    // is a machine to read a profile off — not whether this code renders a page.
+    #[cfg(not(host))]
     {
         "Personal".to_string()
     }

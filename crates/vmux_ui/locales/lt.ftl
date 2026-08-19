@@ -68,11 +68,6 @@ tools-result-linked = { $name } susietas
 tools-result-unlinked = { $name } atsietas
 vault-title = Vault
 vault-encrypted = Užšifruota nuo galo iki galo
-vault-passkey = Passkey
-vault-passkey-description = Atrakinkite šią saugyklą kituose įrenginiuose be slaptažodžio.
-vault-passkey-add = Pridėti prieigos raktą
-vault-passkey-unlock = Atrakinti
-vault-passkey-provider-unsupported = Šis slaptažodžio teikėjas dar nepalaiko šifruoto Vault atrakinimo.
 vault-recovery-key = Atkūrimo raktas
 vault-recovery-key-description = Išsaugokite vieną raktą „Bitwarden“ arba kitoje slaptažodžių tvarkytuvėje, kad atkurtumėte šį saugyklą naujame įrenginyje.
 vault-recovery-key-create = Sukurti raktą
@@ -680,12 +675,6 @@ setup-install-homebrew = Įdiegti Homebrew + { $name }
 setup-run-install = Paleisti diegimo komandą
 setup-auto-reload = Vmux paleidžia ją terminale ir įkelia iš naujo, kai { $command } paruošta.
 
-debug-title = Derinimas
-debug-auto-update = Automatinis naujinimas
-debug-simulate-update = Imituoti galimą naujinį
-debug-simulate-download = Imituoti atsisiuntimą
-debug-clear-update = Išvalyti naujinį
-debug-trigger-restart = Suaktyvinti paleidimą iš naujo
 
 command-manage-spaces = Tvarkyti erdves…
 command-pane-stack-location = polangis { $pane } / dėklas { $stack }

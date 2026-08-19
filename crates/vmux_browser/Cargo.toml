@@ -29,18 +29,25 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
 tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+vmux_agent = { path = "../page/vmux_agent" }
+vmux_chat = { path = "../page/vmux_chat" }
 vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
+vmux_editor = { path = "../page/vmux_editor" }
 vmux_flex = { path = "../vmux_flex" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../page/vmux_history" }
 vmux_layout = { path = "../page/vmux_layout" }
+vmux_native = { path = "../vmux_native" }
 vmux_service = { path = "../host/vmux_service" }
 vmux_setting = { path = "../page/vmux_setting" }
 vmux_space = { path = "../page/vmux_space" }
+vmux_start = { path = "../page/vmux_start" }
+vmux_team = { path = "../page/vmux_team" }
 vmux_terminal = { path = "../page/vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_wire = { path = "../vmux_wire" }

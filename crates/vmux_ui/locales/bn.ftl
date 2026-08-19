@@ -68,11 +68,6 @@ tools-result-linked = { $name } লিঙ্ক করা হয়েছে
 tools-result-unlinked = { $name }-এর লিঙ্ক সরানো হয়েছে
 vault-title = Vault
 vault-encrypted = প্রান্ত থেকে প্রান্তে এনক্রিপ্ট করা
-vault-passkey = পাসকি
-vault-passkey-description = পাসওয়ার্ড ছাড়াই অন্যান্য ডিভাইসে এই ভল্টটি আনলক করুন।
-vault-passkey-add = পাসকি যোগ করুন
-vault-passkey-unlock = আনলক করুন
-vault-passkey-provider-unsupported = এই পাসকি প্রদানকারী এখনও এনক্রিপ্ট করা ভল্ট আনলক সমর্থন করে না।
 vault-recovery-key = রিকভারি কী
 vault-recovery-key-description = একটি নতুন ডিভাইসে এই ভল্টটি পুনরুদ্ধার করতে Bitwarden বা অন্য পাসওয়ার্ড ম্যানেজারে একটি কী সংরক্ষণ করুন।
 vault-recovery-key-create = কী তৈরি করুন
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ইনস্টল করুন
 setup-run-install = ইনস্টল কমান্ড চালান
 setup-auto-reload = Vmux এটি টার্মিনালে চালায় এবং { $command } প্রস্তুত হলে রিলোড করে।
 
-debug-title = ডিবাগ
-debug-auto-update = স্বয়ংক্রিয় আপডেট
-debug-simulate-update = আপডেট উপলভ্য সিমুলেট করুন
-debug-simulate-download = ডাউনলোড সিমুলেট করুন
-debug-clear-update = আপডেট পরিষ্কার
-debug-trigger-restart = রিস্টার্ট ট্রিগার করুন
 
 command-manage-spaces = স্পেস পরিচালনা করুন…
 command-pane-stack-location = পেন { $pane } / স্ট্যাক { $stack }

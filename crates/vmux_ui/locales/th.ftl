@@ -68,11 +68,6 @@ tools-result-linked = เชื่อมโยง { $name } แล้ว
 tools-result-unlinked = ยกเลิกการเชื่อมโยง { $name } แล้ว
 vault-title = Vault
 vault-encrypted = เข้ารหัสตั้งแต่ต้นทางถึงปลายทาง
-vault-passkey = กุญแจผี
-vault-passkey-description = ปลดล็อคห้องนิรภัยนี้บนอุปกรณ์อื่นโดยไม่ต้องใช้รหัสผ่าน
-vault-passkey-add = เพิ่มรหัสผ่าน
-vault-passkey-unlock = ปลดล็อค
-vault-passkey-provider-unsupported = ผู้ให้บริการรหัสผ่านรายนี้ยังไม่รองรับการปลดล็อกห้องนิรภัยที่เข้ารหัส
 vault-recovery-key = รหัสการกู้คืน
 vault-recovery-key-description = บันทึกหนึ่งคีย์ใน Bitwarden หรือตัวจัดการรหัสผ่านอื่นเพื่อกู้คืน Vault นี้บนอุปกรณ์ใหม่
 vault-recovery-key-create = สร้างคีย์
@@ -680,12 +675,6 @@ setup-install-homebrew = ติดตั้ง Homebrew + { $name }
 setup-run-install = รันคำสั่งติดตั้ง
 setup-auto-reload = Vmux จะรันในเทอร์มินัลและโหลดใหม่เมื่อ { $command } พร้อมใช้งาน
 
-debug-title = ดีบัก
-debug-auto-update = อัปเดตอัตโนมัติ
-debug-simulate-update = จำลองว่ามีอัปเดต
-debug-simulate-download = จำลองการดาวน์โหลด
-debug-clear-update = ล้างอัปเดต
-debug-trigger-restart = สั่งรีสตาร์ท
 
 command-manage-spaces = จัดการ Space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

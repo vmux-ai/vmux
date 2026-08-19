@@ -180,19 +180,15 @@ fn snapshot_of(
         CHAT_INITIAL_ITEM_LIMIT as usize,
     );
     let messages_json = serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string());
-    let (status, error) = match state {
-        AgentRunState::Idle => ("idle", String::new()),
-        AgentRunState::Installing { pct, message } => {
-            let text = match pct {
-                Some(p) => format!("{message} ({p}%)"),
-                None => message.clone(),
-            };
-            ("installing", text)
-        }
-        AgentRunState::Streaming => ("streaming", String::new()),
-        AgentRunState::AwaitingApproval { .. } => ("awaiting", String::new()),
-        AgentRunState::Errored(message) => ("errored", message.clone()),
+    let error = match state {
+        AgentRunState::Installing { pct, message } => match pct {
+            Some(pct) => format!("{message} ({pct}%)"),
+            None => message.clone(),
+        },
+        AgentRunState::Errored(message) => message.clone(),
+        _ => String::new(),
     };
+    let status = state.status();
     let (call_id, name, args_json) = match state {
         AgentRunState::AwaitingApproval {
             call_id,

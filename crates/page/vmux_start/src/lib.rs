@@ -3,9 +3,51 @@
 //! Ranking and rendering live here so the desktop launcher and the mobile launcher are the
 //! same surface; only the result providers and the action sink differ per host.
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::too_many_arguments, clippy::type_complexity)]
 
-pub mod keyboard;
-pub mod results;
-pub mod row;
-pub mod style;
+pub mod event;
+
+/// `ui`, because a caret claim needs a caret: the only caller is [`page::Page`], and a host with no
+/// page has nothing to focus. The split *inside* it is `web` against the rest, which is a different
+/// question — whether the claim is made by reaching the document or by asking the host for it.
+#[cfg(ui)]
+pub mod focus;
+
+#[cfg(ui)]
+pub mod page;
+
+#[cfg(host)]
+mod host;
+#[cfg(host)]
+pub use host::StartPlugin;
+
+pub use vmux_wire::agent::supports_inline_agent_transition;
+
+/// The view a launcher is turning into an agent page.
+///
+/// Choosing an agent swaps the launcher for it in place rather than opening a pane beside it, so
+/// the stack has to remember which view is mid-transition.
+#[cfg(host)]
+#[derive(bevy::prelude::Component, Clone, Copy, Debug)]
+pub struct StartInlineTransition {
+    pub webview: bevy::prelude::Entity,
+}
+
+#[cfg(host)]
+#[derive(bevy::prelude::Component)]
+pub struct StartInlineTransitionView;
+
+/// Canonical URL of the start launcher page.
+pub const START_PAGE_URL: &str = "vmux://start/";
+
+/// Page manifest for the launcher, which the command bar also offers.
+#[cfg(host)]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "start",
+    title: "Start",
+    title_message_id: Some("start-title"),
+    replaces_command: None,
+    keywords: &["start", "home", "new tab", "launcher"],
+    icon: Some(vmux_core::icon::BuiltinIcon::Sparkles),
+    command_bar: true,
+};

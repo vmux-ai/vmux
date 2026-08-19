@@ -68,11 +68,6 @@ tools-result-linked = បានភ្ជាប់ { $name }
 tools-result-unlinked = បានផ្ដាច់ { $name }
 vault-title = Vault
 vault-encrypted = បានអ៊ិនគ្រីបពីចុងដល់ចុង
-vault-passkey = លេខសម្ងាត់
-vault-passkey-description = ដោះសោ Vault នេះនៅលើឧបករណ៍ផ្សេងទៀតដោយគ្មានពាក្យសម្ងាត់។
-vault-passkey-add = បន្ថែមលេខសម្ងាត់
-vault-passkey-unlock = ដោះសោ
-vault-passkey-provider-unsupported = អ្នកផ្តល់លេខសម្ងាត់នេះមិនគាំទ្រការដោះសោរ Vault ដែលបានអ៊ិនគ្រីបនៅឡើយទេ។
 vault-recovery-key = កូនសោសង្គ្រោះ
 vault-recovery-key-description = រក្សាទុកកូនសោមួយនៅក្នុង Bitwarden ឬអ្នកគ្រប់គ្រងពាក្យសម្ងាត់ផ្សេងទៀត ដើម្បីសង្គ្រោះ Vault នេះនៅលើឧបករណ៍ថ្មី។
 vault-recovery-key-create = បង្កើតកូនសោ
@@ -680,12 +675,6 @@ setup-install-homebrew = ដំឡើង Homebrew + { $name }
 setup-run-install = ដំណើរការពាក្យបញ្ជាដំឡើង
 setup-auto-reload = Vmux ដំណើរការវាក្នុង terminal ហើយផ្ទុកឡើងវិញពេល { $command } រួចរាល់។
 
-debug-title = បំបាត់កំហុស
-debug-auto-update = ធ្វើបច្ចុប្បន្នភាពស្វ័យប្រវត្តិ
-debug-simulate-update = ក្លែងធ្វើថាមានបច្ចុប្បន្នភាព
-debug-simulate-download = ក្លែងធ្វើការទាញយក
-debug-clear-update = សម្អាតបច្ចុប្បន្នភាព
-debug-trigger-restart = ចាប់ផ្ដើមឡើងវិញ
 
 command-manage-spaces = គ្រប់គ្រង Space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

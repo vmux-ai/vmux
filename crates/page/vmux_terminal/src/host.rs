@@ -5,7 +5,6 @@
 //! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_terminal::plugin` still
 //! resolves from outside and `crate::plugin` still resolves from within.
 
-pub mod clipboard;
 pub mod component;
 pub mod contract;
 pub mod launch;

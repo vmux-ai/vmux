@@ -68,11 +68,6 @@ tools-result-linked = { $name } verknëppt
 tools-result-unlinked = { $name } net méi verknëppt
 vault-title = Vault
 vault-encrypted = Enn-zu-Enn verschlësselt
-vault-passkey = Passschlëssel
-vault-passkey-description = Spär dës Vault op aneren Apparater ouni Passwuert op.
-vault-passkey-add = Passwuert dobäisetzen
-vault-passkey-unlock = Spär op
-vault-passkey-provider-unsupported = Dëse Passkey Provider ënnerstëtzt nach net verschlësselte Vault Spär.
 vault-recovery-key = Erhuelung Schlëssel
 vault-recovery-key-description = Späichert ee Schlëssel am Bitwarden oder engem anere Passwuertmanager fir dës Vault op engem neien Apparat ze recuperéieren.
 vault-recovery-key-create = Erstellt Schlëssel
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } installéieren
 setup-run-install = Installatiounskommando ausféieren
 setup-auto-reload = Vmux féiert en an engem Terminal aus a lued nei, wann { $command } prett ass.
 
-debug-title = Debug
-debug-auto-update = Automatesch aktualiséieren
-debug-simulate-update = Disponibelen Update simuléieren
-debug-simulate-download = Download simuléieren
-debug-clear-update = Update läschen
-debug-trigger-restart = Neistart ausléisen
 
 command-manage-spaces = Spacë verwalten…
 command-pane-stack-location = Beräich { $pane } / Stack { $stack }

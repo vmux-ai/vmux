@@ -68,11 +68,6 @@ tools-result-linked = { $name } tengt
 tools-result-unlinked = { $name } aftengt
 vault-title = Vault
 vault-encrypted = Dulkóðað frá enda til enda
-vault-passkey = Aðgangslykill
-vault-passkey-description = Opnaðu þessa Vault í öðrum tækjum án lykilorðs.
-vault-passkey-add = Bæta við lykilorði
-vault-passkey-unlock = Opnaðu
-vault-passkey-provider-unsupported = Þessi aðgangslyklaveita styður ekki dulkóðaða Vault-opnun ennþá.
 vault-recovery-key = Endurheimtarlykill
 vault-recovery-key-description = Vistaðu einn lykil í Bitwarden eða öðrum lykilorðastjóra til að endurheimta þessa hvelfingu á nýju tæki.
 vault-recovery-key-create = Búa til lykil
@@ -680,12 +675,6 @@ setup-install-homebrew = Setja upp Homebrew + { $name }
 setup-run-install = Keyra uppsetningarskipun
 setup-auto-reload = Vmux keyrir hana í skel og endurhleður þegar { $command } er tilbúin.
 
-debug-title = Villuleit
-debug-auto-update = Sjálfvirk uppfærsla
-debug-simulate-update = Herma eftir tiltækri uppfærslu
-debug-simulate-download = Herma eftir niðurhali
-debug-clear-update = Hreinsa uppfærslu
-debug-trigger-restart = Kveikja á endurræsingu
 
 command-manage-spaces = Stjórna vinnusvæðum…
 command-pane-stack-location = svæði { $pane } / stafli { $stack }

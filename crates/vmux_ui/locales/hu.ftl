@@ -68,11 +68,6 @@ tools-result-linked = { $name } összekapcsolva
 tools-result-unlinked = { $name } szétkapcsolva
 vault-title = Vault
 vault-encrypted = Végpontok között titkosított
-vault-passkey = Passkey
-vault-passkey-description = Jelszó nélkül oldja fel a Széf zárolását más eszközökön.
-vault-passkey-add = Adjon hozzá jelszót
-vault-passkey-unlock = Kinyit
-vault-passkey-provider-unsupported = Ez a jelszószolgáltató még nem támogatja a titkosított Vault feloldást.
 vault-recovery-key = Helyreállítási kulcs
 vault-recovery-key-description = Mentse el az egyik kulcsot a Bitwardenben vagy egy másik jelszókezelőben, hogy helyreállítsa ezt a Vaultot egy új eszközön.
 vault-recovery-key-create = Kulcs létrehozása
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } telepítése
 setup-run-install = Telepítőparancs futtatása
 setup-auto-reload = A Vmux terminálban futtatja, és újratölt, amikor a { $command } készen áll.
 
-debug-title = Hibakeresés
-debug-auto-update = Automatikus frissítés
-debug-simulate-update = Elérhető frissítés szimulálása
-debug-simulate-download = Letöltés szimulálása
-debug-clear-update = Frissítés törlése
-debug-trigger-restart = Újraindítás indítása
 
 command-manage-spaces = Terek kezelése…
 command-pane-stack-location = panel { $pane } / verem { $stack }

@@ -283,7 +283,11 @@ fn pool_node_for(
         })
 }
 
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+pub(crate) fn clear_stack_children(
+    stack: Entity,
+    children_q: &Query<&Children>,
+    commands: &mut Commands,
+) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
             commands.entity(child).try_despawn();

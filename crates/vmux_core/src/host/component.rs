@@ -14,8 +14,48 @@ pub fn now_millis() -> i64 {
         .as_millis() as i64
 }
 
-#[derive(Component, Clone, Debug)]
-pub struct OscTitle(pub String);
+/// What a page currently calls itself, as opposed to the name the host gave it when it opened.
+///
+/// Deliberately not a field of [`crate::PageMetadata`]: that is reflected into saved sessions by
+/// field name, so growing it is a save-format migration, and a title reported by a live terminal
+/// or conversation has no business outliving the process that reported it. Dropping this
+/// component reverts the page to its host-given name, which is how a page survives its reporter
+/// going away.
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct PageIdentity {
+    pub title: Option<String>,
+    pub icon: Option<crate::PageIcon>,
+}
+
+impl PageIdentity {
+    pub fn of_title(title: impl Into<String>) -> Self {
+        Self {
+            title: Some(title.into()),
+            icon: None,
+        }
+    }
+}
+
+impl crate::PageMetadata {
+    /// The title to show: what the page calls itself, else the name the host gave it.
+    ///
+    /// An empty reported title counts as unset — a page that blanks its own title has nothing to
+    /// say, rather than wanting a blank tab.
+    pub fn title_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a str {
+        match identity.and_then(|identity| identity.title.as_deref()) {
+            Some(title) if !title.is_empty() => title,
+            _ => &self.title,
+        }
+    }
+
+    /// The icon to show, on the same terms as [`Self::title_with`].
+    pub fn icon_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a crate::PageIcon {
+        match identity.and_then(|identity| identity.icon.as_ref()) {
+            Some(icon) if !icon.is_none() => icon,
+            _ => &self.icon,
+        }
+    }
+}
 
 /// The working directory of a non-terminal agent pane (e.g. an ACP session), so the command
 /// bar's "current work" can list its cwd contents the same way it lists open terminals' cwds.

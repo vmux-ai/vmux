@@ -25,8 +25,6 @@ use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::page::composer::options::{EffortMenu, ModelMenu, ModelPill};
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_service::chat::group_turns_tail;
-use vmux_start::results::CommandBarResultItem;
-use vmux_start::row::ResultRow;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
     PromptComposer, PromptComposerAction, PromptComposerAttachment,
@@ -36,6 +34,8 @@ use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, Start
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_ui::i18n::translate;
+use vmux_ui::launcher::results::CommandBarResultItem;
+use vmux_ui::launcher::row::ResultRow;
 use vmux_wire::PageIcon;
 use vmux_wire::chat::{ChatItem, latest_tool_location};
 use vmux_wire::prompt_media::ChatAttachment;

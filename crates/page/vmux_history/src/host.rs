@@ -6,7 +6,7 @@ pub mod spawn;
 pub mod transition;
 
 use bevy::prelude::*;
-use vmux_core::page::PrewarmPage;
+use vmux_core::host::page::NativelyHosted;
 
 pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
@@ -18,11 +18,9 @@ impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
             crate::PAGE_MANIFEST,
-            PrewarmPage {
-                host: "history",
-                url: "vmux://history/",
+            NativelyHosted {
+                url: crate::PAGE_URL,
                 title: "History",
-                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "history");

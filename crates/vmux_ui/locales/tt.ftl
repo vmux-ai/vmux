@@ -68,11 +68,6 @@ tools-result-linked = { $name } бәйләнде
 tools-result-unlinked = { $name } бәйләнеше өзелде
 vault-title = Vault
 vault-encrypted = Очтан-очка шифрланган
-vault-passkey = Паски
-vault-passkey-description = Бу Вальсны серсүзсез башка җайланмаларда ачу.
-vault-passkey-add = Паски өстәргә
-vault-passkey-unlock = Блокны ачу
-vault-passkey-provider-unsupported = Бу ачкыч провайдеры шифрланган Vault ачуны хупламый.
 vault-recovery-key = Реставрация ачкычы
 vault-recovery-key-description = Бу җайланманы яңа җайланмада торгызу өчен Bitwarden яки бер серсүз менеджерында бер ачкычны саклагыз.
 vault-recovery-key-create = Ачкыч яса
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } урнаштыру
 setup-run-install = Урнаштыру боерыгын эшләтү
 setup-auto-reload = Vmux аны терминалда эшләтә һәм { $command } әзер булгач яңадан йөкли.
 
-debug-title = Көйләү
-debug-auto-update = Авто-яңарту
-debug-simulate-update = Яңарту барлыгын имитацияләү
-debug-simulate-download = Йөкләүне имитацияләү
-debug-clear-update = Яңартуны чистарту
-debug-trigger-restart = Яңадан җибәрүне башлату
 
 command-manage-spaces = Аралыклар белән идарә итү…
 command-pane-stack-location = панель { $pane } / катлам { $stack }

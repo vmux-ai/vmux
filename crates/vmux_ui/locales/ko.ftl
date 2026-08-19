@@ -68,11 +68,6 @@ tools-result-linked = { $name } 연결됨
 tools-result-unlinked = { $name } 연결 해제됨
 vault-title = Vault
 vault-encrypted = 종단 간 암호화됨
-vault-passkey = 곁쇠
-vault-passkey-description = 비밀번호 없이 다른 장치에서 이 Vault를 잠금 해제하세요.
-vault-passkey-add = 패스키 추가
-vault-passkey-unlock = 터놓다
-vault-passkey-provider-unsupported = 이 암호 키 제공업체는 아직 암호화된 Vault 잠금 해제를 지원하지 않습니다.
 vault-recovery-key = 복구 키
 vault-recovery-key-description = Bitwarden 또는 다른 비밀번호 관리자에 하나의 키를 저장하여 새 장치에서 이 Vault를 복구하세요.
 vault-recovery-key-create = 키 생성
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } 설치
 setup-run-install = 설치 명령 실행
 setup-auto-reload = Vmux가 터미널에서 실행하고 { $command }이(가) 준비되면 다시 로드합니다.
 
-debug-title = 디버그
-debug-auto-update = 자동 업데이트
-debug-simulate-update = 업데이트 사용 가능 상태 시뮬레이션
-debug-simulate-download = 다운로드 시뮬레이션
-debug-clear-update = 업데이트 지우기
-debug-trigger-restart = 재시작 트리거
 
 command-manage-spaces = 스페이스 관리…
 command-pane-stack-location = 패널 { $pane } / 스택 { $stack }

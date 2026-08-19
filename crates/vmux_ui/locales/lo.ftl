@@ -68,11 +68,6 @@ tools-result-linked = ເຊື່ອມຕໍ່ { $name } ແລ້ວ
 tools-result-unlinked = ຍົກເລີກການເຊື່ອມຕໍ່ { $name } ແລ້ວ
 vault-title = Vault
 vault-encrypted = ເຂົ້າລະຫັດແບບຕົ້ນທາງຫາປາຍທາງ
-vault-passkey = ລະຫັດຜ່ານ
-vault-passkey-description = ປົດລັອກ Vault ນີ້ຢູ່ໃນອຸປະກອນອື່ນໂດຍບໍ່ມີການລະຫັດຜ່ານ.
-vault-passkey-add = ເພີ່ມລະຫັດຜ່ານ
-vault-passkey-unlock = ປົດລັອກ
-vault-passkey-provider-unsupported = ຜູ້ໃຫ້ບໍລິການລະຫັດຜ່ານນີ້ຍັງບໍ່ຮອງຮັບການປົດລັອກ Vault ທີ່ເຂົ້າລະຫັດເທື່ອ.
 vault-recovery-key = ລະຫັດການກູ້ຂໍ້ມູນ
 vault-recovery-key-description = ບັນທຶກກະແຈອັນໜຶ່ງໄວ້ໃນ Bitwarden ຫຼືຕົວຈັດການລະຫັດຜ່ານອື່ນເພື່ອກູ້ Vault ນີ້ຢູ່ໃນອຸປະກອນໃໝ່.
 vault-recovery-key-create = ສ້າງກະແຈ
@@ -680,12 +675,6 @@ setup-install-homebrew = ຕິດຕັ້ງ Homebrew + { $name }
 setup-run-install = ແລ່ນຄຳສັ່ງຕິດຕັ້ງ
 setup-auto-reload = Vmux ແລ່ນມັນໃນເທີມິນັນ ແລະໂຫຼດໃໝ່ເມື່ອ { $command } ພ້ອມ.
 
-debug-title = ດີບັກ
-debug-auto-update = ອັບເດດອັດຕະໂນມັດ
-debug-simulate-update = ຈຳລອງວ່າມີອັບເດດ
-debug-simulate-download = ຈຳລອງການດາວໂຫຼດ
-debug-clear-update = ລ້າງອັບເດດ
-debug-trigger-restart = ກະຕຸ້ນການຣີສະຕາດ
 
 command-manage-spaces = ຈັດການສະເປດ…
 command-pane-stack-location = ພານ { $pane } / ສະແຕັກ { $stack }

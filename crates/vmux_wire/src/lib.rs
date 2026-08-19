@@ -4,6 +4,7 @@ pub mod agent;
 pub mod avatar;
 pub mod chat;
 pub mod command_bar;
+pub mod error;
 pub mod history;
 pub mod icon;
 pub mod layout;

@@ -68,11 +68,6 @@ tools-result-linked = { $name } waa la xiriiriyey
 tools-result-unlinked = Xiriirka { $name } waa la saaray
 vault-title = Vault
 vault-encrypted = Si dhammaad-ilaa-dhammaad ah loo siray
-vault-passkey = Furaha furaha
-vault-passkey-description = Ku fur Vault-kan aaladaha kale bilaa sirta ah.
-vault-passkey-add = Ku dar furaha furaha
-vault-passkey-unlock = Fur
-vault-passkey-provider-unsupported = Bixiyaha furaha furaha weli ma taageerayo furaha Vault sir ah weli.
 vault-recovery-key = Furaha Soo kabashada
 vault-recovery-key-description = Ku keydi hal fure Bitwarden ama maamule sirta ah si aad ugu soo ceshato Vault-kan qalab cusub.
 vault-recovery-key-create = Abuur furaha
@@ -680,12 +675,6 @@ setup-install-homebrew = Rakib Homebrew + { $name }
 setup-run-install = Ful amarka rakibidda
 setup-auto-reload = Vmux wuxuu ku socodsiiyaa terminal, wuuna dib u raraa marka { $command } diyaar noqdo.
 
-debug-title = Cilad-baaris
-debug-auto-update = Is-cusboonaysiin
-debug-simulate-update = Jil cusboonaysiin diyaar ah
-debug-simulate-download = Jil soo dejin
-debug-clear-update = Nadiifi cusboonaysiinta
-debug-trigger-restart = Kici dib-u-bilow
 
 command-manage-spaces = Maamul goobaha…
 command-pane-stack-location = daaqad-qayb { $pane } / lakab { $stack }

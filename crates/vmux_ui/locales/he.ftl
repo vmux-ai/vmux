@@ -68,11 +68,6 @@ tools-result-linked = { $name } קושר
 tools-result-unlinked = הקישור של { $name } בוטל
 vault-title = Vault
 vault-encrypted = מוצפן מקצה לקצה
-vault-passkey = מפתח סיסמה
-vault-passkey-description = בטל את נעילת הכספת הזו במכשירים אחרים ללא סיסמה.
-vault-passkey-add = הוסף מפתח
-vault-passkey-unlock = לִפְתוֹחַ
-vault-passkey-provider-unsupported = ספק מפתח סיסמה זה אינו תומך עדיין בפתיחת נעילה מוצפנת של Vault.
 vault-recovery-key = מפתח שחזור
 vault-recovery-key-description = שמור מפתח אחד ב-Bitwarden או במנהל סיסמאות אחר כדי לשחזר את הכספת הזו במכשיר חדש.
 vault-recovery-key-create = צור מפתח
@@ -680,12 +675,6 @@ setup-install-homebrew = התקנת Homebrew + { $name }
 setup-run-install = הרצת פקודת התקנה
 setup-auto-reload = Vmux מריץ אותה במסוף וטוען מחדש כש־{ $command } מוכן.
 
-debug-title = ניפוי שגיאות
-debug-auto-update = עדכון אוטומטי
-debug-simulate-update = הדמיית עדכון זמין
-debug-simulate-download = הדמיית הורדה
-debug-clear-update = ניקוי עדכון
-debug-trigger-restart = הפעלת הפעלה מחדש
 
 command-manage-spaces = ניהול מרחבים…
 command-pane-stack-location = חלונית { $pane } / ערימה { $stack }

@@ -9,7 +9,7 @@ use vmux_core::event::{
     LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest, LspPackage,
     LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
 };
-use vmux_core::page::PrewarmPage;
+use vmux_core::host::page::NativelyHosted;
 
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
@@ -20,11 +20,9 @@ impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
             PAGE_MANIFEST,
-            PrewarmPage {
-                host: "lsp",
+            NativelyHosted {
                 url: "vmux://lsp/",
                 title: "Language Servers",
-                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "lsp");

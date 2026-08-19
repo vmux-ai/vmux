@@ -68,11 +68,6 @@ tools-result-linked = { $name }-ը կապվեց
 tools-result-unlinked = { $name }-ն անջատվեց
 vault-title = Vault
 vault-encrypted = Ծայրից ծայր գաղտնագրված
-vault-passkey = Passkey
-vault-passkey-description = Ապակողպեք այս պահոցը այլ սարքերում առանց գաղտնաբառի:
-vault-passkey-add = Ավելացնել անցաբառ
-vault-passkey-unlock = Ապակողպել
-vault-passkey-provider-unsupported = Այս գաղտնաբառի մատակարարը դեռ չի աջակցում գաղտնագրված պահոցի ապակողպումը:
 vault-recovery-key = Վերականգնման բանալի
 vault-recovery-key-description = Պահպանեք մեկ բանալի Bitwarden-ում կամ մեկ այլ գաղտնաբառի կառավարիչում՝ այս պահոցը նոր սարքում վերականգնելու համար:
 vault-recovery-key-create = Ստեղծել բանալի
@@ -680,12 +675,6 @@ setup-install-homebrew = Տեղադրել Homebrew + { $name }
 setup-run-install = Գործարկել տեղադրման հրամանը
 setup-auto-reload = Vmux-ը այն գործարկում է տերմինալում և վերբեռնում, երբ { $command }-ը պատրաստ է։
 
-debug-title = Վրիպազերծում
-debug-auto-update = Ավտոթարմացում
-debug-simulate-update = Մոդելավորել հասանելի թարմացում
-debug-simulate-download = Մոդելավորել ներբեռնում
-debug-clear-update = Մաքրել թարմացումը
-debug-trigger-restart = Գործարկել վերագործարկում
 
 command-manage-spaces = Կառավարել տարածքները…
 command-pane-stack-location = վահանակ { $pane } / շերտ { $stack }

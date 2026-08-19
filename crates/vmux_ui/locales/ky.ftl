@@ -68,11 +68,6 @@ tools-result-linked = { $name } байланды
 tools-result-unlinked = { $name } байланышы үзүлдү
 vault-title = Vault
 vault-encrypted = Башынан аягына чейин шифрленген
-vault-passkey = Passkey
-vault-passkey-description = Сырсөзсүз башка түзмөктөрдө бул Vault кулпусун ачыңыз.
-vault-passkey-add = Кошуу ачкыч
-vault-passkey-unlock = Кулпуну ачуу
-vault-passkey-provider-unsupported = Бул ачкыч камсыздоочу шифрленген Vault кулпусун азырынча колдобойт.
 vault-recovery-key = Калыбына келтирүүчү ачкыч
 vault-recovery-key-description = Бул Vaultту жаңы түзмөктө калыбына келтирүү үчүн Bitwarden же башка сырсөз башкаргычында бир ачкычты сактаңыз.
 vault-recovery-key-create = ачкыч түзүү
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } орнотуу
 setup-run-install = Орнотуу буйругун иштетүү
 setup-auto-reload = Vmux аны терминалда иштетет жана { $command } даяр болгондо кайра жүктөйт.
 
-debug-title = Мүчүлүштүктөрдү оңдоо
-debug-auto-update = Автожаңыртуу
-debug-simulate-update = Жаңыртуу бар экенин симуляциялоо
-debug-simulate-download = Жүктөөнү симуляциялоо
-debug-clear-update = Жаңыртууну тазалоо
-debug-trigger-restart = Кайра иштетүүнү баштоо
 
 command-manage-spaces = Мейкиндиктерди башкаруу…
 command-pane-stack-location = панель { $pane } / стек { $stack }

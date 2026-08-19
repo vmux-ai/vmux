@@ -68,11 +68,6 @@ tools-result-linked = { $name } ligatu
 tools-result-unlinked = { $name } slegatu
 vault-title = Vault
 vault-encrypted = Cifratu da punta à punta
-vault-passkey = Passkey
-vault-passkey-description = Sblocca stu Vault in altri dispositi senza password.
-vault-passkey-add = Aggiungi passkey
-vault-passkey-unlock = Sbloccare
-vault-passkey-provider-unsupported = Stu fornitore di passkey ùn sustene ancu u sbloccare Vault criptatu.
 vault-recovery-key = Chjave di Recuperazione
 vault-recovery-key-description = Salvà una chjave in Bitwarden o un altru gestore di password per ricuperà questa Vault in un novu dispositivu.
 vault-recovery-key-create = Crea chjave
@@ -680,12 +675,6 @@ setup-install-homebrew = Installà Homebrew + { $name }
 setup-run-install = Lancià u cumandu d’installazione
 setup-auto-reload = Vmux u lancia in un terminale è ricarica quandu { $command } hè prontu.
 
-debug-title = Debug
-debug-auto-update = Aghjurnamentu automaticu
-debug-simulate-update = Simulà aghjurnamentu dispunibule
-debug-simulate-download = Simulà scaricamentu
-debug-clear-update = Sguassà aghjurnamentu
-debug-trigger-restart = Innescà riavviu
 
 command-manage-spaces = Gestisce i spazii…
 command-pane-stack-location = riquadru { $pane } / pila { $stack }

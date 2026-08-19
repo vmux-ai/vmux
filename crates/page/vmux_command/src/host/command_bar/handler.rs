@@ -31,6 +31,7 @@ use crate::{
 use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceCommandEvent;
+use vmux_core::host::page::HostsPage;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
@@ -522,9 +523,11 @@ fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<RendersLauncherPanel>>,
     all_children: Query<&Children>,
-    // Filtered to webviews because a stack carries `PageMetadata` of its own; only the page
-    // showing inside it answers "what is open here".
-    browser_meta: Query<&PageMetadata, With<WebviewSource>>,
+    // Filtered to pages because a stack carries `PageMetadata` of its own; only the page showing
+    // inside it answers "what is open here". Either marker counts: a natively-hosted page has no
+    // `WebviewSource`, and matching on that alone left the bar reading an empty url for one — which
+    // reads the same as an empty pane, so it stopped offering to reuse the launcher in place.
+    browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
     focus: Res<CommandBarWorkspaceSnapshot>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut abandoned: MessageWriter<PendingStackAbandoned>,

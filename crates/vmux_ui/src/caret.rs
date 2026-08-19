@@ -1,4 +1,4 @@
-//! Placing the caret in a text field, where only the host can do it.
+//! Moving the caret in a text field, and reading what an event found selected.
 
 /// The caret in one text field, addressed by element id and measured in UTF-8 bytes.
 ///
@@ -6,173 +6,68 @@
 /// programmatic move — a readline chord, accepting a completion, revealing a URL ready to
 /// overtype — has to reach the host. Byte offsets in and out: the DOM's UTF-16 code units stop
 /// here, because mixing the two units is how a caret ends up beside the wrong character.
+///
+/// Instructions only. Reading is [`EventSelection`] — a different question with a different
+/// lifetime, since an instruction is good whenever it is issued and an answer only for the event
+/// it arrived with.
 #[derive(Clone, Copy)]
-#[cfg_attr(not(web), allow(dead_code))]
 pub struct TextCaret {
     element_id: &'static str,
 }
 
 impl TextCaret {
-    /// The caret in the `<input>` with this id.
+    /// The caret in the field with this id.
     pub fn in_field(element_id: &'static str) -> Self {
         Self { element_id }
     }
 }
 
-#[cfg(web)]
-mod imp {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen::closure::Closure;
+/// What was selected when the event now being dispatched was raised.
+///
+/// Meaningful only inside a handler, and the only reading of a selection a handler can do. A key
+/// handler settles `prevent_default` before it returns, so it cannot await an answer; off the web
+/// the values therefore travel on the event's own request rather than being asked for.
+pub struct EventSelection;
 
-    use super::{
-        TextCaret, byte_offset_to_utf16, caret_scroll_left, floor_char_boundary,
-        utf16_offset_to_byte,
-    };
-
-    /// Pixels of text kept visible past the caret when the field has to scroll to reach it.
-    const FOLLOW_MARGIN_PX: f64 = 8.0;
-
-    impl TextCaret {
-        /// Where the caret is, as a byte offset into the field's value. Zero if the field is gone.
-        pub fn position(self) -> usize {
-            let Some(input) = self.input() else {
-                return 0;
-            };
-            let utf16 = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
-            utf16_offset_to_byte(&input.value(), utf16)
-        }
-
-        /// Put the caret at a byte offset, scrolling the field so it is visible.
-        ///
-        /// The two are one operation because a programmatic move bypasses Chromium's own
-        /// caret-follow: on a long URL, placing without scrolling leaves the caret off-screen,
-        /// which reads as the keystroke having done nothing.
-        pub fn place(self, byte: usize) {
-            let Some(input) = self.input() else {
-                return;
-            };
-            let value = input.value();
-            let byte = floor_char_boundary(&value, byte);
-            let utf16 = byte_offset_to_utf16(&value, byte);
-            let _ = input.set_selection_range(utf16, utf16);
-            Self::follow(&input, &value[..byte]);
-        }
-
-        /// Highlight the whole value, leaving the view where it is.
-        pub fn select_all(self) {
-            let Some(input) = self.input() else {
-                return;
-            };
-            let end = input.value().encode_utf16().count() as u32;
-            let _ = input.set_selection_range(0, end);
-        }
-
-        /// Highlight the whole value one frame from now, taking focus and rewinding the view to
-        /// the start of the text.
-        ///
-        /// Deferred because a caller that has just set the value through a signal cannot select
-        /// it yet: the render that puts those characters in the field has not happened, so
-        /// selecting now would highlight the previous value — usually an empty one, which looks
-        /// like nothing happened. Focus is claimed here as well as by
-        /// [`crate::focus::FocusClaim`] because focusing an input may itself move the selection,
-        /// so a retry landing after this would otherwise undo it.
-        ///
-        /// The rewind is what separates this from [`Self::select_all`]: this is the gesture that
-        /// offers a value up to be overtyped, and a long one scrolled to its tail does not read
-        /// as an offer.
-        pub fn select_all_from_start_next_frame(self) {
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let callback = Closure::once_into_js(move || {
-                let Some(input) = self.input() else {
-                    return;
-                };
-                let _ = input.focus();
-                self.select_all();
-                input.set_scroll_left(0);
-            });
-            let _ = window.request_animation_frame(callback.unchecked_ref());
-        }
-
-        fn input(self) -> Option<web_sys::HtmlInputElement> {
-            web_sys::window()?
-                .document()?
-                .get_element_by_id(self.element_id)?
-                .dyn_into()
-                .ok()
-        }
-
-        fn follow(input: &web_sys::HtmlInputElement, before_caret: &str) {
-            let Some((viewport, caret_px)) = Self::metrics(input, before_caret) else {
-                return;
-            };
-            let scroll_left = input.scroll_left() as f64;
-            if let Some(scrolled) =
-                caret_scroll_left(caret_px, viewport, scroll_left, FOLLOW_MARGIN_PX)
-            {
-                input.set_scroll_left(scrolled as i32);
-            }
-        }
-
-        /// The field's usable text width and the pixel offset of `prefix` in its current font,
-        /// measured on an offscreen canvas. `None` when the canvas, its context or the computed
-        /// font is unavailable, which leaves the field scrolled where it was.
-        fn metrics(input: &web_sys::HtmlInputElement, prefix: &str) -> Option<(f64, f64)> {
-            let window = web_sys::window()?;
-            let document = window.document()?;
-            let style = window.get_computed_style(input).ok()??;
-            let font_size = style.get_property_value("font-size").unwrap_or_default();
-            let font_family = style.get_property_value("font-family").unwrap_or_default();
-            if font_size.is_empty() || font_family.is_empty() {
-                return None;
-            }
-            let font_weight = style.get_property_value("font-weight").unwrap_or_default();
-            let font_style = style.get_property_value("font-style").unwrap_or_default();
-            let canvas: web_sys::HtmlCanvasElement =
-                document.create_element("canvas").ok()?.unchecked_into();
-            let context: web_sys::CanvasRenderingContext2d =
-                canvas.get_context("2d").ok()??.unchecked_into();
-            context
-                .set_font(format!("{font_style} {font_weight} {font_size} {font_family}").trim());
-            let caret_px = context.measure_text(prefix).ok()?.width();
-            let pad_left = css_px(&style.get_property_value("padding-left").unwrap_or_default());
-            let pad_right = css_px(
-                &style
-                    .get_property_value("padding-right")
-                    .unwrap_or_default(),
-            );
-            let viewport = (input.client_width() as f64 - pad_left - pad_right).max(1.0);
-            caret_px.is_finite().then_some((viewport, caret_px))
-        }
-    }
-
-    /// Parse a computed `<n>px` length, defaulting to `0.0`.
-    fn css_px(value: &str) -> f64 {
-        value
-            .trim()
-            .strip_suffix("px")
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite())
-            .unwrap_or(0.0)
+impl EventSelection {
+    /// Where the caret was in this field, ignoring anything selected past it.
+    pub fn caret_in(element_id: &str) -> usize {
+        Self::in_field(element_id).0
     }
 }
 
-#[cfg(not(web))]
-impl TextCaret {
-    /// Inert: a touch host has no programmatic caret to place, and the field scrolls its own.
-    pub fn position(self) -> usize {
-        0
+impl EventSelection {
+    /// What the event's own request carried, which is `(0, 0)` when the event came from anywhere
+    /// but this field — where the web path also lands for a field that is gone.
+    pub fn in_field(element_id: &str) -> (usize, usize) {
+        crate::transport::Host::event_field_selection(element_id)
     }
 
-    /// Inert. See [`Self::position`].
-    pub fn place(self, _byte: usize) {}
+    pub fn in_document() -> bool {
+        crate::transport::Host::event_document_has_selection()
+    }
+}
 
-    /// Inert. See [`Self::position`].
-    pub fn select_all(self) {}
+impl TextCaret {
+    /// Asks the host, which queues it for the page to apply behind the next frame.
+    pub fn place(self, byte: usize) {
+        crate::transport::Host::place_caret(self.element_id, byte);
+    }
 
-    /// Inert. See [`Self::position`].
-    pub fn select_all_from_start_next_frame(self) {}
+    /// Asks the host, which may have a document even though this target has no `web_sys`.
+    pub fn select_all(self) {
+        crate::transport::Host::select_element_text(self.element_id);
+    }
+
+    /// Asks the host. See [`Self::select_all`].
+    pub fn clear(self) {
+        crate::transport::Host::clear_element_text(self.element_id);
+    }
+
+    /// Asks the host. See [`Self::select_all`].
+    pub fn select_all_from_start_next_frame(self) {
+        crate::transport::Host::offer_element_text(self.element_id);
+    }
 }
 
 /// Largest char boundary of `s` at or before `i`, so a DOM text offset never slices a UTF-8

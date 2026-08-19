@@ -68,11 +68,6 @@ tools-result-linked = { $name } e hoketsoe
 tools-result-unlinked = { $name } e hakolotsoe
 vault-title = Vault
 vault-encrypted = E patilwe ho tloha qalong ho isa qetellong
-vault-passkey = Passkey
-vault-passkey-description = Notlolla Vault ena lisebelisoa tse ling ntle le senotlolo.
-vault-passkey-add = Kenya senotlolo
-vault-passkey-unlock = Notlolla
-vault-passkey-provider-unsupported = Mofani enoa oa senotlolo ha a tšehetse ho notlolla ha Vault e kentsoeng.
 vault-recovery-key = Senotlolo sa ho hlaphoheloa
 vault-recovery-key-description = Boloka senotlolo se le seng ho Bitwarden kapa molaoli e mong oa password ho khutlisa Vault ena sesebelisoa se secha.
 vault-recovery-key-create = Etsa senotlolo
@@ -680,12 +675,6 @@ setup-install-homebrew = Kenya Homebrew + { $name }
 setup-run-install = Sebedisa taelo ya ho kenya
 setup-auto-reload = Vmux e e tsamaisa ho terminal mme e kenya hape ha { $command } e se e lokile.
 
-debug-title = Lokisa diphoso
-debug-auto-update = Intjhafatso ya othomathiki
-debug-simulate-update = Etsa eka ntjhafatso e teng
-debug-simulate-download = Etsa eka ho a jarollwa
-debug-clear-update = Hlakola ntjhafatso
-debug-trigger-restart = Qalisa ho qala hape
 
 command-manage-spaces = Laola libaka…
 command-pane-stack-location = pane { $pane } / mokgobo { $stack }

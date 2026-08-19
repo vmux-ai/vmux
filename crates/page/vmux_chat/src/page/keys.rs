@@ -22,9 +22,10 @@
 //! claims a printable key pressed alone, because a claim set that is one context behind would
 //! swallow a character. So `1`-`3` on an approval is the one chat shortcut that is not rebindable.
 //!
-//! The split at the bottom of this file is between hosts, not between features. Deciding needs a
-//! webview to hand a stroke to; doing needs neither, so [`ChatKeys::apply`] and everything under
-//! it is shared, and a host with no keymap to ask still answers what it can answer alone.
+//! [`ChatKeys::hand_over`] is where a host with no keymap parts company, and it is the only place:
+//! the keymap is `settings.json`, so a host that does not hold it cannot say what `Enter` means and
+//! the page falls back to the one verb the caret decides by itself. Everything else on this page —
+//! the numbers, the lists, the verbs — is reached the same way either way.
 
 use super::state::Chat;
 use crate::event::{ApprovalDecision, CHAT_KEY_EVENT, ChatItem, ChatKey};
@@ -32,13 +33,11 @@ use crate::format::composer::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
+use vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed};
+use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
-use vmux_ui::hooks::{MenuDirection, choice_number_index, move_selection, use_listener};
-#[cfg(web)]
-use {
-    vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed},
-    vmux_ui::components::prompt_composer::prompt_textarea,
-    vmux_ui::hooks::{KeyClaim, send, use_key_claim},
+use vmux_ui::hooks::{
+    KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim, use_listener,
 };
 
 /// Allow, allow always, deny.
@@ -48,7 +47,6 @@ const APPROVAL_OPTION_COUNT: usize = 3;
 ///
 /// `Copy`, and reached through a context rather than a prop, because the composer is several
 /// components below the page root and [`KeyClaim`] is not comparable — a prop would have to be.
-#[cfg(web)]
 #[derive(Clone, Copy)]
 pub struct ChatKeys {
     chat: Chat,
@@ -57,7 +55,6 @@ pub struct ChatKeys {
 
 /// Subscribe the page to the keyboard seam and start listening for what its keys turned out to
 /// mean.
-#[cfg(web)]
 pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let keys = ChatKeys {
         chat,
@@ -70,7 +67,6 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     keys
 }
 
-#[cfg(web)]
 impl ChatKeys {
     /// A key with the prompt focused.
     ///
@@ -81,8 +77,7 @@ impl ChatKeys {
         if self.answered_by_number(&event) {
             return;
         }
-        self.claim
-            .on_keydown(&event, |stroke| self.wanted_locally(stroke));
+        self.hand_over(&event);
     }
 
     /// A key that arrived with the prompt unfocused, so it was aimed at the transcript.
@@ -93,11 +88,37 @@ impl ChatKeys {
         if self.answered_by_number(&event) {
             return;
         }
-        self.claim
-            .on_keydown(&event, |stroke| self.wanted_locally(stroke));
+        self.hand_over(&event);
         if event.default_action_enabled() {
             self.type_into_draft(&event);
         }
+    }
+
+    /// Give the stroke to whoever can say what it meant.
+    fn hand_over(&self, event: &KeyboardEvent) {
+        if !self.claim.resolves() {
+            return self.recall_alone(event);
+        }
+        self.claim
+            .on_keydown(event, |stroke| self.wanted_locally(stroke));
+    }
+
+    /// The whole keyboard of a host with no keymap: prompt recall, which the caret decides and no
+    /// binding is consulted for.
+    ///
+    /// Deliberately not a second table of what a key means. A key whose meaning lives in
+    /// `settings.json` has to be looked up by whoever holds that file, and here nobody does.
+    fn recall_alone(&self, event: &KeyboardEvent) {
+        let modifiers = event.modifiers();
+        if modifiers.meta() || modifiers.alt() {
+            return;
+        }
+        let key = event.key().to_string();
+        let Some(direction) = self.recall_direction(&key, modifiers.ctrl()) else {
+            return;
+        };
+        event.prevent_default();
+        self.recall(direction);
     }
 
     /// The page's own answer about one stroke, asked in the same tick so it never disagrees with
@@ -108,7 +129,7 @@ impl ChatKeys {
     /// because `ArrowUp` doubles as caret movement, not because prompt recall is optional.
     fn wanted_locally(&self, stroke: &KeyStroke) -> bool {
         if Self::copies(stroke) {
-            return has_text_selection();
+            return EventSelection::in_document();
         }
         if !Self::moves_the_caret(stroke) {
             return false;
@@ -137,13 +158,7 @@ impl ChatKeys {
             _ => false,
         }
     }
-}
 
-/// Everything the page does once something has decided what a key meant.
-///
-/// Shared, because none of it needs a webview: a host with no keymap reaches the same verbs
-/// through the ones it can resolve alone.
-impl ChatKeys {
     /// Take the host's answers about keys this page handed over.
     fn listen(&self) {
         let keys = *self;
@@ -181,10 +196,19 @@ impl ChatKeys {
 
     /// Which way prompt recall would go for this key, or `None` when the caret has somewhere else
     /// to be or there is nothing left to recall.
+    ///
+    /// A host with nothing to report answers with the start of the draft, which is what makes Up
+    /// recall rather than appear to do nothing.
     fn recall_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
-        let (start, end) = prompt_caret()?;
         let draft = self.chat.draft();
-        let direction = prompt_history_direction(key, ctrl, &draft, start, end)?;
+        let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
+        let direction = prompt_history_direction(
+            key,
+            ctrl,
+            &draft,
+            byte_offset_to_utf16(&draft, start),
+            byte_offset_to_utf16(&draft, end),
+        )?;
         let usable = match direction {
             PromptHistoryDirection::Older => !self.chat.prompt_history().is_empty(),
             PromptHistoryDirection::Newer => self.chat.composer.history_cursor.peek().is_some(),
@@ -299,8 +323,7 @@ impl ChatList {
     }
 
     /// Whether this list is one the draft opened, which is what makes `Escape` close it rather
-    /// than interrupt the turn. Only a host with a keymap asks, since the answer is a context key.
-    #[cfg(web)]
+    /// than interrupt the turn.
     fn is_selector(self) -> bool {
         !matches!(self, Self::Approval | Self::Choice)
     }
@@ -378,9 +401,7 @@ impl Chat {
     /// What is true of this page now, as the context keys a binding's `when` is resolved against.
     ///
     /// Read reactively — every signal touched here becomes a trigger to republish — so the page
-    /// says what it is rather than remembering to announce a change. There is nobody to say it to
-    /// without a webview.
-    #[cfg(web)]
+    /// says what it is rather than remembering to announce a change.
     fn key_context(&self) -> Vec<String> {
         let mut keys = vec!["chat".to_string()];
         let Some(list) = ChatList::of(*self) else {
@@ -410,88 +431,5 @@ impl Chat {
             }
         }
         history
-    }
-}
-
-/// Where the caret sits in the prompt, which decides whether Up moves within the text or recalls
-/// the previous prompt.
-#[cfg(web)]
-fn prompt_caret() -> Option<(u32, u32)> {
-    let textarea = prompt_textarea(PROMPT_INPUT_ID)?;
-    let start = textarea
-        .selection_start()
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let end = textarea.selection_end().ok().flatten().unwrap_or(start);
-    Some((start, end))
-}
-
-/// Nothing to measure without an element handle. Reporting the start is what makes Up recall
-/// history rather than appear to do nothing.
-#[cfg(not(web))]
-fn prompt_caret() -> Option<(u32, u32)> {
-    Some((0, 0))
-}
-
-/// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
-#[cfg(web)]
-fn has_text_selection() -> bool {
-    let Some(window) = web_sys::window() else {
-        return false;
-    };
-    let Ok(Some(selection)) = window.get_selection() else {
-        return false;
-    };
-    !selection.is_collapsed()
-}
-
-/// A touch host has no keymap to ask, so the only keys its chat page resolves are the ones it can
-/// answer without one.
-///
-/// Not a lesser copy of the seam above: there is no second table of what a key means here, and
-/// there deliberately is not one. A key whose meaning lives in `settings.json` has to be looked up
-/// by whoever holds that file, and on a host with no webview nobody does.
-#[cfg(not(web))]
-#[derive(Clone, Copy)]
-pub struct ChatKeys {
-    chat: Chat,
-}
-
-#[cfg(not(web))]
-pub fn use_chat_keys(chat: Chat) -> ChatKeys {
-    let keys = ChatKeys { chat };
-    keys.listen();
-    keys
-}
-
-#[cfg(not(web))]
-impl ChatKeys {
-    pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
-        event.stop_propagation();
-        self.resolve_without_a_keymap(&event);
-    }
-
-    pub fn on_root_keydown(&self, event: KeyboardEvent) {
-        self.resolve_without_a_keymap(&event);
-        if event.default_action_enabled() {
-            self.type_into_draft(&event);
-        }
-    }
-
-    fn resolve_without_a_keymap(&self, event: &KeyboardEvent) {
-        if self.answered_by_number(event) {
-            return;
-        }
-        let modifiers = event.modifiers();
-        if modifiers.meta() || modifiers.alt() {
-            return;
-        }
-        let key = event.key().to_string();
-        let Some(direction) = self.recall_direction(&key, modifiers.ctrl()) else {
-            return;
-        };
-        event.prevent_default();
-        self.recall(direction);
     }
 }

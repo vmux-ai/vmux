@@ -68,11 +68,6 @@ tools-result-linked = { $name } დაკავშირებულია
 tools-result-unlinked = { $name }-თან კავშირი გაუქმებულია
 vault-title = Vault
 vault-encrypted = ბოლოდან ბოლომდე დაშიფრული
-vault-passkey = პაროლის გასაღები
-vault-passkey-description = განბლოკეთ ეს Vault სხვა მოწყობილობებზე პაროლის გარეშე.
-vault-passkey-add = პაროლის დამატება
-vault-passkey-unlock = განბლოკვა
-vault-passkey-provider-unsupported = პაროლის ამ პროვაიდერს ჯერ არ აქვს დაშიფრული Vault-ის განბლოკვის მხარდაჭერა.
 vault-recovery-key = აღდგენის გასაღები
 vault-recovery-key-description = შეინახეთ ერთი გასაღები Bitwarden-ში ან პაროლის სხვა მენეჯერში, რათა აღადგინოთ ეს Vault ახალ მოწყობილობაზე.
 vault-recovery-key-create = გასაღების შექმნა
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name }-ის დაყენება
 setup-run-install = დაყენების ბრძანების გაშვება
 setup-auto-reload = Vmux მას ტერმინალში გაუშვებს და { $command }-ის მზადყოფნისას ხელახლა ჩაიტვირთება.
 
-debug-title = გამართვა
-debug-auto-update = ავტომატური განახლება
-debug-simulate-update = ხელმისაწვდომი განახლების სიმულაცია
-debug-simulate-download = ჩამოტვირთვის სიმულაცია
-debug-clear-update = განახლების გასუფთავება
-debug-trigger-restart = გადატვირთვის გაშვება
 
 command-manage-spaces = სივრცეების მართვა…
 command-pane-stack-location = პანელი { $pane } / სტეკი { $stack }

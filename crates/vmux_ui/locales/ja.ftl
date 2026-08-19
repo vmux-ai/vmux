@@ -65,11 +65,6 @@ tools-result-linked = { $name } をリンクしました
 tools-result-unlinked = { $name } のリンクを解除しました
 vault-title = Vault
 vault-encrypted = エンドツーエンド暗号化
-vault-passkey = パスキー
-vault-passkey-description = パスワードを使用せずに他のデバイスでこの Vault のロックを解除します。
-vault-passkey-add = パスキーを追加する
-vault-passkey-unlock = ロックを解除する
-vault-passkey-provider-unsupported = このパスキー プロバイダーは、暗号化された Vault ロック解除をまだサポートしていません。
 vault-recovery-key = 回復キー
 vault-recovery-key-description = 新しいデバイスでこの Vault を回復するには、Bitwarden または別のパスワード マネージャーに 1 つのキーを保存します。
 vault-recovery-key-create = キーの作成
@@ -665,12 +660,6 @@ setup-install-homebrew = Homebrew + { $name }をインストール
 setup-run-install = インストールコマンドを実行
 setup-auto-reload = Vmuxがターミナルで実行し、{ $command }の準備ができたら再読み込みします。
 
-debug-title = デバッグ
-debug-auto-update = 自動アップデート
-debug-simulate-update = アップデートありをシミュレート
-debug-simulate-download = ダウンロードをシミュレート
-debug-clear-update = アップデートをクリア
-debug-trigger-restart = 再起動をトリガー
 
 command-manage-spaces = スペースを管理…
 command-pane-stack-location = ペイン { $pane } / スタック { $stack }

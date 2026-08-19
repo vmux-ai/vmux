@@ -68,11 +68,6 @@ tools-result-linked = Kua honoa a { $name }
 tools-result-unlinked = Kua momotuhia a { $name }
 vault-title = Vault
 vault-encrypted = Kua whakamunatia mai i tētahi pito ki tētahi
-vault-passkey = Kupuhipa
-vault-passkey-description = Wewetehia tenei Vault ki etahi atu taputapu kaore he kupuhipa.
-vault-passkey-add = Tāpiri kupuhipa
-vault-passkey-unlock = Wewete
-vault-passkey-provider-unsupported = Ko tenei kaiwhakarato kupuhipa kaore i te tautoko i te iriti Vault whakamunatia.
 vault-recovery-key = Kī Whakaora
 vault-recovery-key-description = Tiakina tetahi kī ki Bitwarden, ki tetahi atu kaiwhakahaere kupuhipa ranei hei whakaora i tenei Vault i runga i tetahi taputapu hou.
 vault-recovery-key-create = Waihanga kī
@@ -680,12 +675,6 @@ setup-install-homebrew = Tāuta Homebrew + { $name }
 setup-run-install = Whakahaere tono tāuta
 setup-auto-reload = Ka whakahaere a Vmux i tētahi kāpeka, ā, ka uta anō ina rite a { $command }.
 
-debug-title = Patuiro
-debug-auto-update = Whakahou aunoa
-debug-simulate-update = Whakaari he whakahou kei te wātea
-debug-simulate-download = Whakaari tikiake
-debug-clear-update = Ūkui whakahou
-debug-trigger-restart = Tīmata anō inaianei
 
 command-manage-spaces = Whakahaere wāhi…
 command-pane-stack-location = pihanga { $pane } / tāpae { $stack }

@@ -12,13 +12,13 @@ mod page_life;
 
 mod native_bridge;
 mod native_layout;
+pub mod native_page;
 mod navigation;
 mod present;
 
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-mod layout_view;
 mod page_open;
 mod page_state;
 mod scroll;
@@ -30,14 +30,8 @@ pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
-#[cfg(target_os = "macos")]
-pub use native_layout::NativeLayoutPointerMoveResult;
 
-use bevy::{
-    ecs::relationship::Relationship,
-    input::{ButtonState, mouse::MouseButton},
-    prelude::*,
-};
+use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::path::Path;
@@ -46,7 +40,8 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadAppCommands;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenRequest, PageOpenSet,
+    CefPageAttachRequest, HostSpawnRegistry, PageIdentity, PageMetadata, PageOpenRequest,
+    PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -55,9 +50,7 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::{
-        DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HeaderCommandEvent, StackRow,
-    },
+    event::{HeaderCommandEvent, StackRow},
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
@@ -114,12 +107,37 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            layout_view::LayoutViewPlugin,
+            native_page::NativePagesPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
             extensions::project::ExtensionProjectPlugin,
             extensions::windows::ExtensionWindowsPlugin,
+        ));
+        #[cfg(target_os = "macos")]
+        app.add_plugins((
+            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::AGENTS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::CHAT_PAGE)
+                .takes::<vmux_core::PageMetadata>(),
+            native_page::NativePagePlugin::in_pane(&native_page::LSP_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::FILES_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::TERMINAL_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::SETTINGS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
+                .takes::<vmux_wire::error::ErrorPageData>(),
+        ))
+        // A second call because `Plugins` is implemented up to a 16-tuple.
+        .add_plugins((
+            native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
+                .takes::<vmux_core::PageMetadata>(),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -151,31 +169,22 @@ impl Plugin for BrowserPlugin {
                     .chain()
                     .after(ReadAppCommands),
             )
-            .add_plugins(
-                (
-                    CefPlugin {
-                        command_line_config: cef_command_line,
-                        root_cache_path: cef_root_cache_path(),
-                        locale: startup_locale,
-                        accept_language_list: startup_accept_language_list,
-                        embedded_hosts,
-                        ..default()
-                    },
-                    BinEventEmitterPlugin::<(
-                        HeaderCommandEvent,
-                        SideSheetCommandEvent,
-                        RemoteCommandEvent,
-                        RemoteCopyEvent,
-                    )>::for_hosts(&["layout"]),
-                    BinEventEmitterPlugin::<(
-                        DebugUpdateReady,
-                        DebugUpdateClear,
-                        DebugSimulateDownload,
-                    )>::for_hosts(&["debug"]),
-                ),
-            )
-            .add_observer(on_debug_update_ready)
-            .add_observer(on_debug_update_clear)
+            .add_plugins((
+                CefPlugin {
+                    command_line_config: cef_command_line,
+                    root_cache_path: cef_root_cache_path(),
+                    locale: startup_locale,
+                    accept_language_list: startup_accept_language_list,
+                    embedded_hosts,
+                    ..default()
+                },
+                BinEventEmitterPlugin::<(
+                    HeaderCommandEvent,
+                    SideSheetCommandEvent,
+                    RemoteCommandEvent,
+                    RemoteCopyEvent,
+                )>::for_hosts(&["layout"]),
+            ))
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
             .add_systems(
                 Update,
@@ -311,7 +320,6 @@ struct CefPointerHitRect {
 }
 
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
-static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
     /// A region only takes the pointer while it is a header or sheet that is open, laid out and
@@ -329,14 +337,6 @@ impl CefPointerHitRect {
     fn contains(self, point: Vec2) -> bool {
         self.interactive && self.rect.contains(point)
     }
-}
-
-pub fn set_native_layout_activity(active: bool) -> bool {
-    NATIVE_LAYOUT_ACTIVITY.swap(active, Ordering::Relaxed) != active
-}
-
-fn native_layout_activity_active() -> bool {
-    NATIVE_LAYOUT_ACTIVITY.load(Ordering::Relaxed)
 }
 
 fn cef_pointer_regions_contains(
@@ -505,40 +505,30 @@ fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
     Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
 }
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 struct LayoutHoverRefreshState {
-    #[cfg(not(target_os = "macos"))]
     sequence: u64,
-    #[cfg(not(target_os = "macos"))]
     position: Option<Vec2>,
-    #[cfg(not(target_os = "macos"))]
     in_region: bool,
 }
 
+#[cfg(not(target_os = "macos"))]
 fn reset_layout_cef_hover(
     browsers: &Browsers,
     buttons: &ButtonInput<MouseButton>,
     layout: Entity,
     state: &mut LayoutHoverRefreshState,
 ) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (browsers, buttons, layout);
-        NativeLayout::clear_pointer_state();
-        *state = LayoutHoverRefreshState::default();
+    if state.in_region {
+        browsers.send_mouse_move(
+            &layout,
+            buttons.get_pressed(),
+            state.position.unwrap_or_default(),
+            true,
+        );
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if state.in_region {
-            browsers.send_mouse_move(
-                &layout,
-                buttons.get_pressed(),
-                state.position.unwrap_or_default(),
-                true,
-            );
-        }
-        *state = LayoutHoverRefreshState::default();
-    }
+    *state = LayoutHoverRefreshState::default();
 }
 
 #[derive(Default)]
@@ -573,10 +563,13 @@ struct CommandBarRoute {
 
 static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
-static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
+/// The write side is ungated, but the only thing that reads this in production is the `NSEvent`
+/// monitor. `test` is in the gate because the rust jobs run on linux: gating on the target alone
+/// would take the atomicity test out of CI rather than move it to another job.
+#[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
         .lock()
@@ -605,62 +598,13 @@ pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
 }
 
-fn command_bar_windowed_click_should_dismiss(
-    open: bool,
-    button: MouseButton,
-    state: ButtonState,
-    cursor: Option<Vec2>,
-    frame: Option<CommandBarWindowedFrame>,
-) -> bool {
-    if !open || button != MouseButton::Left || state != ButtonState::Pressed {
-        return false;
-    }
-    let (Some(cursor), Some(frame)) = (cursor, frame) else {
-        return false;
-    };
-    !command_bar_windowed_frame_contains(frame, cursor)
-}
-
+/// Answers a cursor position for the AppKit event thread, and nothing else.
+#[cfg(target_os = "macos")]
 fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: Vec2) -> bool {
     cursor.x >= frame.left_px
         && cursor.x <= frame.left_px + frame.width_px
         && cursor.y >= frame.top_px
         && cursor.y <= frame.top_px + frame.height_px
-}
-
-/// Offers a native keystroke to whichever page surface wants to close on it, and reports whether
-/// one took it. The host consumes the key when this is true.
-pub fn request_native_dismiss(combo: &vmux_command::shortcut::KeyCombo) -> bool {
-    if !combo.dismisses_command_bar() {
-        return false;
-    }
-    if !native_command_bar_route().owns_input {
-        return false;
-    }
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
-    true
-}
-
-pub fn request_native_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
-    if !x_px.is_finite() || !y_px.is_finite() {
-        return false;
-    }
-    let route = native_command_bar_route();
-    if !route.owns_input {
-        return false;
-    }
-    let Some(frame) = route.frame else {
-        return false;
-    };
-    if command_bar_windowed_frame_contains(frame, Vec2::new(x_px, y_px)) {
-        return false;
-    }
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
-    true
-}
-
-pub fn take_native_command_bar_dismiss_requested() -> bool {
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -794,18 +738,11 @@ fn active_stack_in_tab(
         .map(|(e, _)| e)
 }
 
-fn effective_title<'a>(osc: Option<&'a OscTitle>, default: &'a str) -> &'a str {
-    match osc {
-        Some(OscTitle(t)) if !t.is_empty() => t,
-        _ => default,
-    }
-}
-
 fn first_browser_meta<'a>(
     stack: Entity,
     stack_children: &Query<&Children>,
-    browser_meta: &'a Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
-) -> Option<(&'a PageMetadata, Option<&'a OscTitle>)> {
+    browser_meta: &'a Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
+) -> Option<(&'a PageMetadata, Option<&'a PageIdentity>)> {
     let kids = stack_children.get(stack).ok()?;
     kids.iter().find_map(|c| browser_meta.get(c).ok())
 }
@@ -816,22 +753,6 @@ fn should_emit_update(
     page_ready_changed: bool,
 ) -> bool {
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
-}
-
-fn on_debug_update_ready(
-    trigger: On<BinReceive<DebugUpdateReady>>,
-    mut state: ResMut<UpdateState>,
-) {
-    *state = UpdateState::Ready {
-        version: trigger.event().payload.version.clone(),
-    };
-}
-
-fn on_debug_update_clear(
-    _trigger: On<BinReceive<DebugUpdateClear>>,
-    mut state: ResMut<UpdateState>,
-) {
-    *state = UpdateState::Idle;
 }
 
 fn knowledge_path_url(root: &Path, requested: &Path) -> Option<String> {
@@ -926,28 +847,28 @@ fn attach_cef_page_to_stack(
     browser
 }
 
+/// Replace whatever is in a stack with the error page, and record on its view what to show.
+///
+/// The stack keeps the url that failed, because that is what the address bar is reporting; the
+/// view is the error page itself, so it is named `vmux://error/` — the url the native surface is
+/// claimed by — and carries the failure as a component for [`answer_error_data_request`] to read.
 fn attach_error_page_to_stack(
     stack: Entity,
-    display_url: &str,
-    title: &str,
-    message: &str,
+    failure: vmux_wire::error::ErrorPageData,
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    let source = error_page_source(title, message, display_url);
     clear_stack_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
-        url: display_url.to_string(),
-        title: title.to_string(),
+        url: failure.url.clone(),
+        title: failure.title.clone(),
         ..default()
     });
-    let browser = commands
-        .spawn((
-            Browser::new_error(&source, display_url, title),
-            ChildOf(stack),
-        ))
-        .id();
-    commands.entity(browser).insert(CefKeyboardTarget);
+    commands.spawn((
+        Browser::native_page(vmux_wire::error::ERROR_PAGE_URL, &failure.title),
+        failure,
+        ChildOf(stack),
+    ));
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -956,28 +877,6 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
             commands.entity(child).try_despawn();
         }
     }
-}
-
-fn error_page_source(title: &str, message: &str, url: &str) -> String {
-    format!(
-        "vmux://error/?title={}&message={}&url={}",
-        percent_encode(title),
-        percent_encode(message),
-        percent_encode(url),
-    )
-}
-
-fn percent_encode(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len() * 3);
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 /// A pending agent-initiated in-place navigation, keyed by the target webview.
@@ -996,58 +895,6 @@ pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>
 
 fn cef_root_cache_path() -> Option<String> {
     vmux_core::profile::cef_cache_path()
-}
-
-#[cfg(test)]
-mod debug_update_observer_tests {
-    use super::*;
-    use bevy_cef::prelude::BinReceive;
-
-    #[test]
-    fn debug_ready_sets_state_then_clear_resets() {
-        let mut app = App::new();
-        app.init_resource::<UpdateState>()
-            .add_observer(on_debug_update_ready)
-            .add_observer(on_debug_update_clear);
-
-        app.world_mut().trigger(BinReceive::<DebugUpdateReady> {
-            webview: Entity::PLACEHOLDER,
-            payload: DebugUpdateReady {
-                version: "v9.0.0".into(),
-            },
-        });
-        assert_eq!(
-            *app.world().resource::<UpdateState>(),
-            UpdateState::Ready {
-                version: "v9.0.0".into()
-            }
-        );
-
-        app.world_mut().trigger(BinReceive::<DebugUpdateClear> {
-            webview: Entity::PLACEHOLDER,
-            payload: DebugUpdateClear,
-        });
-        assert_eq!(*app.world().resource::<UpdateState>(), UpdateState::Idle);
-    }
-}
-
-#[cfg(test)]
-mod error_page_source_tests {
-    use super::{error_page_source, percent_encode};
-
-    #[test]
-    fn percent_encode_escapes_reserved_keeps_unreserved() {
-        assert_eq!(percent_encode("a b/&"), "a%20b%2F%26");
-        assert_eq!(percent_encode("v0.0.1-rc~_"), "v0.0.1-rc~_");
-    }
-
-    #[test]
-    fn error_page_source_builds_query() {
-        assert_eq!(
-            error_page_source("Page not found", "", "vmux://debug/"),
-            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fdebug%2F"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1152,17 +999,27 @@ mod tests {
     }
 
     #[test]
-    fn effective_title_prefers_nonempty_osc() {
-        use vmux_core::OscTitle;
+    fn reported_title_wins_unless_it_is_absent_or_blank() {
+        use vmux_core::PageIdentity;
+        let meta = PageMetadata {
+            title: "host".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(meta.title_with(None), "host");
         assert_eq!(
-            effective_title(Some(&OscTitle("osc".to_string())), "def"),
-            "osc"
+            meta.title_with(Some(&PageIdentity::of_title("reported"))),
+            "reported"
         );
         assert_eq!(
-            effective_title(Some(&OscTitle(String::new())), "def"),
-            "def"
+            meta.title_with(Some(&PageIdentity::of_title(""))),
+            "host",
+            "a page that blanks its own title has nothing to say, so the host name stands"
         );
-        assert_eq!(effective_title(None, "def"), "def");
+        assert_eq!(
+            meta.title_with(Some(&PageIdentity::default())),
+            "host",
+            "an identity reporting only an icon must not blank the title"
+        );
     }
 
     #[test]
@@ -1320,35 +1177,6 @@ mod tests {
             assert!(app.world().get::<WebviewWindowed>(entity).is_some());
             assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
         }
-    }
-
-    #[test]
-    fn native_layout_pointer_queue_retains_only_latest_sample() {
-        let source = include_str!("native_layout/macos.rs");
-        let queue = source
-            .split("pub fn queue_pointer_move")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn flush_pointer_move").next())
-            .unwrap_or_default();
-        let flush = source
-            .split("pub fn flush_pointer_move")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn forward_scroll").next())
-            .unwrap_or_default();
-        let sample = source
-            .split("fn queue_sample")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
-
-        assert!(sample.contains("self.position_px = Some(position)"));
-        assert!(sample.contains("self.buttons = buttons"));
-        assert!(source.contains("fn queue_sample"));
-        assert!(sample.contains("sample_changed"));
-        assert!(sample.contains("self.pending = true"));
-        assert!(queue.contains("state.queue_sample("));
-        assert!(flush.contains("state.pending = false"));
-        assert!(flush.contains("presenter.send(position_px / state.scale"));
     }
 
     #[test]

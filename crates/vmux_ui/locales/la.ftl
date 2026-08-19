@@ -68,11 +68,6 @@ tools-result-linked = { $name } coniunctum
 tools-result-unlinked = { $name } disiunctum
 vault-title = Vault
 vault-encrypted = Ab extremo ad extremum encryptatum
-vault-passkey = Passkey
-vault-passkey-description = Hoc Cochleam recludam in aliis machinis sine tessera.
-vault-passkey-add = Add passkey
-vault-passkey-unlock = Basem
-vault-passkey-provider-unsupported = Hic provisor passkey encrypted Vault reserare adhuc non sustinet.
 vault-recovery-key = Recuperatio Key
 vault-recovery-key-description = Serva unam clavem in Bitwarden vel in alia password procurator ut hoc Vault in novo artificio recipias.
 vault-recovery-key-create = Create key
@@ -680,12 +675,6 @@ setup-install-homebrew = Installare Homebrew + { $name }
 setup-run-install = Currere mandatum installationis
 setup-auto-reload = Vmux id in terminali currit et reonerat cum { $command } paratum est.
 
-debug-title = Debug
-debug-auto-update = Renovatio automatica
-debug-simulate-update = Simulare renovationem praesto
-debug-simulate-download = Simulare depositionem
-debug-clear-update = Purgare renovationem
-debug-trigger-restart = Restarte incitare
 
 command-manage-spaces = Spatia administrare…
 command-pane-stack-location = area { $pane } / strues { $stack }

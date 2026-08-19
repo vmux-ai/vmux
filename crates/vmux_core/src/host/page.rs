@@ -44,12 +44,33 @@ pub struct PageManifest {
     pub command_bar: bool,
 }
 
+/// A Dioxus page is mounted on this entity, wherever its components run.
+///
+/// `WebviewSource` used to be the way to ask this, because a page was always a URL a CEF browser
+/// loaded. That stopped being true when the layout began running its components in the host
+/// process: it hosts a page and has no source, so every query filtered on one silently skipped it
+/// — which left its keyboard claims empty and its published context read by nobody.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostsPage;
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrewarmPage {
     pub host: &'static str,
     pub url: &'static str,
     pub title: &'static str,
     pub pool_size: usize,
+}
+
+/// A page whose components run in this process, declared beside its [`PageManifest`].
+///
+/// The opposite of [`PrewarmPage`], and a page has one or the other. A prewarmed page keeps hidden
+/// browsers mounted so it can be revealed rather than loaded; this one has nothing to keep warm,
+/// because mounting it is building a `VirtualDom` rather than starting a browser and fetching a
+/// bundle into it.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativelyHosted {
+    pub url: &'static str,
+    pub title: &'static str,
 }
 
 impl PageManifest {
@@ -67,7 +88,7 @@ impl PageManifest {
 
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
         packaged_page_root(resources_dir, self.host)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist"))
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_ui/dist"))
     }
 }
 
@@ -306,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn registered_hosts_use_vmux_page_dist() {
+    fn registered_hosts_fall_back_to_the_stylesheet_bundle() {
         let manifest = PageManifest {
             host: "history",
             title: "History",
@@ -319,7 +340,7 @@ mod tests {
 
         assert_eq!(
             manifest.bundle_root(None),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_ui/dist")
         );
     }
 

@@ -68,11 +68,6 @@ tools-result-linked = { $name } dipautkan
 tools-result-unlinked = { $name } dinyahpaut
 vault-title = Vault
 vault-encrypted = Disulitkan hujung ke hujung
-vault-passkey = Kunci laluan
-vault-passkey-description = Buka kunci Bilik Kebal ini pada peranti lain tanpa kata laluan.
-vault-passkey-add = Tambah kunci laluan
-vault-passkey-unlock = Buka kunci
-vault-passkey-provider-unsupported = Pembekal kunci laluan ini belum menyokong buka kunci Vault yang disulitkan lagi.
 vault-recovery-key = Kunci Pemulihan
 vault-recovery-key-description = Simpan satu kunci dalam Bitwarden atau pengurus kata laluan lain untuk memulihkan Bilik Kebal ini pada peranti baharu.
 vault-recovery-key-create = Cipta kunci
@@ -680,12 +675,6 @@ setup-install-homebrew = Pasang Homebrew + { $name }
 setup-run-install = Jalankan perintah pemasangan
 setup-auto-reload = Vmux menjalankannya dalam terminal dan memuat semula apabila { $command } sedia.
 
-debug-title = Nyahpepijat
-debug-auto-update = Kemas kini automatik
-debug-simulate-update = Simulasikan kemas kini tersedia
-debug-simulate-download = Simulasikan muat turun
-debug-clear-update = Kosongkan kemas kini
-debug-trigger-restart = Cetuskan mula semula
 
 command-manage-spaces = Urus ruang…
 command-pane-stack-location = anak tetingkap { $pane } / tindanan { $stack }

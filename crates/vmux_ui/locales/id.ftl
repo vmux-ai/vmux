@@ -68,11 +68,6 @@ tools-result-linked = { $name } ditautkan
 tools-result-unlinked = Tautan { $name } dilepas
 vault-title = Vault
 vault-encrypted = Terenkripsi ujung ke ujung
-vault-passkey = Kunci pas
-vault-passkey-description = Buka kunci Vault ini di perangkat lain tanpa kata sandi.
-vault-passkey-add = Tambahkan kunci sandi
-vault-passkey-unlock = Membuka kunci
-vault-passkey-provider-unsupported = Penyedia kunci sandi ini belum mendukung pembukaan kunci Vault terenkripsi.
 vault-recovery-key = Kunci Pemulihan
 vault-recovery-key-description = Simpan satu kunci di Bitwarden atau pengelola kata sandi lainnya untuk memulihkan Vault ini di perangkat baru.
 vault-recovery-key-create = Buat kunci
@@ -680,12 +675,6 @@ setup-install-homebrew = Instal Homebrew + { $name }
 setup-run-install = Jalankan perintah instalasi
 setup-auto-reload = Vmux menjalankannya di terminal dan memuat ulang saat { $command } siap.
 
-debug-title = Debug
-debug-auto-update = Pembaruan otomatis
-debug-simulate-update = Simulasikan pembaruan tersedia
-debug-simulate-download = Simulasikan unduhan
-debug-clear-update = Bersihkan pembaruan
-debug-trigger-restart = Picu mulai ulang
 
 command-manage-spaces = Kelola space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

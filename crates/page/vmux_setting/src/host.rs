@@ -31,7 +31,6 @@ pub struct SettingsPlugin;
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "settings");
         app.add_plugins((
             runtime::SettingsRuntimePlugin,
             view::SettingsViewPlugin,

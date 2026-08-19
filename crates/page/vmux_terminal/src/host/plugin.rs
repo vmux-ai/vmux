@@ -21,7 +21,7 @@ use vmux_core::terminal::{
     ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
 };
 use vmux_core::{
-    OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
+    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
@@ -46,7 +46,6 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "terminal");
-        vmux_core::register_host_spawn(app, "services");
         app.add_plugins(crate::contract::TerminalContractPlugin)
             .register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
@@ -737,8 +736,8 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_PAGE_URL),
-            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
+            WebviewWindowed,
+            vmux_core::host::page::HostsPage,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -825,8 +824,8 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_PAGE_URL),
-            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
+            WebviewWindowed,
+            vmux_core::host::page::HostsPage,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -1581,7 +1580,7 @@ fn poll_service_messages(
                 process_id: _,
                 text,
             } if !text.is_empty() => {
-                crate::clipboard::write(text);
+                vmux_clipboard::write(text);
             }
             ServiceMessage::AgentCommand {
                 request_id,
@@ -2482,21 +2481,21 @@ fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::
 /// the pasteboard, so its data is written to a temp file and pasted as a path.
 /// Otherwise the clipboard text is bracketed-pasted. `None` when nothing to paste.
 fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
-    if let Some(path) = crate::clipboard::image_file_path() {
+    if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(bracketed_paste(
             image_path_payload(is_vibe, &path).as_bytes(),
         ));
     }
-    if crate::clipboard::has_image() {
+    if vmux_clipboard::has_image() {
         if is_vibe {
-            let png = crate::clipboard::read_image_png()?;
+            let png = vmux_clipboard::read_image_png()?;
             let path = write_clipboard_image_temp(process_id, &png)?;
             let payload = image_path_payload(true, &path.to_string_lossy());
             return Some(bracketed_paste(payload.as_bytes()));
         }
         return Some(vec![CTRL_V]);
     }
-    let text = crate::clipboard::read_blocking()?;
+    let text = vmux_clipboard::read_blocking()?;
     (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
 }
 
@@ -2506,15 +2505,15 @@ fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
 /// pasteboard via `Ctrl+V`, and the draft is delivered later as text. Returns
 /// `None` when there is nothing to paste.
 fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
-    if let Some(path) = crate::clipboard::image_file_path() {
+    if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(image_path_payload(is_vibe, &path));
     }
-    if crate::clipboard::has_image() {
-        let png = crate::clipboard::read_image_png()?;
+    if vmux_clipboard::has_image() {
+        let png = vmux_clipboard::read_image_png()?;
         let path = write_clipboard_image_temp(process_id, &png)?;
         return Some(image_path_payload(is_vibe, &path.to_string_lossy()));
     }
-    let text = crate::clipboard::read_blocking()?;
+    let text = vmux_clipboard::read_blocking()?;
     (!text.is_empty()).then_some(text)
 }
 
@@ -3619,7 +3618,7 @@ pub struct OscTitleChanged {
 pub fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId, Option<&OscTitle>), With<Terminal>>,
+    terminals: Query<(Entity, &ProcessId, Option<&PageIdentity>), With<Terminal>>,
 ) {
     for ev in reader.read() {
         let Some((entity, _, current)) =
@@ -3629,10 +3628,13 @@ pub fn apply_osc_title(
         };
         if ev.title.is_empty() {
             if current.is_some() {
-                commands.entity(entity).remove::<OscTitle>();
+                commands.entity(entity).remove::<PageIdentity>();
             }
-        } else if current.map(|o| o.0.as_str()) != Some(ev.title.as_str()) {
-            commands.entity(entity).insert(OscTitle(ev.title.clone()));
+        } else if current.and_then(|identity| identity.title.as_deref()) != Some(ev.title.as_str())
+        {
+            commands
+                .entity(entity)
+                .insert(PageIdentity::of_title(ev.title.clone()));
         }
     }
 }
@@ -3640,11 +3642,11 @@ pub fn apply_osc_title(
 pub fn clear_osc_title_on_exit(
     mut reader: MessageReader<ProcessExitedEvent>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<OscTitle>)>,
+    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<PageIdentity>)>,
 ) {
     for ev in reader.read() {
         if let Some((entity, _)) = terminals.iter().find(|(_, pid)| **pid == ev.process_id) {
-            commands.entity(entity).remove::<OscTitle>();
+            commands.entity(entity).remove::<PageIdentity>();
         }
     }
 }
@@ -5334,8 +5336,8 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get::<vmux_core::OscTitle>(e)
-                .map(|o| o.0.clone()),
+                .get::<vmux_core::PageIdentity>(e)
+                .and_then(|identity| identity.title.clone()),
             Some("claude — repo".to_string())
         );
 
@@ -5346,7 +5348,7 @@ mod tests {
                 title: String::new(),
             });
         app.update();
-        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
     }
 
     #[test]
@@ -5359,14 +5361,14 @@ mod tests {
         let pid = ProcessId::new();
         let e = app
             .world_mut()
-            .spawn((Terminal, pid, vmux_core::OscTitle("working".to_string())))
+            .spawn((Terminal, pid, vmux_core::PageIdentity::of_title("working")))
             .id();
 
         app.world_mut()
             .resource_mut::<Messages<ProcessExitedEvent>>()
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
-        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
     }
 
     #[test]

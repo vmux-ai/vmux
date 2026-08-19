@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-#[cfg(not(web))]
 pub mod tools;
-#[cfg(not(web))]
 pub mod vault;
 
 pub const fn build_profile() -> &'static str {

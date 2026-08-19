@@ -260,19 +260,8 @@ pub enum TranslationValue<'a> {
     Number(i64),
 }
 
-#[cfg(not(web))]
 fn platform_locale() -> Option<String> {
     sys_locale::get_locale()
-}
-
-#[cfg(web)]
-fn platform_locale() -> Option<String> {
-    let navigator = web_sys::window()?.navigator();
-    navigator
-        .languages()
-        .get(0)
-        .as_string()
-        .or_else(|| navigator.language())
 }
 
 #[cfg(test)]

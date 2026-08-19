@@ -68,11 +68,6 @@ tools-result-linked = { $name } keppele
 tools-result-unlinked = { $name } ûntkeppele
 vault-title = Vault
 vault-encrypted = Fan ein oant ein fersifere
-vault-passkey = Passkey
-vault-passkey-description = Untskoattelje dizze Vault op oare apparaten sûnder wachtwurd.
-vault-passkey-add = Foegje wachtwurd ta
-vault-passkey-unlock = Untskoattelje
-vault-passkey-provider-unsupported = Dizze passkey-provider stipet noch gjin fersifere Vault-ûntskoatteljen.
 vault-recovery-key = Herstelkaai
 vault-recovery-key-description = Bewarje ien kaai yn Bitwarden as in oare wachtwurdbehearder om dizze Vault op in nij apparaat werom te heljen.
 vault-recovery-key-create = Meitsje kaai
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ynstallearje
 setup-run-install = Ynstallaasjekommando útfiere
 setup-auto-reload = Vmux draait it yn in terminal en laadt opnij as { $command } klear is.
 
-debug-title = Debug
-debug-auto-update = Automatysk bywurkje
-debug-simulate-update = Beskikbere update simulearje
-debug-simulate-download = Download simulearje
-debug-clear-update = Update wiskje
-debug-trigger-restart = Opnij starten aktivearje
 
 command-manage-spaces = Romten beheare…
 command-pane-stack-location = finsterdiel { $pane } / steapel { $stack }

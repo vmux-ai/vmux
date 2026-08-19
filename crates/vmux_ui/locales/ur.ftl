@@ -68,11 +68,6 @@ tools-result-linked = { $name } منسلک ہو گیا
 tools-result-unlinked = { $name } کا ربط ہٹا دیا گیا
 vault-title = Vault
 vault-encrypted = اینڈ ٹو اینڈ مرموز
-vault-passkey = پاسکی
-vault-passkey-description = پاس ورڈ کے بغیر دیگر آلات پر اس والٹ کو غیر مقفل کریں۔
-vault-passkey-add = پاسکی شامل کریں۔
-vault-passkey-unlock = غیر مقفل کریں۔
-vault-passkey-provider-unsupported = یہ پاسکی فراہم کنندہ ابھی تک انکرپٹڈ والٹ انلاک کو سپورٹ نہیں کرتا ہے۔
 vault-recovery-key = ریکوری کلید
 vault-recovery-key-description = اس والٹ کو نئے آلے پر بازیافت کرنے کے لیے بٹ وارڈن یا دوسرے پاس ورڈ مینیجر میں ایک کلید محفوظ کریں۔
 vault-recovery-key-create = کلید بنائیں
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } انسٹال کریں
 setup-run-install = انسٹال کمانڈ چلائیں
 setup-auto-reload = Vmux اسے ٹرمینل میں چلاتا ہے اور { $command } تیار ہونے پر دوبارہ لوڈ کرتا ہے۔
 
-debug-title = ڈیبگ
-debug-auto-update = خودکار اپ ڈیٹ
-debug-simulate-update = اپ ڈیٹ دستیاب ہونے کی نقل بنائیں
-debug-simulate-download = ڈاؤن لوڈ کی نقل بنائیں
-debug-clear-update = اپ ڈیٹ صاف کریں
-debug-trigger-restart = دوبارہ شروع کرائیں
 
 command-manage-spaces = اسپیسز کا نظم کریں…
 command-pane-stack-location = پین { $pane } / اسٹیک { $stack }

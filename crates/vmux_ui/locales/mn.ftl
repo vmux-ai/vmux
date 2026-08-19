@@ -68,11 +68,6 @@ tools-result-linked = { $name } холбогдлоо
 tools-result-unlinked = { $name }-ийн холбоос салгагдлаа
 vault-title = Vault
 vault-encrypted = Төгсгөл хооронд шифрлэгдсэн
-vault-passkey = Нэвтрэх түлхүүр
-vault-passkey-description = Энэ Vault-н түгжээг нууц үггүйгээр бусад төхөөрөмж дээр тайл.
-vault-passkey-add = Нэвтрэх түлхүүр нэмнэ үү
-vault-passkey-unlock = Түгжээг тайлах
-vault-passkey-provider-unsupported = Энэ нэвтрэх түлхүүрийн үйлчилгээ үзүүлэгч нь шифрлэгдсэн Vault түгжээг тайлахыг хараахан дэмждэггүй.
 vault-recovery-key = Сэргээх түлхүүр
 vault-recovery-key-description = Энэ Vault-г шинэ төхөөрөмж дээр сэргээхийн тулд Bitwarden эсвэл өөр нууц үгийн менежерт нэг түлхүүр хадгална уу.
 vault-recovery-key-create = Түлхүүр үүсгэх
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } суулгах
 setup-run-install = Суулгах командыг ажиллуулах
 setup-auto-reload = Vmux үүнийг терминалд ажиллуулж, { $command } бэлэн болохоор дахин ачаална.
 
-debug-title = Дибаг
-debug-auto-update = Автомат шинэчлэлт
-debug-simulate-update = Шинэчлэл бэлэнг дуурайх
-debug-simulate-download = Таталтыг дуурайх
-debug-clear-update = Шинэчлэл цэвэрлэх
-debug-trigger-restart = Дахин эхлүүлэхийг өдөөх
 
 command-manage-spaces = Спэйсүүдийг удирдах…
 command-pane-stack-location = самбар { $pane } / стек { $stack }

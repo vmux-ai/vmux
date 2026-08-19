@@ -12,7 +12,7 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
-use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
+use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
@@ -118,20 +118,16 @@ impl Plugin for ToolsPlugin {
         }
         app.world_mut().spawn((
             PAGE_MANIFEST,
-            PrewarmPage {
-                host: "tools",
+            vmux_core::host::page::NativelyHosted {
                 url: "vmux://tools/",
                 title: "Tools",
-                pool_size: 1,
             },
         ));
         app.world_mut().spawn((
             VAULT_PAGE_MANIFEST,
-            PrewarmPage {
-                host: "vault",
+            vmux_core::host::page::NativelyHosted {
                 url: "vmux://vault/",
                 title: "Vault",
-                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "tools");
@@ -429,8 +425,7 @@ fn queue_vault_auto_sync(
             action: VaultAction::Sync,
             repository: String::new(),
             private: true,
-            credential_id: String::new(),
-            prf_output: Vec::new(),
+            folder_name: String::new(),
             recovery_key: String::new(),
         },
     ));
@@ -814,8 +809,6 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
         encrypted: status.encrypted,
         unlocked: status.unlocked,
         vault_id: status.vault_id,
-        passkey_credentials: status.passkey_credentials,
-        passkey_salt: status.passkey_salt,
         recovery_enabled: status.recovery_enabled,
         remote: status.remote,
         branch: status.branch,
@@ -1371,7 +1364,7 @@ where
     C: Fn() -> bool,
 {
     if request.action == VaultAction::CreateRecoveryKey {
-        let recovery = vmux_core::profile::vault::create_recovery_key(&request.recovery_key)?;
+        let recovery = vmux_core::profile::vault::create_recovery_key()?;
         return Ok(VaultActionOutput {
             message: String::new(),
             pending_upload: recovery.pending_upload,
@@ -1412,21 +1405,16 @@ where
             };
             vmux_core::profile::vault::connect_folder(folder.path())
         }
-        VaultAction::AddPasskey => {
-            vmux_core::profile::vault::add_passkey(&request.credential_id, &request.prf_output)
+        VaultAction::GenerateRecoveryKey => {
+            vmux_core::profile::vault::generate_recovery_key().map(|key| key.to_string())
         }
-        VaultAction::PreparePasskey => vmux_core::profile::vault::prepare_passkey(),
-        VaultAction::UnlockPasskey => vmux_core::profile::vault::unlock_with_passkey(
-            &request.credential_id,
-            &request.prf_output,
-        ),
         VaultAction::CreateRecoveryKey => unreachable!(),
         VaultAction::UnlockRecoveryKey => {
             vmux_core::profile::vault::unlock_with_recovery_key(&request.recovery_key)
         }
         VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
         VaultAction::CreateCloudFolder => {
-            let folder = Path::new(&request.repository).join(&request.credential_id);
+            let folder = Path::new(&request.repository).join(&request.folder_name);
             vmux_core::profile::vault::connect_folder(&folder)
         }
         VaultAction::ChooseCloudFolder => {

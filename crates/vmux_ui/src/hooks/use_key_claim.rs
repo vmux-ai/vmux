@@ -7,6 +7,10 @@
 //! which is never stale; and [`Unclaimed`], the standing policy for a key nobody spoke for. The
 //! rule combining them is [`KeyVerdict::of`], next to the wire types both sides read.
 //!
+//! Whether there is a core to rule at all is a separate question, and a host capability rather than
+//! a target: only a host holding `settings.json` can resolve against it. [`KeyClaim::resolves`] is
+//! that answer, and a page with verbs it can reach alone branches on it.
+//!
 //! There is deliberately no fourth part for a half-typed chord. Suppression happens in the Bevy
 //! process, upstream of the page — a CEF browser here is offscreen and sees no key the host did not
 //! forward — so the second key of a chord never arrives and there is no round trip to lose.
@@ -14,7 +18,7 @@
 //! Nothing here knows what a key *means*. It tests membership and asks the page a yes/no question.
 
 use crate::hooks::use_event::use_event;
-use crate::key_stroke::WebKey;
+use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
 use vmux_core::input::{
@@ -31,12 +35,20 @@ pub fn use_key_claim(
     context: impl Fn() -> Vec<String> + 'static,
 ) -> KeyClaim {
     let claims = use_event::<KeyClaims>(KEY_CLAIMS_EVENT, KeyClaims::default);
+    let resolves = use_hook(crate::transport::Host::resolves_keys);
 
     use_effect(move || {
+        if !resolves {
+            return;
+        }
         let _ = send(&PageKeyContext { keys: context() });
     });
 
-    KeyClaim { claims, unclaimed }
+    KeyClaim {
+        claims,
+        unclaimed,
+        resolves,
+    }
 }
 
 /// A page's keyboard: what the core has claimed from it, and what it does with the rest.
@@ -44,9 +56,19 @@ pub fn use_key_claim(
 pub struct KeyClaim {
     claims: Signal<KeyClaims>,
     unclaimed: Unclaimed,
+    resolves: bool,
 }
 
 impl KeyClaim {
+    /// Whether handing a stroke over will get an answer back.
+    ///
+    /// False leaves [`Self::on_keydown`] correct but inert for anything a binding would have
+    /// decided, so a page with verbs it can reach alone asks this and reaches them directly. A page
+    /// with none does not need to ask.
+    pub fn resolves(&self) -> bool {
+        self.resolves
+    }
+
     /// Handle one `keydown`. This is the whole body of a migrated page's `onkeydown`.
     ///
     /// `wanted_locally` is the page's own question about this stroke, asked in the same tick, so it
@@ -60,10 +82,7 @@ impl KeyClaim {
         wanted_locally: impl FnOnce(&KeyStroke) -> bool,
     ) {
         let data = event.data();
-        let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-            return;
-        };
-        let Some(stroke) = WebKey::new(raw).stroke() else {
+        let Some(stroke) = PressedKey::new(&data).stroke() else {
             return;
         };
         if stroke.is_modifier_key() {

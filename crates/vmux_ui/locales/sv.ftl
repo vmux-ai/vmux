@@ -68,11 +68,6 @@ tools-result-linked = { $name } länkad
 tools-result-unlinked = Länken till { $name } borttagen
 vault-title = Vault
 vault-encrypted = End-to-end-krypterad
-vault-passkey = Nyckel
-vault-passkey-description = Lås upp detta valv på andra enheter utan lösenord.
-vault-passkey-add = Lägg till lösenord
-vault-passkey-unlock = Låsa upp
-vault-passkey-provider-unsupported = Den här lösenordsleverantören stöder inte krypterad valvupplåsning ännu.
 vault-recovery-key = Återställningsnyckel
 vault-recovery-key-description = Spara en nyckel i Bitwarden eller en annan lösenordshanterare för att återställa detta valv på en ny enhet.
 vault-recovery-key-create = Skapa nyckel
@@ -680,12 +675,6 @@ setup-install-homebrew = Installera Homebrew + { $name }
 setup-run-install = Kör installationskommando
 setup-auto-reload = Vmux kör det i en terminal och läser in igen när { $command } är redo.
 
-debug-title = Felsök
-debug-auto-update = Uppdatera automatiskt
-debug-simulate-update = Simulera tillgänglig uppdatering
-debug-simulate-download = Simulera hämtning
-debug-clear-update = Rensa uppdatering
-debug-trigger-restart = Utlös omstart
 
 command-manage-spaces = Hantera spaces…
 command-pane-stack-location = panel { $pane } / stack { $stack }

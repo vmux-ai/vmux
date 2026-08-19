@@ -68,11 +68,6 @@ tools-result-linked = { $name } lié
 tools-result-unlinked = { $name } dissocié
 vault-title = Vault
 vault-encrypted = Chiffré de bout en bout
-vault-passkey = Clé d'accès
-vault-passkey-description = Déverrouillez ce coffre-fort sur d'autres appareils sans mot de passe.
-vault-passkey-add = Ajouter un mot de passe
-vault-passkey-unlock = Ouvrir
-vault-passkey-provider-unsupported = Ce fournisseur de clé d'accès ne prend pas encore en charge le déverrouillage crypté du coffre-fort.
 vault-recovery-key = Clé de récupération
 vault-recovery-key-description = Enregistrez une clé dans Bitwarden ou un autre gestionnaire de mots de passe pour récupérer ce coffre-fort sur un nouvel appareil.
 vault-recovery-key-create = Créer une clé
@@ -680,12 +675,6 @@ setup-install-homebrew = Installer Homebrew + { $name }
 setup-run-install = Exécuter la commande d’installation
 setup-auto-reload = Vmux l’exécute dans un terminal et recharge quand { $command } est prêt.
 
-debug-title = Débogage
-debug-auto-update = Mise à jour automatique
-debug-simulate-update = Simuler une mise à jour disponible
-debug-simulate-download = Simuler un téléchargement
-debug-clear-update = Effacer la mise à jour
-debug-trigger-restart = Déclencher le redémarrage
 
 command-manage-spaces = Gérer les espaces…
 command-pane-stack-location = volet { $pane } / pile { $stack }

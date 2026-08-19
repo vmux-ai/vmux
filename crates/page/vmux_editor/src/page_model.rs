@@ -423,51 +423,6 @@ pub fn centered_scroll_top(target_center: f64, viewport_height: f64) -> f64 {
     (target_center - viewport_height * 0.5).max(0.0)
 }
 
-pub fn viewport_reveal_delta(
-    target_top: f64,
-    target_bottom: f64,
-    viewport_top: f64,
-    viewport_bottom: f64,
-) -> f64 {
-    if target_top < viewport_top {
-        target_top - viewport_top
-    } else if target_bottom > viewport_bottom {
-        target_bottom - viewport_bottom
-    } else {
-        0.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NoteCaretVisibilityRequest {
-    pub block_index: usize,
-    pub line: u32,
-    pub retry: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct NoteCaretVisibilityQueue {
-    pending: Option<NoteCaretVisibilityRequest>,
-    scheduled: bool,
-}
-
-impl NoteCaretVisibilityQueue {
-    pub fn enqueue(&mut self, request: NoteCaretVisibilityRequest) -> bool {
-        self.pending = Some(request);
-        if self.scheduled {
-            false
-        } else {
-            self.scheduled = true;
-            true
-        }
-    }
-
-    pub fn take(&mut self) -> Option<NoteCaretVisibilityRequest> {
-        self.scheduled = false;
-        self.pending.take()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteCursorActivation {
     Center(u32),
@@ -746,33 +701,6 @@ mod tests {
     fn cursor_centering_places_target_at_viewport_midpoint() {
         assert_eq!(centered_scroll_top(500.0, 400.0), 300.0);
         assert_eq!(centered_scroll_top(100.0, 400.0), 0.0);
-    }
-
-    #[test]
-    fn cursor_reveal_waits_until_the_caret_leaves_the_viewport() {
-        assert_eq!(viewport_reveal_delta(120.0, 148.0, 100.0, 500.0), 0.0);
-        assert_eq!(viewport_reveal_delta(80.0, 108.0, 100.0, 500.0), -20.0);
-        assert_eq!(viewport_reveal_delta(480.0, 520.0, 100.0, 500.0), 20.0);
-    }
-
-    #[test]
-    fn note_caret_visibility_coalesces_to_latest_cursor_per_frame() {
-        let mut queue = NoteCaretVisibilityQueue::default();
-        let first = NoteCaretVisibilityRequest {
-            block_index: 2,
-            line: 8,
-            retry: true,
-        };
-        let latest = NoteCaretVisibilityRequest {
-            block_index: 4,
-            line: 15,
-            retry: true,
-        };
-
-        assert!(queue.enqueue(first));
-        assert!(!queue.enqueue(latest));
-        assert_eq!(queue.take(), Some(latest));
-        assert!(queue.enqueue(first));
     }
 
     #[test]

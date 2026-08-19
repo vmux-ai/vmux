@@ -68,11 +68,6 @@ tools-result-linked = { $name } legat
 tools-result-unlinked = { $name } dezlegat
 vault-title = Vault
 vault-encrypted = Criptat integral
-vault-passkey = Cheie de acces
-vault-passkey-description = Deblocați acest Vault pe alte dispozitive fără parolă.
-vault-passkey-add = Adăugați cheia de acces
-vault-passkey-unlock = Deblocați
-vault-passkey-provider-unsupported = Acest furnizor de chei de acces nu acceptă încă deblocarea criptată a seifului.
 vault-recovery-key = Cheie de recuperare
 vault-recovery-key-description = Salvați o cheie în Bitwarden sau în alt manager de parole pentru a recupera acest Vault pe un dispozitiv nou.
 vault-recovery-key-create = Creați cheia
@@ -680,12 +675,6 @@ setup-install-homebrew = Instalează Homebrew + { $name }
 setup-run-install = Rulează comanda de instalare
 setup-auto-reload = Vmux o rulează într-un terminal și reîncarcă atunci când { $command } este gata.
 
-debug-title = Depanare
-debug-auto-update = Actualizare automată
-debug-simulate-update = Simulează actualizare disponibilă
-debug-simulate-download = Simulează descărcarea
-debug-clear-update = Șterge actualizarea
-debug-trigger-restart = Declanșează repornirea
 
 command-manage-spaces = Gestionează spațiile…
 command-pane-stack-location = panou { $pane } / stivă { $stack }

@@ -17,7 +17,8 @@ similar = "2"
 vmux_chat = { path = "../vmux_chat" }
 vmux_wire = { path = "../../vmux_wire" }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+vmux_clipboard = { path = "../../vmux_clipboard" }
 vmux_command = { path = "../vmux_command" }
 base64 = "0.22"
 bevy = { workspace = true }
@@ -41,6 +42,7 @@ vmux_editor = { path = "../vmux_editor" }
 vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_start = { path = "../vmux_start" }
 vmux_mcp = { path = "../../host/vmux_mcp" }
 vmux_remote = { path = "../../host/vmux_remote" }
 vmux_service = { path = "../../host/vmux_service" }
@@ -49,34 +51,9 @@ vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 
-# Shared by both page hosts. Everything web-bound stays in the wasm-only block below, so a phone
-# build pulls neither the browser bindings nor the crates that gate bevy on `not(wasm32)`.
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
-js-sys = "0.3"
-pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
-vmux_core = { path = "../../vmux_core" }
-wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = [
-    "Clipboard",
-    "Window",
-    "Document",
-    "Element",
-    "Event",
-    "EventInit",
-    "EventTarget",
-    "HtmlTextAreaElement",
-    "KeyboardEvent",
-    "KeyboardEventInit",
-    "Navigator",
-    "ScrollIntoViewOptions",
-    "ScrollLogicalPosition",
-    "Selection",
-] }
 
 [dev-dependencies]
 mockito = "1"

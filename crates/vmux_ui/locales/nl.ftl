@@ -68,11 +68,6 @@ tools-result-linked = { $name } gekoppeld
 tools-result-unlinked = { $name } ontkoppeld
 vault-title = Vault
 vault-encrypted = End-to-end versleuteld
-vault-passkey = Wachtwoord
-vault-passkey-description = Ontgrendel deze kluis op andere apparaten zonder wachtwoord.
-vault-passkey-add = Wachtwoord toevoegen
-vault-passkey-unlock = Ontgrendelen
-vault-passkey-provider-unsupported = Deze toegangssleutelprovider ondersteunt nog geen gecodeerde ontgrendeling van de kluis.
 vault-recovery-key = Herstelsleutel
 vault-recovery-key-description = Bewaar één sleutel in Bitwarden of een andere wachtwoordbeheerder om deze kluis op een nieuw apparaat te herstellen.
 vault-recovery-key-create = Sleutel maken
@@ -680,12 +675,6 @@ setup-install-homebrew = Installeer Homebrew + { $name }
 setup-run-install = Voer installatiecommando uit
 setup-auto-reload = Vmux voert dit uit in een terminal en herlaadt wanneer { $command } klaar is.
 
-debug-title = Debug
-debug-auto-update = Automatisch bijwerken
-debug-simulate-update = Beschikbare update simuleren
-debug-simulate-download = Download simuleren
-debug-clear-update = Update wissen
-debug-trigger-restart = Herstart activeren
 
 command-manage-spaces = Spaces beheren…
 command-pane-stack-location = paneel { $pane } / stack { $stack }

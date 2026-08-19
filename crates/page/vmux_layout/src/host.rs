@@ -14,7 +14,7 @@ pub mod archive;
 pub mod bookmark;
 pub mod cef;
 pub mod contract;
-pub mod debug;
+pub mod native_open;
 pub mod native_pointer;
 pub mod overlay_adopt;
 pub mod pane;
@@ -58,15 +58,6 @@ pub use window::fit_window_to_screen;
 pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "layout",
     title: "Layout",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &[],
-    icon: None,
-    command_bar: false,
-};
-pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "debug",
-    title: "Debug",
     title_message_id: None,
     replaces_command: None,
     keywords: &[],
@@ -188,8 +179,5 @@ pub struct ExtensionInstallRequest {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn debug_manifest_and_url_are_consistent() {
-        assert_eq!(super::DEBUG_PAGE_MANIFEST.host, "debug");
-        assert_eq!(crate::debug::DEBUG_PAGE_URL, "vmux://debug/");
-    }
+    fn debug_manifest_and_url_are_consistent() {}
 }

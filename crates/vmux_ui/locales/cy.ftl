@@ -68,11 +68,6 @@ tools-result-linked = Mae { $name } wedi’i gysylltu
 tools-result-unlinked = Mae { $name } wedi’i ddatgysylltu
 vault-title = Vault
 vault-encrypted = Wedi'i amgryptio o'r dechrau i'r diwedd
-vault-passkey = Paskey
-vault-passkey-description = Datgloi'r Vault hwn ar ddyfeisiau eraill heb gyfrinair.
-vault-passkey-add = Ychwanegu cyfrinair
-vault-passkey-unlock = Datgloi
-vault-passkey-provider-unsupported = Nid yw'r darparwr cyfrinair hwn yn cefnogi datgloi Vault wedi'i amgryptio eto.
 vault-recovery-key = Allwedd Adfer
 vault-recovery-key-description = Arbedwch un allwedd yn Bitwarden neu reolwr cyfrinair arall i adennill y Vault hwn ar ddyfais newydd.
 vault-recovery-key-create = Creu allwedd
@@ -680,12 +675,6 @@ setup-install-homebrew = Gosod Homebrew + { $name }
 setup-run-install = Rhedeg gorchymyn gosod
 setup-auto-reload = Mae Vmux yn ei redeg mewn terfynell ac yn ail-lwytho pan fydd { $command } yn barod.
 
-debug-title = Dadfygio
-debug-auto-update = Diweddaru’n awtomatig
-debug-simulate-update = Efelychu diweddariad ar gael
-debug-simulate-download = Efelychu lawrlwythiad
-debug-clear-update = Clirio diweddariad
-debug-trigger-restart = Sbarduno ailgychwyn
 
 command-manage-spaces = Rheoli mannau…
 command-pane-stack-location = cwarel { $pane } / pentwr { $stack }

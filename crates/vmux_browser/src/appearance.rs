@@ -18,13 +18,40 @@ pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_webview_ready_send_theme).add_systems(
-            Update,
-            sync_appearance_to_cef
-                .before(CefSystems::CreateAndResize)
-                .run_if(resource_changed::<AppSettings>),
-        );
+        app.add_observer(on_webview_ready_send_theme)
+            .add_systems(
+                Update,
+                sync_appearance_to_cef
+                    .before(CefSystems::CreateAndResize)
+                    .run_if(resource_changed::<AppSettings>),
+            )
+            .add_systems(Update, reassert_color_scheme_on_navigation);
     }
+}
+
+/// Tell CEF the colour scheme again whenever a page commits a navigation.
+///
+/// A pane's `prefers-color-scheme` is not a setting CEF holds but a media feature emulated over the
+/// DevTools protocol, applied to a browser once when it is created. A navigation that crosses into
+/// another renderer leaves the emulation behind with the old one, and the page that arrives asks the
+/// platform instead — which on a dark desktop answers dark, whatever the app is set to.
+///
+/// Re-asserting costs one DevTools call per live browser on a navigation nobody sees the cost of,
+/// and it also covers the startup ordering: the setting is pushed once, on the frame it changes, and
+/// a browser created before that push would otherwise keep the default for its whole life.
+fn reassert_color_scheme_on_navigation(
+    mut committed: MessageReader<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
+    settings: Res<AppSettings>,
+    mut browsers: Option<NonSendMut<Browsers>>,
+) {
+    if committed.read().count() == 0 {
+        return;
+    }
+    let Some(browsers) = browsers.as_deref_mut() else {
+        return;
+    };
+
+    browsers.set_color_scheme(map_color_scheme(settings.appearance.mode));
 }
 
 fn on_webview_ready_send_theme(

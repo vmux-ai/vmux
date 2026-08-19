@@ -68,11 +68,6 @@ tools-result-linked = Nampifandraisina i { $name }
 tools-result-unlinked = Tapaka ny rohin’i { $name }
 vault-title = Vault
 vault-encrypted = Voafina tanteraka
-vault-passkey = Passkey
-vault-passkey-description = Sokafy ity Vault ity amin'ny fitaovana hafa tsy misy tenimiafina.
-vault-passkey-add = Ampio passkey
-vault-passkey-unlock = hamaha
-vault-passkey-provider-unsupported = Ity mpanome passkey ity dia tsy mbola manohana ny fanokafana Vault voahafina.
 vault-recovery-key = Fanalahidy fanarenana
 vault-recovery-key-description = Tehirizo fanalahidy iray ao amin'ny Bitwarden na mpitantana tenimiafina hafa mba hamerenana ity Vault ity amin'ny fitaovana vaovao.
 vault-recovery-key-create = Mamorona fanalahidy
@@ -680,12 +675,6 @@ setup-install-homebrew = Apetraho Homebrew + { $name }
 setup-run-install = Alefaso baiko fametrahana
 setup-auto-reload = Alefan’i Vmux ao anaty terminal izany ary averiny ampidirina rehefa vonona ny { $command }.
 
-debug-title = Debug
-debug-auto-update = Fanavaozana mandeha ho azy
-debug-simulate-update = Andramo hoe misy fanavaozana
-debug-simulate-download = Andramo fisintomana
-debug-clear-update = Diovy fanavaozana
-debug-trigger-restart = Alefaso famerenana manomboka
 
 command-manage-spaces = Tantano ny habaka…
 command-pane-stack-location = tontonana { $pane } / antontany { $stack }

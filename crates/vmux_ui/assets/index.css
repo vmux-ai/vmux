@@ -1,0 +1,249 @@
+@import "./theme.css";
+@import "tailwindcss";
+@source "../src";
+@source "../../vmux_browser/src";
+@source "../../page/vmux_agent/src";
+@source "../../page/vmux_chat/src";
+@source "../../page/vmux_command/src";
+@source "../../page/vmux_editor/src";
+@source "../../page/vmux_history/src";
+@source "../../page/vmux_layout/src";
+@source "../../host/vmux_service/src";
+@source "../../page/vmux_setting/src";
+@source "../../page/vmux_space/src";
+@source "../../page/vmux_team/src";
+@source "../../page/vmux_terminal/src";
+@source ".";
+
+@theme {
+  --font-mono: ui-monospace, "JetBrainsMono NF", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-BoldItalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --term-fg: rgb(205, 214, 244);
+    --term-bg: rgb(30, 30, 46);
+    --term-cursor: rgb(245, 224, 220);
+    --ansi-0: rgb(69, 71, 90);
+    --ansi-1: rgb(243, 139, 168);
+    --ansi-2: rgb(166, 227, 161);
+    --ansi-3: rgb(249, 226, 175);
+    --ansi-4: rgb(137, 180, 250);
+    --ansi-5: rgb(245, 194, 231);
+    --ansi-6: rgb(148, 226, 213);
+    --ansi-7: rgb(186, 194, 222);
+    --ansi-8: rgb(88, 91, 112);
+    --ansi-9: rgb(243, 139, 168);
+    --ansi-10: rgb(166, 227, 161);
+    --ansi-11: rgb(249, 226, 175);
+    --ansi-12: rgb(137, 180, 250);
+    --ansi-13: rgb(245, 194, 231);
+    --ansi-14: rgb(148, 226, 213);
+    --ansi-15: rgb(166, 173, 200);
+  }
+
+  html {
+    height: 100%;
+    color-scheme: light dark;
+  }
+
+  html,
+  body {
+    @apply m-0 h-full min-h-screen w-full overflow-hidden bg-transparent p-0 text-foreground antialiased;
+    max-width: 100%;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  #main {
+    flex: 1 1 0%;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #main > * {
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+}
+
+@keyframes loading-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.pane-loading-ring {
+  --ring-color: var(--ring);
+  box-shadow:
+    0 0 0 2px var(--ring-color),
+    0 0 8px 0 color-mix(in oklch, var(--ring-color) 40%, transparent);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 30%,
+    color-mix(in oklch, var(--ring-color) 60%, transparent) 50%,
+    transparent 70%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes update-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@keyframes file-mode-note-enter {
+  from {
+    opacity: 0.35;
+    transform: translateY(0.35rem) scale(0.997);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes file-mode-editor-enter {
+  from {
+    opacity: 0.35;
+    transform: translateY(-0.25rem) scale(0.997);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.update-progress-indeterminate {
+  animation: update-indeterminate 1.2s ease-in-out infinite;
+}
+
+:root {
+  interpolate-size: allow-keywords;
+}
+
+@layer components {
+  .file-mode-note-enter {
+    animation: file-mode-note-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transform-origin: top center;
+  }
+
+  .file-mode-editor-enter {
+    animation: file-mode-editor-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transform-origin: top center;
+  }
+
+  .disclosure {
+    transition:
+      background-color 220ms ease,
+      box-shadow 220ms ease;
+  }
+
+  .disclosure::details-content {
+    block-size: 0;
+    overflow: clip;
+    opacity: 0;
+    transform: translateY(-0.25rem) scale(0.985);
+    transform-origin: top center;
+    transition:
+      block-size 220ms cubic-bezier(0.4, 0, 0.2, 1),
+      content-visibility 220ms allow-discrete,
+      opacity 160ms ease,
+      transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition-behavior: allow-discrete;
+  }
+
+  .disclosure[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .disclosure-icon::before,
+  .disclosure-icon::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0.625rem;
+    height: 1px;
+    border-radius: 9999px;
+    background: currentColor;
+    transform: translate(-50%, -50%);
+    transform-origin: center;
+    transition:
+      transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 180ms ease;
+  }
+
+  .disclosure-icon::after {
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+
+  .disclosure[open] > summary .disclosure-icon::before {
+    transform: translate(-50%, -50%) rotate(180deg);
+  }
+
+  .disclosure[open] > summary .disclosure-icon::after {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(180deg) scaleX(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .file-mode-note-enter,
+    .file-mode-editor-enter,
+    .disclosure,
+    .disclosure::details-content,
+    .disclosure-icon::before,
+    .disclosure-icon::after {
+      animation: none;
+      transition: none;
+    }
+  }
+}

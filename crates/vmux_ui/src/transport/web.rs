@@ -22,7 +22,7 @@ use web_sys::window;
 use crate::transport::Host;
 use crate::transport::bin_ipc_envelope::BinIpcEnvelope;
 use crate::transport::event_listener::EventListenerError;
-use crate::transport::{BytesListener, HostPayload, PageHost};
+use crate::transport::{BytesListener, HostPayload, PageHost, TextOffsetAnswer};
 
 impl Host {
     /// The injected bridge, assumed when no host installs one — which is every desktop page.
@@ -120,6 +120,74 @@ impl PageHost for WebHost {
         let _ = listen_fn.call2(&bridge.0, &JsValue::from_str(id), cb);
         closure.forget();
         Ok(())
+    }
+
+    /// Both engines that inject a bridge do it from the process holding the keymap.
+    fn resolves_keys(&self) -> bool {
+        true
+    }
+
+    fn reveal_first_rendered(&self, element_ids: &[&str], centered: bool) {
+        let Some(document) = window().and_then(|window| window.document()) else {
+            return;
+        };
+        for id in element_ids {
+            let Some(element) = document.get_element_by_id(id) else {
+                continue;
+            };
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(if centered {
+                web_sys::ScrollLogicalPosition::Center
+            } else {
+                web_sys::ScrollLogicalPosition::Nearest
+            });
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+
+            return;
+        }
+    }
+
+    /// Already known by the time it is asked, unlike the hosts that have to send the question to a
+    /// page — so the future is resolved before anything awaits it.
+    fn text_offset_at(&self, element_id: &str, x: f64, y: f64) -> TextOffsetAnswer {
+        Box::pin(std::future::ready(Self::offset_in(element_id, x, y)))
+    }
+}
+
+impl WebHost {
+    /// Which character of an element's text a point falls on, counted in code points.
+    ///
+    /// The same walk the wry shim does, and it has to stay the same: a page switching hosts must
+    /// not switch answers. The engine reports the caret against whichever descendant text node
+    /// holds it, so the offset is taken over the whole element's contents rather than that node's.
+    fn offset_in(element_id: &str, x: f64, y: f64) -> Option<u32> {
+        let document = window()?.document()?;
+        let element = document.get_element_by_id(element_id)?;
+        let length = element.text_content().unwrap_or_default().chars().count();
+        let contents: &web_sys::Node = element.as_ref();
+
+        if let Some(caret) = document.caret_position_from_point(x as f32, y as f32)
+            && let Some(offset_node) = caret.offset_node()
+            && contents.contains(Some(&offset_node))
+            && let Ok(range) = document.create_range()
+            && range.select_node_contents(contents).is_ok()
+            && range.set_end(&offset_node, caret.offset()).is_ok()
+            && let Ok(fragment) = range.clone_contents()
+        {
+            let counted = fragment.text_content().unwrap_or_default().chars().count();
+
+            return Some(counted.min(length) as u32);
+        }
+
+        // The point missed the text: past the end of a short line, or over the padding beside it.
+        // How far along the box it sits is the best answer left, and only an estimate.
+        let rect = element.get_bounding_client_rect();
+        if rect.width() <= 0.0 {
+            return Some(0);
+        }
+        let ratio = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+
+        Some((ratio * length as f64).round() as u32)
     }
 }
 

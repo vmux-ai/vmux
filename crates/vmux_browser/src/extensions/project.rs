@@ -231,7 +231,9 @@ fn page_candidate(world: &World, entity: Entity) -> Option<PageCandidate> {
             .get::<LastActivatedAt>(entity)
             .map_or(0, |activated| activated.0),
         url: metadata.url.clone(),
-        title: metadata.title.clone(),
+        title: metadata
+            .title_with(world.get::<vmux_core::PageIdentity>(entity))
+            .to_string(),
         status: if loading { "loading" } else { "complete" }.into(),
     })
 }

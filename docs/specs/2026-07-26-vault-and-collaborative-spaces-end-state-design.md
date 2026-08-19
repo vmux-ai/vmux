@@ -1,5 +1,14 @@
 # Vault and collaborative Spaces end-state design
 
+> **Superseded in part, 2026-08-19.** Passkey unlock was removed. It needed a real web origin for
+> the WebAuthn rpId, which the desktop only had because the patched CEF fabricated
+> `https://vault.vmux.ai` — a name with no DNS record. Once every page ran natively there was no
+> origin to fabricate, and reinstating it means standing that subdomain up for real plus an
+> `associated-domains` entitlement, or moving the rpId to `vmux.ai` and retiring the credentials
+> already issued. Nobody had registered one, so it was removed rather than carried. Unlock keeps
+> the system key store and the Recovery Key, which involves no WebAuthn at all. What follows
+> describes the design as it stood.
+
 ## Summary
 
 Vmux has two related encrypted systems:

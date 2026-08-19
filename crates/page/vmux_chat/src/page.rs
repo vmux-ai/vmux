@@ -1,6 +1,6 @@
 //! The chat page itself: one conversation's transcript, approvals and composer.
 //!
-//! Gated once here rather than per module, so what ships to wasm and iOS is this file and the
+//! Gated once here rather than per module, so what ships to a `ui` target is this file and the
 //! directory beside it. The desktop half that feeds it lives outside this crate, and speaks to
 //! it only through the bin-ipc payloads in [`crate::event`].
 
@@ -12,20 +12,16 @@ use self::composer::ChatDock;
 use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
-use crate::event::ChatAttachment;
 use crate::transcript::MD_CSS;
 use dioxus::prelude::*;
-#[cfg(web)]
-use vmux_terminal::matrix_rain::MatrixRain;
-
 /// One agent conversation: its transcript, whatever it is waiting on, and the composer.
+///
+/// No props. Which conversation this is comes from the view's own metadata, so the page has the
+/// same shape whether a host built its `VirtualDom` or a bundle mounted it — and a native page is
+/// a `fn() -> Element`, with nowhere for a prop to come from.
 #[component]
-pub fn Page(
-    #[props(default)] agent_override: Option<String>,
-    #[props(default)] transition_prompt: Option<String>,
-    #[props(default)] transition_attachments: Option<Vec<ChatAttachment>>,
-) -> Element {
-    let chat = use_chat(agent_override, transition_prompt, transition_attachments);
+pub fn Page() -> Element {
+    let chat = use_chat();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
@@ -55,17 +51,6 @@ pub fn Page(
 ///
 /// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
 /// desktop act anyway, so a native host renders nothing rather than an approximation.
-#[cfg(web)]
-#[component]
-fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
-    rsx! {
-        div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
-            MatrixRain { accent_rgb, words: vec![title] }
-        }
-    }
-}
-
-#[cfg(not(web))]
 #[component]
 fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     // The prop names have to match the CEF impl, since callers name them.
@@ -80,5 +65,4 @@ mod error;
 mod keys;
 mod scroll;
 mod state;
-mod tab;
 mod transcript;

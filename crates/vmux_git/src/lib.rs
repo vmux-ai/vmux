@@ -6,7 +6,7 @@ pub mod view;
 
 pub const FILES_HOST: &str = "files";
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod ui;
 
 #[cfg(host)]

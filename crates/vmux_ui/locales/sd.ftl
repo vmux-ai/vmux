@@ -68,11 +68,6 @@ tools-result-linked = { $name } ڳنڍيو ويو
 tools-result-unlinked = { $name } جو ڳانڍاپو هٽايو ويو
 vault-title = Vault
 vault-encrypted = شروع کان آخر تائين انڪرپٽ ٿيل
-vault-passkey = پاسڪي
-vault-passkey-description = ھن والٽ کي ان لاڪ ڪريو ٻين ڊوائيسز تي بغير پاسورڊ جي.
-vault-passkey-add = پاسڪي شامل ڪريو
-vault-passkey-unlock = لاڪ
-vault-passkey-provider-unsupported = هي پاسڪي فراهم ڪندڙ اڃا تائين انڪريپٽ ٿيل والٽ انلاڪ کي سپورٽ نٿو ڪري.
 vault-recovery-key = بحالي جي چاٻي
 vault-recovery-key-description = هن والٽ کي نئين ڊوائيس تي بحال ڪرڻ لاءِ Bitwarden يا ٻئي پاسورڊ مئنيجر ۾ هڪ چيڪ محفوظ ڪريو.
 vault-recovery-key-create = چيڪ ٺاهيو
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } انسٽال ڪريو
 setup-run-install = انسٽال ڪمانڊ هلايو
 setup-auto-reload = Vmux ان کي ٽرمينل ۾ هلائيندو ۽ { $command } تيار ٿيڻ تي ٻيهر لوڊ ڪندو.
 
-debug-title = ڊيبگ
-debug-auto-update = خودڪار اپڊيٽ
-debug-simulate-update = اپڊيٽ موجود هجڻ جي نقالي ڪريو
-debug-simulate-download = ڊائونلوڊ جي نقالي ڪريو
-debug-clear-update = اپڊيٽ صاف ڪريو
-debug-trigger-restart = ٻيهر شروع ڪرائيو
 
 command-manage-spaces = اسپيسز سنڀاليو…
 command-pane-stack-location = پين { $pane } / اسٽيڪ { $stack }

@@ -68,11 +68,6 @@ tools-result-linked = S’ha enllaçat { $name }
 tools-result-unlinked = S’ha desenllaçat { $name }
 vault-title = Vault
 vault-encrypted = Xifratge d'extrem a extrem
-vault-passkey = Clau d'accés
-vault-passkey-description = Desbloquegeu aquest Vault en altres dispositius sense contrasenya.
-vault-passkey-add = Afegeix la clau de pas
-vault-passkey-unlock = Desbloqueja
-vault-passkey-provider-unsupported = Aquest proveïdor de claus de contrasenya encara no admet el desbloqueig encriptat de Vault.
 vault-recovery-key = Clau de recuperació
 vault-recovery-key-description = Deseu una clau a Bitwarden o en un altre gestor de contrasenyes per recuperar aquest Vault en un dispositiu nou.
 vault-recovery-key-create = Crea la clau
@@ -680,12 +675,6 @@ setup-install-homebrew = Instal·la Homebrew + { $name }
 setup-run-install = Executa l’ordre d’instal·lació
 setup-auto-reload = Vmux l’executa en un terminal i es recarrega quan { $command } està a punt.
 
-debug-title = Depuració
-debug-auto-update = Actualització automàtica
-debug-simulate-update = Simula que hi ha una actualització disponible
-debug-simulate-download = Simula la baixada
-debug-clear-update = Esborra l’actualització
-debug-trigger-restart = Activa el reinici
 
 command-manage-spaces = Gestiona els espais…
 command-pane-stack-location = subfinestra { $pane } / pila { $stack }

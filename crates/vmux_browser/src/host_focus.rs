@@ -70,6 +70,12 @@ pub enum HostFocusIntent {
     /// so keys reach a terminal by way of winit and Bevy; the chrome is a DOM that must receive
     /// them natively, and routing them through winit sends them to a CEF browser that is not there.
     LayoutView,
+    /// Active page runs in this process and paints into a `WKWebView` of its own.
+    ///
+    /// Distinct from [`Self::Windowed`] for the reason that makes this whole variant necessary:
+    /// `Windowed` is applied through `Browsers::set_windowed_focus`, which asks CEF to focus a
+    /// browser it has never heard of and silently does nothing. The keyboard would land nowhere.
+    NativePane(Entity),
     /// Active page is a terminal, or there is none — the winit host window must own first-responder.
     #[default]
     WinitHost,
@@ -78,10 +84,16 @@ pub enum HostFocusIntent {
 pub(crate) fn host_focus_intent(
     active_webview: Option<Entity>,
     is_terminal: bool,
+    is_native: bool,
 ) -> HostFocusIntent {
     match active_webview {
-        Some(webview) if !is_terminal => HostFocusIntent::Windowed(webview),
-        _ => HostFocusIntent::WinitHost,
+        Some(webview) if is_terminal => {
+            let _ = webview;
+            HostFocusIntent::WinitHost
+        }
+        Some(webview) if is_native => HostFocusIntent::NativePane(webview),
+        Some(webview) => HostFocusIntent::Windowed(webview),
+        None => HostFocusIntent::WinitHost,
     }
 }
 
@@ -102,9 +114,10 @@ pub(crate) fn compute_host_focus_intent(
         With<WindowOverlay>,
     >,
     layout_keyboard_q: Query<(), crate::present::LayoutKeyboardHost>,
+    native_q: Query<(), With<vmux_core::host::page::HostsPage>>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if let Some((modal, windowed)) = modal_q.iter().find_map(
+    let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
         |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
             OverlayState::of(
                 node.display,
@@ -113,14 +126,21 @@ pub(crate) fn compute_host_focus_intent(
                 shown_inline,
             )
             .owns_input()
-            .then_some((entity, windowed))
+            .then_some((entity, windowed, shown_inline))
         },
     ) {
-        // A windowed command bar hosts a real DOM text field, so Chromium must receive the
-        // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no DOM
-        // key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor before the
-        // event reaches the view, so dismiss still works while the bar holds first responder.
-        if windowed {
+        if shown_inline {
+            // The overlay says it is open, but its own webview is not what is drawn — the layout
+            // page renders it. Reading `windowed` here and focusing that webview hands the
+            // keyboard to a surface nobody can see, and takes the responder off the one that is
+            // showing the field.
+            HostFocusIntent::LayoutView
+        } else if windowed {
+            // A windowed command bar hosts a real DOM text field, so Chromium must receive the
+            // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no
+            // DOM key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor
+            // before the event reaches the view, so dismiss still works while the bar holds first
+            // responder.
             HostFocusIntent::Windowed(modal)
         } else {
             HostFocusIntent::WinitHost
@@ -137,7 +157,8 @@ pub(crate) fn compute_host_focus_intent(
             })
         });
         let is_terminal = active.is_some_and(|webview| terminal_q.contains(webview));
-        host_focus_intent(active, is_terminal)
+        let is_native = active.is_some_and(|webview| native_q.contains(webview));
+        host_focus_intent(active, is_terminal, is_native)
     };
     set_intent(&mut intent, next);
 }
@@ -203,6 +224,7 @@ pub(crate) fn apply_windowed_host_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_command::command_bar::panel::CommandBarPanelActive;
     use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
     use vmux_layout::cef::LayoutCef;
 
@@ -383,6 +405,33 @@ mod tests {
         });
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::LayoutView);
+    }
+
+    #[test]
+    fn an_overlay_the_layout_page_draws_leaves_the_caret_with_the_layout_view() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((LayoutCef, CommandBarPanelActive));
+        // The overlay's own webview: open, windowed, and drawn nowhere.
+        app.world_mut().spawn((
+            WindowOverlay,
+            Node::default(),
+            Visibility::Hidden,
+            WebviewWindowed,
+            vmux_core::overlay::OverlayShownInline,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+        app.update();
+
+        assert_eq!(
+            intent(&app),
+            HostFocusIntent::LayoutView,
+            "focusing the overlay's own webview takes the responder off the surface showing the field"
+        );
     }
 
     #[test]

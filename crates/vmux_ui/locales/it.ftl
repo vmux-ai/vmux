@@ -68,11 +68,6 @@ tools-result-linked = { $name } collegato
 tools-result-unlinked = { $name } scollegato
 vault-title = Vault
 vault-encrypted = Crittografia end-to-end
-vault-passkey = Chiave di accesso
-vault-passkey-description = Sblocca questa Cassaforte su altri dispositivi senza password.
-vault-passkey-add = Aggiungi chiave di accesso
-vault-passkey-unlock = Sbloccare
-vault-passkey-provider-unsupported = Questo fornitore di passkey non supporta ancora lo sblocco crittografato del Vault.
 vault-recovery-key = Chiave di ripristino
 vault-recovery-key-description = Salva una chiave in Bitwarden o in un altro gestore di password per ripristinare questo Vault su un nuovo dispositivo.
 vault-recovery-key-create = Crea chiave
@@ -680,12 +675,6 @@ setup-install-homebrew = Installa Homebrew + { $name }
 setup-run-install = Esegui comando di installazione
 setup-auto-reload = Vmux lo esegue in un terminale e ricarica quando { $command } è pronto.
 
-debug-title = Debug
-debug-auto-update = Aggiornamento automatico
-debug-simulate-update = Simula aggiornamento disponibile
-debug-simulate-download = Simula download
-debug-clear-update = Cancella aggiornamento
-debug-trigger-restart = Attiva riavvio
 
 command-manage-spaces = Gestisci spazi…
 command-pane-stack-location = pannello { $pane } / pila { $stack }

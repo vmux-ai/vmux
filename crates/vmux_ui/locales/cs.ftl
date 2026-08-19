@@ -68,11 +68,6 @@ tools-result-linked = { $name } byl propojen
 tools-result-unlinked = { $name } byl odpojen
 vault-title = Vault
 vault-encrypted = End-to-end šifrování
-vault-passkey = Přístupový klíč
-vault-passkey-description = Odemkněte tento trezor na jiných zařízeních bez hesla.
-vault-passkey-add = Přidat přístupový klíč
-vault-passkey-unlock = Odemknout
-vault-passkey-provider-unsupported = Tento poskytovatel přístupového klíče zatím nepodporuje šifrované odemykání trezoru.
 vault-recovery-key = Obnovovací klíč
 vault-recovery-key-description = Uložte jeden klíč do Bitwardenu nebo jiného správce hesel a obnovte tento trezor na novém zařízení.
 vault-recovery-key-create = Vytvořit klíč
@@ -680,12 +675,6 @@ setup-install-homebrew = Nainstalovat Homebrew + { $name }
 setup-run-install = Spustit instalační příkaz
 setup-auto-reload = Vmux ho spustí v terminálu a po připravení { $command } stránku znovu načte.
 
-debug-title = Ladění
-debug-auto-update = Automatické aktualizace
-debug-simulate-update = Simulovat dostupnou aktualizaci
-debug-simulate-download = Simulovat stažení
-debug-clear-update = Vymazat aktualizaci
-debug-trigger-restart = Spustit restart
 
 command-manage-spaces = Spravovat prostory…
 command-pane-stack-location = panel { $pane } / vrstva { $stack }

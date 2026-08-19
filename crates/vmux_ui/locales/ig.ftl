@@ -68,11 +68,6 @@ tools-result-linked = Ejikọọla { $name }
 tools-result-unlinked = Ekwupụla { $name }
 vault-title = Vault
 vault-encrypted = Ezoro ezo site n'isi ruo n'isi
-vault-passkey = Akara mbanye
-vault-passkey-description = Mepee Vault a na ngwaọrụ ndị ọzọ na-enweghị paswọọdụ.
-vault-passkey-add = Tinye igodo mbanye
-vault-passkey-unlock = Mepee
-vault-passkey-provider-unsupported = Onye na-eweta paswọọdụ akwadoghị mkpọghe Vault ezoro ezo.
 vault-recovery-key = Igodo mgbake
 vault-recovery-key-description = Chekwaa otu igodo na Bitwarden ma ọ bụ njikwa paswọọdụ ọzọ iji nwetaghachi Vault a na ngwaọrụ ọhụrụ.
 vault-recovery-key-create = Mepụta igodo
@@ -680,12 +675,6 @@ setup-install-homebrew = Tinye Homebrew + { $name }
 setup-run-install = Gbaa iwu ntinye
 setup-auto-reload = Vmux na-agba ya na terminal ma na-ebubata ọzọ mgbe { $command } dị njikere.
 
-debug-title = Debug
-debug-auto-update = Mmelite akpaka
-debug-simulate-update = Mee ka mmelite dị ka ọ dị
-debug-simulate-download = Mee ka nbudata dị ka ọ na-eme
-debug-clear-update = Kpochapụ mmelite
-debug-trigger-restart = Kpalite mmalitegharị
 
 command-manage-spaces = Jikwaa oghere…
 command-pane-stack-location = pane { $pane } / stack { $stack }

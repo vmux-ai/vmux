@@ -68,11 +68,6 @@ tools-result-linked = { $name } සම්බන්ධ කරන ලදී
 tools-result-unlinked = { $name } සම්බන්ධතාව ඉවත් කරන ලදී
 vault-title = Vault
 vault-encrypted = අන්තයෙන් අන්තයට සංකේතනය කර ඇත
-vault-passkey = පාස්කී
-vault-passkey-description = මුරපදයක් නොමැතිව වෙනත් උපාංගවල මෙම සුරක්ෂිතාගාරය අගුළු හරින්න.
-vault-passkey-add = මුරපදය එක් කරන්න
-vault-passkey-unlock = අගුළු හරින්න
-vault-passkey-provider-unsupported = මෙම මුරපදය සපයන්නා තවමත් සංකේතාත්මක වෝල්ට් අගුලු හැරීමට සහාය නොදක්වයි.
 vault-recovery-key = ප්‍රතිසාධන යතුර
 vault-recovery-key-description = නව උපාංගයක මෙම සුරක්ෂිතාගාරය ප්‍රතිසාධනය කිරීමට එක් යතුරක් Bitwarden හෝ වෙනත් මුරපද කළමනාකරුවෙකු තුළ සුරකින්න.
 vault-recovery-key-create = යතුර සාදන්න
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ස්ථාපනය කරන්
 setup-run-install = ස්ථාපන විධානය ධාවනය කරන්න
 setup-auto-reload = Vmux එය ටර්මිනලයක ධාවනය කර, { $command } සූදානම් වූ විට නැවත පූරණය කරයි.
 
-debug-title = දෝෂ සොයන්න
-debug-auto-update = ස්වයංක්‍රීය යාවත්කාලීනය
-debug-simulate-update = යාවත්කාලීනයක් ලබා ගත හැකි බව අනුකරණය කරන්න
-debug-simulate-download = බාගැනීම අනුකරණය කරන්න
-debug-clear-update = යාවත්කාලීනය හිස් කරන්න
-debug-trigger-restart = නැවත ආරම්භ කිරීම ක්‍රියාත්මක කරන්න
 
 command-manage-spaces = අවකාශ කළමනාකරණය කරන්න…
 command-pane-stack-location = පැනලය { $pane } / ස්ටැක් { $stack }

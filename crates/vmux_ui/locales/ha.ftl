@@ -68,11 +68,6 @@ tools-result-linked = An haɗa { $name }
 tools-result-unlinked = An cire haɗin { $name }
 vault-title = Vault
 vault-encrypted = An ɓoye daga farko zuwa ƙarshe
-vault-passkey = Lambar wucewa
-vault-passkey-description = Buɗe wannan Vault akan wasu na'urori ba tare da kalmar sirri ba.
-vault-passkey-add = Ƙara maɓallin wucewa
-vault-passkey-unlock = Buɗe
-vault-passkey-provider-unsupported = Wannan mai bada maɓalli ba ya goyan bayan buɗewar Vault ɗin da aka ɓoye tukuna.
 vault-recovery-key = Maɓallin farfadowa da na'ura
 vault-recovery-key-description = Ajiye maɓalli ɗaya a cikin Bitwarden ko wani manajan kalmar sirri don dawo da wannan Vault akan sabuwar na'ura.
 vault-recovery-key-create = Ƙirƙiri maɓalli
@@ -680,12 +675,6 @@ setup-install-homebrew = Girka Homebrew + { $name }
 setup-run-install = Gudanar da umarnin girka
 setup-auto-reload = Vmux yana gudanar da shi a tashar umarni kuma yana sake loda idan { $command } ya shirya.
 
-debug-title = Gyaran kurakurai
-debug-auto-update = Sabunta kai tsaye
-debug-simulate-update = Kwaikwayi akwai sabuntawa
-debug-simulate-download = Kwaikwayi zazzagewa
-debug-clear-update = Share sabuntawa
-debug-trigger-restart = Tayar da sake farawa
 
 command-manage-spaces = Sarrafa sarari…
 command-pane-stack-location = fanni { $pane } / tari { $stack }

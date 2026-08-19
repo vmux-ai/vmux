@@ -68,11 +68,6 @@ tools-result-linked = { $name } ligita
 tools-result-unlinked = { $name } malligita
 vault-title = Vault
 vault-encrypted = Ĉifrita de komenco ĝis fino
-vault-passkey = Pasŝlosilo
-vault-passkey-description = Malŝlosu ĉi tiun Trezorejon sur aliaj aparatoj sen pasvorto.
-vault-passkey-add = Aldonu pasŝlosilon
-vault-passkey-unlock = Malŝlosu
-vault-passkey-provider-unsupported = Ĉi tiu pasilŝlosilprovizanto ankoraŭ ne subtenas ĉifritan Vault-malŝlosadon.
 vault-recovery-key = Reakira Ŝlosilo
 vault-recovery-key-description = Konservu unu ŝlosilon en Bitwarden aŭ en alia pasvorta administranto por reakiri ĉi tiun Trezorejon sur nova aparato.
 vault-recovery-key-create = Krei ŝlosilon
@@ -680,12 +675,6 @@ setup-install-homebrew = Instali Homebrew + { $name }
 setup-run-install = Ruli instal-komandon
 setup-auto-reload = Vmux rulas ĝin en terminalo kaj reŝargas kiam { $command } pretas.
 
-debug-title = Sencimigo
-debug-auto-update = Aŭtomata ĝisdatigo
-debug-simulate-update = Simuli disponeblan ĝisdatigon
-debug-simulate-download = Simuli elŝuton
-debug-clear-update = Viŝi ĝisdatigon
-debug-trigger-restart = Ekigi relanĉon
 
 command-manage-spaces = Administri spacojn…
 command-pane-stack-location = panelo { $pane } / stako { $stack }

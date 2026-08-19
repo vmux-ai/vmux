@@ -68,11 +68,6 @@ tools-result-linked = { $name } bağlandı
 tools-result-unlinked = { $name } bağlantısı kaldırıldı
 vault-title = Vault
 vault-encrypted = Uçtan uca şifreli
-vault-passkey = Geçiş anahtarı
-vault-passkey-description = Bu Kasanın kilidini diğer cihazlarda şifre olmadan açın.
-vault-passkey-add = Şifre anahtarı ekle
-vault-passkey-unlock = Kilidi aç
-vault-passkey-provider-unsupported = Bu şifre anahtarı sağlayıcısı henüz şifreli Apps Kasası kilidini açmayı desteklemiyor.
 vault-recovery-key = Kurtarma Anahtarı
 vault-recovery-key-description = Bu Kasayı yeni bir cihazda kurtarmak için bir anahtarı Bitwarden'a veya başka bir şifre yöneticisine kaydedin.
 vault-recovery-key-create = Anahtar oluştur
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } yükle
 setup-run-install = Yükleme komutunu çalıştır
 setup-auto-reload = Vmux bunu bir terminalde çalıştırır ve { $command } hazır olduğunda yeniden yükler.
 
-debug-title = Hata ayıklama
-debug-auto-update = Otomatik güncelle
-debug-simulate-update = Güncelleme varmış gibi simüle et
-debug-simulate-download = İndirmeyi simüle et
-debug-clear-update = Güncellemeyi temizle
-debug-trigger-restart = Yeniden başlatmayı tetikle
 
 command-manage-spaces = Alanları yönet…
 command-pane-stack-location = bölme { $pane } / yığın { $stack }

@@ -68,11 +68,6 @@ tools-result-linked = Đã liên kết { $name }
 tools-result-unlinked = Đã hủy liên kết { $name }
 vault-title = Vault
 vault-encrypted = Được mã hóa đầu cuối
-vault-passkey = Mật mã
-vault-passkey-description = Mở khóa Vault này trên các thiết bị khác mà không cần mật khẩu.
-vault-passkey-add = Thêm mật mã
-vault-passkey-unlock = Mở khóa
-vault-passkey-provider-unsupported = Nhà cung cấp mã khóa này chưa hỗ trợ mở khóa Vault được mã hóa.
 vault-recovery-key = Khóa khôi phục
 vault-recovery-key-description = Lưu một khóa trong Bitwarden hoặc trình quản lý mật khẩu khác để khôi phục Vault này trên thiết bị mới.
 vault-recovery-key-create = Tạo khóa
@@ -680,12 +675,6 @@ setup-install-homebrew = Cài Homebrew + { $name }
 setup-run-install = Chạy lệnh cài đặt
 setup-auto-reload = Vmux chạy lệnh trong terminal và tải lại khi { $command } đã sẵn sàng.
 
-debug-title = Gỡ lỗi
-debug-auto-update = Tự động cập nhật
-debug-simulate-update = Mô phỏng có bản cập nhật
-debug-simulate-download = Mô phỏng tải xuống
-debug-clear-update = Xóa bản cập nhật
-debug-trigger-restart = Kích hoạt khởi động lại
 
 command-manage-spaces = Quản lý các không gian…
 command-pane-stack-location = ô { $pane } / ngăn xếp { $stack }

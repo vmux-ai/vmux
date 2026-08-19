@@ -68,11 +68,6 @@ tools-result-linked = { $name } је повезан
 tools-result-unlinked = Веза са { $name } је прекинута
 vault-title = Vault
 vault-encrypted = Шифровано од краја до краја
-vault-passkey = Пасскеи
-vault-passkey-description = Откључајте овај трезор на другим уређајима без лозинке.
-vault-passkey-add = Додај приступни кључ
-vault-passkey-unlock = Откључај
-vault-passkey-provider-unsupported = Овај добављач приступних кључева још увек не подржава шифровано откључавање трезора.
 vault-recovery-key = Кључ за опоравак
 vault-recovery-key-description = Сачувајте један кључ у Битвардену или другом менаџеру лозинки да бисте опоравили овај трезор на новом уређају.
 vault-recovery-key-create = Креирајте кључ
@@ -680,12 +675,6 @@ setup-install-homebrew = Instaliraj Homebrew + { $name }
 setup-run-install = Pokreni komandu za instalaciju
 setup-auto-reload = Vmux je pokreće u terminalu i ponovo učitava kada { $command } bude spremna.
 
-debug-title = Otklanjanje grešaka
-debug-auto-update = Automatsko ažuriranje
-debug-simulate-update = Simuliraj dostupno ažuriranje
-debug-simulate-download = Simuliraj preuzimanje
-debug-clear-update = Očisti ažuriranje
-debug-trigger-restart = Pokreni ponovno pokretanje
 
 command-manage-spaces = Upravljaj prostorima…
 command-pane-stack-location = okno { $pane } / stek { $stack }

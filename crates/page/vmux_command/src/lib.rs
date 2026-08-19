@@ -6,11 +6,11 @@
 //! a choice lives in the crate that owns the capability, reached through
 //! [`snapshot::Contributions`] — the page never learns what any row is for.
 
-#![cfg_attr(web, allow(non_snake_case))]
+#![cfg_attr(ui, allow(non_snake_case))]
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
-#[cfg(web)]
+#[cfg(ui)]
 pub mod panel;
 
 pub mod event;

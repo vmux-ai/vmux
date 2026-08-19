@@ -68,11 +68,6 @@ tools-result-linked = 已連結 { $name }
 tools-result-unlinked = 已取消連結 { $name }
 vault-title = Vault
 vault-encrypted = 端對端加密
-vault-passkey = 萬能鑰匙
-vault-passkey-description = 無需密碼即可在其他裝置上解鎖此保管庫。
-vault-passkey-add = 新增密鑰
-vault-passkey-unlock = 開鎖
-vault-passkey-provider-unsupported = 此密鑰提供者尚不支援加密的保管庫解鎖。
 vault-recovery-key = 恢復密鑰
 vault-recovery-key-description = 在 Bitwarden 或其他密碼管理器中儲存一個金鑰，以便在新裝置上還原此保管庫。
 vault-recovery-key-create = 建立密鑰
@@ -680,12 +675,6 @@ setup-install-homebrew = 安裝 Homebrew + { $name }
 setup-run-install = 執行安裝命令
 setup-auto-reload = Vmux 會在終端機中執行，並在 { $command } 就緒後重新載入。
 
-debug-title = 偵錯
-debug-auto-update = 自動更新
-debug-simulate-update = 模擬有可用更新
-debug-simulate-download = 模擬下載
-debug-clear-update = 清除更新
-debug-trigger-restart = 觸發重新啟動
 
 command-manage-spaces = 管理空間…
 command-pane-stack-location = 窗格 { $pane } / 堆疊 { $stack }

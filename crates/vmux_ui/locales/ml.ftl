@@ -68,11 +68,6 @@ tools-result-linked = { $name } ബന്ധിപ്പിച്ചു
 tools-result-unlinked = { $name }-ന്റെ ബന്ധം നീക്കി
 vault-title = Vault
 vault-encrypted = എൻഡ്-ടു-എൻഡ് എൻക്രിപ്റ്റ് ചെയ്‌തത്
-vault-passkey = പാസ്കീ
-vault-passkey-description = പാസ്‌വേഡ് ഇല്ലാതെ മറ്റ് ഉപകരണങ്ങളിൽ ഈ വോൾട്ട് അൺലോക്ക് ചെയ്യുക.
-vault-passkey-add = പാസ്കീ ചേർക്കുക
-vault-passkey-unlock = അൺലോക്ക് ചെയ്യുക
-vault-passkey-provider-unsupported = ഈ പാസ്‌കീ ദാതാവ് ഇതുവരെ എൻക്രിപ്റ്റ് ചെയ്ത വോൾട്ട് അൺലോക്കിനെ പിന്തുണയ്ക്കുന്നില്ല.
 vault-recovery-key = വീണ്ടെടുക്കൽ കീ
 vault-recovery-key-description = ഒരു പുതിയ ഉപകരണത്തിൽ ഈ വോൾട്ട് വീണ്ടെടുക്കാൻ ഒരു കീ ബിറ്റ്വാർഡനിൽ അല്ലെങ്കിൽ മറ്റൊരു പാസ്‌വേഡ് മാനേജറിൽ സംരക്ഷിക്കുക.
 vault-recovery-key-create = കീ സൃഷ്ടിക്കുക
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ഇൻസ്റ്റാൾ ചെ
 setup-run-install = ഇൻസ്റ്റാൾ കമാൻഡ് പ്രവർത്തിപ്പിക്കുക
 setup-auto-reload = Vmux ഇത് ടെർമിനലിൽ പ്രവർത്തിപ്പിച്ച് { $command } തയ്യാറാകുമ്പോൾ വീണ്ടും ലോഡ് ചെയ്യും.
 
-debug-title = ഡീബഗ്
-debug-auto-update = സ്വയം അപ്‌ഡേറ്റ്
-debug-simulate-update = അപ്‌ഡേറ്റ് ലഭ്യമാണെന്ന് അനുകരിക്കുക
-debug-simulate-download = ഡൗൺലോഡ് അനുകരിക്കുക
-debug-clear-update = അപ്‌ഡേറ്റ് മായ്ക്കുക
-debug-trigger-restart = പുനരാരംഭം ട്രിഗർ ചെയ്യുക
 
 command-manage-spaces = സ്‌പെയ്‌സുകൾ കൈകാര്യം ചെയ്യുക…
 command-pane-stack-location = പെയിൻ { $pane } / സ്റ്റാക്ക് { $stack }

@@ -7,8 +7,10 @@ use crate::render_model::{
     span_looks_like_suggestion,
 };
 use dioxus::html::Modifiers;
+use dioxus::html::geometry::{ClientPoint, PixelsVector2D, WheelDelta};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
 use vmux_core::input::Unclaimed;
 use vmux_ui::agent_accent::agent_accent;
@@ -16,18 +18,85 @@ use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_key_claim, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
 /// ID for the outermost terminal container div.
 const CONTAINER_ID: &str = "term-container";
-/// ID for the hidden measurement span used to compute character dimensions.
-const MEASURE_ID: &str = "term-measure";
+
+/// How many rows of how many columns the measuring span holds.
+///
+/// Both dimensions come off one element: the width divides out to a character, and the height to a
+/// line box — which is what a single-line span could not give, since its box is the font's content
+/// area and the row pitch is the line height around it.
+const MEASURE_COLS: usize = 80;
+const MEASURE_ROWS: usize = 8;
 
 #[derive(Clone, PartialEq)]
 struct TerminalRowState {
     line: TermLine,
     cursor: Option<TermCursor>,
+}
+
+/// How big a character is and how big the box holding them is.
+///
+/// Two elements answer for this and they answer separately: the container when the pane changes
+/// size, the measuring span when the font finishes loading. Either can arrive first, and neither
+/// is a complete answer, which is why the pty hears nothing until both have.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct Viewport {
+    /// One character: its advance width, and the pitch from one row to the next.
+    cell: (f64, f64),
+    /// The scrolling element's own border box.
+    client: (f64, f64),
+    /// Where that box starts, which is what turns a pointer's coordinates into a cell.
+    origin: (f64, f64),
+}
+
+impl Viewport {
+    /// Which cell a pointer at these viewport coordinates is over.
+    ///
+    /// Rows are counted from the top of the visible box rather than of the scrollback, because
+    /// that is the frame the terminal's own mouse protocol reports in.
+    fn cell_at(&self, at: ClientPoint, padding: f64) -> Option<(u16, u16)> {
+        let (cw, ch) = self.cell;
+        if cw <= 0.0 || ch <= 0.0 {
+            return None;
+        }
+        let col = ((at.x - self.origin.0 - padding) / cw).floor().max(0.0);
+        let row = ((at.y - self.origin.1 - padding) / ch).floor().max(0.0);
+        Some((col as u16, row as u16))
+    }
+
+    fn container_resized(&mut self, client: (f64, f64), padding: f64) {
+        if self.client == client {
+            return;
+        }
+        self.client = client;
+        self.announce(padding);
+    }
+
+    fn cell_measured(&mut self, cell: (f64, f64), padding: f64) {
+        if self.cell == cell {
+            return;
+        }
+        self.cell = cell;
+        self.announce(padding);
+    }
+
+    /// The padding is subtracted from the value the page itself wrote rather than read back off
+    /// the element: it sits on the scrolling child, whose box is the content's height, not the
+    /// viewport's.
+    fn announce(&self, padding: f64) {
+        let (cw, ch) = self.cell;
+        if cw <= 0.0 || ch <= 0.0 || self.client.1 <= 0.0 {
+            return;
+        }
+        let _ = send(&TermResizeEvent {
+            char_width: cw as f32,
+            char_height: ch as f32,
+            viewport_width: (self.client.0 - 2.0 * padding) as f32,
+            viewport_height: (self.client.1 - 2.0 * padding) as f32,
+        });
+    }
 }
 
 fn localized_terminal_title(title: &str) -> String {
@@ -65,7 +134,8 @@ pub fn Page() -> Element {
     let mut service_error = use_signal(String::new);
     let mut loading = use_signal(|| None::<(String, String)>);
     let mut prompt_draft = use_signal(|| (String::new(), false));
-    let client_h = use_signal(|| 0.0f64);
+    let mut viewport = use_signal(Viewport::default);
+    let mut container = use_signal(|| None::<Rc<MountedData>>);
 
     let keys = use_key_claim(Unclaimed::Forwards, move || {
         let mut context = vec!["terminal".to_string()];
@@ -197,10 +267,24 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         let _ = total_rows();
-        let _ = client_h();
-        if following() {
-            pin_scroll_to_bottom();
+        let _ = viewport().client;
+        if !following() {
+            return;
         }
+        spawn(async move {
+            let Some(element) = container.peek().clone() else {
+                return;
+            };
+            let Ok(size) = element.get_scroll_size().await else {
+                return;
+            };
+            let _ = element
+                .scroll(
+                    PixelsVector2D::new(0.0, size.height),
+                    ScrollBehavior::Instant,
+                )
+                .await;
+        });
     });
 
     let _theme_listener = use_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
@@ -225,16 +309,22 @@ pub fn Page() -> Element {
             prompt_draft.set((evt.draft, evt.skipped));
         });
 
-    // Cell dimensions (char_width, char_height), updated by resize observer.
-    let cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let locate_container = move || {
+        spawn(async move {
+            let Some(element) = container() else {
+                return;
+            };
+            let Ok(rect) = element.get_client_rect().await else {
+                return;
+            };
+            viewport.write().origin = (rect.origin.x, rect.origin.y);
+        });
+    };
+
     // Last emitted mouse cell position for move-event throttling.
     let mut last_mouse_cell = use_signal(|| (-1i32, -1i32));
     // Accumulated wheel delta (pixels) not yet converted into scroll notches.
     let mut wheel_accum = use_signal(|| 0.0f64);
-    // Set up character measurement span and ResizeObserver (runs once after mount).
-    use_effect(move || {
-        setup_measurement(cell_dims, client_h);
-    });
 
     let theme_style = {
         let t = theme();
@@ -272,7 +362,7 @@ pub fn Page() -> Element {
     // Include measured cell dimensions as CSS custom properties so they
     // survive Dioxus style re-renders and are available for row height,
     // cursor, and selection overlay positioning.
-    let (cw, ch) = cell_dims();
+    let (cw, ch) = viewport().cell;
     let cell_style = if cw > 0.0 && ch > 0.0 {
         format!("--cw:{cw}px;--ch:{ch}px;")
     } else {
@@ -285,14 +375,16 @@ pub fn Page() -> Element {
     } else {
         "overflow-auto"
     };
+    let client_h = viewport().client.1;
     let content_h = total_rows() as f64 * ch;
-    let bottom_pad = if ch > 0.0 && content_h + 2.0 * padding > client_h() {
-        vmux_core::scroll::follow_bottom_pad(client_h() as f32, padding as f32, ch as f32) as f64
+    let bottom_pad = if ch > 0.0 && content_h + 2.0 * padding > client_h {
+        vmux_core::scroll::follow_bottom_pad(client_h as f32, padding as f32, ch as f32) as f64
     } else {
         0.0
     };
     let spacer_h = content_h + bottom_pad;
     let title = localized_terminal_title(&raw_title());
+    let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
 
     rsx! {
         if !title.is_empty() {
@@ -304,34 +396,54 @@ pub fn Page() -> Element {
             class: "relative h-full w-full {overflow_class} bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
             style: "{theme_style}{cell_style}outline:none;",
 
+            onmounted: move |e: Event<MountedData>| {
+                container.set(Some(e.data()));
+                locate_container();
+            },
+
+            onresize: move |e: Event<ResizeData>| {
+                let Ok(size) = e.get_border_box_size() else {
+                    return;
+                };
+                viewport
+                    .write()
+                    .container_resized((size.width, size.height), padding);
+                // Resizing a pane is also the only thing that moves one, so this is where the
+                // origin is worth re-reading — and it is a question, so it answers a frame later
+                // rather than here.
+                locate_container();
+            },
+
             onmousedown: move |e: Event<MouseData>| {
                 e.prevent_default();
-                focus_terminal_container();
-                let dims = cell_dims();
-                if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
-                    emit_mouse(trigger_button_id(&e), col, row, modifier_bits(&e), true, false);
+                spawn(async move {
+                    let Some(element) = container.peek().clone() else {
+                        return;
+                    };
+                    let _ = element.set_focus(true).await;
+                });
+                if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
+                    emit_mouse(trigger_button_id(&e), col, row, modifier_bits(e.modifiers()), true, false);
                 }
             },
 
             onkeydown: move |e: Event<KeyboardData>| keys.on_keydown(&e, |_| false),
 
             onmouseup: move |e: Event<MouseData>| {
-                let dims = cell_dims();
-                if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
-                    emit_mouse(trigger_button_id(&e), col, row, modifier_bits(&e), false, false);
+                if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
+                    emit_mouse(trigger_button_id(&e), col, row, modifier_bits(e.modifiers()), false, false);
                 }
             },
 
             onmousemove: move |e: Event<MouseData>| {
-                let dims = cell_dims();
-                if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
+                if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
                     let last = last_mouse_cell();
                     if col as i32 == last.0 && row as i32 == last.1 {
                         return;
                     }
                     last_mouse_cell.set((col as i32, row as i32));
                     let btn = held_button_id(&e);
-                    emit_mouse(btn, col, row, modifier_bits(&e), true, true);
+                    emit_mouse(btn, col, row, modifier_bits(e.modifiers()), true, true);
                 }
             },
 
@@ -344,17 +456,13 @@ pub fn Page() -> Element {
                     return;
                 }
                 e.prevent_default();
-                let dims = cell_dims();
+                let dims = viewport().cell;
                 let (_, ch) = dims;
-                let data = e.data();
-                let Some(raw) = data.downcast::<web_sys::WheelEvent>() else {
-                    return;
-                };
                 let line_px = if ch > 0.0 { ch } else { 16.0 };
-                let px = match raw.delta_mode() {
-                    1 => raw.delta_y() * line_px,
-                    2 => raw.delta_y() * line_px * 3.0,
-                    _ => raw.delta_y(),
+                let px = match e.data().delta() {
+                    WheelDelta::Pixels(delta) => delta.y,
+                    WheelDelta::Lines(delta) => delta.y * line_px,
+                    WheelDelta::Pages(delta) => delta.y * line_px * 3.0,
                 };
                 let total = wheel_accum() + px;
                 let notches = (total / line_px).trunc();
@@ -363,31 +471,30 @@ pub fn Page() -> Element {
                 if count == 0 {
                     return;
                 }
-                if let Some((col, row)) =
-                    client_to_cell(raw.client_x() as f64, raw.client_y() as f64, padding, dims)
-                {
+                if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
                     let button = if count < 0 { 64 } else { 65 };
-                    let modifiers = wheel_modifier_bits(raw);
+                    let modifiers = modifier_bits(e.modifiers());
                     for _ in 0..count.unsigned_abs() {
                         emit_mouse(button, col, row, modifiers, true, false);
                     }
                 }
             },
 
-            onscroll: move |_| {
+            onscroll: move |e: Event<ScrollData>| {
                 if alt() || copy_mode() || mouse() {
                     return;
                 }
-                let (_, ch) = cell_dims();
+                let (_, ch) = viewport().cell;
                 if ch <= 0.0 {
                     return;
                 }
-                let Some(el) = scroll_el() else {
-                    return;
-                };
-                let vis_first = (((el.scroll_top() as f64 - padding) / ch).floor()).max(0.0) as u32;
-                let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
-                let follow = is_following(ch);
+                let scrolled = e.scroll_top();
+                let visible = e.client_height() as f64;
+                let vis_first = (((scrolled - padding) / ch).floor()).max(0.0) as u32;
+                let vis_rows = (visible / ch).ceil() as u32 + 1;
+                // Within a row of the bottom counts as following, so that output arriving while
+                // the user sits at the end keeps them there rather than stranding them a line up.
+                let follow = e.scroll_height() as f64 - scrolled - visible <= ch.max(2.0) + 1.0;
                 if follow != *following.peek() {
                     following.set(follow);
                     last_scroll_req.set(if follow { u32::MAX } else { vis_first });
@@ -527,6 +634,27 @@ pub fn Page() -> Element {
                 })
             }
 
+            style { ".vmux-link:hover{{border-bottom:2px solid var(--primary)}}" }
+
+            // Absolutely positioned so it is out of flow and, being blockified by that, something
+            // a resize observer will report on at all — it skips inline elements.
+            span {
+                style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
+                onresize: move |e: Event<ResizeData>| {
+                    let Ok(size) = e.get_border_box_size() else {
+                        return;
+                    };
+                    viewport.write().cell_measured(
+                        (
+                            size.width / MEASURE_COLS as f64,
+                            size.height / MEASURE_ROWS as f64,
+                        ),
+                        padding,
+                    );
+                },
+                {measure_text}
+            }
+
             div {
                 style: "padding:{padding}px;",
                 div {
@@ -642,168 +770,8 @@ fn TerminalRow(
 }
 
 // ---------------------------------------------------------------------------
-// Measurement + ResizeObserver
-// ---------------------------------------------------------------------------
-
-/// Create a hidden measurement span, measure character dimensions, set CSS
-/// custom properties, emit a resize event to Bevy, and install a
-/// ResizeObserver to repeat on layout changes.
-fn setup_measurement(cell_dims: Signal<(f64, f64)>, client_h: Signal<f64>) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
-        return;
-    };
-
-    if document.get_element_by_id("vmux-link-style").is_none()
-        && let Ok(style_el) = document.create_element("style")
-    {
-        let _ = style_el.set_attribute("id", "vmux-link-style");
-        let style_node: &web_sys::Node = style_el.as_ref();
-        style_node.set_text_content(Some(
-            ".vmux-link:hover{border-bottom:2px solid var(--primary)}",
-        ));
-        let _ = container.append_child(&style_el);
-    }
-
-    // Create hidden measurement span (80 monospace characters).
-    let measure: web_sys::Element = document.create_element("span").unwrap();
-    measure
-        .set_attribute(
-            "style",
-            "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
-        )
-        .unwrap();
-    measure.set_attribute("id", MEASURE_ID).unwrap();
-    let measure_node: &web_sys::Node = measure.as_ref();
-    measure_node.set_text_content(Some(&"X".repeat(80)));
-    container.append_child(&measure).unwrap();
-
-    // Run initial measurement.
-    do_measure(cell_dims, client_h);
-
-    // Install ResizeObserver on container + measure span to catch both
-    // viewport resizes and font-load-triggered reflows.
-    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        do_measure(cell_dims, client_h);
-    }) as Box<dyn FnMut(JsValue)>);
-
-    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
-        observer.observe(&container);
-        observer.observe(&measure);
-        // Keep observer alive for the lifetime of the page.
-        std::mem::forget(observer);
-    }
-    callback.forget();
-}
-
-/// Measure character dimensions from the hidden span, update CSS custom
-/// properties on the container, update the Dioxus signal, and emit a
-/// TermResizeEvent to the Bevy host.
-fn do_measure(mut cell_dims: Signal<(f64, f64)>, mut client_h: Signal<f64>) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
-        return;
-    };
-    let Some(measure) = document.get_element_by_id(MEASURE_ID) else {
-        return;
-    };
-
-    let rect = measure.get_bounding_client_rect();
-    let cw = rect.width() / 80.0;
-
-    // Prefer computed line-height (px value); fall back to measured span height.
-    let ch = window
-        .get_computed_style(&container)
-        .ok()
-        .flatten()
-        .and_then(|cs| {
-            cs.get_property_value("line-height")
-                .ok()
-                .and_then(|s| s.trim_end_matches("px").parse::<f64>().ok())
-        })
-        .unwrap_or(rect.height());
-
-    if cw <= 0.0 || ch <= 0.0 {
-        return;
-    }
-
-    cell_dims.set((cw, ch));
-
-    // Set CSS custom properties for cursor/selection overlay positioning.
-    let html: &web_sys::HtmlElement = container.unchecked_ref();
-    let _ = html.style().set_property("--cw", &format!("{cw}px"));
-    let _ = html.style().set_property("--ch", &format!("{ch}px"));
-
-    // Compute viewport dimensions (container size minus inner padding).
-    let (pad_x, pad_y) = container
-        .first_element_child()
-        .and_then(|inner| window.get_computed_style(&inner).ok().flatten())
-        .map(|cs| {
-            let px = parse_px(&cs, "padding-left") + parse_px(&cs, "padding-right");
-            let py = parse_px(&cs, "padding-top") + parse_px(&cs, "padding-bottom");
-            (px, py)
-        })
-        .unwrap_or((0.0, 0.0));
-
-    let viewport_client_h = container.client_height() as f64;
-    let vw = container.client_width() as f64 - pad_x;
-    let vh = viewport_client_h - pad_y;
-    client_h.set(viewport_client_h);
-
-    let _ = send(&TermResizeEvent {
-        char_width: cw as f32,
-        char_height: ch as f32,
-        viewport_width: vw as f32,
-        viewport_height: vh as f32,
-    });
-}
-
-fn parse_px(cs: &web_sys::CssStyleDeclaration, prop: &str) -> f64 {
-    cs.get_property_value(prop)
-        .ok()
-        .and_then(|s| s.trim_end_matches("px").parse::<f64>().ok())
-        .unwrap_or(0.0)
-}
-
-// ---------------------------------------------------------------------------
 // Mouse helpers
 // ---------------------------------------------------------------------------
-
-/// Convert mouse client coordinates to terminal grid (col, row).
-fn mouse_to_cell(e: &Event<MouseData>, padding: f64, dims: (f64, f64)) -> Option<(u16, u16)> {
-    let client = e.client_coordinates();
-    client_to_cell(client.x, client.y, padding, dims)
-}
-
-fn client_to_cell(
-    client_x: f64,
-    client_y: f64,
-    padding: f64,
-    (cw, ch): (f64, f64),
-) -> Option<(u16, u16)> {
-    if cw <= 0.0 || ch <= 0.0 {
-        return None;
-    }
-    let container = web_sys::window()?
-        .document()?
-        .get_element_by_id(CONTAINER_ID)?;
-    let rect = container.get_bounding_client_rect();
-    let x = client_x - rect.left() - padding;
-    let y = client_y - rect.top() - padding;
-    let col = (x / cw).floor().max(0.0) as u16;
-    let row = (y / ch).floor().max(0.0) as u16;
-    Some((col, row))
-}
 
 /// Map Dioxus trigger_button to terminal protocol button number.
 fn trigger_button_id(e: &Event<MouseData>) -> u8 {
@@ -830,8 +798,7 @@ fn held_button_id(e: &Event<MouseData>) -> u8 {
 }
 
 /// Convert Dioxus modifier flags to our MOD_* bitmask.
-fn modifier_bits(e: &Event<MouseData>) -> u8 {
-    let mods = e.modifiers();
+fn modifier_bits(mods: Modifiers) -> u8 {
     let mut m = 0u8;
     if mods.contains(Modifiers::CONTROL) {
         m |= MOD_CTRL;
@@ -846,59 +813,6 @@ fn modifier_bits(e: &Event<MouseData>) -> u8 {
         m |= MOD_SUPER;
     }
     m
-}
-
-fn wheel_modifier_bits(e: &web_sys::WheelEvent) -> u8 {
-    let mut m = 0u8;
-    if e.ctrl_key() {
-        m |= MOD_CTRL;
-    }
-    if e.alt_key() {
-        m |= MOD_ALT;
-    }
-    if e.shift_key() {
-        m |= MOD_SHIFT;
-    }
-    if e.meta_key() {
-        m |= MOD_SUPER;
-    }
-    m
-}
-
-fn focus_terminal_container() {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
-    else {
-        return;
-    };
-    let Ok(html) = el.dyn_into::<web_sys::HtmlElement>() else {
-        return;
-    };
-    let _ = html.focus();
-}
-
-/// The native-scroll container element (also the measurement/mouse origin).
-fn scroll_el() -> Option<web_sys::Element> {
-    web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
-}
-
-/// True when the viewport is within ~one row of the bottom (i.e. "following").
-fn is_following(ch: f64) -> bool {
-    let Some(el) = scroll_el() else {
-        return true;
-    };
-    let dist = el.scroll_height() as f64 - el.scroll_top() as f64 - el.client_height() as f64;
-    dist <= ch.max(2.0) + 1.0
-}
-
-/// Pin the viewport to the bottom (used while following as output grows).
-fn pin_scroll_to_bottom() {
-    if let Some(el) = scroll_el() {
-        el.set_scroll_top(el.scroll_height());
-    }
 }
 
 /// Emit a TermMouseEvent to the Bevy host via the CEF bridge.

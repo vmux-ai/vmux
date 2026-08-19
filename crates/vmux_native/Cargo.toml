@@ -1,0 +1,43 @@
+[package]
+name = "vmux_native"
+description = "Run a vmux page in this process: a Dioxus VirtualDom, painted by a webview of its own"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+base64 = "0.22"
+dioxus-core = "=0.7.9"
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
+# `binary-protocol` and `sledgehammer` are what gate `MutationState`, the `WriteMutations` sink
+# that turns a render into the byte batch `run_from_bytes` applies. Without both, this crate has
+# nothing to send.
+dioxus-interpreter-js = { version = "=0.7.9", features = [
+    "binary-protocol",
+    "sledgehammer",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+
+# The view half. wry is macOS-only here for the same reason it is in `vmux_browser`: that is the
+# only target with a window to parent a webview into.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSAppearance",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+vmux_clipboard = { path = "../vmux_clipboard" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
+wry = { version = "0.53", features = ["transparent"] }
+
+[dev-dependencies]
+dioxus = { workspace = true }

@@ -68,11 +68,6 @@ tools-result-linked = { $name } بەسترایەوە
 tools-result-unlinked = بەستەری { $name } پچڕێنرا
 vault-title = Vault
 vault-encrypted = Ji serî heta serî şîfrekirî
-vault-passkey = Passkey
-vault-passkey-description = Vê Vault-ê bêyî şîfreyek li ser cîhazên din vekin.
-vault-passkey-add = Passkey zêde bike
-vault-passkey-unlock = Vekirin
-vault-passkey-provider-unsupported = Vê dabînkerê şîfreya şîfrekirinê hîna vekirina Vault-a şîfrekirî piştgirî nake.
 vault-recovery-key = Mifteya Vegerandinê
 vault-recovery-key-description = Bişkojek li Bitwarden an rêveberek şîfreyek din hilîne da ku vê Vault-ê li ser cîhazek nû vegerîne.
 vault-recovery-key-create = Miftê biafirîne
@@ -680,12 +675,6 @@ setup-install-homebrew = دامەزراندنی Homebrew + { $name }
 setup-run-install = جێبەجێکردنی فرمانی دامەزراندن
 setup-auto-reload = Vmux لە تێرمیناڵێکدا جێبەجێی دەکات و کاتێک { $command } ئامادە بوو دووبارە بار دەکاتەوە.
 
-debug-title = هەڵەدۆزی
-debug-auto-update = نوێکردنەوەی خودکار
-debug-simulate-update = لاساییکردنەوەی بەردەستبوونی نوێکاری
-debug-simulate-download = لاساییکردنەوەی داگرتن
-debug-clear-update = پاککردنەوەی نوێکاری
-debug-trigger-restart = دەستپێکردنی دووبارەکردنەوە
 
 command-manage-spaces = بەڕێوەبردنی فەزاكان…
 command-pane-stack-location = پەین { $pane } / ستاك { $stack }

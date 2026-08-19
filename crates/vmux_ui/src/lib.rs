@@ -7,7 +7,7 @@ pub mod agent_accent;
 
 pub mod caret;
 
-pub mod dom_listener;
+pub mod clipboard;
 
 pub mod favicon;
 
@@ -22,6 +22,7 @@ mod i18n_catalogs {
 }
 
 pub mod i18n;
+pub mod launcher;
 
 pub mod prompt_ghost;
 
@@ -31,7 +32,7 @@ mod listener_guard;
 
 pub mod transport;
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod key_stroke;
 
 pub mod list_nav;
@@ -42,7 +43,13 @@ pub mod components;
 
 pub mod platform;
 
+#[cfg(ui)]
+pub mod media;
+
 pub mod scroll;
+
+#[cfg(ui)]
+pub mod text_run;
 
 pub mod util;
 

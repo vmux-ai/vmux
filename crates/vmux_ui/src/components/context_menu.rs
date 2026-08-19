@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 use dioxus_primitives::context_menu::{
     ContextMenuContentProps, ContextMenuItemProps, ContextMenuProps, ContextMenuTriggerProps,
 };
-use wasm_bindgen::JsCast;
 
 #[derive(Clone, Copy)]
 struct ContextMenuState {
@@ -24,49 +23,17 @@ impl ContextMenuState {
     }
 }
 
-fn clamp_context_menu_to_viewport(menu: &web_sys::HtmlElement) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(width) = window.inner_width().ok().and_then(|value| value.as_f64()) else {
-        return;
-    };
-    let Some(height) = window.inner_height().ok().and_then(|value| value.as_f64()) else {
-        return;
-    };
-    let rect = menu.get_bounding_client_rect();
-    let padding = 6.0;
-    let max_left = (width - rect.width() - padding).max(padding);
-    let max_top = (height - rect.height() - padding).max(padding);
-    let style = menu.style();
-    let _ = style.set_property(
-        "left",
-        &format!("{}px", rect.left().clamp(padding, max_left)),
-    );
-    let _ = style.set_property("top", &format!("{}px", rect.top().clamp(padding, max_top)));
-}
-
-fn mount_context_menu_top_layer(event: Event<MountedData>) {
-    let Some(element) = event.downcast::<web_sys::Element>() else {
-        return;
-    };
-    let Ok(overlay) = element.clone().dyn_into::<web_sys::HtmlElement>() else {
-        return;
-    };
-    let shown = js_sys::Reflect::get(overlay.as_ref(), &"showPopover".into())
-        .ok()
-        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
-        .is_some_and(|show| show.call0(overlay.as_ref()).is_ok());
-    if !shown {
-        let _ = overlay.remove_attribute("popover");
-    }
-    if let Some(menu) = overlay
-        .first_element_child()
-        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        clamp_context_menu_to_viewport(&menu);
-    }
-}
+/// Keep a just-opened menu inside the window.
+///
+/// `web` only, and it needs a real element: the menu is positioned at the pointer, so without
+/// this a right-click near an edge opens a menu that runs off it.
+/// Lift the menu into the browser's top layer, then keep it on screen.
+///
+/// `web` only. Both halves need an element to act on, and a native `MountedData` answers
+/// `NotSupported` — the downcast below already returns `None` there, so this was inert rather
+/// than wrong. Until a `RenderedElementBacking` exists, a native menu stays in normal flow and
+/// is positioned by CSS alone: it can be overlapped, and it is not clamped to the window.
+fn mount_context_menu_top_layer(_event: Event<MountedData>) {}
 
 #[component]
 pub fn ContextMenu(props: ContextMenuProps) -> Element {

@@ -1,5 +1,5 @@
 mod components;
-pub(crate) mod custom_scheme;
+pub mod custom_scheme;
 mod ipc;
 mod message_loop;
 

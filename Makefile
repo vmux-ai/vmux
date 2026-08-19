@@ -1,12 +1,10 @@
-.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
 VMUX_PROFILE ?= personal
 VMUX_TEST ?=
-VMUX_BUILD_WEB ?= 1
 VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full
-DEV_WEB_TARGET := $(if $(filter 1,$(VMUX_BUILD_WEB)),web-bundle)
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 CARGO_WITH_CEF_CACHE := CARGO_BIN="$(CARGO_BIN)" ./scripts/cargo-with-cef-cache.sh
@@ -22,10 +20,7 @@ CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' C
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-web-bundle: ensure-web-deps
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_page
-
-dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-render-process
+dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
@@ -48,26 +43,6 @@ dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-ren
 
 dev-player:
 	$(MAKE) dev VMUX_DESKTOP_FEATURES="--no-default-features --features dev,player-mode"
-
-dev-rust:
-	@./scripts/verify-web-bundle.sh debug || (echo "missing or incompatible debug web bundle; run make dev first" && exit 1)
-	@wasm="$$(find crates/vmux_page/dist -type f -name '*_bg.wasm' -print -quit 2>/dev/null)"; \
-	stale="$$(find \
-		Cargo.toml Cargo.lock crates/vmux_*/Cargo.toml \
-		crates/app/*/Cargo.toml crates/page/*/Cargo.toml \
-		crates/vmux_page/Cargo.toml crates/vmux_page/Dioxus.toml crates/vmux_page/build.rs \
-		crates/vmux_page/assets crates/vmux_page/src crates/vmux_ui/assets crates/vmux_ui/src \
-		crates/page/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/page/vmux_editor/src \
-		crates/vmux_git/src crates/page/vmux_history/src crates/page/vmux_layout/src crates/vmux_profile/src \
-		crates/host/vmux_service/src crates/page/vmux_setting/src crates/page/vmux_space/src \
-		crates/page/vmux_team/src crates/page/vmux_terminal/assets/fonts crates/page/vmux_terminal/src \
-		crates/vmux_wire/src \
-		-type f -newer "$$wasm" -print -quit 2>/dev/null)"; \
-	if [ -z "$$wasm" ] || [ -n "$$stale" ]; then \
-		echo "stale debug web bundle; run make dev first"; \
-		exit 1; \
-	fi
-	$(MAKE) dev VMUX_BUILD_WEB=0 VMUX_DESKTOP_FEATURES="--no-default-features --features dev,full"
 
 dev-full:
 	$(MAKE) dev VMUX_DESKTOP_FEATURES="--no-default-features --features dev,full"
@@ -282,7 +257,7 @@ doctor:
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
 
 # Non-interactive bootstrap so `make dev` works even after dependency bumps.
-ensure-mac-deps: ensure-native-deps ensure-web-deps
+ensure-mac-deps: ensure-native-deps
 
 ensure-native-deps:
 	@echo "Checking build dependencies..."
@@ -297,12 +272,6 @@ ensure-native-deps:
 	@if [ ! -d "$(CEF_FRAMEWORK_DIR)" ]; then \
 		echo "CEF framework not found at $(CEF_FRAMEWORK_DIR). Run: make setup-cef"; \
 		exit 1; \
-	fi
-
-ensure-web-deps: ensure-native-deps ensure-dioxus-deps
-	@if ! "$(RUSTUP_BIN)" target list --installed 2>/dev/null | grep -qx "wasm32-unknown-unknown"; then \
-		echo "Installing rust target wasm32-unknown-unknown..."; \
-		"$(RUSTUP_BIN)" target add wasm32-unknown-unknown; \
 	fi
 
 ensure-dioxus-deps:

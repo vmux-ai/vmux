@@ -81,11 +81,6 @@ tools-result-linked = { $name } linked
 tools-result-unlinked = { $name } unlinked
 vault-title = Vault
 vault-encrypted = End-to-end encrypted
-vault-passkey = Passkey
-vault-passkey-description = Unlock this Vault on other devices without a password.
-vault-passkey-add = Add passkey
-vault-passkey-unlock = Unlock
-vault-passkey-provider-unsupported = This passkey provider doesn’t support encrypted Vault unlock yet.
 vault-recovery-key = Recovery Key
 vault-recovery-key-description = Save one key in Bitwarden or another password manager to recover this Vault on a new device.
 vault-recovery-key-create = Create key
@@ -710,12 +705,6 @@ setup-install-homebrew = Install Homebrew + { $name }
 setup-run-install = Run install command
 setup-auto-reload = Vmux runs it in a terminal and reloads when { $command } is ready.
 
-debug-title = Debug
-debug-auto-update = Auto-update
-debug-simulate-update = Simulate update available
-debug-simulate-download = Simulate download
-debug-clear-update = Clear update
-debug-trigger-restart = Trigger restart
 
 agent-effort = Effort
 agent-effort-default = Default

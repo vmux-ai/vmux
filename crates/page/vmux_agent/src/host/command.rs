@@ -222,7 +222,6 @@ pub(super) fn handle_agent_tool_calls(
 /// Flatten the launcher's agent registry into the shape a remote client can consume.
 ///
 /// ACP agents first, then CLI providers, matching the order the desktop launcher lists them.
-#[cfg(not(web))]
 pub(crate) fn remote_agents(
     snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
 ) -> Vec<vmux_wire::room::RemoteAgent> {
@@ -251,7 +250,6 @@ pub(crate) fn remote_agents(
 
 /// Focus and the agent registry, bundled because `handle_agent_commands` is at Bevy's
 /// system-parameter limit.
-#[cfg(not(web))]
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct DesktopContext<'w, 's> {
     focus: Res<'w, FocusedStack>,

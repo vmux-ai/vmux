@@ -68,11 +68,6 @@ tools-result-linked = { $name } е поврзан
 tools-result-unlinked = Врската со { $name } е прекината
 vault-title = Vault
 vault-encrypted = Шифрирано од крај до крај
-vault-passkey = Лозинка
-vault-passkey-description = Отклучете го овој сеф на други уреди без лозинка.
-vault-passkey-add = Додадете лозинка
-vault-passkey-unlock = Отклучи
-vault-passkey-provider-unsupported = Овој давател на лозинка сè уште не поддржува шифрирано отклучување на сефот.
 vault-recovery-key = Клуч за обновување
 vault-recovery-key-description = Зачувајте еден клуч во Bitwarden или друг менаџер за лозинки за да го вратите овој сеф на нов уред.
 vault-recovery-key-create = Креирај клуч
@@ -680,12 +675,6 @@ setup-install-homebrew = Инсталирај Homebrew + { $name }
 setup-run-install = Изврши команда за инсталација
 setup-auto-reload = Vmux ја извршува во терминал и повторно вчитува кога { $command } ќе биде подготвена.
 
-debug-title = Дебагирање
-debug-auto-update = Автоматско ажурирање
-debug-simulate-update = Симулирај достапно ажурирање
-debug-simulate-download = Симулирај преземање
-debug-clear-update = Исчисти ажурирање
-debug-trigger-restart = Активирај рестартирање
 
 command-manage-spaces = Управувај со простори…
 command-pane-stack-location = панел { $pane } / стек { $stack }

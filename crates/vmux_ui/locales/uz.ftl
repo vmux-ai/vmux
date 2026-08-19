@@ -68,11 +68,6 @@ tools-result-linked = { $name } bog‘landi
 tools-result-unlinked = { $name } bog‘lanishi uzildi
 vault-title = Vault
 vault-encrypted = Boshidan oxirigacha shifrlangan
-vault-passkey = O'tish kaliti
-vault-passkey-description = Bu Vaultni boshqa qurilmalarda parolsiz oching.
-vault-passkey-add = O'tish kalitini qo'shing
-vault-passkey-unlock = Qulfni ochish
-vault-passkey-provider-unsupported = Bu kalit provayderi hali shifrlangan Vault qulfini ochishni qo‘llab-quvvatlamaydi.
 vault-recovery-key = Qayta tiklash kaliti
 vault-recovery-key-description = Bitwarden yoki boshqa parol menejerida ushbu Vaultni yangi qurilmada tiklash uchun bitta kalitni saqlang.
 vault-recovery-key-create = Kalit yaratish
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } o‘rnatish
 setup-run-install = O‘rnatish buyrug‘ini ishga tushirish
 setup-auto-reload = Vmux uni terminalda ishga tushiradi va { $command } tayyor bo‘lganda qayta yuklaydi.
 
-debug-title = Nosozliklarni tuzatish
-debug-auto-update = Avtomatik yangilash
-debug-simulate-update = Yangilanish mavjudligini simulyatsiya qilish
-debug-simulate-download = Yuklab olishni simulyatsiya qilish
-debug-clear-update = Yangilanishni tozalash
-debug-trigger-restart = Qayta ishga tushirishni chaqirish
 
 command-manage-spaces = Speyslarni boshqarish…
 command-pane-stack-location = panel { $pane } / stek { $stack }

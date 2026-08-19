@@ -68,11 +68,6 @@ tools-result-linked = { $name } જોડાયું
 tools-result-unlinked = { $name }નું જોડાણ દૂર થયું
 vault-title = Vault
 vault-encrypted = એન્ડ-ટુ-એન્ડ એન્ક્રિપ્ટેડ
-vault-passkey = પાસકી
-vault-passkey-description = પાસવર્ડ વિના અન્ય ઉપકરણો પર આ વૉલ્ટને અનલૉક કરો.
-vault-passkey-add = પાસકી ઉમેરો
-vault-passkey-unlock = અનલોક કરો
-vault-passkey-provider-unsupported = આ પાસકી પ્રદાતા હજી સુધી એન્ક્રિપ્ટેડ વૉલ્ટ અનલૉકને સપોર્ટ કરતું નથી.
 vault-recovery-key = પુનઃપ્રાપ્તિ કી
 vault-recovery-key-description = આ વૉલ્ટને નવા ઉપકરણ પર પુનઃપ્રાપ્ત કરવા માટે Bitwarden અથવા અન્ય પાસવર્ડ મેનેજરમાં એક કી સાચવો.
 vault-recovery-key-create = કી બનાવો
@@ -680,12 +675,6 @@ setup-install-homebrew = Homebrew + { $name } ઇન્સ્ટોલ કરો
 setup-run-install = ઇન્સ્ટોલ કમાન્ડ ચલાવો
 setup-auto-reload = Vmux તેને ટર્મિનલમાં ચલાવે છે અને { $command } તૈયાર થાય ત્યારે ફરી લોડ કરે છે.
 
-debug-title = ડિબગ
-debug-auto-update = આપમેળે અપડેટ
-debug-simulate-update = ઉપલબ્ધ અપડેટનું સિમ્યુલેશન કરો
-debug-simulate-download = ડાઉનલોડનું સિમ્યુલેશન કરો
-debug-clear-update = અપડેટ સાફ કરો
-debug-trigger-restart = ફરી શરૂ કરાવો
 
 command-manage-spaces = સ્પેસ સંચાલિત કરો…
 command-pane-stack-location = પેન { $pane } / સ્ટેક { $stack }

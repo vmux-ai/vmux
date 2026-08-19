@@ -1,5 +1,5 @@
-//! Terminal page: spawns and drives shell processes through the background service and
-//! renders them in a CEF + Dioxus terminal webview.
+//! Terminal page: spawns and drives shell processes through the background service and renders
+//! them as a Dioxus grid of rows.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -9,11 +9,9 @@
 pub mod event;
 pub mod render_model;
 
-// `web`, not `ui`: both reach the DOM directly and are only served into the CEF webview. They were
-// written when `ui` and `web` were the same thing, which stopped being true when iOS arrived.
-#[cfg(web)]
+#[cfg(ui)]
 pub mod matrix_rain;
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
 
 #[cfg(host)]

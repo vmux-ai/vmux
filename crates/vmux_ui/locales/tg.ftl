@@ -68,11 +68,6 @@ tools-result-linked = { $name } пайваст шуд
 tools-result-unlinked = Пайвасти { $name } қатъ шуд
 vault-title = Vault
 vault-encrypted = Рамзгузории саросарӣ
-vault-passkey = Калиди гузариш
-vault-passkey-description = Ин Vault-ро дар дигар дастгоҳҳо бе парол кушоед.
-vault-passkey-add = Калиди гузаришро илова кунед
-vault-passkey-unlock = Кушодан
-vault-passkey-provider-unsupported = Ин провайдери калиди гузариш кушодани Vault-и рамзгузоришударо ҳанӯз дастгирӣ намекунад.
 vault-recovery-key = Калиди барқарорсозӣ
 vault-recovery-key-description = Як калидро дар Bitwarden ё мудири дигари парол захира кунед, то ин Vaultро дар дастгоҳи нав барқарор кунед.
 vault-recovery-key-create = Калид эҷод кунед
@@ -680,12 +675,6 @@ setup-install-homebrew = Насби Homebrew + { $name }
 setup-run-install = Иҷрои фармони насб
 setup-auto-reload = Vmux онро дар терминал иҷро мекунад ва вақте { $command } омода шуд, аз нав бор мекунад.
 
-debug-title = Ислоҳи хато
-debug-auto-update = Навсозии худкор
-debug-simulate-update = Шабеҳсозии дастрасии навсозӣ
-debug-simulate-download = Шабеҳсозии боргирӣ
-debug-clear-update = Тоза кардани навсозӣ
-debug-trigger-restart = Оғози бозоғозӣ
 
 command-manage-spaces = Идоракунии фазоҳо…
 command-pane-stack-location = панел { $pane } / стек { $stack }

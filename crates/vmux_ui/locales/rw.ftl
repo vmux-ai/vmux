@@ -68,11 +68,6 @@ tools-result-linked = { $name } yahujwe
 tools-result-unlinked = { $name } yatandukanyijwe
 vault-title = Vault
 vault-encrypted = Byabitswe kuva ku mpera kugeza ku yindi
-vault-passkey = Passkey
-vault-passkey-description = Fungura iyi Vault kubindi bikoresho udafite ijambo ryibanga.
-vault-passkey-add = Ongeraho passkey
-vault-passkey-unlock = Fungura
-vault-passkey-provider-unsupported = Uyu mutanga wa passkey ntabwo ashyigikiye ibanga rya Vault rifungura.
 vault-recovery-key = Urufunguzo rwo Kugarura
 vault-recovery-key-description = Bika urufunguzo rumwe muri Bitwarden cyangwa irindi jambo ryibanga kugirango ugarure iyi Vault ku gikoresho gishya.
 vault-recovery-key-create = Kora urufunguzo
@@ -680,12 +675,6 @@ setup-install-homebrew = Shyiramo Homebrew + { $name }
 setup-run-install = Koresha ibwiriza ryo gushyiramo
 setup-auto-reload = Vmux irarikoresha muri teminali maze ikongera gutangiza iyo { $command } yiteguye.
 
-debug-title = Gukosora
-debug-auto-update = Kwivugurura
-debug-simulate-update = Kwigana ko ivugurura rihari
-debug-simulate-download = Kwigana ivanaho
-debug-clear-update = Gukuraho ivugurura
-debug-trigger-restart = Gutangiza kongera gutangira
 
 command-manage-spaces = Gucunga imyanya…
 command-pane-stack-location = igice { $pane } / urwego { $stack }

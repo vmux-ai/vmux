@@ -68,11 +68,6 @@ tools-result-linked = { $name } е свързан
 tools-result-unlinked = Връзката с { $name } е прекъсната
 vault-title = Vault
 vault-encrypted = Шифровано от край до край
-vault-passkey = Ключ за достъп
-vault-passkey-description = Отключете този Vault на други устройства без парола.
-vault-passkey-add = Добавете парола
-vault-passkey-unlock = Отключи
-vault-passkey-provider-unsupported = Този доставчик на ключ за достъп все още не поддържа шифровано отключване на Vault.
 vault-recovery-key = Ключ за възстановяване
 vault-recovery-key-description = Запазете един ключ в Bitwarden или друг мениджър на пароли, за да възстановите това хранилище на ново устройство.
 vault-recovery-key-create = Създаване на ключ
@@ -680,12 +675,6 @@ setup-install-homebrew = Инсталирай Homebrew + { $name }
 setup-run-install = Изпълни командата за инсталиране
 setup-auto-reload = Vmux я изпълнява в терминал и презарежда, когато { $command } е готова.
 
-debug-title = Отстраняване на грешки
-debug-auto-update = Автоматично актуализиране
-debug-simulate-update = Симулирай налична актуализация
-debug-simulate-download = Симулирай изтегляне
-debug-clear-update = Изчисти актуализацията
-debug-trigger-restart = Задействай рестарт
 
 command-manage-spaces = Управление на пространствата…
 command-pane-stack-location = панел { $pane } / стек { $stack }

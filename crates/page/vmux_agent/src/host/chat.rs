@@ -11,6 +11,7 @@ mod media;
 mod model;
 mod prompt;
 mod resume;
+mod tab;
 mod transcript;
 mod workspace;
 
@@ -30,6 +31,7 @@ impl Plugin for AgentChatPagePlugin {
             model::ChatModelPlugin,
             prompt::ChatPromptPlugin,
             resume::ChatResumePlugin,
+            tab::ChatTabPlugin,
             transcript::ChatTranscriptPlugin,
             workspace::ChatWorkspacePlugin,
         ))

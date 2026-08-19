@@ -68,11 +68,6 @@ tools-result-linked = { $name } u lidh
 tools-result-unlinked = { $name } u shkëput
 vault-title = Vault
 vault-encrypted = I enkriptuar skaj më skaj
-vault-passkey = Passkey
-vault-passkey-description = Zhbllokoni këtë Vault në pajisje të tjera pa fjalëkalim.
-vault-passkey-add = Shto çelësin e kalimit
-vault-passkey-unlock = Zhblloko
-vault-passkey-provider-unsupported = Ky ofrues i fjalëkalimit nuk e mbështet ende shkyçjen e koduar të "Veult".
 vault-recovery-key = Çelësi i rikuperimit
 vault-recovery-key-description = Ruani një çelës në Bitwarden ose një menaxher tjetër fjalëkalimi për të rikuperuar këtë Vault në një pajisje të re.
 vault-recovery-key-create = Krijo çelës
@@ -680,12 +675,6 @@ setup-install-homebrew = Instalo Homebrew + { $name }
 setup-run-install = Ekzekuto komandën e instalimit
 setup-auto-reload = Vmux e ekzekuton në terminal dhe ringarkohet kur { $command } të jetë gati.
 
-debug-title = Diagnostikim
-debug-auto-update = Përditësim automatik
-debug-simulate-update = Simulo përditësim të disponueshëm
-debug-simulate-download = Simulo shkarkim
-debug-clear-update = Pastro përditësimin
-debug-trigger-restart = Shkakto rinisje
 
 command-manage-spaces = Menaxho hapësirat…
 command-pane-stack-location = paneli { $pane } / stiva { $stack }

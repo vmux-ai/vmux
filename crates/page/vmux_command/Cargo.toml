@@ -22,7 +22,7 @@ vmux_core = { path = "../../vmux_core" }
 vmux_history = { path = "../vmux_history", default-features = false }
 vmux_wire = { path = "../../vmux_wire" }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
@@ -31,25 +31,6 @@ vmux_flex = { path = "../../vmux_flex" }
 vmux_macro = { path = "../../vmux_macro" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
-vmux_start = { path = "../vmux_start" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
-wasm-bindgen = "0.2.115"
-web-sys = { version = "0.3", features = [
-    "CssStyleDeclaration",
-    "Document",
-    "DomRect",
-    "Element",
-    "Event",
-    "EventInit",
-    "EventTarget",
-    "HtmlElement",
-    "HtmlInputElement",
-    "KeyboardEvent",
-    "Node",
-    "Window",
-] }
