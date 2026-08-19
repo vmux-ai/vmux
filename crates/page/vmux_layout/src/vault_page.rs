@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use js_sys::{Function, Promise, Reflect};
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolsSnapshot};
 use vmux_core::vault::{
     VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
@@ -13,8 +12,6 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RemoteProvider {
@@ -70,10 +67,7 @@ pub fn Page() -> Element {
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
     let selected_repository = use_signal(|| None::<String>);
-    let preferred_provider = web_sys::window()
-        .and_then(|window| window.location().search().ok())
-        .and_then(|search| search.strip_prefix("?provider=").map(str::to_string))
-        .unwrap_or_default();
+    let preferred_provider = requested_provider();
     let selected_provider = use_signal(|| match preferred_provider.as_str() {
         "github" => Some(RemoteProvider::Github),
         "google_drive" | "cloud_folder" => Some(RemoteProvider::GoogleDrive),
@@ -452,7 +446,7 @@ fn VaultPanel(
                                         class: "group mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform,background-color] duration-200 ease-out hover:bg-foreground/[0.09] active:scale-[0.98] starting:scale-90 starting:opacity-0",
                                         title: translate("common-copy"),
                                         aria_label: translate("common-copy"),
-                                        onclick: move |_| copy_text(
+                                        onclick: move |_| copy_recovery_key(
                                             github_device_code(),
                                             github_device_code_copied,
                                         ),
@@ -756,7 +750,7 @@ fn RecoveryCard(
                         },
                         onclick: move |_| {
                             recovery_key_copied.set(false);
-                            copy_text(generated_recovery_key(), recovery_key_copied);
+                            copy_recovery_key(generated_recovery_key(), recovery_key_copied);
                         },
                         code { class: "min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground",
                             if recovery_key_copied() {
@@ -882,37 +876,48 @@ fn recovery_key_complete(value: &str) -> bool {
     normalized_recovery_key(value).len() == 68
 }
 
-fn recovery_keys_match(expected: &str, actual: &str) -> bool {
-    recovery_key_complete(actual)
-        && normalized_recovery_key(expected) == normalized_recovery_key(actual)
+/// The provider the Vault was asked to connect, from `vmux://vault/?provider=<name>`.
+///
+/// A native host puts the view's [`vmux_core::PageMetadata`] in the root scope, so the query
+/// rides the url the host opened. On the web the document carries it instead.
+fn requested_provider() -> String {
+    fn from_query(source: &str) -> Option<String> {
+        Some(
+            source
+                .split_once("?provider=")?
+                .1
+                .split(['&', '#'])
+                .next()?
+                .to_string(),
+        )
+    }
+
+    if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+        && let Some(provider) = from_query(&meta.url)
+    {
+        return provider;
+    }
+    #[cfg(web)]
+    if let Some(provider) = web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .and_then(|search| from_query(&search))
+    {
+        return provider;
+    }
+    String::new()
 }
 
-fn copy_text(value: String, mut copied: Signal<bool>) {
+fn copy_recovery_key(value: String, mut copied: Signal<bool>) {
     spawn(async move {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let Ok(navigator) = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")) else {
-            return;
-        };
-        let Ok(clipboard) = Reflect::get(&navigator, &JsValue::from_str("clipboard")) else {
-            return;
-        };
-        let Ok(function) = Reflect::get(&clipboard, &JsValue::from_str("writeText"))
-            .and_then(|function| function.dyn_into::<Function>())
-        else {
-            return;
-        };
-        let Ok(promise) = function
-            .call1(&clipboard, &JsValue::from_str(&value))
-            .and_then(|promise| promise.dyn_into::<Promise>())
-        else {
-            return;
-        };
-        if JsFuture::from(promise).await.is_ok() {
+        if vmux_ui::platform::copy_to_clipboard(value).await {
             copied.set(true);
         }
     });
+}
+
+fn recovery_keys_match(expected: &str, actual: &str) -> bool {
+    recovery_key_complete(actual)
+        && normalized_recovery_key(expected) == normalized_recovery_key(actual)
 }
 
 fn request_snapshot(load_repositories: bool) {

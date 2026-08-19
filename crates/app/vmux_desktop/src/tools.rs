@@ -12,7 +12,7 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
-use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
+use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
@@ -125,11 +125,9 @@ impl Plugin for ToolsPlugin {
         ));
         app.world_mut().spawn((
             VAULT_PAGE_MANIFEST,
-            PrewarmPage {
-                host: "vault",
+            vmux_core::host::page::NativelyHosted {
                 url: "vmux://vault/",
                 title: "Vault",
-                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "tools");

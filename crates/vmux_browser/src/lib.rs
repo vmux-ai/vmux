@@ -135,6 +135,11 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
                 .takes::<vmux_wire::error::ErrorPageData>(),
+        ))
+        // A second call because `Plugins` is implemented up to a 16-tuple.
+        .add_plugins((
+            native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
+                .takes::<vmux_core::PageMetadata>(),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(

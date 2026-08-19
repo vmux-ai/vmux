@@ -224,6 +224,14 @@ pub static SPACES_PAGE: NativePage =
 pub static TOOLS_PAGE: NativePage =
     NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page);
 
+/// The encrypted Vault and its remote.
+///
+/// Owns its subtree because the Vault is deep-linked with a provider to preselect —
+/// `vmux://vault/?provider=github` — and an exact match would leave that url unclaimed.
+#[cfg(target_os = "macos")]
+pub static VAULT_PAGE: NativePage =
+    NativePage::pane("vmux://vault/", vmux_layout::vault_page::Page).owning_subtree();
+
 /// The installed browser extensions.
 #[cfg(target_os = "macos")]
 pub static EXTENSIONS_PAGE: NativePage = NativePage::pane(
@@ -274,5 +282,21 @@ impl Plugin for NativePagesPlugin {
         app.add_plugins(macos::NativePagesMacosPlugin);
         #[cfg(not(target_os = "macos"))]
         app.add_plugins(other::NativePagesOtherPlugin);
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    /// A page that does not claim a url is not an error — the view simply never appears, so the
+    /// deep links the MCP tools hand out are worth pinning.
+    #[test]
+    fn the_vault_claims_the_provider_deep_links_and_nothing_next_door() {
+        assert!(VAULT_PAGE.answers_for("vmux://vault/"));
+        assert!(VAULT_PAGE.answers_for("vmux://vault/?provider=github"));
+        assert!(VAULT_PAGE.answers_for("vmux://vault/?provider=cloud_folder"));
+        assert!(!VAULT_PAGE.answers_for("vmux://vaults/"));
+        assert!(!VAULT_PAGE.answers_for("vmux://tools/"));
     }
 }

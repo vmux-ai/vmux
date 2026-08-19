@@ -33,6 +33,47 @@ pub async fn sleep_ms(ms: u32) {
     tokio::time::sleep(std::time::Duration::from_millis(u64::from(ms))).await;
 }
 
+/// Put `text` on the system clipboard, reporting whether it landed.
+///
+/// Not a `PageHost` request: the clipboard is the machine's, not the document's, and routing it
+/// through the page would additionally need `vmux://` to be a secure context before
+/// `navigator.clipboard` would answer at all.
+#[cfg(web)]
+pub async fn copy_to_clipboard(text: String) -> bool {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(navigator) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("navigator"))
+    else {
+        return false;
+    };
+    let Ok(clipboard) = js_sys::Reflect::get(&navigator, &JsValue::from_str("clipboard")) else {
+        return false;
+    };
+    let Ok(write_text) = js_sys::Reflect::get(&clipboard, &JsValue::from_str("writeText"))
+        .and_then(|function| function.dyn_into::<js_sys::Function>())
+    else {
+        return false;
+    };
+    let Ok(promise) = write_text
+        .call1(&clipboard, &JsValue::from_str(&text))
+        .and_then(|promise| promise.dyn_into::<js_sys::Promise>())
+    else {
+        return false;
+    };
+    wasm_bindgen_futures::JsFuture::from(promise).await.is_ok()
+}
+
+#[cfg(not(web))]
+pub async fn copy_to_clipboard(text: String) -> bool {
+    // `vmux_clipboard::write` hands the work to a thread and logs its own failures, so there is
+    // no outcome to wait for.
+    vmux_clipboard::write(text);
+    true
+}
+
 /// A pseudo-random index below `len`, saturating to 0 for an empty range.
 #[cfg(web)]
 pub fn random_index(len: usize) -> usize {
