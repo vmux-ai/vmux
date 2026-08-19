@@ -12,13 +12,12 @@ fn main() {
     build_platform_cfg::emit();
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     PageBuilder::new(manifest_dir.clone(), "vmux_page", "vmux_page")
+        // The flat crates the wasm bundle reaches. `vmux_ui` is tracked unconditionally by
+        // `tracked_roots`, and everything under `crates/page` by the bucket below.
         .track_manifest_rel_paths(&[
-            "../vmux_ui/assets/theme.css",
-            "../vmux_command/src",
             "../vmux_core/src",
-            "../vmux_git/src",
+            "../vmux_macro/src",
             "../vmux_profile/src",
-            "../host/vmux_service/src",
             "../vmux_wire/src",
         ])
         .track_bucket_crates("../page", "src")
