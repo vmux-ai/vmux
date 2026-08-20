@@ -39,18 +39,23 @@ pub fn Page(
 
     rsx! {
         main {
-            class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground sm:px-6",
+            class: "relative isolate flex h-dvh flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
             StartBackdrop {}
-            StartHero { revealed: mounted(),
-                div { class: "relative w-full",
-                    CommandPalette {
-                        state,
-                        variant: PaletteVariant::Start,
-                        on_close: move |_| {},
-                        on_dismiss: move |_| {},
-                        on_activity: move |_| {},
-                        on_start_inline_transition: on_inline_transition,
+            // `m-auto` rather than `justify-center`: a centred flex item whose content outgrows
+            // the container has its overflow clipped above the scroll origin, and auto margins are
+            // what centre it while still yielding when there is no room.
+            div { class: "m-auto w-full",
+                StartHero { revealed: mounted(),
+                    div { class: "relative w-full",
+                        CommandPalette {
+                            state,
+                            variant: PaletteVariant::Start,
+                            on_close: move |_| {},
+                            on_dismiss: move |_| {},
+                            on_activity: move |_| {},
+                            on_start_inline_transition: on_inline_transition,
+                        }
                     }
                 }
             }

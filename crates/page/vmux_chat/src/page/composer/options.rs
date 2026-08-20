@@ -81,6 +81,7 @@ pub(super) fn ChatModelMenu(chat: Chat) -> Element {
             selected: menu_sel(),
             on_hover: move |index| menu_sel.set(index),
             on_select: move |model: ModelOptionEntry| chat.select_model(&model),
+            on_dismiss: move |()| chat.dismiss_selector(),
         }
     }
 }
@@ -96,9 +97,10 @@ pub fn ModelMenu(
     selected: usize,
     on_hover: EventHandler<usize>,
     on_select: EventHandler<ModelOptionEntry>,
+    #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
-        PromptPopup {
+        PromptPopup { on_dismiss,
             if models.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-matching-models")} }
             } else {

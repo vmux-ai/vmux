@@ -243,7 +243,7 @@ jobs:
               - 'scripts/*ios*'
               - '.github/workflows/ci.yml'
               - '!crates/app/vmux_desktop/**'
-              - '!crates/vmux_page/**'
+              - '!crates/vmux_native/**'
               - '!patches/**'
 
   deps-rust:
@@ -395,24 +395,35 @@ jobs:
             -o crates/app/vmux_mobile/assets/tailwind.out.css
 
       # Build, not check. A dropped codegen-unit symbol once shipped a broken app while every
-      # `cargo check` stayed green — see docs/plans/2026-08-11-portable-pages.md. Only a linker
-      # catches that, and the bin is `required-features = ["mobile"]`, so a plain
-      # `cargo build -p vmux_mobile` would compile nothing and pass for free.
+      # `cargo check` stayed green. Only a linker catches that, and the bin is
+      # `required-features = ["mobile"]`, so a plain `cargo build -p vmux_mobile` would compile
+      # nothing and pass for free.
       - name: Build the phone app
         run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
 
+      # Building does not compile the crate's `cfg(test)` half, and the same `required-features`
+      # that makes a bare build vacuous makes a bare `cargo test` skip the bin outright. Three
+      # `Credentials` initializers rotted a field behind exactly that gap. These tests are portable
+      # logic, so they run on the host rather than needing a simulator.
+      - name: Test the phone app
+        run: cargo test --locked -p vmux_mobile --features mobile --bin vmux_mobile
+
       # vmux_mobile does not depend on every page that claims to be portable, so compiling it
       # proves nothing about them. This went green once while vmux_editor for iOS was broken.
-      # Crates left `cfg(web)` on purpose — vmux_layout, vmux_editor, vmux_terminal — are absent
-      # deliberately: they render only in CEF and are not meant to build for the phone.
+      # Every page crate with a `cfg(ui)` half is listed. vmux_knowledge is the one directory under
+      # page/ that is host-only, with no components to build for the phone.
       - name: Check the pages that ship on the phone
-        run: cargo check --locked --target aarch64-apple-ios -p vmux_chat -p vmux_start -p vmux_team -p vmux_ui
+        run: |
+          cargo check --locked --target aarch64-apple-ios \
+            -p vmux_agent -p vmux_chat -p vmux_command -p vmux_editor -p vmux_history \
+            -p vmux_layout -p vmux_setting -p vmux_space -p vmux_start -p vmux_team \
+            -p vmux_terminal -p vmux_ui
 
       # Neither of these is catchable by building. `dioxus` declares `dioxus-web` in a plain
       # [dependencies] block, so `dioxus/web` is not target-gated and feature unification can put
-      # the wasm renderer in the phone's graph silently — only vmux_page may ask for it, from its
-      # wasm32 block. And bevy_cef arriving would mean a portable page had taken a dependency on
-      # the desktop's browser engine.
+      # the wasm renderer in the phone's graph silently. Nothing builds for wasm32 any more, so
+      # nothing may ask for it at all. And bevy_cef arriving would mean a portable page had taken a
+      # dependency on the desktop's browser engine.
       - name: The phone links no desktop-only crate
         run: |
           set -euo pipefail

@@ -1,8 +1,18 @@
 # Locale catalogs
 
-`en-US.ftl` is the source catalog. Vmux bundles 115 locale tags, including Japanese, regional Chinese and Portuguese variants, and broad ISO 639-1 coverage.
+`en-US.ftl` is the source catalog. Vmux bundles fifteen: English, Japanese, Simplified and
+Traditional Chinese, Korean, Spanish, French, German, Brazilian Portuguese, Italian, Russian,
+Arabic, Dutch, Polish and Ukrainian.
 
-Every bundled catalog has the same message IDs and variables as English. All non-English catalogs, including Japanese, are context-aware LLM localizations rather than literal translations. Native corrections are welcome.
+It bundled 115 before, which was the Google Translate language list rather than a decision — Latin,
+Esperanto, three spellings of Portuguese and four of Chinese among them, none of it ever read by a
+person. What it cost was real: every new string had to be written 115 times, so adding one word to
+the UI meant 114 machine translations nobody would check.
+
+Every bundled catalog has the same message IDs and variables as English. All non-English catalogs,
+including Japanese, are context-aware LLM localizations rather than literal translations. Native
+corrections are welcome. Anything not on the list belongs in `~/.vmux/locales/`, which needs no
+rebuild and no change here.
 
 Each catalog's `locale-name` is its autonym and is shown unchanged in the language picker.
 

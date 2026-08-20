@@ -124,10 +124,14 @@ pub struct FilePath<'a>(pub &'a str);
 
 impl<'a> FilePath<'a> {
     /// The final segment, after the last `/`.
+    ///
+    /// Trailing slashes are trimmed first, so a directory written `src/pages/` is named for the
+    /// directory rather than for the empty string after its slash.
     pub fn name(self) -> &'a str {
-        match self.0.rsplit_once('/') {
+        let path = self.0.trim_end_matches('/');
+        match path.rsplit_once('/') {
             Some((_, name)) => name,
-            None => self.0,
+            None => path,
         }
     }
 
@@ -278,6 +282,16 @@ mod tests {
         assert_eq!(ext_of("file:///a/b/main.rs"), "rs");
         assert_eq!(ext_of("/x/Photo.PNG"), "png");
         assert_eq!(ext_of("/x/noext"), "");
+    }
+
+    /// A launcher row and a session header both name a directory by this, and a working directory
+    /// is as likely to be written with a trailing slash as without.
+    #[test]
+    fn name_reads_a_directory_written_with_a_trailing_slash() {
+        assert_eq!(FilePath("/a/b/pages/").name(), "pages");
+        assert_eq!(FilePath("/a/b/pages").name(), "pages");
+        assert_eq!(FilePath("pages/").name(), "pages");
+        assert_eq!(FilePath("/").name(), "");
     }
 
     /// The pill label follows `Path::extension`, so a dotfile has none — where
