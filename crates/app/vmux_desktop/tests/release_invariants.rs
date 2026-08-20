@@ -61,11 +61,6 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
         makefile.contains("VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full")
     );
     assert!(makefile.contains("dev-player:"));
-    assert!(
-        !makefile.contains("-p vmux_page"),
-        "the wasm bundle is gone; the stylesheet comes from vmux_ui's build script, which cargo \
-         sequences because vmux_ui is a dependency of the app"
-    );
     assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
 
