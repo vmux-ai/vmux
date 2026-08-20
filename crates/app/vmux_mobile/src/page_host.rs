@@ -14,6 +14,7 @@
 //! whose listener is turned down leaves the feature it drives unrendered, which is why mounting
 //! the desktop's chat page against a link that carries no slash commands costs nothing.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::core::ReactiveContext;
@@ -53,6 +54,9 @@ use crate::{Api, ApiError};
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 
 pub(crate) struct MobileHost {
+    /// Which installation this host is. A watcher compares it against [`EPOCH`] to find out that
+    /// it is serving a page on behalf of a link nobody holds any more.
+    epoch: u64,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     agents: Signal<Vec<RemoteAgent>>,
@@ -60,7 +64,21 @@ pub(crate) struct MobileHost {
     composer: ComposerExchange,
 }
 
-/// Route shared pages through `api` for the rest of this app's life.
+thread_local! {
+    /// Bumped by every [`install`].
+    ///
+    /// `install_host` replaces the thread-local host but hands back nothing, so a host being
+    /// superseded is never told and cannot stop the tasks it started. Those tasks hold a clone of
+    /// an `Api` that has since been closed, and the team watcher retries a non-terminal failure
+    /// forever — so a re-pair would leave a loop dialling an endpoint nobody is listening on.
+    ///
+    /// In practice every re-pair passes through `AuthState::Unpaired`, which unmounts the pages
+    /// and takes their scope-bound tasks with them. That is a property of how the shell happens to
+    /// branch, though, not of anything here, and it is not what a watcher should be relying on.
+    static EPOCH: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Route shared pages through `api`, and retire whatever was routing them before.
 pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
@@ -68,13 +86,24 @@ pub(crate) fn install(
     session: Session,
     composer: ComposerExchange,
 ) {
+    let epoch = EPOCH.with(|epoch| {
+        let next = epoch.get().wrapping_add(1);
+        epoch.set(next);
+        next
+    });
     install_host(Rc::new(MobileHost {
+        epoch,
         api,
         sessions,
         agents,
         session,
         composer,
     }));
+}
+
+/// Whether a later [`install`] has replaced the host a watcher was started by.
+fn superseded(epoch: u64) -> bool {
+    EPOCH.with(|current| current.get()) != epoch
 }
 
 /// The two exchanges the composer opens that are answered by pushing an event back.
@@ -149,17 +178,19 @@ impl PageHost for MobileHost {
         match id {
             CHAT_SNAPSHOT_EVENT => {
                 let (session, agents) = (self.session, self.agents);
-                watch(on_bytes, move || encode(&session.snapshot(&agents.read())));
+                watch(self.epoch, on_bytes, move || {
+                    encode(&session.snapshot(&agents.read()))
+                });
             }
             START_COMMAND_BAR_OPEN_EVENT => {
                 let (sessions, agents) = (self.sessions, self.agents);
-                watch(on_bytes, move || {
+                watch(self.epoch, on_bytes, move || {
                     encode(&launcher(&sessions.read(), &agents.read()))
                 });
             }
             CHAT_ATTACHMENTS_EVENT => {
                 let attached = self.composer.attached;
-                watch(on_bytes, move || {
+                watch(self.epoch, on_bytes, move || {
                     let attachments = attached.read().clone();
                     if attachments.is_empty() {
                         return None;
@@ -314,9 +345,13 @@ impl MobileHost {
     /// dropped.
     fn watch_models(&self, mut on_bytes: BytesListener) {
         let (api, session) = (self.api.clone(), self.session);
+        let epoch = self.epoch;
         let (rc, mut changed) = ReactiveContext::new();
         spawn(async move {
             loop {
+                if superseded(epoch) {
+                    return;
+                }
                 let sid = rc.reset_and_run_in(|| session.sid());
                 if !sid.is_empty()
                     && let Ok(state) = api.models(&sid).await
@@ -341,9 +376,13 @@ impl MobileHost {
         let (api, session) = (self.api.clone(), self.session);
         let composer = self.composer;
         let mut offered = composer.offered;
+        let epoch = self.epoch;
         let (rc, mut changed) = ReactiveContext::new();
         spawn(async move {
             loop {
+                if superseded(epoch) {
+                    return;
+                }
                 let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
                 let sid = session.sid();
                 if let Some(request) = asked
@@ -378,10 +417,13 @@ impl MobileHost {
     }
 
     fn watch_team(&self, mut on_bytes: BytesListener) {
-        let api = self.api.clone();
+        let (api, epoch) = (self.api.clone(), self.epoch);
         spawn(async move {
             let mut last: Option<Vec<TeamMemberRow>> = None;
             loop {
+                if superseded(epoch) {
+                    return;
+                }
                 match api.team().await {
                     Ok(members) => {
                         if last.as_ref() != Some(&members) {
@@ -452,10 +494,17 @@ fn launcher(sessions: &[RemoteSession], agents: &[RemoteAgent]) -> CommandBarOpe
 /// The desktop pushes because a daemon told it something. The phone has no such prompt: what a
 /// page needs to know is already in a signal, so the listener is a subscription to that signal
 /// rather than a poll. Scope-bound, so it stops when the page that subscribed goes away.
-fn watch(mut on_bytes: BytesListener, mut build: impl FnMut() -> Option<Vec<u8>> + 'static) {
+fn watch(
+    epoch: u64,
+    mut on_bytes: BytesListener,
+    mut build: impl FnMut() -> Option<Vec<u8>> + 'static,
+) {
     let (rc, mut changed) = ReactiveContext::new();
     spawn(async move {
         loop {
+            if superseded(epoch) {
+                return;
+            }
             if let Some(bytes) = rc.reset_and_run_in(&mut build) {
                 on_bytes(&bytes);
             }
