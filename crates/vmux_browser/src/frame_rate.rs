@@ -85,9 +85,8 @@ fn refresh_layout_cef_hover(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<Entity, With<LayoutCef>>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
 ) {
-    if layout_q.single().is_err() || suppress.0 || !modal_pointer_targets.is_empty() {
+    if layout_q.single().is_err() || suppress.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     }
@@ -115,7 +114,6 @@ fn refresh_layout_cef_hover(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
@@ -123,7 +121,7 @@ fn refresh_layout_cef_hover(
         *state = LayoutHoverRefreshState::default();
         return;
     };
-    if suppress.0 || !modal_pointer_targets.is_empty() {
+    if suppress.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;

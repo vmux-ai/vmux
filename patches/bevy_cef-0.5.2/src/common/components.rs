@@ -158,14 +158,6 @@ where
     }
 }
 
-/// Restricts wheel forwarding to the [`WebviewSource`] entities carrying it.
-///
-/// When **at least one** entity has this marker, `on_mouse_wheel` only forwards scroll events to
-/// those entities. When **no** entity carries the marker, every webview receives wheel events.
-#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct CefPointerTarget;
-
 /// Transient browser-surface offset used while a horizontal history swipe is in progress.
 #[derive(Reflect, Component, Debug, Copy, Clone, PartialEq, Default)]
 #[reflect(Component, Debug, Default)]

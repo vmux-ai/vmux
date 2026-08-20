@@ -1161,7 +1161,6 @@ fn on_command_bar_action(
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
-            .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
@@ -1195,7 +1194,6 @@ fn deferred_dismiss_modal(
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
-            .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
