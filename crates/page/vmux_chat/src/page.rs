@@ -28,7 +28,7 @@ pub fn Page() -> Element {
 
     rsx! {
         main {
-            class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground outline-none",
+            class: "agent-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
             style: "--agent-accent:{accent.css};",
             // Focusable so a click on the transcript lands focus here rather than on the body,
             // which would put keystrokes out of reach of the handler below. Deliberately not

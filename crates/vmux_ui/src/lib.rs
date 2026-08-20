@@ -39,6 +39,8 @@ pub mod list_nav;
 
 pub mod hooks;
 
+pub mod chrome;
+
 pub mod components;
 
 pub mod platform;

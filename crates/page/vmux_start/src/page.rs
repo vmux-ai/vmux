@@ -41,7 +41,7 @@ pub fn Page(
     rsx! {
         document::Title { {translate("start-title")} }
         main {
-            class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground sm:px-6",
+            class: "relative isolate flex h-dvh items-center justify-center overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
             StartBackdrop {}
             StartHero { revealed: mounted(),

@@ -6,15 +6,21 @@
 
 use super::state::Chat;
 use dioxus::prelude::*;
+use vmux_ui::chrome::BackButton;
 use vmux_ui::favicon::favicon_src_for_url;
 
 /// Who the conversation is with, and what it is called.
+///
+/// The top inset resolves to zero wherever there is no notch, so the same padding serves a header
+/// under a status bar and one under a tab strip. [`BackButton`] renders only for a host that draws
+/// no chrome of its own, which on the desktop is nothing at all.
 #[component]
 pub(super) fn ChatHeader(chat: Chat) -> Element {
     let name = chat.header_name();
     let title = chat.title();
     rsx! {
-        header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] sm:px-5",
+        header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] shadow-[0_1px_0_rgba(255,255,255,0.02)] sm:px-5",
+            BackButton {}
             AgentAvatar { chat, size_class: "h-6 w-6 text-[11px]" }
             StatusDot { status: chat.status(), size_class: "h-2.5 w-2.5" }
             div { class: "min-w-0 flex-1",
