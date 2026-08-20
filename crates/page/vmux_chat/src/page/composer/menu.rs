@@ -17,7 +17,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 pub(super) fn MediaMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
     rsx! {
-        PromptPopup {
+        PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             PromptMediaOptions {
                 items: chat.media_options(),
                 selected: menu_sel(),
@@ -40,7 +40,7 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
 pub(super) fn CommandMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
     rsx! {
-        PromptPopup {
+        PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             for (i , command) in chat.filtered_commands().into_iter().enumerate() {
                 div {
                     key: "sc{i}",
@@ -76,7 +76,7 @@ pub(super) fn ResumeMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
     let state = chat.resume_state();
     rsx! {
-        PromptPopup {
+        PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             if state == Some(ResumeMenuState::Loading) {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-loading-sessions")} }
             } else if state == Some(ResumeMenuState::Empty) {

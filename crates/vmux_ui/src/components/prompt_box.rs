@@ -40,8 +40,13 @@ pub fn PromptBox(
 
 #[component]
 /// Shared popup surface for prompt suggestions and selectors.
+///
+/// A popup opened by what was typed is closed by Escape, which a software keyboard does not have.
+/// Passing `on_dismiss` adds the only other way out that does not involve deleting the draft a
+/// character at a time; it is a plain button, so it serves a mouse as readily as a thumb.
 pub fn PromptPopup(
     #[props(default)] placement: PromptPopupPlacement,
+    #[props(default)] on_dismiss: Option<EventHandler<()>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -61,6 +66,34 @@ pub fn PromptPopup(
     });
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
-        div { ..merged, {children} }
+        div { ..merged,
+            if let Some(on_dismiss) = on_dismiss {
+                // Sticky rather than floating: the list scrolls under it, so it cannot be scrolled
+                // out of reach in a menu long enough to need scrolling in the first place.
+                div { class: "pointer-events-none sticky top-0 z-10 flex justify-end",
+                    button {
+                        class: "pointer-events-auto m-1 flex h-7 w-7 items-center justify-center rounded-lg bg-background/80 text-muted-foreground backdrop-blur hover:text-foreground active:bg-accent",
+                        r#type: "button",
+                        aria_label: crate::i18n::translate("common-close"),
+                        // The prompt keeps focus, so the menu does not reopen from a refocus and
+                        // the keyboard does not drop on the way out.
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| on_dismiss.call(()),
+                        svg {
+                            class: "h-4 w-4",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M18 6 6 18" }
+                            path { d: "m6 6 12 12" }
+                        }
+                    }
+                }
+            }
+            {children}
+        }
     }
 }
