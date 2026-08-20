@@ -1,3 +1,4 @@
+use crate::components::icon::Icon;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
@@ -79,14 +80,7 @@ pub fn PromptPopup(
                         // the keyboard does not drop on the way out.
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| on_dismiss.call(()),
-                        svg {
-                            class: "h-4 w-4",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
+                        Icon { class: "h-4 w-4",
                             path { d: "M18 6 6 18" }
                             path { d: "m6 6 12 12" }
                         }

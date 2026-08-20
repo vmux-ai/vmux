@@ -10,7 +10,11 @@
 //! other host provides nothing, `PageBack::of` answers `None`, and the affordance does not render
 //! — so the desktop is untouched by the phone needing one.
 
+use crate::components::icon::Icon;
+use crate::util::merge_class;
 use dioxus::prelude::*;
+
+const BACK_BUTTON: &str = "-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground active:bg-accent";
 
 /// How a page returns to whatever it was opened from.
 ///
@@ -41,27 +45,15 @@ pub fn BackButton(#[props(default)] class: String) -> Element {
     let Some(back) = PageBack::of() else {
         return rsx! {};
     };
-    let class = if class.is_empty() {
-        "-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground active:bg-accent".to_string()
-    } else {
-        class
-    };
     rsx! {
         button {
-            class: "{class}",
+            class: merge_class(BACK_BUTTON, Some(&class)),
             r#type: "button",
             // Named for the app that first needed it and translated into all 116 locales there.
             // Minting a `common-` id for the same word would mean 116 untranslated strings.
             aria_label: crate::i18n::translate("mobile-chat-back"),
             onclick: move |_| back.go(),
-            svg {
-                class: "h-5 w-5",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "2",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
+            Icon { class: "h-5 w-5",
                 path { d: "m15 18-6-6 6-6" }
             }
         }
