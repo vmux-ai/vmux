@@ -10542,6 +10542,10 @@ dependencies = [
 name = "vmux_mobile"
 version = "0.0.30"
 dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "bevy_window",
  "block2 0.6.2",
  "dioxus",
  "dispatch2",
