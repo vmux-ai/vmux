@@ -5,7 +5,7 @@
 //!
 //! Instructions resolve as soon as they are queued: the next frame carries them, and nothing the
 //! page could say afterwards would change the answer. The three questions go out the same way and
-//! wait, because an answer has to come back — see [`measurement`](crate::measurement).
+//! wait, because an answer has to come back — see [`measurement`](crate::view::measurement).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -14,8 +14,8 @@ use dioxus_core::ElementId;
 use dioxus_html::geometry::{PixelsRect, PixelsSize, PixelsVector2D};
 use dioxus_html::{MountedResult, RenderedElementBacking, ScrollBehavior, ScrollToOptions};
 
-use crate::dom_request::{DomRequest, Measure, RequestQueue};
-use crate::measurement::{Measurement, PendingReads};
+use crate::view::dom_request::{DomRequest, Measure, RequestQueue};
+use crate::view::measurement::{Measurement, PendingReads};
 
 type Answer<T> = Pin<Box<dyn Future<Output = MountedResult<T>>>>;
 

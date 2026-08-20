@@ -11,12 +11,12 @@ mod macos;
 
 use tracing::error;
 
-use crate::dom::SurfaceDom;
-use crate::embed::Embedding;
 use crate::page::NativePage;
-use crate::report::PageMessage;
-use crate::route::PageRoutes;
-use crate::shim::WRY_HOST_SHIM;
+use crate::view::dom::SurfaceDom;
+use crate::view::embed::Embedding;
+use crate::view::report::PageMessage;
+use crate::view::route::PageRoutes;
+use crate::view::shim::WRY_HOST_SHIM;
 
 /// What a view's `prefers-color-scheme` should answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

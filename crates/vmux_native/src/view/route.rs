@@ -6,9 +6,9 @@
 
 use std::rc::Rc;
 
-use crate::dom::SurfaceDom;
-use crate::embed::{AssetReply, Assets};
 use crate::page::NativePage;
+use crate::view::dom::SurfaceDom;
+use crate::view::embed::{AssetReply, Assets};
 
 /// One page's `vmux://` handler: what it is, what fills it, and where its assets come from.
 ///

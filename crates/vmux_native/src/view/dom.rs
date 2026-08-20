@@ -22,12 +22,12 @@ use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
 
-use crate::dom_request::{DomRequest, RequestQueue};
-use crate::embed::{Embedding, Outbox, Wake};
-use crate::event_selection::EventSelection;
-use crate::frame::PageFrame;
-use crate::measurement::PendingReads;
-use crate::surface_element::SurfaceElement;
+use crate::view::dom_request::{DomRequest, RequestQueue};
+use crate::view::embed::{Embedding, Outbox, Wake};
+use crate::view::event_selection::EventSelection;
+use crate::view::frame::PageFrame;
+use crate::view::measurement::PendingReads;
+use crate::view::surface_element::SurfaceElement;
 use crate::{EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.

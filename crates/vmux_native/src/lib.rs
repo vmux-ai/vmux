@@ -42,37 +42,9 @@ pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
 
 #[cfg(ui)]
-mod dom;
-#[cfg(ui)]
-mod dom_request;
-#[cfg(ui)]
-mod embed;
-#[cfg(ui)]
-mod event_selection;
-#[cfg(ui)]
-mod frame;
-#[cfg(ui)]
-mod measurement;
-#[cfg(ui)]
-mod report;
-#[cfg(ui)]
-mod route;
-#[cfg(ui)]
-mod shim;
-#[cfg(ui)]
-mod surface;
-#[cfg(ui)]
-mod surface_element;
+mod view;
 
 #[cfg(ui)]
-pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
-#[cfg(ui)]
-pub use surface::{Appearance, PageSurface, SiblingOrder};
-
-// wry calls `objc2::exception::catch`, whose C shim ships as a static archive built by
-// `objc2-exception-helper`. Cargo puts that archive's directory on the link path but its `-l`
-// never reaches the binary, so the reference resolves to nothing. Naming the library here is what
-// pulls it in.
-#[cfg(ui)]
-#[link(name = "objc2_exception_helper_0_1", kind = "static")]
-unsafe extern "C" {}
+pub use view::{
+    Appearance, AssetReply, Assets, Embedding, Outbox, PageSurface, SiblingOrder, Wake,
+};
