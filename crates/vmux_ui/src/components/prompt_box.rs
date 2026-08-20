@@ -1,4 +1,4 @@
-use crate::components::icon::Icon;
+use crate::components::button::IconButton;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
@@ -72,18 +72,14 @@ pub fn PromptPopup(
                 // Sticky rather than floating: the list scrolls under it, so it cannot be scrolled
                 // out of reach in a menu long enough to need scrolling in the first place.
                 div { class: "pointer-events-none sticky top-0 z-10 flex justify-end",
-                    button {
-                        class: "pointer-events-auto m-1 flex h-7 w-7 items-center justify-center rounded-lg bg-background/80 text-muted-foreground backdrop-blur hover:text-foreground active:bg-accent",
-                        r#type: "button",
-                        aria_label: crate::i18n::translate("common-close"),
+                    IconButton {
+                        class: "pointer-events-auto m-1 bg-background/80 backdrop-blur",
+                        label: crate::i18n::translate("common-close"),
+                        paths: vec!["M18 6 6 18".to_string(), "m6 6 12 12".to_string()],
                         // The prompt keeps focus, so the menu does not reopen from a refocus and
                         // the keyboard does not drop on the way out.
-                        onmousedown: move |event| event.prevent_default(),
+                        onmousedown: move |event: MouseEvent| event.prevent_default(),
                         onclick: move |_| on_dismiss.call(()),
-                        Icon { class: "h-4 w-4",
-                            path { d: "M18 6 6 18" }
-                            path { d: "m6 6 12 12" }
-                        }
                     }
                 }
             }
