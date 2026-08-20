@@ -2162,8 +2162,7 @@ mod tests {
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
 
         let modal = app
             .world_mut()

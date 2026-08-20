@@ -6,7 +6,6 @@ pub(crate) struct WebviewCoreComponentsPlugin;
 impl Plugin for WebviewCoreComponentsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CefSuppressPointerInput::default())
-            .insert_resource(CefSuppressKeyboardInput::default())
             .register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
             .register_type::<CefKeyboardTarget>()
@@ -40,11 +39,6 @@ pub struct CefKeyboardTarget;
 /// while a key chord is in progress.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct CefSuppressPointerInput(pub bool);
-
-/// When `true`, CEF skips forwarding [`KeyboardInput`] and [`Ime`] commits to browsers (pair with
-/// [`CefSuppressPointerInput`] for host-managed chords).
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct CefSuppressKeyboardInput(pub bool);
 
 /// Marker: this webview should ignore pinch-to-zoom gestures.
 ///

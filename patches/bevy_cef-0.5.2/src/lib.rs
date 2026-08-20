@@ -3,7 +3,6 @@
 mod cef_state;
 mod common;
 mod cursor_icon;
-mod keyboard;
 mod loading_state;
 mod mute;
 mod navigation;
@@ -14,7 +13,6 @@ mod zoom;
 use crate::cef_state::WebviewCefStatePlugin;
 use crate::common::{CustomSchemePlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
-use crate::keyboard::KeyboardPlugin;
 use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::mute::AudioMutePlugin;
 use crate::popup_state::WebviewPopupPlugin;
@@ -29,9 +27,8 @@ use bevy_cef_core::prelude::{
 pub mod prelude {
     pub use crate::{
         CefPlugin, RunOnMainThread, cef_state::*,
-        common::custom_scheme::asset_loader::CefResponseHandle, common::*,
-        keyboard::CefKeyboardInputSet, loading_state::*, navigation::*, popup_state::*,
-        webview::prelude::*,
+        common::custom_scheme::asset_loader::CefResponseHandle, common::*, loading_state::*,
+        navigation::*, popup_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
         Browsers, CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot,
@@ -92,7 +89,6 @@ impl Plugin for CefPlugin {
             WebviewCoreComponentsPlugin,
             WebviewPlugin,
             IpcPlugin,
-            KeyboardPlugin,
             SystemCursorIconPlugin,
             WebviewLoadingStatePlugin,
             WebviewCefStatePlugin,

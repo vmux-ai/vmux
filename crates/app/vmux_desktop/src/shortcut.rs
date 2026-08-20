@@ -39,7 +39,6 @@ fn process_key_input(
     mut chord_state: ResMut<ChordState>,
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
-    mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
 ) {
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     let current_modifiers = read_current_modifiers(&keyboard);
@@ -48,7 +47,6 @@ fn process_key_input(
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
         if instant.elapsed() > timeout {
             chord_state.pending_prefix = None;
-            suppress.0 = false;
         }
     }
 
@@ -70,14 +68,12 @@ fn process_key_input(
         {
             issuer.issue(caller, cmd);
             chord_state.pending_prefix = None;
-            suppress.0 = false;
             return;
         }
         if just_pressed.is_empty() {
             return;
         }
         chord_state.pending_prefix = None;
-        suppress.0 = false;
     }
 
     for (index, pressed) in just_pressed.iter().enumerate() {
@@ -87,7 +83,6 @@ fn process_key_input(
         }
         if bindings.has_chord_prefix(pressed) {
             chord_state.pending_prefix = Some((pressed.clone(), Instant::now()));
-            suppress.0 = true;
             for (second_index, second) in just_pressed.iter().enumerate() {
                 if second_index == index {
                     continue;
@@ -95,7 +90,6 @@ fn process_key_input(
                 if let Some(cmd) = bindings.chord(pressed, second) {
                     issuer.issue(caller, cmd);
                     chord_state.pending_prefix = None;
-                    suppress.0 = false;
                     return;
                 }
             }
@@ -158,8 +152,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
-            .insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+            .insert_resource(ButtonInput::<KeyCode>::default());
         app.update();
         app
     }
@@ -169,8 +162,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
             .insert_resource(settings)
-            .insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+            .insert_resource(ButtonInput::<KeyCode>::default());
         app.update();
         app
     }

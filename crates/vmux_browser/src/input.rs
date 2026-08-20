@@ -42,10 +42,7 @@ impl Plugin for InputPlugin {
                     .chain()
                     .after(InputSystems),
             )
-            .add_systems(
-                PreUpdate,
-                log_command_bar_keyboard_input.after(bevy_cef::prelude::CefKeyboardInputSet),
-            )
+            .add_systems(PreUpdate, log_command_bar_keyboard_input)
             .add_systems(Update, track_browser_interaction);
     }
 }

@@ -89,8 +89,6 @@ fn sync_keyboard_target(
     modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<WindowOverlay>>,
     layout_keyboard_q: Query<Entity, LayoutKeyboardHost>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
-    terminal_q: Query<(), With<vmux_terminal::Terminal>>,
-    mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     mut commands: Commands,
 ) {
     if let Some(modal) = modal_q.iter().find_map(|(entity, node, keyboard_target)| {
@@ -101,7 +99,6 @@ fn sync_keyboard_target(
                 commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
-        suppress.0 = false;
         return;
     }
 
@@ -119,7 +116,6 @@ fn sync_keyboard_target(
                 commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
-        suppress.0 = false;
         return;
     }
 
@@ -142,9 +138,6 @@ fn sync_keyboard_target(
             if !has_kb {
                 commands.entity(browser_e).try_insert(CefKeyboardTarget);
             }
-            // Suppress CEF keyboard forwarding when a terminal is focused —
-            // terminals receive input via the service, not CEF key events.
-            suppress.0 = terminal_q.contains(browser_e);
         } else if has_kb {
             commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
         }
@@ -1570,7 +1563,6 @@ mod tests {
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
         app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .insert_resource(CefSuppressKeyboardInput(true))
             .add_systems(Update, sync_keyboard_target);
         let page = app.world_mut().spawn((Browser, CefKeyboardTarget)).id();
         let modal = app
@@ -1590,7 +1582,6 @@ mod tests {
 
         assert!(app.world().get::<CefKeyboardTarget>(modal).is_some());
         assert!(app.world().get::<CefKeyboardTarget>(page).is_none());
-        assert!(!app.world().resource::<CefSuppressKeyboardInput>().0);
     }
 
     #[test]
