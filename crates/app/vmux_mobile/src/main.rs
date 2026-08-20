@@ -1,30 +1,34 @@
 #![allow(non_snake_case)]
 
+mod api;
 mod credentials;
 mod logs;
 mod native_transition;
 mod page_host;
+mod pairing;
 mod qr_scanner;
 mod quic_api;
+mod session;
 
+use crate::api::{Api, ApiError, next_client_op_id};
 use crate::logs::Logs;
+use crate::pairing::Credentials;
+use crate::session::{
+    AuthState, MobileRoomProjection, leave_session, open_session, start_new_chat,
+};
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
-use url::Url;
 use vmux_chat::format::composer::{SelectorMode, filter_models, selector_mode};
 use vmux_chat::page::agent::StatusDot;
 use vmux_chat::page::approval::ApprovalPanel;
 use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::page::composer::options::{EffortMenu, ModelMenu, ModelPill};
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
-use vmux_service::chat::group_turns_tail;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
     PromptComposer, PromptComposerAction, PromptComposerAttachment,
@@ -38,28 +42,16 @@ use vmux_ui::i18n::translate;
 use vmux_ui::launcher::results::CommandBarResultItem;
 use vmux_ui::launcher::row::ResultRow;
 use vmux_wire::PageIcon;
-use vmux_wire::chat::{ChatItem, latest_tool_location};
+use vmux_wire::chat::latest_tool_location;
 use vmux_wire::prompt_media::ChatAttachment;
-use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
-    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, ModelOptionEntry,
-    NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry,
-    RemoteModelState, RemoteSession, RemoteStatus, RoomEvent, RoomId, inline_media_query,
+    AgentAttachment, ApprovalRequest, ModelOptionEntry, PromptRequest, RemoteAgent, RemoteApproval,
+    RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus, inline_media_query,
     replace_inline_media_query,
 };
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
-
-fn next_client_op_id() -> ClientOpId {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
-    ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
-}
 
 /// Set when the app comes back to the foreground.
 ///
@@ -132,343 +124,8 @@ fn main() {
 }
 
 /// Whether the app has resumed since this was last asked.
-fn take_resumed() -> bool {
+pub(crate) fn take_resumed() -> bool {
     RESUMED.swap(false, std::sync::atomic::Ordering::AcqRel)
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum AuthState {
-    Loading,
-    Paired,
-    Unpaired,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-struct MobileRoomProjection {
-    room_id: Option<RoomId>,
-    through_seq: u64,
-    events: Vec<RoomEvent>,
-}
-
-impl MobileRoomProjection {
-    /// Fold the replayed log into rendered chat items, with any streaming delta as the tail of
-    /// the live turn.
-    ///
-    /// The phone has no imported history and no per-turn durations, so it always asks for the
-    /// whole transcript and lets every turn resolve its duration to `None`.
-    fn chat_items(&self, live_delta: &str, running: bool) -> Vec<ChatItem> {
-        let mut messages = Vec::with_capacity(self.events.len() + 1);
-        for event in &self.events {
-            messages.push(event.message.clone());
-        }
-        if !live_delta.is_empty() {
-            messages.push(Message::Assistant {
-                blocks: vec![AssistantBlock::Text(live_delta.to_string())],
-            });
-        }
-        group_turns_tail(&[], &messages, &[], running, usize::MAX).items
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-struct Credentials {
-    base_url: String,
-    token: String,
-    /// SHA-256 of the desktop's QUIC certificate, pinned when dialling it.
-    ///
-    /// Defaulted rather than required so a pairing written by an older build still deserialises.
-    /// It is refused on use instead, which tells the phone to scan again rather than silently
-    /// forgetting the Mac.
-    #[serde(default)]
-    fingerprint: String,
-    /// Which desktop to ask the relay for.
-    ///
-    /// Every desktop is reached at the same relay address, so the link has to name one. Defaulted
-    /// for the same reason as the fingerprint: a pairing written before the relay routed by
-    /// identity still deserialises, and is refused on use rather than forgotten silently.
-    #[serde(default)]
-    device: String,
-}
-
-#[derive(Clone)]
-struct Api {
-    quic: crate::quic_api::QuicApi,
-}
-
-enum ApiError {
-    Unauthorized,
-    /// No such session on the Mac. Asking again will not conjure one.
-    NotFound,
-    Message(String),
-}
-
-impl std::fmt::Display for ApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unauthorized => f.write_str(&translate("mobile-error-pairing-expired")),
-            Self::NotFound => f.write_str(&translate("mobile-error-not-offered")),
-            Self::Message(message) => f.write_str(message),
-        }
-    }
-}
-
-impl Api {
-    /// Fails when the pairing carries no certificate fingerprint.
-    ///
-    /// There is nothing to fall back to: the Mac is reached by pinning that certificate, so a
-    /// pairing without one names a desktop this build cannot dial. Re-pairing is the only fix.
-    fn new(credentials: Credentials) -> Result<Self, ApiError> {
-        let Some(endpoint) = quic_endpoint(&credentials) else {
-            return Err(ApiError::Message(translate(
-                "mobile-error-pairing-outdated",
-            )));
-        };
-        Ok(Self {
-            quic: crate::quic_api::QuicApi::new(endpoint),
-        })
-    }
-
-    /// Drop any live QUIC connection so the next call redials.
-    async fn reset_transport(&self) {
-        self.quic.reset().await;
-    }
-
-    /// Close the connection, for a client being replaced or cleared.
-    fn close(&self) {
-        self.quic.close();
-    }
-
-    async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
-        broker_json(&self.quic, SharedAgentCommand::ListAgents).await
-    }
-
-    async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
-        match self.quic.request(SharedMessage::ListSessions).await {
-            Ok(SharedResponse::Sessions(sessions)) => Ok(sessions),
-            Ok(_) => Err(ApiError::Message(translate(
-                "mobile-error-unexpected-answer",
-            ))),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    /// The models this session can run, and its current effort level.
-    async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
-        broker_json(
-            &self.quic,
-            SharedAgentCommand::ListModels {
-                sid: sid.to_string(),
-            },
-        )
-        .await
-    }
-
-    /// Switch the session to another of its models.
-    async fn select_model(&self, sid: &str, model_id: &str) -> Result<(), ApiError> {
-        self.command(SharedAgentCommand::SelectModel {
-            sid: sid.to_string(),
-            model_id: model_id.to_string(),
-        })
-        .await
-    }
-
-    /// Set how hard the session's agent is asked to think. An empty level restores its default.
-    async fn set_effort(&self, sid: &str, level: &str) -> Result<(), ApiError> {
-        self.command(SharedAgentCommand::SetEffort {
-            sid: sid.to_string(),
-            level: level.to_string(),
-        })
-        .await
-    }
-
-    async fn command(&self, command: SharedAgentCommand) -> Result<(), ApiError> {
-        self.applied(
-            self.quic
-                .request(SharedMessage::AgentCommand(command))
-                .await,
-        )
-    }
-
-    async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
-        broker_json(&self.quic, SharedAgentCommand::ListTeam).await
-    }
-
-    /// Subscribe to a session's events.
-    async fn subscribe(&self, sid: &str) -> Result<crate::quic_api::Subscription, ApiError> {
-        self.quic.subscribe(sid).await.map_err(Into::into)
-    }
-
-    /// Submit a prompt to a running session.
-    async fn send_prompt(&self, sid: &str, request: &PromptRequest) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentAction::Input {
-                text: request.text.clone(),
-                context: None,
-                attachments: request.attachments.clone(),
-            },
-        );
-        self.applied(self.quic.request(message).await)
-    }
-
-    /// Open a new chat on the desktop.
-    async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
-        let command = SharedAgentCommand::NewAgentChat {
-            client_op_id: request.client_op_id.clone(),
-            prompt: request.text.clone(),
-            agent_url: request.agent_url.clone(),
-        };
-        self.applied(
-            self.quic
-                .request(SharedMessage::AgentCommand(command))
-                .await,
-        )
-    }
-
-    /// Interrupt the session's in-flight turn.
-    async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(sid, AgentAction::Cancel);
-        self.applied(self.quic.request(message).await)
-    }
-
-    /// Answer a pending tool approval.
-    async fn approve(&self, sid: &str, request: &ApprovalRequest) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentAction::Approve {
-                call_id: request.call_id.clone(),
-                decision: request.decision,
-            },
-        );
-        self.applied(self.quic.request(message).await)
-    }
-
-    /// A replay is success, not failure: the desktop recognised the op and declined to run it
-    /// twice, which is exactly what the idempotency key is for.
-    fn applied(
-        &self,
-        outcome: Result<SharedResponse, crate::quic_api::QuicError>,
-    ) -> Result<(), ApiError> {
-        match outcome {
-            Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Ok(()),
-            Ok(_) => Err(ApiError::Message(translate(
-                "mobile-error-unexpected-answer",
-            ))),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    async fn media(&self, sid: &str, query: &str) -> Result<Vec<RemoteMediaEntry>, ApiError> {
-        let request = SharedMessage::agent(
-            sid,
-            AgentAction::ListMedia {
-                query: query.to_string(),
-            },
-        );
-        match self.quic.request(request).await {
-            Ok(SharedResponse::Media(entries)) => Ok(entries),
-            Ok(_) => Err(ApiError::Message(translate(
-                "mobile-error-unexpected-answer",
-            ))),
-            Err(error) => Err(error.into()),
-        }
-    }
-}
-
-/// Project a shared event onto the shape the pages already render.
-///
-/// The desktop used to do this before serialising to SSE. Doing it here instead keeps the wire
-/// typed — `RemoteEvent` is now a rendering concern of this app, not a thing any peer sends.
-fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<RemoteEvent> {
-    use vmux_wire::protocol::SharedEvent as Shared;
-    match event {
-        Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-            room_id: vmux_wire::room::RoomId::for_session(&sid),
-            text,
-        }),
-        Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
-            status: RemoteStatus::from(&status),
-        }),
-        Shared::AgentAwaitingApproval {
-            call_id,
-            name,
-            args_json,
-            ..
-        } => Some(RemoteEvent::Approval {
-            approval: Some(RemoteApproval {
-                call_id,
-                name,
-                args_json,
-            }),
-        }),
-        Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
-        Shared::AgentMessagesSnapshot { sid, messages_json } => {
-            let messages: Vec<vmux_wire::room::Message> =
-                serde_json::from_str(&messages_json).ok()?;
-            let room_id = vmux_wire::room::RoomId::for_session(&sid);
-            let events = vmux_wire::room::RoomEvent::from_messages(&sid, 0, &messages);
-            Some(RemoteEvent::Snapshot {
-                room_id,
-                through_seq: events.len() as u64,
-                events,
-            })
-        }
-        Shared::Session { session } => Some(RemoteEvent::Session { session }),
-        // The daemon resolves these into Session before they reach a client; reaching here means
-        // an older desktop that predates that, and there is nothing renderable to derive.
-        Shared::AcpAgentInfo { .. }
-        | Shared::AcpWorkspaceChanged { .. }
-        | Shared::AcpModelInfo { .. } => None,
-    }
-}
-
-/// Build the QUIC endpoint from a pairing, when it carried both a fingerprint and a device.
-///
-/// A pairing missing either cannot reach anything: the fingerprint is what the inner session pins,
-/// and the device is what the relay routes on. Returning `None` sends the phone back to the
-/// scanner rather than into a dial that would be refused.
-fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint> {
-    if credentials.fingerprint.is_empty() || credentials.device.is_empty() {
-        return None;
-    }
-    let parsed = Url::parse(&credentials.base_url).ok()?;
-    let host = parsed.host_str()?;
-    let port = parsed.port().unwrap_or(443);
-    Some(crate::quic_api::Endpoint {
-        address: format!("{host}:{port}"),
-        token: credentials.token.clone(),
-        fingerprint: credentials.fingerprint.clone(),
-        desktop: vmux_remote::DeviceId::new(&credentials.device),
-    })
-}
-
-/// GUI-held state comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
-/// than re-typed on the wire — the shape belongs to the page that renders it.
-async fn broker_json<T: serde::de::DeserializeOwned>(
-    quic: &crate::quic_api::QuicApi,
-    command: SharedAgentCommand,
-) -> Result<T, ApiError> {
-    match quic.request(SharedMessage::AgentCommand(command)).await {
-        Ok(SharedResponse::BrokerJson(json)) => {
-            serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
-        }
-        Ok(_) => Err(ApiError::Message(translate(
-            "mobile-error-unexpected-answer",
-        ))),
-        Err(error) => Err(error.into()),
-    }
-}
-
-impl From<crate::quic_api::QuicError> for ApiError {
-    fn from(error: crate::quic_api::QuicError) -> Self {
-        use crate::quic_api::QuicError;
-        use vmux_wire::protocol::SharedFailure;
-        match error {
-            QuicError::Unauthorized => Self::Unauthorized,
-            QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,
-            other => Self::Message(other.to_string()),
-        }
-    }
 }
 
 /// The model and effort pickers under the composer.
@@ -622,101 +279,6 @@ fn select_remote_media_entry(
     selected.set(0);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn start_new_chat(
-    api: Signal<Option<Api>>,
-    mut sessions: Signal<Vec<RemoteSession>>,
-    current: Signal<Option<RemoteSession>>,
-    room: Signal<MobileRoomProjection>,
-    live_delta: Signal<String>,
-    status: Signal<RemoteStatus>,
-    approval: Signal<Option<RemoteApproval>>,
-    connected: Signal<bool>,
-    stream_generation: Signal<u64>,
-    mut draft: Signal<String>,
-    mut error: Signal<String>,
-    mut creating: Signal<bool>,
-    agent_url: Option<String>,
-) {
-    let text = draft.peek().trim().to_string();
-    let Some(client) = api() else { return };
-    if text.is_empty() || creating() {
-        return;
-    }
-    let known = sessions
-        .read()
-        .iter()
-        .map(|session| session.sid.clone())
-        .collect::<std::collections::HashSet<_>>();
-    creating.set(true);
-    error.set(String::new());
-    spawn(async move {
-        match client
-            .create_chat(&NewChatRequest {
-                client_op_id: next_client_op_id(),
-                text,
-                agent_url,
-            })
-            .await
-        {
-            Ok(()) => {
-                for _ in 0..40 {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                    if let Ok(next) = client.sessions().await {
-                        let created = next
-                            .iter()
-                            .find(|session| !known.contains(&session.sid))
-                            .cloned();
-                        sessions.set(next);
-                        if let Some(created) = created {
-                            draft.set(String::new());
-                            creating.set(false);
-                            open_session(
-                                client,
-                                created,
-                                current,
-                                room,
-                                live_delta,
-                                status,
-                                approval,
-                                connected,
-                                stream_generation,
-                            );
-                            return;
-                        }
-                    }
-                }
-                error.set(translate("mobile-error-stack-missing"));
-            }
-            Err(ApiError::Unauthorized) => {
-                error.set(translate("mobile-error-pairing-lost"));
-            }
-            Err(other) => error.set(other.to_string()),
-        }
-        creating.set(false);
-    });
-}
-
-fn leave_session(
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-    mut connected: Signal<bool>,
-    mut generation: Signal<u64>,
-) {
-    let dismissing = native_transition::NativeSheet::close();
-    generation.set(generation().wrapping_add(1));
-    current.set(None);
-    room.set(MobileRoomProjection::default());
-    live_delta.set(String::new());
-    status.set(RemoteStatus::Idle);
-    approval.set(None);
-    connected.set(false);
-    dismissing.finish();
-}
-
 #[component]
 fn App() -> Element {
     rsx! {
@@ -770,7 +332,7 @@ fn AppBody() -> Element {
     // reaching into the DOM, so the renderer decides how a scroll actually happens.
     let mut transcript_view = use_signal(|| None::<Event<MountedData>>);
     use_effect(move || {
-        let _ = room.read().events.len();
+        let _ = room.read().event_count();
         let _ = live_delta.read().len();
         let Some(view) = transcript_view() else {
             return;
@@ -857,7 +419,7 @@ fn AppBody() -> Element {
         if deep_link_received() {
             return;
         }
-        pair_url.set(pairing_url(&credentials));
+        pair_url.set(credentials.pairing_url());
         let client = match Api::new(credentials) {
             Ok(client) => client,
             Err(reason) => {
@@ -927,7 +489,7 @@ fn AppBody() -> Element {
             let Some(input) = pending else {
                 continue;
             };
-            let credentials = match parse_pairing_url(&input) {
+            let credentials = match Credentials::parse(&input) {
                 Ok(credentials) => credentials,
                 Err(message) => {
                     pairing.set(false);
@@ -950,7 +512,7 @@ fn AppBody() -> Element {
             match client.sessions().await {
                 Ok(next) => {
                     credentials::StoredCredentials::save(&credentials);
-                    pair_url.set(pairing_url(&credentials));
+                    pair_url.set(credentials.pairing_url());
                     let displaced = api.peek().clone();
                     api.set(Some(client.clone()));
                     if let Some(displaced) = displaced {
@@ -1790,250 +1352,11 @@ fn PairCard(props: PairCardProps) -> Element {
     }
 }
 
-/// Fold the room's event log into the shared transcript model. The desktop gets this from
-/// `group_turns` on the daemon side; the relay does not pre-group yet, so mobile folds locally.
-#[allow(clippy::too_many_arguments)]
-fn open_session(
-    api: Api,
-    session: RemoteSession,
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-    mut connected: Signal<bool>,
-    mut generation: Signal<u64>,
-) {
-    native_transition::NativeSheet::open();
-    let sid = session.sid.clone();
-    current.set(Some(session.clone()));
-    room.set(MobileRoomProjection {
-        room_id: Some(session.room_id.clone()),
-        ..MobileRoomProjection::default()
-    });
-    live_delta.set(String::new());
-    status.set(session.status.clone());
-    approval.set(session.approval.clone());
-    connected.set(false);
-    let next_generation = generation().wrapping_add(1);
-    generation.set(next_generation);
-    spawn(async move {
-        loop {
-            if generation() != next_generation {
-                return;
-            }
-            // A connection that survived a suspend is a connection whose socket the OS already
-            // closed. Drop it before dialling rather than waiting for a request to stall.
-            if take_resumed() {
-                api.reset_transport().await;
-            }
-            match api.subscribe(&sid).await {
-                Ok(mut subscription) => {
-                    connected.set(true);
-                    while let Some(event) = subscription.next().await {
-                        if generation() != next_generation {
-                            return;
-                        }
-                        let Some(event) = remote_event_from_shared(event) else {
-                            continue;
-                        };
-                        let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
-                        apply_remote_event(event, current, room, live_delta, status, approval);
-                        if refresh_now {
-                            tokio::task::yield_now().await;
-                        }
-                    }
-                }
-                // Pairing is gone, or the stream route is — reconnecting brings back neither.
-                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                Err(ApiError::Message(_)) => {}
-            }
-            connected.set(false);
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-    });
-}
-
-fn apply_remote_event(
-    event: RemoteEvent,
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-) {
-    match event {
-        RemoteEvent::Session { session } => {
-            if room
-                .peek()
-                .room_id
-                .as_ref()
-                .is_some_and(|room_id| room_id != &session.room_id)
-            {
-                room.set(MobileRoomProjection::default());
-            }
-            status.set(session.status.clone());
-            approval.set(session.approval.clone());
-            current.set(Some(session));
-        }
-        RemoteEvent::Snapshot {
-            room_id,
-            through_seq,
-            events,
-        } => {
-            let matches_session = current
-                .peek()
-                .as_ref()
-                .is_none_or(|session| session.room_id == room_id);
-            let has_newer_projection = {
-                let projection = room.peek();
-                projection.room_id.as_ref() == Some(&room_id)
-                    && projection.through_seq > through_seq
-            };
-            if matches_session && !has_newer_projection {
-                room.set(MobileRoomProjection {
-                    room_id: Some(room_id),
-                    through_seq,
-                    events,
-                });
-                live_delta.set(String::new());
-            }
-        }
-        RemoteEvent::Delta { room_id, text } => {
-            let accepts_delta = room
-                .peek()
-                .room_id
-                .as_ref()
-                .is_none_or(|current| current == &room_id);
-            if accepts_delta {
-                if room.peek().room_id.is_none() {
-                    room.write().room_id = Some(room_id);
-                }
-                live_delta.write().push_str(&text);
-            }
-        }
-        RemoteEvent::Status { status: next } => {
-            if !matches!(next, RemoteStatus::Streaming) {
-                approval.set(None);
-            }
-            status.set(next);
-        }
-        RemoteEvent::Approval { approval: next } => approval.set(next),
-    }
-}
-
-fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
-    let input = input.trim();
-    if input.starts_with("vmux://") {
-        let parsed = Url::parse(input).map_err(|_| translate("mobile-url-invalid"))?;
-        if parsed.scheme() != "vmux" || parsed.host_str() != Some("pair") {
-            return Err(translate("mobile-url-invalid"));
-        }
-        let params = parsed
-            .query_pairs()
-            .collect::<std::collections::HashMap<_, _>>();
-        let base_url = params
-            .get("base")
-            .map(|value| value.to_string())
-            .ok_or_else(|| translate("mobile-url-no-address"))?;
-        let token = params
-            .get("token")
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| translate("mobile-url-no-token"))?;
-        let base = Url::parse(&base_url).map_err(|_| translate("mobile-url-bad-address"))?;
-        if !matches!(base.scheme(), "http" | "https") {
-            return Err(translate("mobile-url-scheme"));
-        }
-        // Absent when the desktop has no QUIC listener yet, which leaves the phone on HTTP
-        // rather than failing to pair.
-        let fingerprint = params
-            .get("fp")
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let device = params
-            .get("device")
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let base_url = normalized_pairing_base(base)?;
-        if base_url.is_empty() {
-            return Err(translate("mobile-url-no-address"));
-        }
-        return Ok(Credentials {
-            base_url,
-            token,
-            fingerprint,
-            device,
-        });
-    }
-    let start = input
-        .find("https://")
-        .or_else(|| input.find("http://"))
-        .ok_or_else(|| translate("mobile-url-paste-full"))?;
-    let candidate = input[start..].split_whitespace().next().unwrap_or_default();
-    let parsed = Url::parse(candidate).map_err(|_| translate("mobile-url-invalid"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(translate("mobile-url-scheme"));
-    }
-    let token = parsed
-        .fragment()
-        .and_then(|fragment| {
-            url::form_urlencoded::parse(fragment.as_bytes())
-                .find(|(name, _)| name == "token")
-                .map(|(_, value)| value.into_owned())
-        })
-        .filter(|token| !token.is_empty())
-        .ok_or_else(|| translate("mobile-url-no-token"))?;
-    let fingerprint = parsed
-        .fragment()
-        .and_then(|fragment| {
-            url::form_urlencoded::parse(fragment.as_bytes())
-                .find(|(name, _)| name == "fp")
-                .map(|(_, value)| value.into_owned())
-        })
-        .unwrap_or_default();
-    let device = parsed
-        .fragment()
-        .and_then(|fragment| {
-            url::form_urlencoded::parse(fragment.as_bytes())
-                .find(|(name, _)| name == "device")
-                .map(|(_, value)| value.into_owned())
-        })
-        .unwrap_or_default();
-    let base_url = normalized_pairing_base(parsed)?;
-    if base_url.is_empty() {
-        return Err(translate("mobile-url-no-address"));
-    }
-    Ok(Credentials {
-        base_url,
-        token,
-        fingerprint,
-        device,
-    })
-}
-
-fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
-    url.set_fragment(None);
-    url.set_query(None);
-    if url.origin().ascii_serialization() == "null" {
-        return Ok(String::new());
-    }
-    let mut value = url.to_string();
-    while value.ends_with('/') {
-        value.pop();
-    }
-    Ok(value)
-}
-
 fn take_opened_url() -> Option<String> {
     OPENED_URLS
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .pop()
-}
-
-fn pairing_url(credentials: &Credentials) -> String {
-    format!("{}/#token={}", credentials.base_url, credentials.token)
 }
 
 /// Present an installed agent as a launcher result, matching the desktop's agent rows.
@@ -2073,145 +1396,5 @@ fn session_result_item(session: &RemoteSession) -> CommandBarResultItem {
         pane_id: 0,
         tab_index: 0,
         location,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_wire::chat::ChatBlock;
-
-    /// The fingerprint is the whole basis for trusting the desktop's certificate. If it were
-    /// dropped while parsing, the phone would silently fall back to an unpinned connection —
-    /// a downgrade with no visible symptom, so both pairing shapes are covered.
-    #[test]
-    fn a_pairing_link_carries_the_certificate_fingerprint() {
-        let expected = "c620a502885ddf230420184cc3a1b190792c14c1049ab76a6a63596054a1025e";
-
-        let pasted = parse_pairing_url(&format!(
-            "https://mac.example.ts.net/#token=secret&fp={expected}"
-        ))
-        .unwrap();
-        let deep_link = parse_pairing_url(&format!(
-            "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net&token=secret&fp={expected}"
-        ))
-        .unwrap();
-
-        assert_eq!(pasted.fingerprint, expected);
-        assert_eq!(deep_link.fingerprint, expected);
-        assert_eq!(
-            pasted.token, "secret",
-            "the token must survive alongside it"
-        );
-    }
-
-    /// A link with no fingerprint parses but cannot be used: there is no unpinned transport left
-    /// to fall back to. It has to fail here, at the point of use, rather than at parse time —
-    /// that is what lets the phone say "scan again" instead of "malformed link".
-    #[test]
-    fn a_link_without_a_fingerprint_parses_but_cannot_be_dialled() {
-        let credentials = parse_pairing_url("https://mac.example.ts.net/#token=secret").unwrap();
-
-        assert!(credentials.fingerprint.is_empty());
-        assert_eq!(credentials.token, "secret");
-        assert!(
-            Api::new(credentials).is_err(),
-            "an unpinned pairing must be refused, not silently downgraded"
-        );
-    }
-
-    #[test]
-    fn parses_pairing_url() {
-        assert_eq!(
-            parse_pairing_url("paste into Vmux: https://mac.example.ts.net/#token=secret").unwrap(),
-            Credentials {
-                base_url: "https://mac.example.ts.net".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
-        );
-    }
-
-    #[test]
-    fn parses_pairing_deep_link() {
-        assert_eq!(
-            parse_pairing_url(
-                "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret"
-            )
-            .unwrap(),
-            Credentials {
-                base_url: "https://mac.example.ts.net:54821".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
-        );
-    }
-
-    #[test]
-    fn pairing_url_preserves_relay_path() {
-        assert_eq!(
-            parse_pairing_url("http://localhost:8787/r/device-1/#token=secret").unwrap(),
-            Credentials {
-                base_url: "http://localhost:8787/r/device-1".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
-        );
-    }
-
-    impl MobileRoomProjection {
-        fn sample() -> Self {
-            Self {
-                room_id: None,
-                through_seq: 0,
-                events: RoomEvent::from_messages(
-                    "s",
-                    0,
-                    &[
-                        Message::user("hello"),
-                        Message::Assistant {
-                            blocks: vec![AssistantBlock::Thinking("working".to_string())],
-                        },
-                        Message::ToolResult {
-                            call_id: "tool-1".to_string(),
-                            content: "done".to_string(),
-                            is_error: false,
-                        },
-                        Message::Assistant {
-                            blocks: vec![AssistantBlock::Text("answer".to_string())],
-                        },
-                    ],
-                ),
-            }
-        }
-    }
-
-    #[test]
-    fn groups_agent_activity_into_one_turn() {
-        let items = MobileRoomProjection::sample().chat_items("", false);
-
-        assert_eq!(items.len(), 2);
-        assert!(matches!(items[0], ChatItem::User { .. }));
-        assert!(matches!(
-            &items[1],
-            ChatItem::Turn(turn) if turn.blocks.len() == 3 && !turn.running
-        ));
-    }
-
-    #[test]
-    fn streaming_delta_extends_the_live_turn() {
-        let items = MobileRoomProjection::sample().chat_items("partial", true);
-
-        let ChatItem::Turn(turn) = &items[1] else {
-            panic!("expected a turn");
-        };
-        assert!(turn.running);
-        assert_eq!(
-            turn.blocks.last(),
-            Some(&ChatBlock::Text("partial".to_string()))
-        );
     }
 }
