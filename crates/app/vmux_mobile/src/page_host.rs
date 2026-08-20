@@ -179,6 +179,11 @@ impl PageHost for MobileHost {
 /// What a page asks the phone to do.
 impl MobileHost {
     fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
+        // Ahead of any mutation: the optimistic status and the cleared attachments below are only
+        // honest if the call they are anticipating is actually going to be made.
+        if self.session.sid().is_empty() {
+            return Err(EventListenerError::Unsupported);
+        }
         let mut status = self.session.status;
         let mut attached = self.composer.attached;
         let mut attachments = Vec::with_capacity(payload.attachments.len());

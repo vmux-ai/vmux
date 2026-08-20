@@ -145,8 +145,18 @@ impl Credentials {
     }
 
     /// The pasteable form of this pairing.
+    ///
+    /// Carries the fingerprint and the device because this is what the app puts back in the link
+    /// field, and pressing Connect on it re-parses it. Writing only the token round-tripped a
+    /// working pairing into one [`Credentials::endpoint`] refuses, so re-submitting the prefilled
+    /// link broke the very pairing it came from.
     pub(crate) fn pairing_url(&self) -> String {
-        format!("{}/#token={}", self.base_url, self.token)
+        let fragment = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("token", &self.token)
+            .append_pair("fp", &self.fingerprint)
+            .append_pair("device", &self.device)
+            .finish();
+        format!("{base}/#{fragment}", base = self.base_url)
     }
 }
 
@@ -293,6 +303,24 @@ mod tests {
         assert!(
             Api::new(credentials).is_err(),
             "an unpinned pairing must be refused, not silently downgraded"
+        );
+    }
+
+    /// The app prefills the link field with this and pressing Connect re-parses it, so anything
+    /// the round trip drops is a working pairing turned into one that cannot dial — and it fails
+    /// at `Api::new`, well away from the writing that lost it.
+    #[test]
+    fn a_written_pairing_can_be_read_back() {
+        let original = Credentials {
+            base_url: "https://mac.example.ts.net".to_string(),
+            token: "secret".to_string(),
+            fingerprint: "c620a502885ddf230420184cc3a1b190".to_string(),
+            device: "device-1".to_string(),
+        };
+
+        assert_eq!(
+            Credentials::parse(&original.pairing_url()).unwrap(),
+            original
         );
     }
 
