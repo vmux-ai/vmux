@@ -238,6 +238,26 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
   };
+  // Whether this href names a place inside the document the VirtualDom is mounted against.
+  //
+  // Both halves of that matter. A url carrying no fragment is a navigation even when it resolves
+  // right back here — `href=""` resolves to this document and reloads it, which ends the page as
+  // surely as leaving would. And a fragment is the engine's to scroll only once it still lands
+  // here: `<base href="/"/>` is in every page's head, so a bare `#section` resolves against the
+  // base rather than the document, and on a page whose url carries a path — `file:///x`,
+  // `vmux://agent/<id>` — that names somewhere else entirely.
+  //
+  // Asked of the resolved url rather than of the attribute, so `#agent` and `vmux://settings/#agent`
+  // reach the same answer on `vmux://settings/`.
+  const sameDocumentFragment = (href) => {
+    const upToFragment = (url) => url.split('#')[0];
+    try {
+      const resolved = new URL(href, document.baseURI).href;
+      return resolved.includes('#') && upToFragment(resolved) === upToFragment(location.href);
+    } catch (e) {
+      return false;
+    }
+  };
   // Which links the document is allowed to follow.
   //
   // dioxus's desktop interpreter follows none of them: it prevents the default action for every
@@ -249,28 +269,17 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   // The refusal moves here, where the two can be told apart. Bubble phase on the document, which
   // is after the interpreter's own delegated handler, so a page that claimed the click for itself
   // has already said so and this leaves it alone.
-  // Whether following this href would leave the document the VirtualDom is mounted against.
-  // `<base href="/"/>` is in every page's head, and it makes a bare fragment resolve against the
-  // base rather than against the document — so on a page whose url carries a path, `file:///x` or
-  // `vmux://agent/<id>`, `#section` names a different document and following it would end the
-  // page. A fragment is the engine's to scroll only once it still lands here.
-  const sameDocument = (href) => {
-    const upToFragment = (url) => url.split('#')[0];
-    try {
-      return upToFragment(new URL(href, document.baseURI).href) === upToFragment(location.href);
-    } catch (e) {
-      return false;
-    }
-  };
   const holdLinks = () => {
     window.interpreter.intercept_link_redirects = false;
     document.addEventListener('click', (event) => {
       if (event.defaultPrevented) return;
       const anchor = event.target instanceof Element ? event.target.closest('a') : null;
       if (!anchor) return;
+      // An `<a>` carrying no href is a placeholder rather than a link, and the engine does nothing
+      // with it either. An empty one is a link: `[text]()` in a note renders `href=""`.
       const href = anchor.getAttribute('href');
-      if (!href) return;
-      if (href.startsWith('#') && sameDocument(href)) return;
+      if (href === null) return;
+      if (sameDocumentFragment(href)) return;
       event.preventDefault();
       window.ipc.postMessage('link:' + href);
     });
