@@ -3,10 +3,7 @@ use std::time::{Duration, Instant};
 
 use bevy::{
     ecs::relationship::Relationship,
-    input::{
-        ButtonState, InputSystems,
-        keyboard::{Key, KeyboardInput},
-    },
+    input::keyboard::Key,
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -70,13 +67,7 @@ impl Plugin for TerminalPlugin {
                 TermMouseEvent,
                 TermScrollEvent,
                 TermLinkOpenRequest,
-            )>::for_hosts(&["terminal"]))
-            .add_systems(
-                PreUpdate,
-                handle_terminal_keyboard
-                    .run_if(on_message::<KeyboardInput>)
-                    .after(InputSystems),
-            );
+            )>::for_hosts(&["terminal"]));
         app.add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
@@ -307,13 +298,56 @@ pub struct BufferedAgentPrompt {
 
 /// While an agent terminal's TUI is booting, the prompt the user types on the
 /// boot screen. Keystrokes are captured here instead of being sent to the
-/// not-yet-ready PTY (see [`handle_terminal_keyboard`]); on alt-screen
+/// not-yet-ready PTY (see [`on_term_key`]); on alt-screen
 /// [`clear_agent_loading`] moves a non-empty draft into a [`BufferedAgentPrompt`]
 /// and removes this, so keys then flow to the PTY normally.
 #[derive(Component, Debug, Clone, Default)]
 pub struct PromptCapture {
     pub draft: String,
     pub skipped: bool,
+}
+
+impl PromptCapture {
+    /// Whether this press wants the clipboard, asked before [`Self::apply`] so the pasteboard is
+    /// read for the one keystroke that needs it rather than for every one.
+    fn wants_paste(event: &KeyStroke) -> bool {
+        event.mods.super_key && event.code == "KeyV"
+    }
+
+    /// Fold one keypress into the draft, answering whether anything changed.
+    ///
+    /// Escape does not clear so much as decline: `skipped` records that the user does not want to
+    /// be asked, which the boot screen shows differently from having typed nothing yet.
+    fn apply(&mut self, event: &KeyStroke, pasted: Option<String>) -> bool {
+        if event.mods.ctrl && event.code == "KeyC" {
+            self.draft.clear();
+            self.skipped = false;
+            return true;
+        }
+        if Self::wants_paste(event) {
+            let Some(pasted) = pasted else { return false };
+            if !self.draft.is_empty() && !self.draft.ends_with(char::is_whitespace) {
+                self.draft.push(' ');
+            }
+            self.draft.push_str(&pasted);
+            self.skipped = false;
+            return true;
+        }
+        match event.key.as_str() {
+            "Escape" => {
+                self.draft.clear();
+                self.skipped = true;
+                true
+            }
+            "Backspace" => self.draft.pop().is_some(),
+            _ if event.is_text_input() => {
+                self.draft.push_str(event.typed_text());
+                self.skipped = false;
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Bytes to deliver for a buffered prompt once the agent TUI is ready, or `None`
@@ -1822,291 +1856,6 @@ fn handle_terminal_reinput_requests(
     }
 }
 
-fn is_non_character_key(key: KeyCode) -> bool {
-    matches!(
-        key,
-        KeyCode::F1
-            | KeyCode::F2
-            | KeyCode::F3
-            | KeyCode::F4
-            | KeyCode::F5
-            | KeyCode::F6
-            | KeyCode::F7
-            | KeyCode::F8
-            | KeyCode::F9
-            | KeyCode::F10
-            | KeyCode::F11
-            | KeyCode::F12
-            | KeyCode::ArrowLeft
-            | KeyCode::ArrowUp
-            | KeyCode::ArrowRight
-            | KeyCode::ArrowDown
-            | KeyCode::Home
-            | KeyCode::End
-            | KeyCode::PageUp
-            | KeyCode::PageDown
-            | KeyCode::Escape
-            | KeyCode::Tab
-            | KeyCode::Enter
-            | KeyCode::Backspace
-            | KeyCode::Delete
-            | KeyCode::Insert
-    )
-}
-
-fn handle_terminal_keyboard(
-    mut er: MessageReader<KeyboardInput>,
-    targeted_terminals: Query<
-        (&ProcessId, &ChildOf),
-        (With<Terminal>, With<KeyboardOwner>, Without<ProcessExited>),
-    >,
-    keyboard_targets: Query<(), With<KeyboardOwner>>,
-    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    terminal_kinds: Query<
-        (
-            &ProcessId,
-            Option<&vmux_core::agent::AgentSession>,
-            Option<&crate::launch::TerminalLaunch>,
-        ),
-        With<Terminal>,
-    >,
-    mut capture_q: Query<(Entity, &ProcessId, &mut PromptCapture), With<Terminal>>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
-    input: Res<ButtonInput<KeyCode>>,
-    chord_state: Res<vmux_command::shortcut::ChordState>,
-    service: Option<Res<ServiceClient>>,
-    mode_map: Res<TerminalModeMap>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-    mut commands: Commands,
-) {
-    let target_processes = resolve_terminal_input_targets(
-        targeted_terminals
-            .iter()
-            .map(|(pid, child_of)| (child_of.get(), *pid)),
-        !keyboard_targets.is_empty(),
-        focus.stack,
-        terminals
-            .iter()
-            .map(|(pid, child_of)| (child_of.get(), *pid)),
-    );
-
-    if target_processes.is_empty() {
-        for _ in er.read() {}
-        return;
-    };
-    let active_process_id = target_processes.first().copied();
-    let Some(service) = service else {
-        for _ in er.read() {}
-        return;
-    };
-    if chord_state.pending_prefix.is_some() {
-        for _ in er.read() {}
-        return;
-    }
-    let ctrl = input.pressed(KeyCode::ControlLeft) || input.pressed(KeyCode::ControlRight);
-    let alt = input.pressed(KeyCode::AltLeft) || input.pressed(KeyCode::AltRight);
-    let shift = input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight);
-    let super_key = input.pressed(KeyCode::SuperLeft) || input.pressed(KeyCode::SuperRight);
-
-    if let Some(cap_e) = active_process_id.and_then(|pid| {
-        capture_q
-            .iter()
-            .find(|(_, p, _)| **p == pid)
-            .map(|(e, _, _)| e)
-    }) {
-        let (mut draft, mut skipped) = capture_q
-            .get(cap_e)
-            .map(|(_, _, c)| (c.draft.clone(), c.skipped))
-            .unwrap_or_default();
-        let is_vibe = active_process_id
-            .and_then(|pid| terminal_kinds.iter().find(|(p, ..)| **p == pid))
-            .map(|(_, agent, launch)| {
-                agent.map(|s| s.kind) == Some(vmux_core::agent::AgentKind::Vibe)
-                    || launch.map(|l| l.kind.clone()) == Some(crate::launch::TerminalKind::Vibe)
-            })
-            .unwrap_or(false);
-        let mut changed = false;
-        let mut seen_keys: Vec<KeyCode> = Vec::new();
-        for event in er.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            if !event.repeat && is_non_character_key(event.key_code) {
-                if seen_keys.contains(&event.key_code) {
-                    continue;
-                }
-                seen_keys.push(event.key_code);
-                if !input.just_pressed(event.key_code) {
-                    continue;
-                }
-            }
-            if ctrl && event.key_code == KeyCode::KeyC {
-                draft.clear();
-                skipped = false;
-                changed = true;
-                continue;
-            }
-            if super_key && event.key_code == KeyCode::KeyV {
-                if let Some(pasted) =
-                    active_process_id.and_then(|pid| resolve_paste_text(is_vibe, pid))
-                {
-                    if !draft.is_empty() && !draft.ends_with(char::is_whitespace) {
-                        draft.push(' ');
-                    }
-                    draft.push_str(&pasted);
-                    skipped = false;
-                    changed = true;
-                }
-                continue;
-            }
-            match &event.logical_key {
-                Key::Escape => {
-                    draft.clear();
-                    skipped = true;
-                    changed = true;
-                }
-                Key::Backspace => {
-                    draft.pop();
-                    changed = true;
-                }
-                Key::Space => {
-                    draft.push(' ');
-                    skipped = false;
-                    changed = true;
-                }
-                Key::Character(s) if !ctrl && !alt && !super_key => {
-                    draft.push_str(s);
-                    skipped = false;
-                    changed = true;
-                }
-                _ => {}
-            }
-        }
-        if changed {
-            if let Ok((_, _, mut cap)) = capture_q.get_mut(cap_e) {
-                cap.draft = draft.clone();
-                cap.skipped = skipped;
-            }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                cap_e,
-                AGENT_PROMPT_DRAFT_EVENT,
-                &AgentPromptDraftEvent { draft, skipped },
-            ));
-        }
-        return;
-    }
-
-    let copy_mode_active = active_process_id
-        .map(|process_id| is_copy_mode_active(&mode_map, &local_copy_mode, process_id))
-        .unwrap_or(false);
-
-    let mut seen_keys: Vec<KeyCode> = Vec::new();
-    for event in er.read() {
-        if event.state != ButtonState::Pressed {
-            continue;
-        }
-        if !event.repeat && is_non_character_key(event.key_code) {
-            if seen_keys.contains(&event.key_code) {
-                continue;
-            }
-            seen_keys.push(event.key_code);
-            if !input.just_pressed(event.key_code) {
-                continue;
-            }
-        }
-
-        if copy_mode_active {
-            let Some(active_process_id) = active_process_id else {
-                continue;
-            };
-            let mapped = map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                active_process_id,
-                CopyModeKeyInput {
-                    key: &event.logical_key,
-                    key_code: event.key_code,
-                    ctrl,
-                    shift,
-                },
-            );
-            for k in mapped {
-                if copy_mode_key_exits(k) {
-                    set_local_copy_mode(&mut local_copy_mode, active_process_id, false);
-                }
-                service.0.send(ClientMessage::CopyModeKey {
-                    process_id: active_process_id,
-                    key: k,
-                });
-            }
-            // While in copy mode, swallow ALL keys — never forward to PTY.
-            continue;
-        }
-
-        if super_key {
-            match event.key_code {
-                KeyCode::KeyV => {
-                    let active = active_process_id
-                        .and_then(|pid| terminal_kinds.iter().find(|(p, ..)| **p == pid));
-                    let agent_kind = active.and_then(|(_, agent, _)| agent.map(|s| s.kind));
-                    let launch_kind =
-                        active.and_then(|(_, _, launch)| launch.map(|l| l.kind.clone()));
-                    let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
-                        || launch_kind == Some(crate::launch::TerminalKind::Vibe);
-                    if let Some(data) =
-                        active_process_id.and_then(|pid| resolve_paste(is_vibe, pid))
-                    {
-                        for process_id in &target_processes {
-                            service.0.send(ClientMessage::ProcessInput {
-                                process_id: *process_id,
-                                data: data.clone(),
-                            });
-                        }
-                    }
-                    continue;
-                }
-                KeyCode::KeyC => {
-                    // Round-trip selection through the service, then copy to pasteboard.
-                    if let Some(process_id) = active_process_id {
-                        service
-                            .0
-                            .send(ClientMessage::GetSelectionText { process_id });
-                    }
-                    continue;
-                }
-                _ => continue,
-            }
-        }
-
-        // Skip selection keys (Shift+Arrow etc) — service doesn't support local selection
-        if shift
-            && matches!(
-                event.key_code,
-                KeyCode::ArrowLeft
-                    | KeyCode::ArrowRight
-                    | KeyCode::ArrowUp
-                    | KeyCode::ArrowDown
-                    | KeyCode::Home
-                    | KeyCode::End
-                    | KeyCode::PageUp
-                    | KeyCode::PageDown
-            )
-        {
-            continue;
-        }
-
-        let bytes = logical_key_to_bytes(&event.logical_key, ctrl, alt);
-        if bytes.is_empty() {
-            continue;
-        }
-        for process_id in &target_processes {
-            service.0.send(ClientMessage::ProcessInput {
-                process_id: *process_id,
-                data: bytes.clone(),
-            });
-        }
-    }
-}
-
 /// Translate a Bevy logical key + ctrl modifier into the corresponding
 /// Vim-style copy-mode action. Returns None if the key has no copy-mode
 /// binding (caller should swallow it regardless).
@@ -2990,6 +2739,8 @@ fn on_term_key(
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut capture_q: Query<&mut PromptCapture, With<Terminal>>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
@@ -3018,6 +2769,26 @@ fn on_term_key(
     let Some(service) = service else { return };
     let Ok(pid) = q.get(entity) else { return };
     let process_id = *pid;
+    let is_vibe = agents.get(entity).ok().map(|session| session.kind)
+        == Some(vmux_core::agent::AgentKind::Vibe)
+        || launches.get(entity).ok().map(|launch| launch.kind.clone())
+            == Some(crate::launch::TerminalKind::Vibe);
+    // Ahead of both the paste and the pty write: while the agent's TUI is still booting there is
+    // no pty worth writing to, and what is typed belongs in the draft instead.
+    if let Ok(mut capture) = capture_q.get_mut(entity) {
+        let pasted = PromptCapture::wants_paste(event)
+            .then(|| resolve_paste_text(is_vibe, process_id))
+            .flatten();
+        if capture.apply(event, pasted) {
+            let (draft, skipped) = (capture.draft.clone(), capture.skipped);
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                AGENT_PROMPT_DRAFT_EVENT,
+                &AgentPromptDraftEvent { draft, skipped },
+            ));
+        }
+        return;
+    }
     let super_key = event.mods.super_key;
     if super_key {
         match event.code.as_str() {
@@ -3732,6 +3503,103 @@ pub fn handle_run_shell_requests(
                 activate: true,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod prompt_capture_tests {
+    use super::PromptCapture;
+    use vmux_core::input::{KeyModifiers, KeyStroke};
+
+    const CTRL: KeyModifiers = KeyModifiers {
+        ctrl: true,
+        shift: false,
+        alt: false,
+        super_key: false,
+    };
+    const SUPER: KeyModifiers = KeyModifiers {
+        ctrl: false,
+        shift: false,
+        alt: false,
+        super_key: true,
+    };
+
+    /// A press as the page reports one: `key` is what it produces, `code` the physical key.
+    fn press(key: &str, code: &str, mods: KeyModifiers) -> KeyStroke {
+        KeyStroke {
+            key: key.to_string(),
+            code: code.to_string(),
+            mods,
+            text: None,
+            repeat: false,
+        }
+    }
+
+    fn typed(key: &str, code: &str) -> KeyStroke {
+        press(key, code, KeyModifiers::default())
+    }
+
+    /// The draft holds what a user typed before the agent could accept it, so every key that
+    /// edits text has to land and every key that does not has to be left alone — a chord reaching
+    /// the draft would put a shortcut's letter into the prompt.
+    #[test]
+    fn the_draft_takes_text_and_refuses_everything_else() {
+        let mut capture = PromptCapture::default();
+
+        assert!(capture.apply(&typed("h", "KeyH"), None));
+        assert!(capture.apply(&typed("i", "KeyI"), None));
+        assert_eq!(capture.draft, "hi");
+
+        assert!(!capture.apply(&press("i", "KeyI", CTRL), None));
+        assert!(!capture.apply(&typed("Enter", "Enter"), None));
+        assert!(!capture.apply(&typed("F5", "F5"), None));
+        assert_eq!(capture.draft, "hi", "a chord or a bare action is not text");
+
+        assert!(capture.apply(&typed("Backspace", "Backspace"), None));
+        assert_eq!(capture.draft, "h");
+    }
+
+    /// Escape and Ctrl-C both empty the draft and mean opposite things: one declines the prompt,
+    /// the other clears it to type again. The boot screen shows those differently.
+    #[test]
+    fn escape_declines_the_prompt_and_ctrl_c_only_clears_it() {
+        let mut capture = PromptCapture::default();
+        capture.apply(&typed("h", "KeyH"), None);
+
+        assert!(capture.apply(&typed("Escape", "Escape"), None));
+        assert_eq!((capture.draft.as_str(), capture.skipped), ("", true));
+
+        capture.apply(&typed("h", "KeyH"), None);
+        assert_eq!((capture.draft.as_str(), capture.skipped), ("h", false));
+
+        assert!(capture.apply(&press("c", "KeyC", CTRL), None));
+        assert_eq!((capture.draft.as_str(), capture.skipped), ("", false));
+    }
+
+    /// Backspace on an empty draft changes nothing. Reporting otherwise would emit a draft event
+    /// per keypress at the moment the boot screen is busiest.
+    #[test]
+    fn a_press_that_changes_nothing_reports_no_change() {
+        let mut capture = PromptCapture::default();
+
+        assert!(!capture.apply(&typed("Backspace", "Backspace"), None));
+        assert!(!capture.apply(&typed("Shift", "ShiftLeft"), None));
+        assert!(capture.draft.is_empty());
+    }
+
+    /// Paste joins onto what is already there rather than running into it, and is not an edit at
+    /// all when the clipboard had nothing to give.
+    #[test]
+    fn paste_is_separated_from_the_draft_it_joins() {
+        let paste = press("v", "KeyV", SUPER);
+        let mut capture = PromptCapture::default();
+        capture.apply(&typed("g", "KeyG"), None);
+
+        assert!(capture.apply(&paste, Some("o run".to_string())));
+        assert_eq!(capture.draft, "g o run");
+
+        assert!(!capture.apply(&paste, None));
+        assert_eq!(capture.draft, "g o run");
     }
 }
 
