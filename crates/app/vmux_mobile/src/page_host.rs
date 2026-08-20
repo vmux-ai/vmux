@@ -353,17 +353,24 @@ impl MobileHost {
                     return;
                 }
                 let sid = rc.reset_and_run_in(|| session.sid());
-                if !sid.is_empty()
-                    && let Ok(state) = api.models(&sid).await
-                    && let Some(bytes) = encode(&ModelState {
-                        current_model_id: state.selected_id,
-                        models: state.models,
-                        effort_current: state.effort,
-                        effort_levels: state.effort_levels,
-                        ..ModelState::default()
-                    })
-                {
-                    on_bytes(&bytes);
+                if !sid.is_empty() {
+                    let fetched = api.models(&sid).await;
+                    // The link can be replaced while a request is in flight, and an answer that
+                    // arrives after that belongs to a page nobody is looking at any more.
+                    if superseded(epoch) {
+                        return;
+                    }
+                    if let Ok(state) = fetched
+                        && let Some(bytes) = encode(&ModelState {
+                            current_model_id: state.selected_id,
+                            models: state.models,
+                            effort_current: state.effort,
+                            effort_levels: state.effort_levels,
+                            ..ModelState::default()
+                        })
+                    {
+                        on_bytes(&bytes);
+                    }
                 }
                 if changed.next().await.is_none() {
                     return;
@@ -387,26 +394,31 @@ impl MobileHost {
                 let sid = session.sid();
                 if let Some(request) = asked
                     && !sid.is_empty()
-                    && let Ok(found) = api.media(&sid, &request.query).await
                 {
-                    let mut entries = Vec::with_capacity(found.len());
-                    for entry in &found {
-                        entries.push(ChatMediaEntry {
-                            path: entry.path.clone(),
-                            name: entry.name.clone(),
-                            parent: entry.parent.clone(),
-                            mime_type: entry.mime_type.clone(),
-                            is_dir: entry.is_dir,
-                            preview_data_url: entry.preview_data_url.clone(),
-                        });
+                    let fetched = api.media(&sid, &request.query).await;
+                    if superseded(epoch) {
+                        return;
                     }
-                    offered.set(found);
-                    if let Some(bytes) = encode(&ChatMediaEntries {
-                        request_id: request.request_id,
-                        query: request.query,
-                        entries,
-                    }) {
-                        on_bytes(&bytes);
+                    if let Ok(found) = fetched {
+                        let mut entries = Vec::with_capacity(found.len());
+                        for entry in &found {
+                            entries.push(ChatMediaEntry {
+                                path: entry.path.clone(),
+                                name: entry.name.clone(),
+                                parent: entry.parent.clone(),
+                                mime_type: entry.mime_type.clone(),
+                                is_dir: entry.is_dir,
+                                preview_data_url: entry.preview_data_url.clone(),
+                            });
+                        }
+                        offered.set(found);
+                        if let Some(bytes) = encode(&ChatMediaEntries {
+                            request_id: request.request_id,
+                            query: request.query,
+                            entries,
+                        }) {
+                            on_bytes(&bytes);
+                        }
                     }
                 }
                 if changed.next().await.is_none() {
@@ -424,7 +436,11 @@ impl MobileHost {
                 if superseded(epoch) {
                     return;
                 }
-                match api.team().await {
+                let fetched = api.team().await;
+                if superseded(epoch) {
+                    return;
+                }
+                match fetched {
                     Ok(members) => {
                         if last.as_ref() != Some(&members) {
                             let payload = TeamEvent {
