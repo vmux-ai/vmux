@@ -34,6 +34,7 @@ use crate::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout,
     WindowedHoverRefreshState, native_left_mouse_down,
 };
+use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
 
@@ -180,7 +181,7 @@ fn refresh_active_windowed_hover(
         (
             With<Browser>,
             With<WebviewWindowed>,
-            With<CefKeyboardTarget>,
+            With<KeyboardOwner>,
             Without<LayoutCef>,
             Without<WindowOverlay>,
             Without<Header>,
@@ -288,7 +289,7 @@ fn sync_layout_cef_frame_rate(
     mut wheel_events: MessageReader<MouseWheel>,
     mut key_events: MessageReader<KeyboardInput>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut layout_q: Query<(&mut WebviewMaxFrameRate, Has<CefKeyboardTarget>), With<LayoutCef>>,
+    mut layout_q: Query<(&mut WebviewMaxFrameRate, Has<KeyboardOwner>), With<LayoutCef>>,
     burst: Res<LayoutFrameRateBurst>,
     mut state: Local<LayoutFrameRateState>,
 ) {

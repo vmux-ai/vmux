@@ -10,7 +10,7 @@
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
+use vmux_core::KeyboardOwner;
 use vmux_core::launcher::{PendingStackAbandoned, RestoreKeyboardToStack, StackInPaneChosen};
 use vmux_history::LastActivatedAt;
 
@@ -68,7 +68,7 @@ fn discard_abandoned_pending_stacks(
         };
         for child in children.iter() {
             if content_browsers.contains(child) {
-                commands.entity(child).try_insert(CefKeyboardTarget);
+                commands.entity(child).try_insert(KeyboardOwner);
             }
         }
     }
@@ -94,7 +94,7 @@ fn restore_keyboard_to_stack(
         };
         for child in children.iter() {
             if content_pages.contains(child) {
-                commands.entity(child).try_insert(CefKeyboardTarget);
+                commands.entity(child).try_insert(KeyboardOwner);
             }
         }
     }

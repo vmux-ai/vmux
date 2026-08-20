@@ -4,8 +4,8 @@
 //! turns that into a live process, an attached webview, or an error card on the stack that asked.
 
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
 use vmux_command::WriteAppCommands;
+use vmux_core::KeyboardOwner;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
@@ -100,7 +100,7 @@ fn respond_process_stack_spawn(
                 ChildOf(stack),
             ))
             .id();
-        commands.entity(term).insert((launch, CefKeyboardTarget));
+        commands.entity(term).insert((launch, KeyboardOwner));
     }
 }
 
@@ -200,7 +200,7 @@ pub(super) fn handle_spawn_agent_requests(
                         ChildOf(req.stack),
                     ))
                     .id();
-                commands.entity(terminal).insert(CefKeyboardTarget).insert((
+                commands.entity(terminal).insert(KeyboardOwner).insert((
                     launch,
                     AgentSession { kind: req.kind },
                     process_id,

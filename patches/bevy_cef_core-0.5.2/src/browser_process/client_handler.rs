@@ -20,8 +20,7 @@ pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 
 // Cancels CEF taking keyboard focus, so winit keeps the macOS first responder and Bevy owns
 // keyboard. Without this, a native (windowed) browser's NSView becomes first responder and steals
-// every key from Bevy — all non-menu shortcuts die. Typing still reaches the page via the
-// `CefKeyboardTarget` forwarding path (keyboard.rs), exactly as in OSR mode.
+// every key from Bevy — all non-menu shortcuts die.
 pub struct FocusCanceler {
     object: *mut RcImpl<sys::cef_focus_handler_t, Self>,
     wake: Option<TextureWake>,

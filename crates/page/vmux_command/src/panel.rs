@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_listener};
 
 /// Tell the host the panel holds a focused DOM field, so the layout shell takes
-/// `CefKeyboardTarget`.
+/// `KeyboardOwner`.
 ///
 /// A missed clear strands the keyboard on the layout shell and no pane can ever reclaim it, so
 /// every route in and out goes through `set_open` and this rides along with it.

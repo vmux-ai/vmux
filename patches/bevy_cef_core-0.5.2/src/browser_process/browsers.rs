@@ -225,15 +225,12 @@ pub struct WebviewBrowser {
     /// resets the renderer's input state, so only transitions are forwarded.
     last_renderer_focus: Cell<Option<bool>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
-    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
-    /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
+    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die.
     ///
-    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal), because
-    /// `send_key_event` is a windowless API and produces no DOM key events. It does not follow that
-    /// a DOM text field cannot be windowed — this doc-comment used to say so, and it was wrong. A
-    /// windowed child view does receive usable `NSEvent`s; letting AppKit deliver them is how a page
-    /// in a pane types today. The trap is the combination: forward through `CefKeyboardTarget` to a
-    /// windowed browser and the keystroke lands in a call that does nothing.
+    /// A windowed child view receives usable `NSEvent`s, and letting AppKit deliver them is how a
+    /// page in a pane types. There used to be an alternative — forwarding keys in over
+    /// `send_key_event` — and it was a trap for exactly this kind of browser, because that is a
+    /// windowless API and produces no DOM key events. It is gone; AppKit is the only way in now.
     /// See docs/specs/2026-08-08-osr-free-desktop-design.md.
     windowed: bool,
     allow_native_focus: bool,
@@ -645,8 +642,8 @@ impl Browsers {
     /// mouse click or move.
     ///
     /// `auxiliary_osr_focus` is for **additional** visible webviews that must keep compositing
-    /// while another pane is active (e.g. a history split next to the main browser). Keyboard
-    /// routing in the host app uses the `CefKeyboardTarget` component, not CEF `set_focus`.
+    /// while another pane is active (e.g. a history split next to the main browser). Which surface
+    /// the keyboard reaches is decided by AppKit first responder, not by CEF `set_focus`.
     ///
     /// Chromium ties **clipboard shortcuts** (⌘C / ⌘V / …) to the browser that last received
     /// `set_focus(true)`. We therefore focus each auxiliary in order (so they can composite), then

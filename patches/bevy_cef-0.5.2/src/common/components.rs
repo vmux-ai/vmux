@@ -8,7 +8,6 @@ impl Plugin for WebviewCoreComponentsPlugin {
         app.insert_resource(CefSuppressPointerInput::default())
             .register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
-            .register_type::<CefKeyboardTarget>()
             .register_type::<CefIgnorePinchZoom>()
             .register_type::<WebviewWindowed>()
             .register_type::<WebviewNativeLiquidGlass>()
@@ -23,15 +22,6 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<PreloadScripts>();
     }
 }
-
-/// Marker: restrict forwarded keyboard events to the webviews carrying it.
-///
-/// When present on **at least one** [`WebviewSource`] entity, only those entities receive
-/// forwarded keyboard events. When **no** webview has this marker, every webview receives keys
-/// (legacy single- or multi-webview behavior).
-#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct CefKeyboardTarget;
 
 /// When `true`, mesh/sprite pointer observers skip forwarding mouse move / click / wheel to CEF.
 ///
@@ -168,11 +158,10 @@ where
     }
 }
 
-/// Analogous to [`CefKeyboardTarget`] but for pointer events (mouse wheel only, for now).
+/// Restricts wheel forwarding to the [`WebviewSource`] entities carrying it.
 ///
-/// When **at least one** [`WebviewSource`] entity has this marker, `on_mouse_wheel` only forwards
-/// scroll events to those entities. When **no** entity carries the marker, every webview receives
-/// wheel events (default behavior).
+/// When **at least one** entity has this marker, `on_mouse_wheel` only forwards scroll events to
+/// those entities. When **no** entity carries the marker, every webview receives wheel events.
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct CefPointerTarget;

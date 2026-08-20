@@ -1,7 +1,7 @@
 //! Pages that cover the window instead of sitting in a pane.
 
+use crate::KeyboardOwner;
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
 use vmux_flex::prelude::*;
 
 /// A page that covers the window rather than sitting in a pane, and owns the keyboard while it is
@@ -120,7 +120,7 @@ pub type OverlayStateQuery<'w, 's> = Query<
     (
         &'static Node,
         &'static Visibility,
-        Has<CefKeyboardTarget>,
+        Has<KeyboardOwner>,
         Has<OverlayShownInline>,
     ),
     With<WindowOverlay>,

@@ -1,6 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
+use bevy_cef::prelude::{Browsers, WebviewWindowed};
+use vmux_core::KeyboardOwner;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 use vmux_layout::Header;
 use vmux_layout::side_sheet::SideSheet;
@@ -45,7 +46,7 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
 
 /// Publishes whether a page will answer Escape itself, for the native key monitor to read.
 fn publish_native_page_owns_escape(
-    terminal_focus_q: Query<(), (With<Terminal>, With<CefKeyboardTarget>)>,
+    terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
 ) {
     crate::set_native_page_owns_escape(page_owns_escape(
@@ -107,7 +108,7 @@ pub(crate) fn compute_host_focus_intent(
             Entity,
             &Node,
             Option<&Visibility>,
-            Has<CefKeyboardTarget>,
+            Has<KeyboardOwner>,
             Has<WebviewWindowed>,
             Has<vmux_core::overlay::OverlayShownInline>,
         ),
@@ -285,7 +286,7 @@ mod tests {
                 display: Display::Flex,
                 ..default()
             },
-            CefKeyboardTarget,
+            KeyboardOwner,
         ));
         app.insert_resource(FocusedStack {
             stack: Some(stack),
@@ -310,7 +311,7 @@ mod tests {
                     display: Display::Flex,
                     ..default()
                 },
-                CefKeyboardTarget,
+                KeyboardOwner,
                 WebviewWindowed,
             ))
             .id();
@@ -340,7 +341,7 @@ mod tests {
                     ..default()
                 },
                 Visibility::Hidden,
-                CefKeyboardTarget,
+                KeyboardOwner,
                 WebviewWindowed,
             ))
             .id();
@@ -366,7 +367,7 @@ mod tests {
                 ..default()
             },
             Visibility::Hidden,
-            CefKeyboardTarget,
+            KeyboardOwner,
         ));
         app.insert_resource(FocusedStack {
             stack: Some(stack),
