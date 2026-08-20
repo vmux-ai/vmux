@@ -57,19 +57,16 @@ fn publish_native_page_owns_escape(
 
 /// Which surface should own keyboard first-responder for the active page in User (browse) mode.
 ///
-/// Windowed web pages need their native `NSView` to be first-responder to type. Terminals are OSR
-/// and route keys through winit → Bevy → PTY, so the winit host window must hold first-responder
-/// instead. Switching between the two requires actively handing first-responder back and forth,
-/// because a focused web page's `NSView` otherwise keeps it and blacks out the host keyboard.
+/// Every page is drawn in a view that can receive an `NSEvent`, so the answer is always "the view
+/// the active page is drawn in". The variants differ in how first responder is handed over, which
+/// is not the same call for a `WKWebView` this process owns and a CEF child view it does not.
+/// Handing it over has to be active: a view that holds it keeps it, and would otherwise black out
+/// the keyboard for whatever the user switched to.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
     /// Active page is a windowed web page; give this webview native first-responder.
     Windowed(Entity),
     /// The layout's own chrome holds the keyboard, and a `WKWebView` of its own draws it.
-    ///
-    /// Distinct from [`Self::WinitHost`] because the two want opposite things. `WinitHost` exists
-    /// so keys reach a terminal by way of winit and Bevy; the chrome is a DOM that must receive
-    /// them natively, and routing them through winit sends them to a CEF browser that is not there.
     LayoutView,
     /// Active page runs in this process and paints into a `WKWebView` of its own.
     ///
@@ -77,21 +74,20 @@ pub enum HostFocusIntent {
     /// `Windowed` is applied through `Browsers::set_windowed_focus`, which asks CEF to focus a
     /// browser it has never heard of and silently does nothing. The keyboard would land nowhere.
     NativePane(Entity),
-    /// Active page is a terminal, or there is none — the winit host window must own first-responder.
+    /// No page is active — the winit host window must own first-responder.
     #[default]
     WinitHost,
 }
 
+/// A terminal used to be the exception, taking [`HostFocusIntent::WinitHost`] so its keys could
+/// travel winit -> Bevy -> pty. That held while it was an offscreen browser with no view of its
+/// own to receive an `NSEvent`. It has a `WKWebView` now, like every other page, and returning
+/// `WinitHost` here is what starved its own DOM key handler.
 pub(crate) fn host_focus_intent(
     active_webview: Option<Entity>,
-    is_terminal: bool,
     is_native: bool,
 ) -> HostFocusIntent {
     match active_webview {
-        Some(webview) if is_terminal => {
-            let _ = webview;
-            HostFocusIntent::WinitHost
-        }
         Some(webview) if is_native => HostFocusIntent::NativePane(webview),
         Some(webview) => HostFocusIntent::Windowed(webview),
         None => HostFocusIntent::WinitHost,
@@ -102,7 +98,6 @@ pub(crate) fn compute_host_focus_intent(
     focus: Res<FocusedStack>,
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
-    terminal_q: Query<(), With<Terminal>>,
     modal_q: Query<
         (
             Entity,
@@ -157,9 +152,8 @@ pub(crate) fn compute_host_focus_intent(
                     .unwrap_or(false)
             })
         });
-        let is_terminal = active.is_some_and(|webview| terminal_q.contains(webview));
         let is_native = active.is_some_and(|webview| native_q.contains(webview));
-        host_focus_intent(active, is_terminal, is_native)
+        host_focus_intent(active, is_native)
     };
     set_intent(&mut intent, next);
 }
@@ -256,16 +250,28 @@ mod tests {
     }
 
     #[test]
-    fn terminal_child_of_active_stack_intends_winit_host() {
+    /// A terminal is a native page like any other, and its own DOM handler is what reaches the
+    /// pty — so it has to be handed first responder. This asserted `WinitHost` for as long as a
+    /// terminal was an offscreen browser with no view to hand it to, and went on asserting it
+    /// afterwards, which is what hid the starved key path.
+    fn terminal_child_of_active_stack_intends_its_own_view() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((Browser, Terminal, ChildOf(stack)));
+        let terminal = app
+            .world_mut()
+            .spawn((
+                Browser,
+                Terminal,
+                vmux_core::host::page::HostsPage,
+                ChildOf(stack),
+            ))
+            .id();
         app.insert_resource(FocusedStack {
             stack: Some(stack),
             ..default()
         });
         app.update();
-        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(intent(&app), HostFocusIntent::NativePane(terminal));
     }
 
     #[test]
