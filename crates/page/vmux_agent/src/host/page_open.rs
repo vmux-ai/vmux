@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
+use vmux_core::KeyboardOwner;
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_service::protocol::AgentAttachment;
@@ -775,7 +775,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
             ChildOf(stack),
         ))
         .id();
-    commands.entity(browser).insert(CefKeyboardTarget);
+    commands.entity(browser).insert(KeyboardOwner);
 }
 
 pub(crate) fn attach_cli_setup_to_stack(
@@ -802,7 +802,7 @@ pub(crate) fn attach_cli_setup_to_stack(
             ChildOf(stack),
         ))
         .id();
-    commands.entity(browser).insert(CefKeyboardTarget);
+    commands.entity(browser).insert(KeyboardOwner);
 }
 
 fn html_escape(value: &str) -> String {

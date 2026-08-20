@@ -57,6 +57,20 @@ impl crate::PageMetadata {
     }
 }
 
+/// The pane the keyboard belongs to, as the host understands it.
+///
+/// A cached projection of the focused stack rather than a second opinion about it: the arbiter in
+/// `vmux_browser` derives this every frame and keeps it on exactly one entity. What it buys over
+/// asking the stack directly is that it can be watched — `Added<KeyboardOwner>` is how a pane
+/// learns it has just come to the front, which a `Res<FocusedStack>` read cannot tell you.
+///
+/// This was `CefKeyboardTarget`, declared in the CEF fork, where it named the webviews an
+/// offscreen browser's forwarded keys should go to. Nothing forwards keys any more — AppKit hands
+/// them to whichever surface holds first responder — so the CEF half is deleted and what remains
+/// never had anything to do with CEF.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyboardOwner;
+
 /// The working directory of a non-terminal agent pane (e.g. an ACP session), so the command
 /// bar's "current work" can list its cwd contents the same way it lists open terminals' cwds.
 /// Terminals carry their cwd on `TerminalLaunch`; this covers agents that have no PTY.

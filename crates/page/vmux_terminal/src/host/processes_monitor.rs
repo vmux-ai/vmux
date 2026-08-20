@@ -9,6 +9,7 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
+use vmux_core::KeyboardOwner;
 use vmux_layout::{
     event::SERVICES_PAGE_URL,
     native_open::{HostedPage, HostedPagePlugin},
@@ -129,7 +130,7 @@ fn request_process_list(
     mut timer: ResMut<ProcessesPollTimer>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<(), With<ProcessesMonitor>>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
 ) {
     if monitors.is_empty() {
         return;
@@ -146,7 +147,7 @@ fn sample_process_usage(
     time: Res<Time>,
     mut timer: ResMut<SysinfoPollTimer>,
     monitors: Query<(), With<ProcessesMonitor>>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
     process_list: Res<ServiceProcessList>,
     mut sys: ResMut<SysinfoState>,
     mut usage: ResMut<ProcessUsage>,
@@ -217,7 +218,7 @@ fn broadcast_to_monitors(
     usage: Res<ProcessUsage>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,

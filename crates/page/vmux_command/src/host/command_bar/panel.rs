@@ -20,7 +20,7 @@ impl Plugin for CommandBarPanelPlugin {
 /// The command bar panel in the layout page holds a focused DOM field.
 ///
 /// Sits on the webview that renders the panel, exactly like the bookmark field's own active marker,
-/// and feeds the same "the layout page owns the keyboard" rule: `CefKeyboardTarget` moves to the
+/// and feeds the same "the layout page owns the keyboard" rule: `KeyboardOwner` moves to the
 /// layout shell, OSR focus follows it, and AppKit first responder stays with winit so keys route
 /// winit -> Bevy -> `send_key_event` -> the focused element.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -76,7 +76,7 @@ mod tests {
     }
 
     /// The panel must release the keyboard as reliably as it takes it: a stuck marker leaves the
-    /// layout shell owning `CefKeyboardTarget` and no pane can ever get it back.
+    /// layout shell owning `KeyboardOwner` and no pane can ever get it back.
     #[test]
     fn active_event_round_trips_the_marker() {
         let mut app = app();

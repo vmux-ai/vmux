@@ -6,10 +6,8 @@ pub(crate) struct WebviewCoreComponentsPlugin;
 impl Plugin for WebviewCoreComponentsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CefSuppressPointerInput::default())
-            .insert_resource(CefSuppressKeyboardInput::default())
             .register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
-            .register_type::<CefKeyboardTarget>()
             .register_type::<CefIgnorePinchZoom>()
             .register_type::<WebviewWindowed>()
             .register_type::<WebviewNativeLiquidGlass>()
@@ -25,26 +23,12 @@ impl Plugin for WebviewCoreComponentsPlugin {
     }
 }
 
-/// Marker: restrict forwarded keyboard events to the webviews carrying it.
-///
-/// When present on **at least one** [`WebviewSource`] entity, only those entities receive
-/// forwarded keyboard events. When **no** webview has this marker, every webview receives keys
-/// (legacy single- or multi-webview behavior).
-#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct CefKeyboardTarget;
-
 /// When `true`, mesh/sprite pointer observers skip forwarding mouse move / click / wheel to CEF.
 ///
 /// Host apps (e.g. tmux-style prefix chords) can set this so pointer input stays with the shell
 /// while a key chord is in progress.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct CefSuppressPointerInput(pub bool);
-
-/// When `true`, CEF skips forwarding [`KeyboardInput`] and [`Ime`] commits to browsers (pair with
-/// [`CefSuppressPointerInput`] for host-managed chords).
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct CefSuppressKeyboardInput(pub bool);
 
 /// Marker: this webview should ignore pinch-to-zoom gestures.
 ///
@@ -173,15 +157,6 @@ where
         Self(scripts.into_iter().map(Into::into).collect())
     }
 }
-
-/// Analogous to [`CefKeyboardTarget`] but for pointer events (mouse wheel only, for now).
-///
-/// When **at least one** [`WebviewSource`] entity has this marker, `on_mouse_wheel` only forwards
-/// scroll events to those entities. When **no** entity carries the marker, every webview receives
-/// wheel events (default behavior).
-#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct CefPointerTarget;
 
 /// Transient browser-surface offset used while a horizontal history swipe is in progress.
 #[derive(Reflect, Component, Debug, Copy, Clone, PartialEq, Default)]

@@ -34,6 +34,7 @@ use crate::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout,
     WindowedHoverRefreshState, native_left_mouse_down,
 };
+use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
 
@@ -84,9 +85,8 @@ fn refresh_layout_cef_hover(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<Entity, With<LayoutCef>>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
 ) {
-    if layout_q.single().is_err() || suppress.0 || !modal_pointer_targets.is_empty() {
+    if layout_q.single().is_err() || suppress.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     }
@@ -114,7 +114,6 @@ fn refresh_layout_cef_hover(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
@@ -122,7 +121,7 @@ fn refresh_layout_cef_hover(
         *state = LayoutHoverRefreshState::default();
         return;
     };
-    if suppress.0 || !modal_pointer_targets.is_empty() {
+    if suppress.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
@@ -180,7 +179,7 @@ fn refresh_active_windowed_hover(
         (
             With<Browser>,
             With<WebviewWindowed>,
-            With<CefKeyboardTarget>,
+            With<KeyboardOwner>,
             Without<LayoutCef>,
             Without<WindowOverlay>,
             Without<Header>,
@@ -288,7 +287,7 @@ fn sync_layout_cef_frame_rate(
     mut wheel_events: MessageReader<MouseWheel>,
     mut key_events: MessageReader<KeyboardInput>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut layout_q: Query<(&mut WebviewMaxFrameRate, Has<CefKeyboardTarget>), With<LayoutCef>>,
+    mut layout_q: Query<(&mut WebviewMaxFrameRate, Has<KeyboardOwner>), With<LayoutCef>>,
     burst: Res<LayoutFrameRateBurst>,
     mut state: Local<LayoutFrameRateState>,
 ) {

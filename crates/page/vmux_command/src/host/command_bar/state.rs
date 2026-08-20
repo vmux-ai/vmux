@@ -1,6 +1,6 @@
 use crate::CommandBar;
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
+use vmux_core::KeyboardOwner;
 use vmux_core::overlay::OverlayState;
 use vmux_flex::prelude::*;
 
@@ -11,7 +11,7 @@ pub type CommandBarStateQuery<'w, 's> = Query<
     (
         &'static Node,
         &'static Visibility,
-        Has<CefKeyboardTarget>,
+        Has<KeyboardOwner>,
         Has<vmux_core::overlay::OverlayShownInline>,
     ),
     With<CommandBar>,

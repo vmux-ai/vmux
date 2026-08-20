@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{CefKeyboardTarget, CefSystems};
+use bevy_cef::prelude::CefSystems;
+use vmux_core::KeyboardOwner;
 use vmux_core::page::{PageReady, PrewarmPage};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
@@ -141,7 +142,7 @@ fn handle_registered_page_open(
             if let Some(spare) = available.get_mut(page.url).and_then(Vec::pop) {
                 commands
                     .entity(spare)
-                    .insert((ChildOf(task.stack), CefKeyboardTarget))
+                    .insert((ChildOf(task.stack), KeyboardOwner))
                     .remove::<WarmPageSpare>();
             } else {
                 let webview = commands
@@ -149,7 +150,7 @@ fn handle_registered_page_open(
                     .id();
                 commands
                     .entity(webview)
-                    .insert((ChildOf(task.stack), CefKeyboardTarget));
+                    .insert((ChildOf(task.stack), KeyboardOwner));
             }
         }
         commands.entity(entity).insert(PageOpenHandled);
@@ -217,13 +218,13 @@ fn handle_warm_page_open<M: WarmPage>(
             if let Some(spare) = available.pop() {
                 commands
                     .entity(spare)
-                    .insert((ChildOf(task.stack), CefKeyboardTarget))
+                    .insert((ChildOf(task.stack), KeyboardOwner))
                     .remove::<WarmPageSpare>();
             } else {
                 let page = M::spawn(&mut commands);
                 commands
                     .entity(page)
-                    .insert((ChildOf(task.stack), CefKeyboardTarget));
+                    .insert((ChildOf(task.stack), KeyboardOwner));
             }
         }
         commands.entity(entity).insert(PageOpenHandled);
@@ -353,7 +354,7 @@ mod tests {
             Some(stack)
         );
         assert!(app.world().get::<WarmPageSpare>(spare).is_none());
-        assert!(app.world().get::<CefKeyboardTarget>(spare).is_some());
+        assert!(app.world().get::<KeyboardOwner>(spare).is_some());
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
     }
 

@@ -121,7 +121,7 @@ pub fn clamp_panel_placement(
 /// Layout page -> host: the command bar panel took or released the keyboard.
 ///
 /// Mirrors `BookmarkTextInputEvent`: while the panel holds a focused DOM field the layout shell
-/// must own `CefKeyboardTarget`, or keystrokes go to the focused pane instead.
+/// must own `KeyboardOwner`, or keystrokes go to the focused pane instead.
 #[derive(
     Clone,
     Copy,

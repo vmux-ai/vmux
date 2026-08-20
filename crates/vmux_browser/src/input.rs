@@ -17,7 +17,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
@@ -35,17 +34,14 @@ impl Plugin for InputPlugin {
             .add_systems(
                 PreUpdate,
                 (
-                    sync_layout_cef_pointer_target,
+                    publish_layout_pointer_inside,
                     forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                     forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
                 )
                     .chain()
                     .after(InputSystems),
             )
-            .add_systems(
-                PreUpdate,
-                log_command_bar_keyboard_input.after(bevy_cef::prelude::CefKeyboardInputSet),
-            )
+            .add_systems(PreUpdate, log_command_bar_keyboard_input)
             .add_systems(Update, track_browser_interaction);
     }
 }
@@ -64,49 +60,45 @@ fn log_command_bar_keyboard_input(
     }
 }
 
-fn sync_layout_cef_pointer_target(
+/// Publish whether the pointer is inside one of the layout's interactive regions.
+///
+/// The atomic is the whole output, and it is read off the Bevy thread: the AppKit monitor asks it
+/// whether a scroll should wake the loop, and `sync_winit_power_mode` how hard to idle.
+///
+/// This used to also put a `CefPointerTarget` on the layout, from the days when the layout was an
+/// offscreen browser and the marker told CEF where to forward a wheel event. Nothing forwarded
+/// one by the end, and nothing but this function ever read the marker back.
+fn publish_layout_pointer_inside(
     windows: Query<&Window, With<PrimaryWindow>>,
-    layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
+    layout_q: Query<(), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
-    mut commands: Commands,
 ) {
-    let Ok((layout, has_target)) = layout_q.single() else {
+    if layout_q.single().is_err() {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
-    };
-    #[cfg(target_os = "macos")]
-    let should_target = {
-        let inside = !pointer_capture_q.is_empty()
-            || windows
-                .single()
-                .ok()
-                .and_then(|window| {
-                    let scale = window.resolution.scale_factor();
-                    (scale.is_finite() && scale > 0.0).then_some(scale)
-                })
-                .and_then(|scale| {
-                    vmux_layout::native_pointer::snapshot()
-                        .map(|pointer| pointer.position_px / scale)
-                })
-                .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
-        modal_pointer_targets.is_empty() && inside
-    };
-    #[cfg(not(target_os = "macos"))]
-    let should_target = modal_pointer_targets.is_empty()
-        && (!pointer_capture_q.is_empty()
-            || windows
-                .single()
-                .ok()
-                .and_then(Window::cursor_position)
-                .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions)));
-    NATIVE_LAYOUT_POINTER_INSIDE.store(should_target, Ordering::Relaxed);
-    if should_target && !has_target {
-        commands.entity(layout).insert(CefPointerTarget);
-    } else if !should_target && has_target {
-        commands.entity(layout).remove::<CefPointerTarget>();
     }
+    #[cfg(target_os = "macos")]
+    let inside = !pointer_capture_q.is_empty()
+        || windows
+            .single()
+            .ok()
+            .and_then(|window| {
+                let scale = window.resolution.scale_factor();
+                (scale.is_finite() && scale > 0.0).then_some(scale)
+            })
+            .and_then(|scale| {
+                vmux_layout::native_pointer::snapshot().map(|pointer| pointer.position_px / scale)
+            })
+            .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
+    #[cfg(not(target_os = "macos"))]
+    let inside = !pointer_capture_q.is_empty()
+        || windows
+            .single()
+            .ok()
+            .and_then(Window::cursor_position)
+            .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions));
+    NATIVE_LAYOUT_POINTER_INSIDE.store(inside, Ordering::Relaxed);
 }
 
 #[cfg(target_os = "macos")]
@@ -123,10 +115,9 @@ fn forward_layout_cef_cursor_move(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut was_in_region: Local<bool>,
 ) {
-    if suppress.0 || !modal_pointer_targets.is_empty() {
+    if suppress.0 {
         for _ in events.read() {}
         *was_in_region = false;
         return;
@@ -156,10 +147,9 @@ fn forward_layout_cef_mouse_button(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut captured: Local<bool>,
 ) {
-    if suppress.0 || !modal_pointer_targets.is_empty() {
+    if suppress.0 {
         for _ in events.read() {}
         *captured = false;
         return;

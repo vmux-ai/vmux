@@ -41,6 +41,7 @@ use vmux_history::{LastActivatedAt, now_millis};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::ResolvedLocale;
+use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
 pub(crate) use vmux_core::focus_pane_entity;
@@ -197,7 +198,7 @@ fn prewarm_command_bar_modal(
             Entity,
             &mut Node,
             &mut Visibility,
-            Has<CefKeyboardTarget>,
+            Has<KeyboardOwner>,
             Has<PendingCommandBarReveal>,
             Has<WebviewNativeOverlay>,
         ),
@@ -571,7 +572,7 @@ fn handle_open_command_bar(
 
     // `Cmd+K` on an open bar closes it, and that has to run the same cleanup as an explicit
     // dismiss: a pending `Cmd+T` stack left alive is an orphan tab, and no browser reclaims
-    // `CefKeyboardTarget`.
+    // `KeyboardOwner`.
     let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, space_switch);
 
     let mut active_stack_override = None;
@@ -1159,8 +1160,7 @@ fn on_command_bar_action(
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
-            .remove::<CefKeyboardTarget>()
-            .remove::<CefPointerTarget>()
+            .remove::<KeyboardOwner>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
@@ -1193,8 +1193,7 @@ fn deferred_dismiss_modal(
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
-            .remove::<CefKeyboardTarget>()
-            .remove::<CefPointerTarget>()
+            .remove::<KeyboardOwner>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
@@ -1553,7 +1552,7 @@ mod tests {
         assert_eq!(node.display, Display::Flex);
         assert_eq!(*visibility, Visibility::Hidden);
         assert_eq!(reveal.open_id, OpenId::NONE);
-        assert!(app.world().get::<CefKeyboardTarget>(modal).is_none());
+        assert!(app.world().get::<KeyboardOwner>(modal).is_none());
     }
 
     #[test]
@@ -2005,7 +2004,7 @@ mod tests {
 
     /// `Cmd+T` then `Cmd+K` must discard the empty stack the first command staged. Closing by
     /// toggle used to return before the dismiss cleanup, orphaning the tab and leaving no browser
-    /// holding `CefKeyboardTarget`.
+    /// holding `KeyboardOwner`.
     #[test]
     fn toggling_closed_discards_the_stack_a_pending_new_tab_staged() {
         let mut app = panel_app();
@@ -2162,8 +2161,7 @@ mod tests {
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
 
         let modal = app
             .world_mut()
@@ -2174,7 +2172,7 @@ mod tests {
                     ..default()
                 },
                 Visibility::Visible,
-                CefKeyboardTarget,
+                KeyboardOwner,
                 CommandBarRenderedOpen(OpenId(1)),
             ))
             .id();
@@ -2188,7 +2186,7 @@ mod tests {
 
         let vis_after_close = *app.world().get::<Visibility>(modal).unwrap();
         let display_after_close = app.world().get::<Node>(modal).unwrap().display;
-        let has_kb_after_close = app.world().get::<CefKeyboardTarget>(modal).is_some();
+        let has_kb_after_close = app.world().get::<KeyboardOwner>(modal).is_some();
         let has_rendered_after_close = app.world().get::<CommandBarRenderedOpen>(modal).is_some();
         let has_pending_after_close = app.world().get::<PendingCommandBarReveal>(modal).is_some();
 
@@ -2204,7 +2202,7 @@ mod tests {
         );
         assert!(
             !has_kb_after_close,
-            "CefKeyboardTarget should be removed after dismiss"
+            "KeyboardOwner should be removed after dismiss"
         );
         assert!(
             !has_rendered_after_close,
@@ -2221,7 +2219,7 @@ mod tests {
 
         let vis_after_prewarm = *app.world().get::<Visibility>(modal).unwrap();
         let display_after_prewarm = app.world().get::<Node>(modal).unwrap().display;
-        let has_kb_after_prewarm = app.world().get::<CefKeyboardTarget>(modal).is_some();
+        let has_kb_after_prewarm = app.world().get::<KeyboardOwner>(modal).is_some();
         let pending_open_id_after_prewarm = app
             .world()
             .get::<PendingCommandBarReveal>(modal)
@@ -2234,7 +2232,7 @@ mod tests {
         );
         assert!(
             !has_kb_after_prewarm,
-            "CefKeyboardTarget must not return after prewarm"
+            "KeyboardOwner must not return after prewarm"
         );
         assert!(
             !OverlayState::of(

@@ -6,7 +6,6 @@ use crate::browser_process::client_handler::{
 };
 use crate::prelude::*;
 use async_channel::Sender;
-use bevy::input::ButtonState;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 #[cfg(target_os = "macos")]
@@ -140,32 +139,6 @@ impl NativeMouseMovePresenter {
         self.host
             .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
     }
-
-    /// Inject a wheel event from the AppKit event thread.
-    ///
-    /// An offscreen webview composited over native windowed views never wins AppKit hit-testing,
-    /// so scroll aimed at it is dispatched to the page underneath unless the monitor swallows the
-    /// event and hands it here instead.
-    pub fn send_wheel(&self, position: Vec2, delta: Vec2) {
-        if let Some((mouse_event, delta_x, delta_y)) = cef_mouse_wheel_event(position, delta) {
-            self.host
-                .send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
-        }
-    }
-
-    /// Inject a click from the AppKit event thread, for the same reason as [`Self::send_wheel`].
-    pub fn send_click(&self, position: Vec2, button: PointerButton, mouse_up: bool) {
-        if !position.is_finite() {
-            return;
-        }
-        let mouse_event = cef::MouseEvent {
-            x: position.x as i32,
-            y: position.y as i32,
-            modifiers: button.event_flag() as _,
-        };
-        self.host
-            .send_mouse_click_event(Some(&mouse_event), button.cef_button(), mouse_up as _, 1);
-    }
 }
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
@@ -225,15 +198,12 @@ pub struct WebviewBrowser {
     /// resets the renderer's input state, so only transitions are forwarded.
     last_renderer_focus: Cell<Option<bool>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
-    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
-    /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
+    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die.
     ///
-    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal), because
-    /// `send_key_event` is a windowless API and produces no DOM key events. It does not follow that
-    /// a DOM text field cannot be windowed — this doc-comment used to say so, and it was wrong. A
-    /// windowed child view does receive usable `NSEvent`s; letting AppKit deliver them is how a page
-    /// in a pane types today. The trap is the combination: forward through `CefKeyboardTarget` to a
-    /// windowed browser and the keystroke lands in a call that does nothing.
+    /// A windowed child view receives usable `NSEvent`s, and letting AppKit deliver them is how a
+    /// page in a pane types. There used to be an alternative — forwarding keys in over
+    /// `send_key_event` — and it was a trap for exactly this kind of browser, because that is a
+    /// windowless API and produces no DOM key events. It is gone; AppKit is the only way in now.
     /// See docs/specs/2026-08-08-osr-free-desktop-design.md.
     windowed: bool,
     allow_native_focus: bool,
@@ -645,8 +615,8 @@ impl Browsers {
     /// mouse click or move.
     ///
     /// `auxiliary_osr_focus` is for **additional** visible webviews that must keep compositing
-    /// while another pane is active (e.g. a history split next to the main browser). Keyboard
-    /// routing in the host app uses the `CefKeyboardTarget` component, not CEF `set_focus`.
+    /// while another pane is active (e.g. a history split next to the main browser). Which surface
+    /// the keyboard reaches is decided by AppKit first responder, not by CEF `set_focus`.
     ///
     /// Chromium ties **clipboard shortcuts** (⌘C / ⌘V / …) to the browser that last received
     /// `set_focus(true)`. We therefore focus each auxiliary in order (so they can composite), then
@@ -779,13 +749,6 @@ impl Browsers {
         }
     }
 
-    #[inline]
-    pub fn send_key(&self, webview: &Entity, event: cef::KeyEvent) {
-        if let Some(browser) = self.browsers.get(webview) {
-            browser.host.send_key_event(Some(&event));
-        }
-    }
-
     /// Returns whether a native windowed browser owns the macOS first responder.
     #[cfg(target_os = "macos")]
     pub fn windowed_has_native_focus(&self, webview: &Entity) -> Option<bool> {
@@ -851,62 +814,6 @@ impl Browsers {
             if browser.last_renderer_focus.replace(Some(focused)) != Some(focused) {
                 browser.host.set_focus(focused as _);
             }
-        }
-    }
-
-    /// Windowless/OSR: synthetic [`BrowserHost::send_key_event`] often does not run Chromium’s
-    /// clipboard handling. When the chord is a plain **⌘C / ⌘V / ⌘X / ⌘A** (macOS) or **Ctrl+…**
-    /// (Windows/Linux), forward to [`cef::Frame::copy`] / [`cef::Frame::paste`] / etc. on the
-    /// focused frame instead of (or skipping) key delivery.
-    ///
-    /// Returns `true` if this key press was handled — callers should **not** also
-    /// [`Self::send_key`] the same press.
-    pub fn try_dispatch_clipboard_shortcut(
-        &self,
-        webview: &Entity,
-        key_code: KeyCode,
-        modifiers: u32,
-        state: ButtonState,
-    ) -> bool {
-        if state != ButtonState::Pressed {
-            return false;
-        }
-        if !Self::modifiers_plain_clipboard_chord(modifiers) {
-            return false;
-        }
-        let Some(browser) = self.browsers.get(webview) else {
-            return false;
-        };
-        let Some(frame) = browser.client.focused_frame() else {
-            return false;
-        };
-        if frame.is_valid() == 0 {
-            return false;
-        }
-        match key_code {
-            KeyCode::KeyC => frame.copy(),
-            KeyCode::KeyV => frame.paste(),
-            KeyCode::KeyX => frame.cut(),
-            KeyCode::KeyA => frame.select_all(),
-            _ => return false,
-        }
-        true
-    }
-
-    fn modifiers_plain_clipboard_chord(modifiers: u32) -> bool {
-        let shift = modifiers & (cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0 as u32) != 0;
-        let alt = modifiers & (cef_event_flags_t::EVENTFLAG_ALT_DOWN.0 as u32) != 0;
-        #[cfg(target_os = "macos")]
-        {
-            let cmd = modifiers & (cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0 as u32) != 0;
-            let ctrl = modifiers & (cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0 as u32) != 0;
-            cmd && !ctrl && !shift && !alt
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let ctrl = modifiers & (cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0 as u32) != 0;
-            let cmd = modifiers & (cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0 as u32) != 0;
-            ctrl && !cmd && !shift && !alt
         }
     }
 

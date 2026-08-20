@@ -30,6 +30,7 @@ use vmux_layout::{
     },
 };
 
+use vmux_core::KeyboardOwner;
 use vmux_setting::AppSettings;
 
 use crate::{
@@ -86,11 +87,9 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<WindowOverlay>>,
+    modal_q: Query<(Entity, &Node, Has<KeyboardOwner>), With<WindowOverlay>>,
     layout_keyboard_q: Query<Entity, LayoutKeyboardHost>,
-    content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
-    terminal_q: Query<(), With<vmux_terminal::Terminal>>,
-    mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
+    content_q: Query<(Entity, Has<KeyboardOwner>), With<Browser>>,
     mut commands: Commands,
 ) {
     if let Some(modal) = modal_q.iter().find_map(|(entity, node, keyboard_target)| {
@@ -98,15 +97,14 @@ fn sync_keyboard_target(
     }) {
         for (browser_e, has_kb) in &content_q {
             if browser_e != modal && has_kb {
-                commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
+                commands.entity(browser_e).try_remove::<KeyboardOwner>();
             }
         }
-        suppress.0 = false;
         return;
     }
 
     // The layout has no CEF browser — its page runs in the host process and its view is handed
-    // keys by AppKit — so there is no target to give `CefKeyboardTarget` to. Taking it off every
+    // keys by AppKit — so there is no target to give `KeyboardOwner` to. Taking it off every
     // browser is the whole job: what must not happen is a pane still holding it and reading the
     // keystrokes meant for the chrome.
     //
@@ -116,10 +114,9 @@ fn sync_keyboard_target(
     if layout_keyboard_q.single().is_ok() {
         for (browser_e, has_kb) in &content_q {
             if has_kb {
-                commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
+                commands.entity(browser_e).try_remove::<KeyboardOwner>();
             }
         }
-        suppress.0 = false;
         return;
     }
 
@@ -140,13 +137,10 @@ fn sync_keyboard_target(
 
         if in_active {
             if !has_kb {
-                commands.entity(browser_e).try_insert(CefKeyboardTarget);
+                commands.entity(browser_e).try_insert(KeyboardOwner);
             }
-            // Suppress CEF keyboard forwarding when a terminal is focused —
-            // terminals receive input via the service, not CEF key events.
-            suppress.0 = terminal_q.contains(browser_e);
         } else if has_kb {
-            commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
+            commands.entity(browser_e).try_remove::<KeyboardOwner>();
         }
     }
 }
@@ -821,7 +815,7 @@ pub(crate) fn sync_windowed_command_bar(
             Entity,
             &Node,
             &Visibility,
-            Has<CefKeyboardTarget>,
+            Has<KeyboardOwner>,
             Has<WebviewWindowed>,
             Has<vmux_core::overlay::OverlayShownInline>,
             Option<&HostWindow>,
@@ -1095,7 +1089,7 @@ fn sync_osr_webview_focus(
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
             Has<WindowOverlay>,
-            Has<CefKeyboardTarget>,
+            Has<KeyboardOwner>,
             Has<WebviewWindowed>,
             Has<LayoutCef>,
             Has<BookmarkTextInputActive>,
@@ -1570,9 +1564,8 @@ mod tests {
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
         app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .insert_resource(CefSuppressKeyboardInput(true))
             .add_systems(Update, sync_keyboard_target);
-        let page = app.world_mut().spawn((Browser, CefKeyboardTarget)).id();
+        let page = app.world_mut().spawn((Browser, KeyboardOwner)).id();
         let modal = app
             .world_mut()
             .spawn((
@@ -1582,15 +1575,14 @@ mod tests {
                     display: Display::Flex,
                     ..default()
                 },
-                CefKeyboardTarget,
+                KeyboardOwner,
             ))
             .id();
 
         app.update();
 
-        assert!(app.world().get::<CefKeyboardTarget>(modal).is_some());
-        assert!(app.world().get::<CefKeyboardTarget>(page).is_none());
-        assert!(!app.world().resource::<CefSuppressKeyboardInput>().0);
+        assert!(app.world().get::<KeyboardOwner>(modal).is_some());
+        assert!(app.world().get::<KeyboardOwner>(page).is_none());
     }
 
     #[test]

@@ -57,6 +57,7 @@ use vmux_layout::{
     tab::Tab,
 };
 
+use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
@@ -843,7 +844,7 @@ fn attach_cef_page_to_stack(
     let browser = commands
         .spawn((Browser::new_with_title(url, title), ChildOf(stack)))
         .id();
-    commands.entity(browser).insert(CefKeyboardTarget);
+    commands.entity(browser).insert(KeyboardOwner);
     browser
 }
 

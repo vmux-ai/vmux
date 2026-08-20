@@ -1,15 +1,14 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
-};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
     ContributionsChanged,
 };
+use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
@@ -282,7 +281,7 @@ fn drain_start_workspace_pickers(
 /// Found by `PageMetadata` rather than `WebviewSource`, for the reason given on
 /// [`mark_start_pages_as_launcher_hosts`]: the launcher runs in this process and has no source, so
 /// the old query matched nothing and the payload it was built from went out once and never again.
-/// `CefKeyboardTarget` still applies — `Browser::native_page` keeps the `Browser` marker the
+/// `KeyboardOwner` still applies — `Browser::native_page` keeps the `Browser` marker the
 /// keyboard router looks for.
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
@@ -299,11 +298,11 @@ fn sync_live_start_pages(
             Entity,
             &PageMetadata,
             Has<StartWorkSynced>,
-            Has<CefKeyboardTarget>,
+            Has<KeyboardOwner>,
         ),
         Without<crate::StartInlineTransitionView>,
     >,
-    added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
+    added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     browsers: NonSend<Browsers>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
@@ -411,7 +410,7 @@ fn should_focus_start_sync(
 /// command-bar launcher payload (opening selections in place).
 fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
-    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
+    keyboard_targets: Query<(), With<KeyboardOwner>>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
@@ -614,7 +613,7 @@ mod tests {
     #[test]
     fn cold_start_focuses_after_page_ready() {
         let mut app = start_ready_app();
-        let webview = app.world_mut().spawn(CefKeyboardTarget).id();
+        let webview = app.world_mut().spawn(KeyboardOwner).id();
 
         emit_start_ready(&mut app, webview);
 

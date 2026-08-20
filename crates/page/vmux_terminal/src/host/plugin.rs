@@ -36,6 +36,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
+use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
 /// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
@@ -500,7 +501,7 @@ fn spawn_layout_requested_content(
                         ChildOf(*stack),
                     ))
                     .id();
-                commands.entity(terminal).insert(CefKeyboardTarget);
+                commands.entity(terminal).insert(KeyboardOwner);
             }
         }
     }
@@ -601,7 +602,7 @@ fn open_terminal_page(
             ChildOf(task.stack),
         ))
         .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
+    commands.entity(terminal).insert(KeyboardOwner);
     Ok(())
 }
 
@@ -623,7 +624,7 @@ fn respond_terminal_spawn(
         let term_e = commands
             .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
             .id();
-        commands.entity(term_e).insert(CefKeyboardTarget);
+        commands.entity(term_e).insert(KeyboardOwner);
         // `requested_pane` is carried rather than looked up: the `ChildOf` below is a queued
         // command, so `child_of_q` cannot see the new stack's parent in this same run and the
         // pane's activation time would never be bumped.
@@ -795,7 +796,7 @@ pub fn respond_terminal_stack_spawn(
                 ChildOf(stack),
             ))
             .id();
-        commands.entity(terminal).insert(CefKeyboardTarget);
+        commands.entity(terminal).insert(KeyboardOwner);
         if request.agent_run {
             commands.entity(terminal).insert(crate::AgentRunTerminal);
         }
@@ -1857,13 +1858,9 @@ fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
     targeted_terminals: Query<
         (&ProcessId, &ChildOf),
-        (
-            With<Terminal>,
-            With<CefKeyboardTarget>,
-            Without<ProcessExited>,
-        ),
+        (With<Terminal>, With<KeyboardOwner>, Without<ProcessExited>),
     >,
-    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
+    keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     terminal_kinds: Query<
         (
@@ -3522,13 +3519,9 @@ fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
     targeted_terminals: Query<
         (&ProcessId, &ChildOf),
-        (
-            With<Terminal>,
-            With<CefKeyboardTarget>,
-            Without<ProcessExited>,
-        ),
+        (With<Terminal>, With<KeyboardOwner>, Without<ProcessExited>),
     >,
-    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
+    keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     service: Option<Res<ServiceClient>>,
