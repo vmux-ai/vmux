@@ -2141,6 +2141,7 @@ mod tests {
                 base_url: "https://mac.example.ts.net".to_string(),
                 token: "secret".to_string(),
                 fingerprint: String::new(),
+                device: String::new(),
             }
         );
     }
@@ -2156,6 +2157,7 @@ mod tests {
                 base_url: "https://mac.example.ts.net:54821".to_string(),
                 token: "secret".to_string(),
                 fingerprint: String::new(),
+                device: String::new(),
             }
         );
     }
@@ -2168,6 +2170,7 @@ mod tests {
                 base_url: "http://localhost:8787/r/device-1".to_string(),
                 token: "secret".to_string(),
                 fingerprint: String::new(),
+                device: String::new(),
             }
         );
     }
