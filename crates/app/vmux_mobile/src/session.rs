@@ -5,12 +5,12 @@ use crate::native_transition;
 use crate::take_resumed;
 use dioxus::prelude::*;
 use std::time::Duration;
+use vmux_chat::event::ChatSnapshot;
 use vmux_service::chat::group_turns_tail;
-use vmux_ui::i18n::translate;
 use vmux_wire::chat::ChatItem;
 use vmux_wire::room::{
-    AssistantBlock, Message, NewChatRequest, RemoteApproval, RemoteEvent, RemoteSession,
-    RemoteStatus, RoomEvent, RoomId,
+    AssistantBlock, Message, NewChatRequest, RemoteAgent, RemoteApproval, RemoteEvent,
+    RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -18,6 +18,290 @@ pub(crate) enum AuthState {
     Loading,
     Paired,
     Unpaired,
+}
+
+/// The one conversation the phone has open, and everything that describes it.
+///
+/// `Copy` and compared by signal identity, mirroring the `Chat` handle the shared chat page keeps
+/// its own state in: passing it to the host costs nothing and never defeats memoization.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct Session {
+    pub(crate) current: Signal<Option<RemoteSession>>,
+    pub(crate) room: Signal<MobileRoomProjection>,
+    pub(crate) live_delta: Signal<String>,
+    pub(crate) status: Signal<RemoteStatus>,
+    pub(crate) approval: Signal<Option<RemoteApproval>>,
+    /// Whether the event stream is up, as opposed to whether the phone is paired.
+    pub(crate) connected: Signal<bool>,
+    /// Bumped on every open and leave, so a stream outlived by its session stops writing.
+    pub(crate) generation: Signal<u64>,
+}
+
+pub(crate) fn use_session() -> Session {
+    Session {
+        current: use_signal(|| None),
+        room: use_signal(MobileRoomProjection::default),
+        live_delta: use_signal(String::new),
+        status: use_signal(|| RemoteStatus::Idle),
+        approval: use_signal(|| None),
+        connected: use_signal(|| false),
+        generation: use_signal(|| 0),
+    }
+}
+
+impl Session {
+    pub(crate) fn is_open(&self) -> bool {
+        self.current.read().is_some()
+    }
+
+    pub(crate) fn sid(&self) -> String {
+        match self.current.read().as_ref() {
+            Some(session) => session.sid.clone(),
+            None => String::new(),
+        }
+    }
+
+    /// Fold the room's event log into the shared transcript model. The desktop gets this from
+    /// `group_turns` on the daemon side; the relay does not pre-group yet, so mobile folds locally.
+    pub(crate) fn open(&self, api: Api, session: RemoteSession) {
+        native_transition::NativeSheet::open();
+        let mut handle = *self;
+        let sid = session.sid.clone();
+        handle.current.set(Some(session.clone()));
+        handle.room.set(MobileRoomProjection {
+            room_id: Some(session.room_id.clone()),
+            ..MobileRoomProjection::default()
+        });
+        handle.live_delta.set(String::new());
+        handle.status.set(session.status.clone());
+        handle.approval.set(session.approval.clone());
+        handle.connected.set(false);
+        let next_generation = (handle.generation)().wrapping_add(1);
+        handle.generation.set(next_generation);
+        spawn(async move {
+            loop {
+                if (handle.generation)() != next_generation {
+                    return;
+                }
+                // A connection that survived a suspend is a connection whose socket the OS already
+                // closed. Drop it before dialling rather than waiting for a request to stall.
+                if take_resumed() {
+                    api.reset_transport().await;
+                }
+                match api.subscribe(&sid).await {
+                    Ok(mut subscription) => {
+                        handle.connected.set(true);
+                        while let Some(event) = subscription.next().await {
+                            if (handle.generation)() != next_generation {
+                                return;
+                            }
+                            let Some(event) = remote_event_from_shared(event) else {
+                                continue;
+                            };
+                            let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
+                            handle.apply(event);
+                            if refresh_now {
+                                tokio::task::yield_now().await;
+                            }
+                        }
+                    }
+                    // Pairing is gone, or the stream route is — reconnecting brings back neither.
+                    Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                    Err(ApiError::Message(_)) => {}
+                }
+                handle.connected.set(false);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
+
+    pub(crate) fn leave(&self) {
+        let mut handle = *self;
+        let dismissing = native_transition::NativeSheet::close();
+        handle.generation.set((handle.generation)().wrapping_add(1));
+        handle.current.set(None);
+        handle.room.set(MobileRoomProjection::default());
+        handle.live_delta.set(String::new());
+        handle.status.set(RemoteStatus::Idle);
+        handle.approval.set(None);
+        handle.connected.set(false);
+        dismissing.finish();
+    }
+
+    /// Start a chat on the desktop, then open whichever session appears that was not there before.
+    pub(crate) fn start_chat(
+        &self,
+        api: Api,
+        mut sessions: Signal<Vec<RemoteSession>>,
+        text: String,
+        agent_url: Option<String>,
+    ) {
+        let handle = *self;
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let mut known = std::collections::HashSet::new();
+        for session in sessions.read().iter() {
+            known.insert(session.sid.clone());
+        }
+        spawn(async move {
+            let request = NewChatRequest {
+                client_op_id: next_client_op_id(),
+                text,
+                agent_url,
+            };
+            if api.create_chat(&request).await.is_err() {
+                return;
+            }
+            for _ in 0..40 {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let Ok(next) = api.sessions().await else {
+                    continue;
+                };
+                let mut created = None;
+                for session in &next {
+                    if !known.contains(&session.sid) {
+                        created = Some(session.clone());
+                        break;
+                    }
+                }
+                sessions.set(next);
+                if let Some(created) = created {
+                    handle.open(api, created);
+                    return;
+                }
+            }
+        });
+    }
+
+    pub(crate) fn apply(&self, event: RemoteEvent) {
+        let mut current = self.current;
+        let mut room = self.room;
+        let mut live_delta = self.live_delta;
+        let mut status = self.status;
+        let mut approval = self.approval;
+        match event {
+            RemoteEvent::Session { session } => {
+                if room
+                    .peek()
+                    .room_id
+                    .as_ref()
+                    .is_some_and(|room_id| room_id != &session.room_id)
+                {
+                    room.set(MobileRoomProjection::default());
+                }
+                status.set(session.status.clone());
+                approval.set(session.approval.clone());
+                current.set(Some(session));
+            }
+            RemoteEvent::Snapshot {
+                room_id,
+                through_seq,
+                events,
+            } => {
+                let matches_session = current
+                    .peek()
+                    .as_ref()
+                    .is_none_or(|session| session.room_id == room_id);
+                let has_newer_projection = {
+                    let projection = room.peek();
+                    projection.room_id.as_ref() == Some(&room_id)
+                        && projection.through_seq > through_seq
+                };
+                if matches_session && !has_newer_projection {
+                    room.set(MobileRoomProjection {
+                        room_id: Some(room_id),
+                        through_seq,
+                        events,
+                    });
+                    live_delta.set(String::new());
+                }
+            }
+            RemoteEvent::Delta { room_id, text } => {
+                let accepts_delta = room
+                    .peek()
+                    .room_id
+                    .as_ref()
+                    .is_none_or(|current| current == &room_id);
+                if accepts_delta {
+                    if room.peek().room_id.is_none() {
+                        room.write().room_id = Some(room_id);
+                    }
+                    live_delta.write().push_str(&text);
+                }
+            }
+            RemoteEvent::Status { status: next } => {
+                if !matches!(next, RemoteStatus::Streaming) {
+                    approval.set(None);
+                }
+                status.set(next);
+            }
+            RemoteEvent::Approval { approval: next } => approval.set(next),
+        }
+    }
+
+    /// Describe the open conversation the way the shared chat page expects to be told about it.
+    ///
+    /// The desktop builds this from the daemon's own session state. The phone has the same facts
+    /// spread across a session row and a folded room log, so this is where the two meet — every
+    /// field the relay cannot answer is left at its default, which each of the page's features
+    /// reads as "absent" and declines to render.
+    pub(crate) fn snapshot(&self, agents: &[RemoteAgent]) -> ChatSnapshot {
+        let current = self.current.read();
+        let Some(session) = current.as_ref() else {
+            return ChatSnapshot::default();
+        };
+        let streaming = matches!(session.status, RemoteStatus::Streaming);
+        let items = self
+            .room
+            .read()
+            .chat_items(&self.live_delta.read(), streaming);
+        let total = items.len() as u32;
+        let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+        // The session says which agent it is by name; the icon lives on the agent list the phone
+        // already fetches, so no extra round trip and nothing new on the wire.
+        let mut agent_icon = String::new();
+        let mut agent_segment = "";
+        for agent in agents {
+            if agent.name == session.name {
+                agent_icon = agent.icon.clone();
+                agent_segment = agent.id.as_str();
+                break;
+            }
+        }
+        let approval = self.approval.read();
+        let (approval_call_id, approval_name, approval_args_json) = match approval.as_ref() {
+            Some(pending) => (
+                pending.call_id.clone(),
+                pending.name.clone(),
+                pending.args_json.clone(),
+            ),
+            None => (String::new(), String::new(), String::new()),
+        };
+        let error = match &*self.status.read() {
+            RemoteStatus::Errored(message) => message.clone(),
+            _ => String::new(),
+        };
+        ChatSnapshot {
+            messages_json,
+            messages_start: 0,
+            messages_total: total,
+            status: self.status.read().page_status().to_string(),
+            error,
+            approval_call_id,
+            approval_name,
+            approval_args_json,
+            agent_name: session.name.clone(),
+            conversation_title: session.name.clone(),
+            agent_icon,
+            // Derived rather than sent: the accent is a pure function of the agent's url segment
+            // and already lives in the shared crate, so the phone reaches the same colour the
+            // desktop paints without the wire carrying a theme.
+            accent_color: vmux_wire::avatar::agent_color(agent_segment),
+            ..ChatSnapshot::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -28,13 +312,6 @@ pub(crate) struct MobileRoomProjection {
 }
 
 impl MobileRoomProjection {
-    /// How many events have been folded in so far.
-    ///
-    /// Read by the transcript's scroll effect purely to depend on the log growing.
-    pub(crate) fn event_count(&self) -> usize {
-        self.events.len()
-    }
-
     /// Fold the replayed log into rendered chat items, with any streaming delta as the tail of
     /// the live turn.
     ///
@@ -54,230 +331,22 @@ impl MobileRoomProjection {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn start_new_chat(
-    api: Signal<Option<Api>>,
-    mut sessions: Signal<Vec<RemoteSession>>,
-    current: Signal<Option<RemoteSession>>,
-    room: Signal<MobileRoomProjection>,
-    live_delta: Signal<String>,
-    status: Signal<RemoteStatus>,
-    approval: Signal<Option<RemoteApproval>>,
-    connected: Signal<bool>,
-    stream_generation: Signal<u64>,
-    mut draft: Signal<String>,
-    mut error: Signal<String>,
-    mut creating: Signal<bool>,
-    agent_url: Option<String>,
-) {
-    let text = draft.peek().trim().to_string();
-    let Some(client) = api() else { return };
-    if text.is_empty() || creating() {
-        return;
-    }
-    let known = sessions
-        .read()
-        .iter()
-        .map(|session| session.sid.clone())
-        .collect::<std::collections::HashSet<_>>();
-    creating.set(true);
-    error.set(String::new());
-    spawn(async move {
-        match client
-            .create_chat(&NewChatRequest {
-                client_op_id: next_client_op_id(),
-                text,
-                agent_url,
-            })
-            .await
-        {
-            Ok(()) => {
-                for _ in 0..40 {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                    if let Ok(next) = client.sessions().await {
-                        let created = next
-                            .iter()
-                            .find(|session| !known.contains(&session.sid))
-                            .cloned();
-                        sessions.set(next);
-                        if let Some(created) = created {
-                            draft.set(String::new());
-                            creating.set(false);
-                            open_session(
-                                client,
-                                created,
-                                current,
-                                room,
-                                live_delta,
-                                status,
-                                approval,
-                                connected,
-                                stream_generation,
-                            );
-                            return;
-                        }
-                    }
-                }
-                error.set(translate("mobile-error-stack-missing"));
-            }
-            Err(ApiError::Unauthorized) => {
-                error.set(translate("mobile-error-pairing-lost"));
-            }
-            Err(other) => error.set(other.to_string()),
-        }
-        creating.set(false);
-    });
+/// The words the shared chat page matches a run's state on.
+///
+/// `RemoteStatus` names the same four states differently, and the page's status is a bare string,
+/// so the translation has to happen somewhere. Here, next to the snapshot that carries it.
+trait PageStatus {
+    fn page_status(&self) -> &'static str;
 }
 
-pub(crate) fn leave_session(
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-    mut connected: Signal<bool>,
-    mut generation: Signal<u64>,
-) {
-    let dismissing = native_transition::NativeSheet::close();
-    generation.set(generation().wrapping_add(1));
-    current.set(None);
-    room.set(MobileRoomProjection::default());
-    live_delta.set(String::new());
-    status.set(RemoteStatus::Idle);
-    approval.set(None);
-    connected.set(false);
-    dismissing.finish();
-}
-
-/// Fold the room's event log into the shared transcript model. The desktop gets this from
-/// `group_turns` on the daemon side; the relay does not pre-group yet, so mobile folds locally.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn open_session(
-    api: Api,
-    session: RemoteSession,
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-    mut connected: Signal<bool>,
-    mut generation: Signal<u64>,
-) {
-    native_transition::NativeSheet::open();
-    let sid = session.sid.clone();
-    current.set(Some(session.clone()));
-    room.set(MobileRoomProjection {
-        room_id: Some(session.room_id.clone()),
-        ..MobileRoomProjection::default()
-    });
-    live_delta.set(String::new());
-    status.set(session.status.clone());
-    approval.set(session.approval.clone());
-    connected.set(false);
-    let next_generation = generation().wrapping_add(1);
-    generation.set(next_generation);
-    spawn(async move {
-        loop {
-            if generation() != next_generation {
-                return;
-            }
-            // A connection that survived a suspend is a connection whose socket the OS already
-            // closed. Drop it before dialling rather than waiting for a request to stall.
-            if take_resumed() {
-                api.reset_transport().await;
-            }
-            match api.subscribe(&sid).await {
-                Ok(mut subscription) => {
-                    connected.set(true);
-                    while let Some(event) = subscription.next().await {
-                        if generation() != next_generation {
-                            return;
-                        }
-                        let Some(event) = remote_event_from_shared(event) else {
-                            continue;
-                        };
-                        let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
-                        apply_remote_event(event, current, room, live_delta, status, approval);
-                        if refresh_now {
-                            tokio::task::yield_now().await;
-                        }
-                    }
-                }
-                // Pairing is gone, or the stream route is — reconnecting brings back neither.
-                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                Err(ApiError::Message(_)) => {}
-            }
-            connected.set(false);
-            tokio::time::sleep(Duration::from_secs(2)).await;
+impl PageStatus for RemoteStatus {
+    fn page_status(&self) -> &'static str {
+        match self {
+            RemoteStatus::Streaming => "streaming",
+            RemoteStatus::Errored(_) => "errored",
+            RemoteStatus::Interrupted => "interrupted",
+            RemoteStatus::Idle => "idle",
         }
-    });
-}
-
-pub(crate) fn apply_remote_event(
-    event: RemoteEvent,
-    mut current: Signal<Option<RemoteSession>>,
-    mut room: Signal<MobileRoomProjection>,
-    mut live_delta: Signal<String>,
-    mut status: Signal<RemoteStatus>,
-    mut approval: Signal<Option<RemoteApproval>>,
-) {
-    match event {
-        RemoteEvent::Session { session } => {
-            if room
-                .peek()
-                .room_id
-                .as_ref()
-                .is_some_and(|room_id| room_id != &session.room_id)
-            {
-                room.set(MobileRoomProjection::default());
-            }
-            status.set(session.status.clone());
-            approval.set(session.approval.clone());
-            current.set(Some(session));
-        }
-        RemoteEvent::Snapshot {
-            room_id,
-            through_seq,
-            events,
-        } => {
-            let matches_session = current
-                .peek()
-                .as_ref()
-                .is_none_or(|session| session.room_id == room_id);
-            let has_newer_projection = {
-                let projection = room.peek();
-                projection.room_id.as_ref() == Some(&room_id)
-                    && projection.through_seq > through_seq
-            };
-            if matches_session && !has_newer_projection {
-                room.set(MobileRoomProjection {
-                    room_id: Some(room_id),
-                    through_seq,
-                    events,
-                });
-                live_delta.set(String::new());
-            }
-        }
-        RemoteEvent::Delta { room_id, text } => {
-            let accepts_delta = room
-                .peek()
-                .room_id
-                .as_ref()
-                .is_none_or(|current| current == &room_id);
-            if accepts_delta {
-                if room.peek().room_id.is_none() {
-                    room.write().room_id = Some(room_id);
-                }
-                live_delta.write().push_str(&text);
-            }
-        }
-        RemoteEvent::Status { status: next } => {
-            if !matches!(next, RemoteStatus::Streaming) {
-                approval.set(None);
-            }
-            status.set(next);
-        }
-        RemoteEvent::Approval { approval: next } => approval.set(next),
     }
 }
 
@@ -336,6 +405,19 @@ mod tests {
         assert_eq!(
             turn.blocks.last(),
             Some(&ChatBlock::Text("partial".to_string()))
+        );
+    }
+
+    /// The page reads its run state off a bare string, so a name that drifts from what it matches
+    /// on is a silent failure: the composer would show idle mid-turn and never offer Stop.
+    #[test]
+    fn every_remote_status_names_a_state_the_shared_page_knows() {
+        assert_eq!(RemoteStatus::Idle.page_status(), "idle");
+        assert_eq!(RemoteStatus::Streaming.page_status(), "streaming");
+        assert_eq!(RemoteStatus::Interrupted.page_status(), "interrupted");
+        assert_eq!(
+            RemoteStatus::Errored("boom".to_string()).page_status(),
+            "errored"
         );
     }
 }

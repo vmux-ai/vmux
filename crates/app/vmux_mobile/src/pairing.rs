@@ -1,5 +1,12 @@
-//! The pairing a phone holds for one desktop, and the links it is written as.
+//! The pairing a phone holds for one desktop, the links it is written as, and the one screen that
+//! asks for one.
+//!
+//! [`PairCard`] is the app's only component. Everything the phone draws after pairing is a page
+//! the desktop draws too; scanning a QR code to find a Mac in the first place has no desktop
+//! counterpart, so it has no shared page to come from.
 
+use crate::qr_scanner;
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_ui::i18n::translate;
@@ -154,6 +161,95 @@ fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
         value.pop();
     }
     Ok(value)
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub(crate) struct PairCardProps {
+    pub(crate) value: String,
+    pub(crate) error: String,
+    pub(crate) pairing: bool,
+    pub(crate) on_value: EventHandler<String>,
+    pub(crate) on_pair: EventHandler<()>,
+    pub(crate) on_scan: EventHandler<()>,
+}
+
+#[component]
+pub(crate) fn PairCard(props: PairCardProps) -> Element {
+    let mut show_link = use_signal(|| !props.value.trim().is_empty());
+    let unavailable = use_hook(|| match qr_scanner::ScannerSupport::detect() {
+        qr_scanner::ScannerSupport::Available => None,
+        qr_scanner::ScannerSupport::Unavailable(reason) => Some(reason),
+    });
+
+    rsx! {
+        div { class: "w-full",
+            div { class: "mb-5 text-center",
+                h2 { class: "text-base font-semibold text-foreground", {translate("mobile-pair-title")} }
+                p { class: "mt-1 text-xs leading-5 text-muted-foreground", {translate("mobile-pair-subtitle")} }
+            }
+            button {
+                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none active:scale-[0.99] active:bg-primary/90",
+                r#type: "button",
+                disabled: unavailable.is_some(),
+                onclick: move |_| props.on_scan.call(()),
+                svg {
+                    class: "h-5 w-5",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M3 5a2 2 0 0 1 2-2h2" }
+                    path { d: "M17 3h2a2 2 0 0 1 2 2v2" }
+                    path { d: "M21 17v2a2 2 0 0 1-2 2h-2" }
+                    path { d: "M7 21H5a2 2 0 0 1-2-2v-2" }
+                    rect { width: "5", height: "5", x: "7", y: "7", rx: "1" }
+                    path { d: "M17 7v.01" }
+                    path { d: "M17 12v5" }
+                    path { d: "M12 17h5" }
+                }
+                {translate("mobile-pair-scan")}
+            }
+            button {
+                class: "mx-auto mt-4 block rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground active:bg-accent active:text-accent-foreground",
+                r#type: "button",
+                onclick: move |_| show_link.set(!show_link()),
+                {if show_link() { translate("mobile-pair-hide-link") } else { translate("mobile-pair-show-link") }}
+            }
+            if let Some(reason) = unavailable.clone() {
+                p { class: "mt-3 text-center text-xs leading-5 text-muted-foreground", "{reason}" }
+            }
+            if show_link() {
+                form {
+                    class: "mt-2 flex items-center gap-2 rounded-2xl border border-border bg-muted p-1.5",
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        props.on_pair.call(());
+                    },
+                    input {
+                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-base text-foreground outline-none placeholder:text-muted-foreground",
+                        r#type: "url",
+                        inputmode: "url",
+                        autocomplete: "off",
+                        autocapitalize: "none",
+                        placeholder: translate("mobile-pair-link-placeholder"),
+                        value: "{props.value}",
+                        oninput: move |event| props.on_value.call(event.value()),
+                    }
+                    button {
+                        class: "h-10 shrink-0 rounded-xl bg-secondary px-4 text-xs font-semibold text-secondary-foreground disabled:opacity-50 active:bg-secondary/80",
+                        r#type: "submit",
+                        disabled: props.pairing,
+                        {if props.pairing { translate("mobile-pair-connecting") } else { translate("mobile-pair-connect") }}
+                    }
+                }
+            }
+            if !props.error.is_empty() {
+                p { class: "mt-3 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-xs leading-5 text-destructive", "{props.error}" }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

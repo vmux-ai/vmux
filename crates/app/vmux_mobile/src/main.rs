@@ -1,7 +1,13 @@
 #![allow(non_snake_case)]
 
+//! The phone app: a QUIC link to one Mac, and the desktop's own pages drawn over it.
+//!
+//! Nothing here draws a conversation or a launcher. Those are [`vmux_chat`] and [`vmux_start`],
+//! the same crates the desktop mounts, reaching this app through [`page_host`] instead of through
+//! Bevy. What is left is the shell: finding a Mac, holding the link, and deciding which page is on
+//! screen.
+
 mod api;
-mod composer;
 mod credentials;
 mod logs;
 mod native_transition;
@@ -10,47 +16,20 @@ mod pairing;
 mod qr_scanner;
 mod quic_api;
 mod session;
-mod start;
 
 use crate::api::{Api, ApiError};
-use crate::composer::{
-    ComposerOptions, insert_media_token, select_remote_media_entry, submit_remote_prompt,
-    use_remote_model_state,
-};
 use crate::logs::Logs;
-use crate::pairing::Credentials;
-use crate::session::{
-    AuthState, MobileRoomProjection, leave_session, open_session, start_new_chat,
-};
-use crate::start::MobileStartPage;
+use crate::pairing::{Credentials, PairCard};
+use crate::session::{AuthState, use_session};
 
-use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
-use vmux_chat::format::composer::{SelectorMode, filter_models, selector_mode};
-use vmux_chat::page::agent::StatusDot;
-use vmux_chat::page::approval::ApprovalPanel;
-use vmux_chat::page::composer::ComposerStatus;
-use vmux_chat::page::composer::options::ModelMenu;
-use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
-use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
-use vmux_ui::components::prompt_composer::{
-    PromptComposer, PromptComposerAction, PromptComposerAttachment,
-};
-use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::favicon::Favicon;
-use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{MenuDirection, move_selection};
+use vmux_ui::chrome::PageBack;
+use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
-use vmux_wire::chat::latest_tool_location;
-use vmux_wire::prompt_media::ChatAttachment;
-use vmux_wire::room::{
-    ApprovalRequest, ModelOptionEntry, RemoteAgent, RemoteApproval, RemoteMediaEntry,
-    RemoteSession, RemoteStatus, inline_media_query, replace_inline_media_query,
-};
+use vmux_wire::room::{RemoteAgent, RemoteSession};
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -138,7 +117,7 @@ fn App() -> Element {
     }
 }
 
-/// Everything below the head.
+/// Everything below the head: the link's state, and which page it is showing.
 ///
 /// Split out so [`AppHead`] mounts exactly once. Dioxus records an inserted stylesheet href in a
 /// root context and skips that href ever after, so a head rendered inside a branch loses its
@@ -153,102 +132,30 @@ fn AppBody() -> Element {
     let mut api = use_signal(|| None::<Api>);
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
     let mut agents = use_signal(Vec::<RemoteAgent>::new);
-    let selected_agent = use_signal(|| Option::<String>::None);
-    let current = use_signal(|| None::<RemoteSession>);
-    let room = use_signal(MobileRoomProjection::default);
-    let live_delta = use_signal(String::new);
-    let status = use_signal(|| RemoteStatus::Idle);
-    let mut approval = use_signal(|| None::<RemoteApproval>);
-    let mut draft = use_signal(String::new);
-    let mut attachments = use_signal(Vec::<RemoteMediaEntry>::new);
-    let mut media_entries = use_signal(Vec::<RemoteMediaEntry>::new);
-    let mut media_loading = use_signal(|| false);
-    let mut media_generation = use_signal(|| 0_u64);
-    let mut media_selected = use_signal(|| 0_usize);
-    let mut attachment_sid = use_signal(String::new);
-    let connected = use_signal(|| false);
+    let session = use_session();
+    let composer = page_host::use_composer_exchange();
     // Whether the Mac is answering, as opposed to whether this device is paired.
     // Conflating the two let the header claim Connected while every request timed out.
     let mut reachable = use_signal(|| false);
-    let mut stream_generation = use_signal(|| 0_u64);
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
     let mut team_open = use_signal(|| false);
-    let mut new_chat_draft = use_signal(String::new);
-    let new_chat_error = use_signal(String::new);
-    let creating_chat = use_signal(|| false);
 
-    // Pinned to the bottom as the transcript grows. Through the mounted handle rather than by
-    // reaching into the DOM, so the renderer decides how a scroll actually happens.
-    let mut transcript_view = use_signal(|| None::<Event<MountedData>>);
-    use_effect(move || {
-        let _ = room.read().event_count();
-        let _ = live_delta.read().len();
-        let Some(view) = transcript_view() else {
-            return;
-        };
-        spawn(async move {
-            let Ok(size) = view.get_scroll_size().await else {
-                return;
-            };
-            let bottom = PixelsVector2D::new(0.0, size.height);
-            let _ = view.scroll(bottom, ScrollBehavior::Instant).await;
-        });
-    });
-
-    use_effect(move || {
-        let sid = current().map(|session| session.sid).unwrap_or_default();
-        if *attachment_sid.peek() == sid {
-            return;
-        }
-        attachment_sid.set(sid);
-        attachments.set(Vec::new());
-        media_entries.set(Vec::new());
-        media_loading.set(false);
-    });
-
-    use_effect(move || {
-        let value = draft();
-        let query = inline_media_query(&value).map(|query| query.query.to_string());
-        let sid = current().map(|session| session.sid).unwrap_or_default();
-        let client = api();
-        let generation = media_generation.peek().wrapping_add(1);
-        media_generation.set(generation);
-        media_selected.set(0);
-        let (Some(query), Some(client)) = (query, client) else {
-            media_entries.set(Vec::new());
-            media_loading.set(false);
-            return;
-        };
-        if sid.is_empty() {
-            media_entries.set(Vec::new());
-            media_loading.set(false);
-            return;
-        }
-        media_loading.set(true);
-        spawn(async move {
-            tokio::time::sleep(Duration::from_millis(120)).await;
-            if *media_generation.peek() != generation {
-                return;
-            }
-            let result = client.media(&sid, &query).await;
-            if *media_generation.peek() != generation {
-                return;
-            }
-            match result {
-                Ok(entries) => media_entries.set(entries),
-                Err(_) => media_entries.set(Vec::new()),
-            }
-            media_loading.set(false);
-        });
+    // A page hosted here is the whole window, so the way out has to come from inside it. Provided
+    // unconditionally because it is a hook; leaving nothing is a no-op.
+    use_context_provider(|| {
+        PageBack::new(EventHandler::new(move |()| {
+            team_open.set(false);
+            session.leave();
+        }))
     });
 
     // Shared pages reach the desktop through the installed host, so it has to exist before one
     // mounts. Keying off the signal covers every path that pairs, not just the resume-on-launch one.
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client);
+            page_host::install(client, sessions, agents, session, composer);
         }
     });
 
@@ -427,9 +334,27 @@ fn AppBody() -> Element {
         };
     }
 
+    if auth() == AuthState::Unpaired {
+        return rsx! {
+            PairScreen {
+                value: pair_url(),
+                error: error(),
+                pairing: pairing(),
+                on_value: move |value| pair_url.set(value),
+                on_pair: move |_| pending_pair_url.set(Some(pair_url())),
+                on_scan: move |_| {
+                    error.set(String::new());
+                    if let Err(message) = qr_scanner::open() {
+                        error.set(message);
+                    }
+                },
+            }
+        };
+    }
+
     if team_open() {
-        // vmux_team::page::Page is the desktop's team page, unmodified — it reads TEAM_EVENT off
-        // the installed host exactly as it does inside CEF. Only the way back is ours.
+        // The desktop's team page, unmodified — it reads its roster off the installed host exactly
+        // as it does inside CEF.
         return rsx! {
             div { class: "flex h-dvh flex-col bg-background text-foreground",
                 div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
@@ -445,506 +370,110 @@ fn AppBody() -> Element {
         };
     }
 
-    if current().is_none() {
+    if session.is_open() {
+        // The desktop's chat page, unmodified. Everything it renders — transcript, approvals,
+        // model picker, composer — is fed by `page_host` off the QUIC link.
         return rsx! {
-            MobileStartPage {
-                paired: auth() == AuthState::Paired,
+            vmux_chat::page::Page {}
+        };
+    }
+
+    // The desktop's launcher, unmodified, with the link's own state floated over it. Overlaid
+    // rather than stacked so the page still owns the whole viewport, which is what lets its hero
+    // stay centred.
+    rsx! {
+        div { class: "relative h-dvh",
+            vmux_start::page::Page {}
+            LinkStatus {
                 reachable: reachable(),
-                sessions: sessions(),
-                agents: agents(),
-                draft: new_chat_draft(),
-                error: new_chat_error(),
-                creating: creating_chat(),
-                pair_value: pair_url(),
-                pair_error: error(),
-                pairing: pairing(),
-                on_draft: move |value| new_chat_draft.set(value),
-                on_submit: move |_| start_new_chat(
-                    api,
-                    sessions,
-                    current,
-                    room,
-                    live_delta,
-                    status,
-                    approval,
-                    connected,
-                    stream_generation,
-                    new_chat_draft,
-                    new_chat_error,
-                    creating_chat,
-                    selected_agent(),
-                ),
-                on_start_agent: move |url: String| start_new_chat(
-                    api,
-                    sessions,
-                    current,
-                    room,
-                    live_delta,
-                    status,
-                    approval,
-                    connected,
-                    stream_generation,
-                    new_chat_draft,
-                    new_chat_error,
-                    creating_chat,
-                    Some(url),
-                ),
-                on_open: move |session| {
-                    let Some(client) = api() else { return };
-                    open_session(
-                        client,
-                        session,
-                        current,
-                        room,
-                        live_delta,
-                        status,
-                        approval,
-                        connected,
-                        stream_generation,
-                    );
-                },
-                on_pair_value: move |value| pair_url.set(value),
-                on_pair: move |_| {
-                    pending_pair_url.set(Some(pair_url()));
-                },
-                on_scan: move |_| {
-                    error.set(String::new());
-                    if let Err(message) = qr_scanner::open() {
-                        error.set(message);
-                    }
-                },
+                on_team: move |_| team_open.set(true),
                 on_disconnect: move |_| {
                     credentials::StoredCredentials::clear();
-                    stream_generation.set(stream_generation().wrapping_add(1));
+                    session.leave();
                     let displaced = api.peek().clone();
                     api.set(None);
                     if let Some(displaced) = displaced {
                         displaced.close();
                     }
                     sessions.set(Vec::new());
+                    agents.set(Vec::new());
                     auth.set(AuthState::Unpaired);
                 },
-                on_open_team: move |_| team_open.set(true),
             }
-        };
+        }
     }
+}
 
-    let current_value = current();
-    // The session says which agent it is by name; the icon lives on the agent list the phone
-    // already fetches, so no extra round trip and nothing new on the wire.
-    let matched_agent = current_value.as_ref().and_then(|session| {
-        agents()
-            .into_iter()
-            .find(|agent| agent.name == session.name)
-    });
-    let agent_icon = matched_agent
-        .as_ref()
-        .map(|agent| agent.icon.clone())
-        .unwrap_or_default();
-    // Derived rather than sent: agent_accent is a pure function of the agent id and already lives
-    // in the shared crate, so the phone reaches the same colours the desktop does without the
-    // wire carrying a theme.
-    let agent_segment = matched_agent
-        .as_ref()
-        .map(|agent| agent.id.as_str())
-        .unwrap_or_default();
-    let accent = vmux_ui::agent_accent::agent_accent(agent_segment);
-    // What the desktop paints --agent-accent with: the agent's avatar colour, which is a pure
-    // function of its URL segment. Deriving it rather than sending it keeps the two in step.
-    let accent_css = vmux_wire::avatar::agent_color(agent_segment);
-    let selected_sid = current_value
-        .as_ref()
-        .map(|session| session.sid.clone())
-        .unwrap_or_default();
-    let is_streaming = matches!(status(), RemoteStatus::Streaming);
-    // The words ComposerStatus matches on. Same component as the desktop, so the mapping has to
-    // land on the same strings rather than on RemoteStatus's own names.
-    let status_word = match status() {
-        RemoteStatus::Streaming => "streaming",
-        RemoteStatus::Errored(_) => "errored",
-        RemoteStatus::Interrupted => "interrupted",
-        RemoteStatus::Idle => "idle",
-    };
-    let draft_value = draft();
-    let can_send = current_value.is_some()
-        && (!draft_value.trim().is_empty() || !attachments.read().is_empty());
-    let prompt_action = if is_streaming {
-        PromptComposerAction::Stop
+/// Whether the Mac is answering, and the two things that can be done about it.
+///
+/// The launcher has nowhere to say any of this: on the desktop the link is the machine it is
+/// running on. So it floats above, in the space the hero leaves empty.
+#[component]
+fn LinkStatus(
+    reachable: bool,
+    on_team: EventHandler<()>,
+    on_disconnect: EventHandler<()>,
+) -> Element {
+    let (dot, pill, label) = if reachable {
+        (
+            "h-1.5 w-1.5 rounded-full bg-success",
+            "flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success",
+            translate("mobile-status-connected"),
+        )
     } else {
-        PromptComposerAction::Send
+        (
+            "h-1.5 w-1.5 rounded-full bg-muted-foreground",
+            "flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground",
+            translate("mobile-status-reaching"),
+        )
     };
-    let prompt_attachments = attachments
-        .read()
-        .iter()
-        .enumerate()
-        .map(|(index, attachment)| PromptComposerAttachment {
-            key: format!("remote-attachment-{}", attachment.path),
-            name: attachment.name.clone(),
-            label: FilePath(&attachment.name).extension_label(),
-            preview_data_url: attachment.preview_data_url.clone(),
-            remove_index: Some(index),
-        })
-        .collect::<Vec<_>>();
-    let prompt_media_options = media_entries
-        .read()
-        .iter()
-        .map(|entry| PromptMediaOption {
-            key: format!("remote-media-{}", entry.path),
-            name: entry.name.clone(),
-            display_path: entry.display_path(),
-            preview_data_url: entry.preview_data_url.clone(),
-            label: FilePath(&entry.name).extension_label(),
-            is_dir: entry.is_dir,
-        })
-        .collect::<Vec<_>>();
-    let media_menu_open = inline_media_query(&draft_value).is_some();
-    let mut model_state = use_remote_model_state(selected_sid.clone(), api);
-    let mut model_selected = use_signal(|| 0usize);
-    let model_matches = match selector_mode(&draft_value) {
-        SelectorMode::Models(query) => Some(filter_models(&model_state().models, query)),
-        _ => None,
-    };
-    let submit_sid = selected_sid.clone();
-    let cancel_sid = selected_sid.clone();
-    let approval_sid = selected_sid.clone();
-    let approval_value = approval();
-    let live_delta_value = live_delta();
-    let room_value = room();
-    let transcript_items = room_value.chat_items(&live_delta_value, is_streaming);
-    let latest_tool = latest_tool_location(&transcript_items);
-    let activity = vmux_wire::chat::activity_counts(&transcript_items);
-    let attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
+    rsx! {
+        header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+            span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
+            span { class: "pointer-events-auto ml-auto {pill}",
+                span { class: "{dot}" }
+                {label}
+            }
+            button {
+                class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                r#type: "button",
+                onclick: move |_| on_team.call(()),
+                {translate("mobile-start-team")}
+            }
+            button {
+                class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                r#type: "button",
+                onclick: move |_| on_disconnect.call(()),
+                {translate("mobile-pair-disconnect")}
+            }
+        }
+    }
+}
 
+/// Finding a Mac in the first place, which is the one thing the desktop never has to do.
+#[component]
+fn PairScreen(
+    value: String,
+    error: String,
+    pairing: bool,
+    on_value: EventHandler<String>,
+    on_pair: EventHandler<()>,
+    on_scan: EventHandler<()>,
+) -> Element {
     rsx! {
         div {
-            class: "flex h-dvh min-h-0 flex-col bg-background text-foreground",
-            style: "--agent-accent:{accent_css};",
-            style { dangerous_inner_html: MD_CSS }
-            header { class: "flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl sm:px-5",
-                button {
-                    class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-lg text-accent-foreground active:bg-accent/70",
-                    onclick: move |_| leave_session(
-                        current,
-                        room,
-                        live_delta,
-                        status,
-                        approval,
-                        connected,
-                        stream_generation,
-                    ),
-                    aria_label: translate("mobile-chat-back-to-stacks"),
-                    svg {
-                        class: "h-5 w-5",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "m15 18-6-6 6-6" }
-                    }
-                }
-                if !agent_icon.is_empty() {
-                    Favicon {
-                        favicon_url: agent_icon.clone(),
-                        url: String::new(),
-                        class: "h-8 w-8 shrink-0 rounded-lg".to_string(),
-                        globe_class: "h-5 w-5 shrink-0 text-muted-foreground".to_string(),
-                    }
-                }
-                div { class: "min-w-0 flex-1",
-                    if let Some(session) = current_value.as_ref() {
-                        div { class: "truncate text-sm font-semibold", "{session.name}" }
-                        div { class: "mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground",
-                            StatusDot {
-                                status: status_word.to_string(),
-                                size_class: "h-2 w-2 shrink-0".to_string(),
-                            }
-                            span { "{session.runtime}" }
-                            if let Some(model) = session.model.as_ref() {
-                                span { "· {model}" }
-                            }
-                            span { "· {FilePath(&session.cwd).name()}" }
-                        }
-                    } else {
-                        div { class: "text-sm font-semibold", "Vmux" }
-                        div { class: "mt-1 text-[11px] text-muted-foreground", {translate("mobile-chat-no-session")} }
-                    }
-                }
-                div { class: if connected() { "h-2 w-2 rounded-full bg-success" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
-            }
-
-            main {
-                class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 sm:px-4 md:px-6",
-                onmounted: move |event| transcript_view.set(Some(event)),
-                if transcript_items.is_empty() && !is_streaming {
-                    div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground",
-                        {translate("mobile-chat-no-messages")}
-                    }
-                }
-                div { class: "mx-auto flex w-full max-w-none flex-col gap-5 md:max-w-3xl",
-                    for (index, item) in transcript_items.iter().cloned().enumerate() {
-                        ChatItemRow {
-                            key: "{index}",
-                            absolute_index: index,
-                            item,
-                            attachment_previews,
-                            latest_tool_block: (latest_tool.map(|(i, _)| i) == Some(index))
-                                .then(|| latest_tool.map(|(_, b)| b))
-                                .flatten(),
-                        }
-                    }
-                    if is_streaming {
-                        div { class: "flex flex-col",
-                            AssistantTurn { WorkingIndicator {} }
-                        }
-                    }
-                    if let RemoteStatus::Errored(message) = status() {
-                        div { class: "mb-4 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive", "{message}" }
-                    }
-                }
-            }
-
-            if let Some(pending) = approval_value {
-                div { class: "shrink-0",
-                    ApprovalPanel {
-                        tool: pending.name.clone(),
-                        args_json: pending.args_json.clone(),
-                        on_answer: move |decision| {
-                            let Some(client) = api() else { return };
-                            approval.set(None);
-                            let call_id = pending.call_id.clone();
-                            let sid = approval_sid.clone();
-                            spawn(async move {
-                                let _ = client
-                                    .approve(&sid, &ApprovalRequest { call_id, decision })
-                                    .await;
-                            });
-                        },
-                    }
-                }
-            }
-
-            div {
-                class: "shrink-0 border-t border-border bg-background/95 px-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl sm:px-4 md:px-6",
-                div { class: "relative mx-auto w-full max-w-none md:max-w-3xl",
-                    if let Some(models) = model_matches {
-                        PromptPopup {
-                            placement: PromptPopupPlacement::Upward,
-                            ModelMenu {
-                                models,
-                                current_model_id: model_state().selected_id.clone(),
-                                selected: model_selected(),
-                                on_hover: move |index| model_selected.set(index),
-                                on_select: move |model: ModelOptionEntry| {
-                                    let sid = selected_sid.clone();
-                                    let Some(client) = api.peek().clone() else { return };
-                                    model_state.write().selected_id = model.id.clone();
-                                    draft.set(String::new());
-                                    model_selected.set(0);
-                                    spawn(async move {
-                                        let _ = client.select_model(&sid, &model.id).await;
-                                    });
-                                },
-                            }
-                        }
-                    }
-                    if media_menu_open {
-                        PromptPopup {
-                            placement: PromptPopupPlacement::Upward,
-                            PromptMediaOptions {
-                                items: prompt_media_options,
-                                selected: media_selected(),
-                                loading: media_loading(),
-                                on_hover: move |index| media_selected.set(index),
-                                on_select: move |index| {
-                                    if let Some(entry) = media_entries.peek().get(index).cloned() {
-                                        select_remote_media_entry(
-                                            &entry,
-                                            draft,
-                                            attachments,
-                                            media_selected,
-                                        );
-                                    }
-                                },
-                            }
-                        }
-                    }
-                    PromptComposer {
-                        value: draft_value.clone(),
-                        attachments: prompt_attachments,
-                        footer: rsx! {
-                            div { class: "flex min-w-0 items-center justify-between gap-1",
-                                ComposerOptions {
-                                    state: model_state,
-                                    sid: submit_sid.clone(),
-                                    api,
-                                    draft,
-                                }
-                                ComposerStatus {
-                                    status: status_word.to_string(),
-                                    active_subagents: activity.0,
-                                    active_tasks: activity.1,
-                                }
-                            }
-                        },
-                        placeholder: if current_value.is_some() { translate("mobile-chat-placeholder") } else { translate("mobile-chat-no-session") },
-                        accent_bg: accent.accent_bg.to_string(),
-                        accent_color: accent_css.clone(),
-                        accent_gradient: accent.grad.to_string(),
-                        autofocus: true,
-                        disabled: current_value.is_none(),
-                        action: prompt_action,
-                        action_title: if is_streaming { translate("mobile-chat-stop") } else { translate("mobile-chat-send") },
-                        action_enabled: if is_streaming { true } else { can_send },
-                        on_input: move |value| draft.set(value),
-                        on_keydown: {
-                            let sid = submit_sid.clone();
-                            move |event: KeyboardEvent| {
-                                let value = draft.peek().clone();
-                                // The model picker is a draft-filtered popup like the media one, so
-                                // it has to claim the same keys before Enter reaches the submit
-                                // path below and sends "/model …" to the agent as a prompt.
-                                if let SelectorMode::Models(query) = selector_mode(&value) {
-                                    let matches = filter_models(&model_state.peek().models, query);
-                                    if let Some(direction) = MenuDirection::of(&event.data()) {
-                                        event.prevent_default();
-                                        model_selected.set(move_selection(
-                                            model_selected(),
-                                            matches.len(),
-                                            direction,
-                                        ));
-                                        return;
-                                    }
-                                    match event.key() {
-                                        Key::Enter if !event.modifiers().shift() => {
-                                            event.prevent_default();
-                                            if let Some(model) =
-                                                matches.get(model_selected()).cloned()
-                                            {
-                                                let sid = sid.clone();
-                                                if let Some(client) = api.peek().clone() {
-                                                    model_state.write().selected_id =
-                                                        model.id.clone();
-                                                    draft.set(String::new());
-                                                    model_selected.set(0);
-                                                    spawn(async move {
-                                                        let _ = client
-                                                            .select_model(&sid, &model.id)
-                                                            .await;
-                                                    });
-                                                }
-                                            }
-                                            return;
-                                        }
-                                        Key::Escape => {
-                                            event.prevent_default();
-                                            draft.set(String::new());
-                                            model_selected.set(0);
-                                            return;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                let media_open = inline_media_query(&value).is_some();
-                                if media_open {
-                                    match event.key() {
-                                        Key::ArrowDown => {
-                                            event.prevent_default();
-                                            let len = media_entries.peek().len();
-                                            if len > 0 {
-                                                media_selected.set((media_selected() + 1) % len);
-                                            }
-                                            return;
-                                        }
-                                        Key::ArrowUp => {
-                                            event.prevent_default();
-                                            let len = media_entries.peek().len();
-                                            if len > 0 {
-                                                media_selected.set((media_selected() + len - 1) % len);
-                                            }
-                                            return;
-                                        }
-                                        Key::Enter if !event.modifiers().shift() => {
-                                            event.prevent_default();
-                                            if let Some(entry) = media_entries
-                                                .peek()
-                                                .get(media_selected())
-                                                .cloned()
-                                            {
-                                                select_remote_media_entry(
-                                                    &entry,
-                                                    draft,
-                                                    attachments,
-                                                    media_selected,
-                                                );
-                                            }
-                                            return;
-                                        }
-                                        Key::Escape => {
-                                            event.prevent_default();
-                                            if let Some(query) = inline_media_query(&value) {
-                                                draft.set(replace_inline_media_query(
-                                                    &value,
-                                                    query,
-                                                    "",
-                                                ));
-                                            }
-                                            return;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                if event.key() == Key::Enter
-                                    && !event.modifiers().shift()
-                                    && !is_streaming
-                                {
-                                    event.prevent_default();
-                                    submit_remote_prompt(
-                                        api,
-                                        sid.clone(),
-                                        draft,
-                                        attachments,
-                                        status,
-                                    );
-                                }
-                            }
-                        },
-                        on_paste: move |_| {},
-                        on_attach: move |_| insert_media_token(draft),
-                        on_remove_attachment: move |index| {
-                            let mut next = attachments.peek().clone();
-                            if index < next.len() {
-                                next.remove(index);
-                                attachments.set(next);
-                            }
-                        },
-                        on_action: {
-                            let send_sid = submit_sid.clone();
-                            let stop_sid = cancel_sid.clone();
-                            move |_| {
-                                if is_streaming {
-                                    let Some(client) = api() else { return };
-                                    let sid = stop_sid.clone();
-                                    spawn(async move {
-                                        let _ = client.cancel(&sid).await;
-                                    });
-                                } else {
-                                    submit_remote_prompt(
-                                        api,
-                                        send_sid.clone(),
-                                        draft,
-                                        attachments,
-                                        status,
-                                    );
-                                }
-                            }
-                        },
-                    }
+            class: "relative isolate flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground",
+            style: START_BACKDROP_STYLE,
+            StartBackdrop {}
+            main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(3.5rem+env(safe-area-inset-top))] sm:px-6 md:pt-20",
+                StartHero {
+                    mark: rsx! {
+                        div { class: "flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-gradient-to-br from-violet-500/80 to-cyan-400/80 text-sm font-bold text-white shadow-lg shadow-violet-950/40", "V" }
+                    },
+                    PairCard { value, error, pairing, on_value, on_pair, on_scan }
                 }
             }
         }
-
     }
 }
 
