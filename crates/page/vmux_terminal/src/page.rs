@@ -388,7 +388,6 @@ pub fn Page() -> Element {
 
     rsx! {
         if !title.is_empty() {
-            document::Title { "{title}" }
         }
         div {
             id: CONTAINER_ID,

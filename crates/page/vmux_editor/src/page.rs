@@ -620,7 +620,6 @@ pub fn Page() -> Element {
 
     rsx! {
         if !doc_title().is_empty() {
-            document::Title { "{doc_title}" }
         }
         div {
             id: PAGE_ID,

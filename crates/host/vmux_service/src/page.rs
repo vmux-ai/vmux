@@ -34,7 +34,6 @@ pub fn Page() -> Element {
     let process_count = data.processes.len();
 
     rsx! {
-        document::Title { {translate("services-title")} }
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
             // Header
             div { class: "mb-3 flex items-center justify-between",

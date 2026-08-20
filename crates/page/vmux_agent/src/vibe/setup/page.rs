@@ -70,9 +70,6 @@ pub fn Page() -> Element {
 
     let emit_segment = segment.clone();
     rsx! {
-        document::Title {
-            {translate_with("setup-install-title", &[("name", TranslationValue::String(name))])}
-        }
         main { class: "relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-10 text-foreground",
             div { class: "{accent.glow_top}" }
             div { class: "{accent.glow_bottom}" }

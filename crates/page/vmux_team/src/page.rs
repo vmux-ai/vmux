@@ -25,7 +25,6 @@ pub fn Page() -> Element {
     };
 
     rsx! {
-        document::Title { {translate("team-title")} }
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
             header { class: "flex items-center justify-between border-b border-border px-5 py-4",

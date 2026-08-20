@@ -63,7 +63,6 @@ pub fn Page() -> Element {
 
     let visible = packages();
     rsx! {
-        document::Title { {translate("lsp-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("lsp-title"),

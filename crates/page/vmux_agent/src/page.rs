@@ -19,7 +19,6 @@ pub fn Page() -> Element {
     let filtered = catalog.matching();
 
     rsx! {
-        document::Title { {translate("agents-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("agents-title"),

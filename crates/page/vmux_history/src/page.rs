@@ -96,7 +96,6 @@ pub fn Page() -> Element {
     let groups = group_by_day(&entries.read(), now_millis());
 
     rsx! {
-        document::Title { {translate("history-title")} }
         div { class: "flex flex-col h-screen bg-background text-foreground",
             header { class: "p-3 border-b border-border flex gap-2 items-center",
                 input {

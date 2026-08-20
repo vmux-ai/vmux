@@ -22,7 +22,6 @@ pub fn Page() -> Element {
     };
 
     rsx! {
-        document::Title { "{title}" }
         div { class: "flex h-full min-h-0 items-center justify-center bg-background p-10 text-foreground",
             section { class: "max-w-[640px]",
                 h1 { class: "mb-3 text-[28px] font-semibold leading-tight", "{title}" }

@@ -178,7 +178,6 @@ pub fn Page() -> Element {
 
     let current = snapshot();
     rsx! {
-        document::Title { {translate("vault-title")} }
         ManagerPage {
             header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
                 div { class: "flex items-center gap-3",
