@@ -17,6 +17,19 @@ pub enum Appearance {
     System,
 }
 
+/// Which end of its parent's subview array a view sits at.
+///
+/// Not where it is drawn. `hitTest:` walks the array back to front and knows nothing of
+/// `zPosition`, so a view's place in it decides who AppKit hands a click to and nothing else —
+/// [`PageSurface::raise_above_layers`] is what decides what is painted over what.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SiblingOrder {
+    /// Last, and so the first asked for any point it covers.
+    Front,
+    /// First, and so asked only for the points no sibling covers.
+    Back,
+}
+
 /// One page running in this process, painted by a webview of its own.
 pub struct PageSurface {
     webview: wry::WebView,
@@ -80,15 +93,16 @@ impl PageSurface {
         self.dom.deliver(id, payload);
     }
 
-    /// Put the view last in its parent's subview array, so clicks land on it.
+    /// Put the view at one end of its parent's subview array, so AppKit asks it first or last.
     ///
     /// `hitTest:` walks siblings back to front and knows nothing of `zPosition`, so a view
-    /// painting above another is not the same as that view receiving the pointer. Anything the
-    /// host adds to the same parent afterwards lands in front — visibly on top, and taking every
-    /// click aimed at what is drawn over it.
+    /// painting above another is not the same as that view receiving the pointer. A view at the
+    /// front takes every click aimed at what it is drawn over, whether or not its document has
+    /// anything there to receive one; a view at the back is asked only where no sibling answers.
     ///
-    /// Reasserted rather than done once, because the next sibling to arrive undoes it again.
-    pub fn raise_above_siblings(&self) {
+    /// Reasserted rather than done once, because every sibling the host adds afterwards lands in
+    /// front and undoes it.
+    pub fn order_among_siblings(&self, order: SiblingOrder) {
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
         use wry::WebViewExtMacOS;
 
@@ -100,12 +114,19 @@ impl PageSurface {
             return;
         };
         let subviews = parent.subviews();
-        let frontmost = subviews.lastObject();
-        if frontmost.is_some_and(|front| std::ptr::eq(&*front, view)) {
+        let occupant = match order {
+            SiblingOrder::Front => subviews.lastObject(),
+            SiblingOrder::Back => subviews.firstObject(),
+        };
+        if occupant.is_some_and(|held| std::ptr::eq(&*held, view)) {
             return;
         }
+        let mode = match order {
+            SiblingOrder::Front => NSWindowOrderingMode::Above,
+            SiblingOrder::Back => NSWindowOrderingMode::Below,
+        };
 
-        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+        parent.addSubview_positioned_relativeTo(view, mode, None);
     }
 
     /// Outrank the layers of whatever else is drawn in this window.
@@ -115,7 +136,8 @@ impl PageSurface {
     ///
     /// It buys painting and nothing else. A layer's `zPosition` is invisible to `hitTest:`, which
     /// walks the subview array back to front, so this does not move a single click;
-    /// [`Self::raise_above_siblings`] is what does.
+    /// [`Self::order_among_siblings`] is what does. That independence is the point: a page can
+    /// paint over every pane and still let their clicks through.
     pub fn raise_above_layers(&self) {
         use objc2_app_kit::NSView;
         use wry::WebViewExtMacOS;
