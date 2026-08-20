@@ -32,6 +32,7 @@ use vmux_ui::components::prompt_composer::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::favicon::Favicon;
+use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_ui::i18n::translate;
 use vmux_ui::launcher::results::CommandBarResultItem;
@@ -1166,7 +1167,7 @@ fn AppBody() -> Element {
         .map(|(index, attachment)| PromptComposerAttachment {
             key: format!("remote-attachment-{}", attachment.path),
             name: attachment.name.clone(),
-            label: file_extension_label(&attachment.name),
+            label: FilePath(&attachment.name).extension_label(),
             preview_data_url: attachment.preview_data_url.clone(),
             remove_index: Some(index),
         })
@@ -1179,7 +1180,7 @@ fn AppBody() -> Element {
             name: entry.name.clone(),
             display_path: entry.display_path(),
             preview_data_url: entry.preview_data_url.clone(),
-            label: file_extension_label(&entry.name),
+            label: FilePath(&entry.name).extension_label(),
             is_dir: entry.is_dir,
         })
         .collect::<Vec<_>>();
@@ -1250,7 +1251,7 @@ fn AppBody() -> Element {
                             if let Some(model) = session.model.as_ref() {
                                 span { "· {model}" }
                             }
-                            span { "· {cwd_name(&session.cwd)}" }
+                            span { "· {FilePath(&session.cwd).name()}" }
                         }
                     } else {
                         div { class: "text-sm font-semibold", "Vmux" }
@@ -2035,24 +2036,6 @@ fn pairing_url(credentials: &Credentials) -> String {
     format!("{}/#token={}", credentials.base_url, credentials.token)
 }
 
-fn cwd_name(cwd: &str) -> String {
-    cwd.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-        .unwrap_or(cwd)
-        .to_string()
-}
-
-fn file_extension_label(name: &str) -> String {
-    std::path::Path::new(name)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_uppercase())
-        .filter(|extension| !extension.is_empty())
-        .unwrap_or_else(|| "FILE".to_string())
-}
-
 /// Present an installed agent as a launcher result, matching the desktop's agent rows.
 fn agent_result_item(agent: &RemoteAgent) -> CommandBarResultItem {
     CommandBarResultItem::Page {
@@ -2070,7 +2053,11 @@ fn agent_result_item(agent: &RemoteAgent) -> CommandBarResultItem {
 
 /// Present a relayed session as a launcher result, so the phone and the desktop draw the same row.
 fn session_result_item(session: &RemoteSession) -> CommandBarResultItem {
-    let mut location = format!("{} \u{b7} {}", session.runtime, cwd_name(&session.cwd));
+    let mut location = format!(
+        "{} \u{b7} {}",
+        session.runtime,
+        FilePath(&session.cwd).name()
+    );
     if let Some(model) = session.model.as_deref() {
         location.push_str(" \u{b7} ");
         location.push_str(model);

@@ -5,6 +5,7 @@
 
 use crate::components::icon::Icon;
 use crate::favicon::Favicon;
+use crate::file_icon::FilePath;
 use crate::i18n::{TranslationValue, translate, translate_with};
 use crate::icon::PageIconView;
 use dioxus::prelude::*;
@@ -181,12 +182,7 @@ pub fn ResultRow(
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
                             ResultItem::File { path, is_dir } => {
-                                let name = path
-                                    .trim_end_matches('/')
-                                    .rsplit('/')
-                                    .next()
-                                    .unwrap_or(path.as_str())
-                                    .to_string();
+                                let name = FilePath(path).name();
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         if *is_dir {
@@ -212,12 +208,7 @@ pub fn ResultRow(
                                 }
                             },
                             ResultItem::WorkDir { path, is_dir } => {
-                                let name = path
-                                    .trim_end_matches('/')
-                                    .rsplit('/')
-                                    .next()
-                                    .unwrap_or(path.as_str())
-                                    .to_string();
+                                let name = FilePath(path).name();
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         if *is_dir {
@@ -245,12 +236,7 @@ pub fn ResultRow(
                             ResultItem::RecentFile { url, title } => {
                                 let display = url.strip_prefix("file://").unwrap_or(url.as_str()).to_string();
                                 let name = if title.is_empty() {
-                                    display
-                                        .trim_end_matches('/')
-                                        .rsplit('/')
-                                        .next()
-                                        .unwrap_or(display.as_str())
-                                        .to_string()
+                                    FilePath(&display).name().to_string()
                                 } else {
                                     title.clone()
                                 };
