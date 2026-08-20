@@ -10581,6 +10581,7 @@ dependencies = [
  "dioxus-interpreter-js",
  "objc2-app-kit 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "objc2-ui-kit 0.3.2",
  "serde",
  "serde_json",
  "tokio",

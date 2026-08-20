@@ -65,7 +65,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(ui)]
 impl NativePage {
     /// The document this page loads: the interpreter, and nothing else.
     ///
