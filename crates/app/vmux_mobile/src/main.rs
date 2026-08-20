@@ -26,7 +26,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use vmux_ui::chrome::PageBack;
+use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
 use vmux_wire::room::{RemoteAgent, RemoteSession};

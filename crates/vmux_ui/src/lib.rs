@@ -39,7 +39,7 @@ pub mod list_nav;
 
 pub mod hooks;
 
-pub mod chrome;
+pub mod back;
 
 pub mod components;
 

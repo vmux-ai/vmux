@@ -1,19 +1,20 @@
-//! What a page has to draw for itself when its host draws no chrome around it.
+//! How a page offers a way out of itself.
 //!
-//! The desktop wraps every page in a shell — tabs, a stack, a way back to the launcher — so a page
-//! rendered there never has to offer one. A phone has no shell: the page is the whole window, and
-//! anything the reader needs in order to leave has to come from inside it.
+//! The desktop surrounds every page with its own furniture — tabs, a stack, a launcher one
+//! keystroke away — so a page rendered there never has to offer an exit. A phone surrounds it with
+//! nothing: the page is the whole window, and anything the reader needs in order to leave has to
+//! come from inside it.
 //!
 //! Rather than split the page or give it a prop it cannot be handed (a natively-hosted page is a
-//! `fn() -> Element`), the host that lacks chrome says so through context. A host with chrome
-//! provides nothing, `PageBack::of()` answers `None`, and the affordance does not render — so the
-//! desktop is untouched by the phone needing one.
+//! `fn() -> Element`), a host that surrounds a page with nothing says so through context. Every
+//! other host provides nothing, `PageBack::of` answers `None`, and the affordance does not render
+//! — so the desktop is untouched by the phone needing one.
 
 use dioxus::prelude::*;
 
 /// How a page returns to whatever it was opened from.
 ///
-/// Provided by a host that draws no chrome of its own. Absent everywhere else.
+/// Provided by a host that surrounds the page with nothing of its own. Absent everywhere else.
 #[derive(Clone, Copy, PartialEq)]
 pub struct PageBack(EventHandler<()>);
 

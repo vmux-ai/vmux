@@ -6,14 +6,14 @@
 
 use super::state::Chat;
 use dioxus::prelude::*;
-use vmux_ui::chrome::BackButton;
+use vmux_ui::back::BackButton;
 use vmux_ui::favicon::favicon_src_for_url;
 
 /// Who the conversation is with, and what it is called.
 ///
 /// The top inset resolves to zero wherever there is no notch, so the same padding serves a header
-/// under a status bar and one under a tab strip. [`BackButton`] renders only for a host that draws
-/// no chrome of its own, which on the desktop is nothing at all.
+/// under a status bar and one under a tab strip. [`BackButton`] renders only for a host that puts
+/// nothing of its own around the page, which on the desktop is no host at all.
 #[component]
 pub(super) fn ChatHeader(chat: Chat) -> Element {
     let name = chat.header_name();
