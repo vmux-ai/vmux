@@ -238,10 +238,56 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
   };
+  // Whether this href names a place inside the document the VirtualDom is mounted against.
+  //
+  // Both halves of that matter. A url carrying no fragment is a navigation even when it resolves
+  // right back here — `href=""` resolves to this document and reloads it, which ends the page as
+  // surely as leaving would. And a fragment is the engine's to scroll only once it still lands
+  // here: `<base href="/"/>` is in every page's head, so a bare `#section` resolves against the
+  // base rather than the document, and on a page whose url carries a path — `file:///x`,
+  // `vmux://agent/<id>` — that names somewhere else entirely.
+  //
+  // Asked of the resolved url rather than of the attribute, so `#agent` and `vmux://settings/#agent`
+  // reach the same answer on `vmux://settings/`.
+  const sameDocumentFragment = (href) => {
+    const upToFragment = (url) => url.split('#')[0];
+    try {
+      const resolved = new URL(href, document.baseURI).href;
+      return resolved.includes('#') && upToFragment(resolved) === upToFragment(location.href);
+    } catch (e) {
+      return false;
+    }
+  };
+  // Which links the document is allowed to follow.
+  //
+  // dioxus's desktop interpreter follows none of them: it prevents the default action for every
+  // click inside an `<a>` and posts the href to the host instead, on the grounds that a document
+  // navigating away would take the VirtualDom's mounting with it. That holds for anything leaving
+  // the page. A fragment does not leave it — so refusing one turns a scroll the engine does
+  // natively, and instantly, into a link that does nothing at all.
+  //
+  // The refusal moves here, where the two can be told apart. Bubble phase on the document, which
+  // is after the interpreter's own delegated handler, so a page that claimed the click for itself
+  // has already said so and this leaves it alone.
+  const holdLinks = () => {
+    window.interpreter.intercept_link_redirects = false;
+    document.addEventListener('click', (event) => {
+      if (event.defaultPrevented) return;
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+      if (!anchor) return;
+      // An `<a>` carrying no href is a placeholder rather than a link, and the engine does nothing
+      // with it either. An empty one is a link: `[text]()` in a note renders `href=""`.
+      const href = anchor.getAttribute('href');
+      if (href === null) return;
+      if (sameDocumentFragment(href)) return;
+      event.preventDefault();
+      window.ipc.postMessage('link:' + href);
+    });
+  };
   window.vmuxWry = {
     // Asking for a frame is what tells the host the page can take one, so the shell calls this
     // once the interpreter holds a root and never before.
-    start: pumpEdits,
+    start() { holdLinks(); pumpEdits(); },
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];
