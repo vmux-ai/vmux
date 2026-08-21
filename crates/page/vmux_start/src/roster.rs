@@ -40,7 +40,7 @@ impl Plugin for StartRosterPlugin {
 pub struct LauncherProjection;
 
 /// What the paired Mac last said it had. Written by the app, read by nothing else.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, PartialEq)]
 pub struct Roster {
     pub sessions: Vec<RemoteSession>,
     pub agents: Vec<RemoteAgent>,

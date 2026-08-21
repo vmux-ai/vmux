@@ -112,8 +112,16 @@ impl World {
             .flatten()
     }
 
-    /// Hand the world something a plugin reads.
-    pub fn insert<R: Resource>(&mut self, resource: R) {
+    /// Hand the world something a plugin reads, unless it already has exactly that.
+    ///
+    /// The equality check is not an optimisation. `insert_resource` marks the resource changed
+    /// whatever it is handed, and the app writes from a Dioxus effect that re-runs whenever any
+    /// signal it read moves — including a 3-second poll that usually reports no difference. Writing
+    /// unconditionally turned that poll into a permanent reproject-and-re-emit heartbeat.
+    pub fn insert<R: Resource + PartialEq>(&mut self, resource: R) {
+        if self.app.world().get_resource::<R>() == Some(&resource) {
+            return;
+        }
         self.app.insert_resource(resource);
     }
 
