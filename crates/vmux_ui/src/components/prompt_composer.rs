@@ -169,6 +169,20 @@ pub fn PromptComposer(
                         autofocus,
                         disabled,
                         rows: "1",
+                        // Text checking off, and it is not only a matter of taste.
+                        //
+                        // WebKit runs spelling, grammar and data detection on a focused editable
+                        // field continuously, on a USER_INTERACTIVE queue. This field is focused
+                        // the moment the launcher mounts and stays focused, so that queue never
+                        // stops: it measured at 1589 of 6047 samples — a quarter of the process —
+                        // with the app doing nothing at all.
+                        //
+                        // What it was checking is commands, paths and urls, which it underlines as
+                        // misspelt anyway.
+                        spellcheck: "false",
+                        autocapitalize: "off",
+                        autocomplete: "off",
+                        "autocorrect": "off",
                         placeholder: if preview.is_empty() && !has_ghost { placeholder } else { String::new() },
                         value: "{value}",
                         oninput: move |event| on_input.call(event.value()),

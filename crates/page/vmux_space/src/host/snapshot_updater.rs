@@ -17,6 +17,13 @@ impl Plugin for SpaceSnapshotPlugin {
     }
 }
 
+/// Republish the space entries, but only when they differ from what is published.
+///
+/// `set_if_neq` rather than four field writes. A `ResMut` marks its resource changed the moment it
+/// is dereferenced, whatever is assigned, and `sync_live_start_pages` rebuilds and re-pushes the
+/// whole launcher payload whenever this snapshot reports a change. Writing unconditionally
+/// therefore re-rendered `vmux://start` every frame, which held the schedule at ~200% CPU with the
+/// app sitting idle. The three sibling snapshot writers each guard for the same reason.
 fn update_spaces_snapshot(
     spaces: Query<(&SpaceId, &Name, Option<&Order>), With<Space>>,
     active_id: Res<ActiveSpaceId>,
@@ -38,37 +45,112 @@ fn update_spaces_snapshot(
         .collect();
     rows.sort_by_key(|(order, _)| *order);
 
-    snapshot.spaces = rows.into_iter().map(|(_, summary)| summary).collect();
-    snapshot.active_space_id = active_id.0.clone().unwrap_or_default();
-    snapshot.active_space_name = active_name
-        .iter()
-        .next()
-        .map(|name| name.to_string())
-        .unwrap_or_default();
-    snapshot.spaces_page_url = SPACES_PAGE_URL.to_string();
+    snapshot.set_if_neq(CommandBarSpacesSnapshot {
+        spaces: rows.into_iter().map(|(_, summary)| summary).collect(),
+        active_space_id: active_id.0.clone().unwrap_or_default(),
+        active_space_name: active_name
+            .iter()
+            .next()
+            .map(|name| name.to_string())
+            .unwrap_or_default(),
+        spaces_page_url: SPACES_PAGE_URL.to_string(),
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// One active space, with the system scheduled.
+    struct Spaces {
+        app: App,
+        published_at: u32,
+    }
+
+    impl Spaces {
+        fn of_one() -> Self {
+            let mut app = App::new();
+            app.init_resource::<CommandBarSpacesSnapshot>()
+                .insert_resource(ActiveSpaceId(Some("space-1".to_string())))
+                .add_systems(Update, update_spaces_snapshot);
+            app.world_mut().spawn((
+                Space,
+                SpaceId("space-1".to_string()),
+                Name::new("Space 1"),
+                vmux_core::Active,
+            ));
+            let published_at = Self::changed_tick(&app);
+            Self { app, published_at }
+        }
+
+        /// Run a turn, and say whether it published the snapshot again.
+        ///
+        /// The tick is compared rather than `is_changed`, which answers against the world's own
+        /// last-change tick and so reads false from outside a system once `update` has advanced it.
+        fn republished(&mut self) -> bool {
+            self.app.update();
+            let now = Self::changed_tick(&self.app);
+            let moved = now != self.published_at;
+            self.published_at = now;
+            moved
+        }
+
+        fn changed_tick(app: &App) -> u32 {
+            app.world()
+                .get_resource_change_ticks::<CommandBarSpacesSnapshot>()
+                .expect("the snapshot")
+                .changed
+                .get()
+        }
+
+        fn snapshot(&self) -> &CommandBarSpacesSnapshot {
+            self.app.world().resource::<CommandBarSpacesSnapshot>()
+        }
+
+        fn rename(&mut self, to: &str) {
+            let world = self.app.world_mut();
+            let entity = world
+                .query_filtered::<Entity, With<Space>>()
+                .iter(world)
+                .next()
+                .expect("the space");
+            world.entity_mut(entity).insert(Name::new(to.to_string()));
+        }
+    }
+
     #[test]
     fn writes_active_name_and_url() {
-        let mut app = App::new();
-        app.init_resource::<CommandBarSpacesSnapshot>()
-            .insert_resource(ActiveSpaceId(Some("space-1".to_string())))
-            .add_systems(Update, update_spaces_snapshot);
-        app.world_mut().spawn((
-            Space,
-            SpaceId("space-1".to_string()),
-            Name::new("Space 1"),
-            vmux_core::Active,
-        ));
-        app.update();
-        let snap = app.world().resource::<CommandBarSpacesSnapshot>();
+        let mut spaces = Spaces::of_one();
+        spaces.republished();
+        let snap = spaces.snapshot();
+
         assert_eq!(snap.spaces_page_url, SPACES_PAGE_URL);
         assert_eq!(snap.active_space_id, "space-1");
         assert_eq!(snap.active_space_name, "Space 1");
         assert_eq!(snap.spaces.len(), 1);
+    }
+
+    /// `sync_live_start_pages` rebuilds and re-pushes the whole launcher payload whenever this
+    /// snapshot reports a change, so republishing an identical one re-renders `vmux://start` every
+    /// frame — which is what held the desktop schedule at ~200% CPU with the app sitting idle.
+    #[test]
+    fn an_unchanged_space_list_is_not_republished() {
+        let mut spaces = Spaces::of_one();
+        assert!(spaces.republished(), "the first list has to reach the bar");
+
+        assert!(
+            !spaces.republished(),
+            "nothing changed, so nothing should have been published"
+        );
+    }
+
+    #[test]
+    fn a_renamed_space_is_republished() {
+        let mut spaces = Spaces::of_one();
+        spaces.republished();
+        spaces.rename("Renamed");
+
+        assert!(spaces.republished(), "a rename has to reach the bar");
+        assert_eq!(spaces.snapshot().active_space_name, "Renamed");
     }
 }
