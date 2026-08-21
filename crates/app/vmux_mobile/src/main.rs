@@ -18,6 +18,7 @@ mod qr_scanner;
 mod quic_api;
 mod session;
 mod start_page;
+mod team_page;
 mod world;
 
 use crate::api::{Api, ApiError};
@@ -25,6 +26,7 @@ use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
 use crate::session::{AuthState, use_session};
 use crate::start_page::StartPagePlugin;
+use crate::team_page::TeamPagePlugin;
 use crate::world::World;
 use vmux_start::roster::Roster;
 
@@ -93,7 +95,7 @@ fn main() {
     // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
     // the world runs on the thread the pages do, and nothing has to cross one to reach it.
     World::new(|app| {
-        app.add_plugins(StartPagePlugin);
+        app.add_plugins((StartPagePlugin, TeamPagePlugin));
     })
     .install();
     lifecycle::install();

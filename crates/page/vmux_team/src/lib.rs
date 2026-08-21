@@ -9,3 +9,9 @@ pub mod page;
 mod host;
 #[cfg(host)]
 pub use host::*;
+
+/// The roster where there is no desktop underneath, only a relay.
+///
+/// Not gated to iOS, though only the phone adds it: plain ECS over wire types, so leaving it
+/// unconditional keeps a projection nobody can exercise locally inside the test suite.
+pub mod roster;

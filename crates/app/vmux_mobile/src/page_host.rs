@@ -26,6 +26,7 @@ use vmux_chat::event::{
 };
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
+use vmux_team::roster::{Members, Team};
 
 use crate::world::World;
 use vmux_ui::hooks::EventListenerError;
@@ -40,7 +41,7 @@ use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteAgent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
+use vmux_wire::team::TEAM_EVENT;
 
 use crate::api::next_client_op_id;
 use crate::session::Session;
@@ -203,7 +204,15 @@ impl PageHost for MobileHost {
             }
             MODEL_STATE_EVENT => self.watch_models(on_bytes),
             CHAT_MEDIA_ENTRIES_EVENT => self.watch_media(on_bytes),
-            TEAM_EVENT => self.watch_team(on_bytes),
+            // Served by the world now, like the launcher: the poll keeps  current and
+            //  emits from it. Registering here only says where that lands.
+            TEAM_EVENT => {
+                self.poll_team();
+                World::with(|world| {
+                    world.listen(TEAM_EVENT, on_bytes);
+                    world.refresh::<Team>();
+                });
+            }
             _ => return Err(EventListenerError::Unsupported),
         }
         Ok(())
@@ -431,10 +440,14 @@ impl MobileHost {
         });
     }
 
-    fn watch_team(&self, mut on_bytes: BytesListener) {
+    /// Keep the world's roster current, and let `TeamPagePlugin` decide what reaches the page.
+    ///
+    /// The dedupe this used to keep in a `last` local is gone: [`World::insert`] already refuses a
+    /// value equal to the one it holds, so an unchanged poll marks nothing changed and the emit
+    /// system does not run.
+    fn poll_team(&self) {
         let (api, epoch) = (self.api.clone(), self.epoch);
         spawn(async move {
-            let mut last: Option<Vec<TeamMemberRow>> = None;
             loop {
                 if superseded(epoch) {
                     return;
@@ -445,15 +458,7 @@ impl MobileHost {
                 }
                 match fetched {
                     Ok(members) => {
-                        if last.as_ref() != Some(&members) {
-                            let payload = TeamEvent {
-                                members: members.clone(),
-                            };
-                            if let Some(bytes) = encode(&payload) {
-                                on_bytes(&bytes);
-                            }
-                            last = Some(members);
-                        }
+                        World::with(|world| world.insert(Members(members)));
                     }
                     // Pairing is gone, or there is no such session. Neither is fixed by asking
                     // again every few seconds.
