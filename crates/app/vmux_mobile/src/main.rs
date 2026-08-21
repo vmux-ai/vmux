@@ -409,14 +409,18 @@ fn AppBody() -> Element {
         };
     }
 
-    // The desktop's launcher, unmodified, under the link's own state.
+    // The desktop's launcher, unmodified, with the link's own state floated over it.
     //
-    // The header has its own row rather than floating over the page. Overlaying kept the hero
-    // centred against the whole screen, but a keyboard shrinks the viewport until the content no
-    // longer fits, and the moment centring gives up the hero starts at the top — behind the
-    // header. A row cannot be overlapped.
+    // Floated rather than stacked, because a header row shifts everything below it down by its
+    // whole height and the hero then centres half a header lower than the eye expects. What a row
+    // did buy was the guarantee that a page whose content outgrows the screen — a keyboard is
+    // enough — cannot start underneath the header. The inset below buys the same thing: symmetric,
+    // so the centre stays where it was, and deep enough at the top that yielding lands clear.
     rsx! {
-        div { class: "flex h-dvh flex-col bg-background",
+        div { class: "relative h-dvh bg-background",
+            div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
+                vmux_start::page::Page {}
+            }
             LinkStatus {
                 reachable: reachable(),
                 on_team: move |_| team_open.set(true),
@@ -432,13 +436,6 @@ fn AppBody() -> Element {
                     agents.set(Vec::new());
                     auth.set(AuthState::Unpaired);
                 },
-            }
-            // A flex column, because that is how the page expects to be given its height — the
-            // desktop's page root is one too. `min-h-0` because a flex child defaults to its
-            // content's minimum height, which for a page that scrolls is the whole scrollable
-            // length: it would push the row taller than the screen instead of scrolling inside it.
-            div { class: "flex min-h-0 flex-1 flex-col",
-                vmux_start::page::Page {}
             }
         }
     }
@@ -468,20 +465,20 @@ fn LinkStatus(
         )
     };
     rsx! {
-        header { class: "flex shrink-0 items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+        header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
             span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
-            span { class: "ml-auto {pill}",
+            span { class: "pointer-events-auto ml-auto {pill}",
                 span { class: "{dot}" }
                 {label}
             }
             button {
-                class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                 r#type: "button",
                 onclick: move |_| on_team.call(()),
                 {translate("mobile-start-team")}
             }
             button {
-                class: "rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                 r#type: "button",
                 onclick: move |_| on_disconnect.call(()),
                 {translate("mobile-pair-disconnect")}
