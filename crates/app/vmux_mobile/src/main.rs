@@ -433,10 +433,11 @@ fn AppBody() -> Element {
                     auth.set(AuthState::Unpaired);
                 },
             }
-            // `min-h-0` because a flex child defaults to its content's minimum height, which for a
-            // page that scrolls is the whole scrollable length — it would push the row taller than
-            // the screen instead of scrolling inside it.
-            div { class: "min-h-0 flex-1",
+            // A flex column, because that is how the page expects to be given its height — the
+            // desktop's page root is one too. `min-h-0` because a flex child defaults to its
+            // content's minimum height, which for a page that scrolls is the whole scrollable
+            // length: it would push the row taller than the screen instead of scrolling inside it.
+            div { class: "flex min-h-0 flex-1 flex-col",
                 vmux_start::page::Page {}
             }
         }

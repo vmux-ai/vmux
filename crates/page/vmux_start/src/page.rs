@@ -43,11 +43,13 @@ pub fn Page(
 
     rsx! {
         main {
-            // `h-full`, not `h-dvh`: a page fills what it was given and does not get to assume it
-            // was given the viewport. The desktop hands it a pane whose document body is already
-            // full height, and the phone hands it what is left under a status header — which it
-            // would overlap if it sized itself against the screen instead.
-            class: "relative isolate flex h-full flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
+            // Grown by flex rather than sized against the viewport, because a page fills what it
+            // was given and does not get to assume it was given the screen — the phone hands it
+            // what is left under a status header, which `h-dvh` would overlap. Not `h-full`
+            // either: a percentage height needs every ancestor to have resolved one, and where
+            // that chain breaks the box collapses to its content and `m-auto` has no room left to
+            // centre in. Both hosts put this in a flex column, so growing into it always works.
+            class: "relative isolate flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
             StartBackdrop {}
             // `m-auto` rather than `justify-center`: a centred flex item whose content outgrows
