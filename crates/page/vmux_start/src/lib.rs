@@ -7,12 +7,6 @@
 
 pub mod event;
 
-/// `ui`, because a caret claim needs a caret: the only caller is [`page::Page`], and a host with no
-/// page has nothing to focus. The split *inside* it is `web` against the rest, which is a different
-/// question — whether the claim is made by reaching the document or by asking the host for it.
-#[cfg(ui)]
-pub mod focus;
-
 #[cfg(ui)]
 pub mod page;
 
