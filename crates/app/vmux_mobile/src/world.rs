@@ -125,6 +125,15 @@ impl World {
         self.app.insert_resource(resource);
     }
 
+    /// Tell the world something happened, for a plugin to fold on its next turn.
+    ///
+    /// Queued rather than applied: the sender is a QUIC task or a page's `send`, neither of which
+    /// is a point in the schedule, and a plugin reading a batch is what lets it deref only the
+    /// resources the batch actually touched.
+    pub fn send<M: Message>(&mut self, message: M) {
+        self.app.world_mut().write_message(message);
+    }
+
     /// Mark a resource changed without changing it, so whatever emits from it emits again.
     ///
     /// For a page that has just registered: the world pushes on change, and a page mounting after

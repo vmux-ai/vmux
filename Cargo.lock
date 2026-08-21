@@ -10197,6 +10197,8 @@ dependencies = [
 name = "vmux_chat"
 version = "0.0.30"
 dependencies = [
+ "bevy_app",
+ "bevy_ecs",
  "dioxus",
  "dioxus-primitives",
  "pulldown-cmark",
@@ -10206,6 +10208,7 @@ dependencies = [
  "similar",
  "unicode-segmentation",
  "vmux_core",
+ "vmux_service",
  "vmux_ui",
  "vmux_wire",
 ]

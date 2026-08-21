@@ -4,10 +4,13 @@
 //! ids it wants pushed back. On the desktop those ids cross a process boundary into Bevy. Here they
 //! cross the QUIC link instead, and the page cannot tell.
 //!
-//! What the desktop answers from a daemon holding the whole session, the phone answers from a
-//! session row and a folded room log. So this file is the join: [`listen`](PageHost::listen) turns
-//! the phone's state into the payloads a page expects to be pushed, and [`send`](PageHost::send)
-//! turns a page's intent into a call on the link.
+//! So this file is the join: [`send`](PageHost::send) turns a page's intent into a call on the
+//! link, and [`listen`](PageHost::listen) says where what comes back is to be delivered.
+//!
+//! Where a payload is *built* is moving out. An id served by the world registers a listener and
+//! nothing else, because a plugin in the page's own crate keeps it current — how a conversation
+//! folds is the chat page's knowledge, not this app's. What is left here is the ids still answered
+//! by watching a Dioxus signal.
 //!
 //! Ids with no route are refused rather than silently accepted, so a half-served page reports as
 //! much instead of rendering empty and looking broken. That refusal is quiet by design: a page
@@ -24,6 +27,7 @@ use vmux_chat::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
     ModelState, SelectModel, SetAgentEffort,
 };
+use vmux_chat::room::{Reported, Snapshot};
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
@@ -38,7 +42,7 @@ use vmux_wire::prompt_media::{
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
 };
 use vmux_wire::room::{
-    AgentAttachment, ApprovalRequest, PromptRequest, RemoteAgent, RemoteMediaEntry, RemoteSession,
+    AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
 use vmux_wire::team::TEAM_EVENT;
@@ -60,7 +64,6 @@ pub(crate) struct MobileHost {
     epoch: u64,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
-    agents: Signal<Vec<RemoteAgent>>,
     session: Session,
     composer: ComposerExchange,
 }
@@ -83,7 +86,6 @@ thread_local! {
 pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
-    agents: Signal<Vec<RemoteAgent>>,
     session: Session,
     composer: ComposerExchange,
 ) {
@@ -96,7 +98,6 @@ pub(crate) fn install(
         epoch,
         api,
         sessions,
-        agents,
         session,
         composer,
     }));
@@ -178,9 +179,9 @@ impl PageHost for MobileHost {
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         match id {
             CHAT_SNAPSHOT_EVENT => {
-                let (session, agents) = (self.session, self.agents);
-                watch(self.epoch, on_bytes, move || {
-                    encode(&session.snapshot(&agents.read()))
+                World::with(|world| {
+                    world.listen(CHAT_SNAPSHOT_EVENT, on_bytes);
+                    world.refresh::<Snapshot>();
                 });
             }
             // The world serves this one. `StartPagePlugin` keeps the payload current and emits it;
@@ -227,7 +228,6 @@ impl MobileHost {
         if self.session.sid().is_empty() {
             return Err(EventListenerError::Unsupported);
         }
-        let mut status = self.session.status;
         let mut attached = self.composer.attached;
         let mut attachments = Vec::with_capacity(payload.attachments.len());
         for attachment in payload.attachments {
@@ -242,7 +242,7 @@ impl MobileHost {
         // The relay answers a prompt with a status event, but not before the next round trip. The
         // desktop's own page is told immediately, so match it rather than leave the composer
         // looking idle over a turn that has already started.
-        status.set(RemoteStatus::Streaming);
+        Self::report(RemoteStatus::Streaming);
         self.agent_call(move |api, sid| async move {
             let request = PromptRequest {
                 client_op_id: next_client_op_id(),
@@ -250,9 +250,14 @@ impl MobileHost {
                 attachments,
             };
             if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
-                status.set(RemoteStatus::Errored(message));
+                MobileHost::report(RemoteStatus::Errored(message));
             }
         })
+    }
+
+    /// Tell the world where the run has got to, ahead of the relay saying so.
+    fn report(status: RemoteStatus) {
+        World::with(|world| world.send(Reported(RemoteEvent::Status { status })));
     }
 
     fn cancel(&self) -> Result<(), EventListenerError> {
@@ -262,8 +267,8 @@ impl MobileHost {
     }
 
     fn approve(&self, payload: ChatApproval) -> Result<(), EventListenerError> {
-        let mut approval = self.session.approval;
-        approval.set(None);
+        // The prompt goes away as the decision is made, not a round trip later.
+        World::with(|world| world.send(Reported(RemoteEvent::Approval { approval: None })));
         self.agent_call(move |api, sid| async move {
             let request = ApprovalRequest {
                 call_id: payload.call_id,

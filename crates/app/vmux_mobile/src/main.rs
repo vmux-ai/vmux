@@ -8,6 +8,7 @@
 //! screen.
 
 mod api;
+mod chat_page;
 mod credentials;
 mod lifecycle;
 mod logs;
@@ -22,12 +23,14 @@ mod team_page;
 mod world;
 
 use crate::api::{Api, ApiError};
+use crate::chat_page::ChatPagePlugin;
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
 use crate::session::{AuthState, use_session};
 use crate::start_page::StartPagePlugin;
 use crate::team_page::TeamPagePlugin;
 use crate::world::World;
+use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
 use std::sync::{LazyLock, Mutex};
@@ -95,7 +98,7 @@ fn main() {
     // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
     // the world runs on the thread the pages do, and nothing has to cross one to reach it.
     World::new(|app| {
-        app.add_plugins((StartPagePlugin, TeamPagePlugin));
+        app.add_plugins((StartPagePlugin, TeamPagePlugin, ChatPagePlugin));
     })
     .install();
     lifecycle::install();
@@ -178,7 +181,7 @@ fn AppBody() -> Element {
     // mounts. Keying off the signal covers every path that pairs, not just the resume-on-launch one.
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, agents, session, composer);
+            page_host::install(client, sessions, session, composer);
         }
     });
 
@@ -190,6 +193,12 @@ fn AppBody() -> Element {
             agents: agents(),
         };
         World::with(|world| world.insert(roster));
+    });
+
+    // The open conversation names its agent but does not carry the icon, so the chat snapshot
+    // needs the list too.
+    use_effect(move || {
+        World::with(|world| world.insert(Agents(agents())));
     });
 
     use_future(move || async move {
