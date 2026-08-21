@@ -21,6 +21,13 @@ mod host;
 #[cfg(host)]
 pub use host::StartPlugin;
 
+/// The launcher's model where there is no desktop underneath, only a relay.
+///
+/// Not gated to iOS, though only the phone adds it: it is plain ECS over wire types, so leaving it
+/// unconditional is what keeps the one projection nobody can exercise locally inside the reach of
+/// the test suite.
+pub mod roster;
+
 pub use vmux_wire::agent::supports_inline_agent_transition;
 
 /// The view a launcher is turning into an agent page.

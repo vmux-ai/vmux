@@ -10735,6 +10735,7 @@ name = "vmux_start"
 version = "0.0.30"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_ecs",
  "dioxus",

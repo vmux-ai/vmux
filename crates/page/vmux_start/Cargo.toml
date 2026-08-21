@@ -10,6 +10,11 @@ build = "../../build_cfg.rs"
 path = "src/lib.rs"
 
 [dependencies]
+# Unconditional, unlike `bevy` below: the launcher's model is plain ECS over wire types, and the
+# phone runs it too. Only the desktop half needs the whole engine, which is why the two are named
+# separately — a split this manifest already had before there was a phone to want it.
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 dioxus = { version = "=0.7.9", default-features = false, features = [
     "minimal",
     "document",
@@ -28,7 +33,6 @@ vmux_wire = { path = "../../vmux_wire" }
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
-bevy_ecs = { workspace = true }
 rfd = { workspace = true }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_git = { path = "../../vmux_git" }
