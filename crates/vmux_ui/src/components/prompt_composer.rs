@@ -160,7 +160,12 @@ pub fn PromptComposer(
                     }
                     textarea {
                         id: "{input_id}",
-                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
+                        // The placeholder is ellipsised rather than wrapped, because
+                        // `field-sizing:content` does not count it as content: an empty field
+                        // stays one line tall however many lines its placeholder would need, so a
+                        // wrapped one has its second line cut off by the box. Where it fits — every
+                        // width but a phone's — this changes nothing.
+                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
                         autofocus,
                         disabled,
                         rows: "1",
