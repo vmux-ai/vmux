@@ -25,13 +25,13 @@ use vmux_chat::event::{
     ModelState, SelectModel, SetAgentEffort,
 };
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
+use vmux_start::roster::Launcher;
+
+use crate::world::World;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
-use vmux_wire::command_bar::{
-    CommandBarActionEvent, CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId,
-};
-use vmux_wire::icon::PageIcon;
+use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
@@ -182,10 +182,13 @@ impl PageHost for MobileHost {
                     encode(&session.snapshot(&agents.read()))
                 });
             }
+            // The world serves this one. `StartPagePlugin` keeps the payload current and emits it;
+            // registering here only says where it lands, and asks for one now because the page has
+            // just mounted and the last change may be long past.
             START_COMMAND_BAR_OPEN_EVENT => {
-                let (sessions, agents) = (self.sessions, self.agents);
-                watch(self.epoch, on_bytes, move || {
-                    encode(&launcher(&sessions.read(), &agents.read()))
+                World::with(|world| {
+                    world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);
+                    world.refresh::<Launcher>();
                 });
             }
             CHAT_ATTACHMENTS_EVENT => {
@@ -464,47 +467,6 @@ impl MobileHost {
     }
 }
 
-/// Describe the desktop the way the shared launcher expects to be told about it.
-///
-/// Sessions become the open-stack rows and agents the prompt targets, which is the same shape the
-/// desktop contributes — so the launcher ranks, filters and renders them without knowing one list
-/// came over a relay.
-fn launcher(sessions: &[RemoteSession], agents: &[RemoteAgent]) -> CommandBarOpenEvent {
-    let mut tabs = Vec::with_capacity(sessions.len());
-    for (index, session) in sessions.iter().enumerate() {
-        let cwd = vmux_ui::file_icon::FilePath(&session.cwd).name();
-        tabs.push(CommandBarTab {
-            title: session.name.clone(),
-            url: format!("vmux://agent/{sid}", sid = session.sid),
-            pane_id: 0,
-            // What comes back on activation, so it has to index the list this was built from.
-            tab_index: index as u32,
-            is_active: false,
-            location: format!("{runtime} · {cwd}", runtime = session.runtime),
-        });
-    }
-    let mut pages = Vec::with_capacity(agents.len());
-    for agent in agents {
-        pages.push(CommandBarPage {
-            host: agent.id.clone(),
-            url: agent.url.clone(),
-            title: agent.name.clone(),
-            keywords: Vec::new(),
-            icon: PageIcon::favicon(agent.icon.clone()),
-            shortcut: String::new(),
-            prompt_target: true,
-        });
-    }
-    CommandBarOpenEvent {
-        // Documented as the start page's live-refresh id: reusing it is what stops each refresh
-        // reading as a reopen and clobbering what is being typed.
-        open_id: OpenId::NONE,
-        tabs,
-        pages,
-        ..CommandBarOpenEvent::default()
-    }
-}
-
 /// Push what `build` returns whenever a signal it read changes.
 ///
 /// The desktop pushes because a daemon told it something. The phone has no such prompt: what a
@@ -551,7 +513,7 @@ where
         .ok_or(EventListenerError::SerializePayload)
 }
 
-fn encode<T>(payload: &T) -> Option<Vec<u8>>
+pub(crate) fn encode<T>(payload: &T) -> Option<Vec<u8>>
 where
     T: for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
@@ -563,81 +525,4 @@ where
 {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload).ok()?;
     Some(bytes.to_vec())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_wire::room::RoomId;
-
-    /// `RemoteSession` is another crate's type, so the fixture that builds one cannot be an
-    /// inherent method however much it wants to be.
-    trait Sample {
-        fn sample(name: &str) -> Self;
-    }
-
-    impl Sample for RemoteSession {
-        fn sample(name: &str) -> Self {
-            Self {
-                sid: format!("sid-{name}"),
-                room_id: RoomId::for_session(name),
-                title: String::new(),
-                name: name.to_string(),
-                runtime: "acp".to_string(),
-                model: None,
-                cwd: "/tmp/work".to_string(),
-                status: RemoteStatus::Idle,
-                approval: None,
-                created_at_ms: 0,
-            }
-        }
-    }
-
-    /// The launcher hands an activated row back by index alone, so the list it was built from is
-    /// the only thing that can name the session again. A row whose index stops addressing its own
-    /// session opens the wrong conversation — silently, and only for whoever has two of them.
-    #[test]
-    fn every_offered_session_is_addressed_by_the_index_it_comes_back_as() {
-        let sessions = vec![
-            RemoteSession::sample("alpha"),
-            RemoteSession::sample("beta"),
-            RemoteSession::sample("gamma"),
-        ];
-
-        let offered = launcher(&sessions, &[]);
-
-        assert_eq!(offered.tabs.len(), 3);
-        for tab in &offered.tabs {
-            let addressed = &sessions[tab.tab_index as usize];
-            assert_eq!(tab.title, addressed.name);
-        }
-    }
-
-    /// An agent has to arrive as something the launcher will send a prompt to. Contributed without
-    /// this flag it renders as an ordinary row that opens a url, and the phone has no browser to
-    /// open one in — so the agent would be listed and unreachable.
-    #[test]
-    fn every_offered_agent_accepts_a_prompt() {
-        let agents = vec![RemoteAgent {
-            id: "claude".to_string(),
-            name: "Claude".to_string(),
-            url: "vmux://agent/claude".to_string(),
-            icon: String::new(),
-        }];
-
-        let offered = launcher(&[], &agents);
-
-        assert_eq!(offered.pages.len(), 1);
-        assert!(offered.pages[0].prompt_target);
-        assert_eq!(offered.pages[0].url, "vmux://agent/claude");
-    }
-
-    /// Every refresh reuses the one id documented as "not a reopen". A real id here would reset
-    /// the palette's input on each poll, deleting whatever was half-typed.
-    #[test]
-    fn a_refresh_does_not_read_as_a_reopen() {
-        let offered = launcher(&[], &[]);
-
-        assert!(!offered.open_id.is_open());
-    }
 }

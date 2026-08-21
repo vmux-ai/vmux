@@ -22,9 +22,22 @@ impl Plugin for StartRosterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Roster>()
             .init_resource::<Launcher>()
-            .add_systems(Update, Launcher::project.run_if(resource_changed::<Roster>));
+            .add_systems(
+                Update,
+                Launcher::project
+                    .in_set(LauncherProjection)
+                    .run_if(resource_changed::<Roster>),
+            );
     }
 }
+
+/// When [`Launcher`] is rebuilt.
+///
+/// Public because a host has to deliver the payload the same turn it is built: ordering after this
+/// is the difference between the page seeing a change now and seeing it on whatever event happens
+/// to arrive next, which on a phone may be a while.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LauncherProjection;
 
 /// What the paired Mac last said it had. Written by the app, read by nothing else.
 #[derive(Resource, Default)]
@@ -93,24 +106,36 @@ mod tests {
         /// One session and one agent, enough to tell the two halves of the payload apart.
         fn of_one() -> Self {
             Self {
-                sessions: vec![RemoteSession {
-                    sid: "s1".into(),
-                    room_id: RoomId::for_session("s1"),
-                    title: String::new(),
-                    name: "api".into(),
-                    runtime: "claude".into(),
-                    model: None,
-                    cwd: "/src/api".into(),
-                    status: RemoteStatus::Idle,
-                    approval: None,
-                    created_at_ms: 0,
-                }],
+                sessions: vec![Self::session("api")],
                 agents: vec![RemoteAgent {
                     id: "claude".into(),
                     name: "Claude".into(),
                     url: "vmux://agent/claude".into(),
                     icon: String::new(),
                 }],
+            }
+        }
+
+        /// Several sessions, so an index that addresses the wrong one has somewhere to show.
+        fn of_sessions(names: &[&str]) -> Self {
+            Self {
+                sessions: names.iter().map(|name| Self::session(name)).collect(),
+                agents: Vec::new(),
+            }
+        }
+
+        fn session(name: &str) -> RemoteSession {
+            RemoteSession {
+                sid: format!("sid-{name}"),
+                room_id: RoomId::for_session(name),
+                title: String::new(),
+                name: name.into(),
+                runtime: "claude".into(),
+                model: None,
+                cwd: format!("/src/{name}"),
+                status: RemoteStatus::Idle,
+                approval: None,
+                created_at_ms: 0,
             }
         }
     }
@@ -136,40 +161,59 @@ mod tests {
         }
     }
 
+    /// The launcher hands an activated row back by index alone, so the list it was built from is
+    /// the only thing that can name the session again. A row whose index stops addressing its own
+    /// session opens the wrong conversation — silently, and only for whoever has two of them.
     #[test]
-    fn a_session_becomes_a_row_addressed_by_its_own_index() {
-        let started = Started::with(Roster::of_one());
+    fn every_session_is_addressed_by_the_index_it_comes_back_as() {
+        let roster = Roster::of_sessions(&["alpha", "beta", "gamma"]);
+        let names: Vec<String> = roster.sessions.iter().map(|s| s.name.clone()).collect();
+        let started = Started::with(roster);
         let tabs = &started.launcher().tabs;
 
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].url, "vmux://agent/s1");
-        assert_eq!(
-            tabs[0].tab_index, 0,
-            "activation indexes the list this was built from"
-        );
+        assert_eq!(tabs.len(), 3);
+        for tab in tabs {
+            assert_eq!(
+                tab.title,
+                names[tab.tab_index as usize],
+                "row {index} must address the session it was built from",
+                index = tab.tab_index
+            );
+        }
+    }
+
+    #[test]
+    fn a_session_row_says_where_the_session_is() {
+        let started = Started::with(Roster::of_one());
+        let tab = &started.launcher().tabs[0];
+
+        assert_eq!(tab.url, "vmux://agent/sid-api");
         assert!(
-            tabs[0].location.contains("api"),
-            "the row says where the session is: {}",
-            tabs[0].location
+            tab.location.contains("api") && tab.location.contains("claude"),
+            "the row names the runtime and the directory: {}",
+            tab.location
         );
     }
 
+    /// An agent has to arrive as something the launcher will send a prompt to. Contributed without
+    /// this flag it renders as an ordinary row that opens a url, and the phone has no browser to
+    /// open one in — so the agent would be listed and unreachable.
     #[test]
     fn an_agent_becomes_a_prompt_target() {
         let started = Started::with(Roster::of_one());
         let pages = &started.launcher().pages;
 
         assert_eq!(pages.len(), 1);
-        assert!(
-            pages[0].prompt_target,
-            "an agent is something to prompt, not merely to open"
-        );
+        assert!(pages[0].prompt_target);
+        assert_eq!(pages[0].url, "vmux://agent/claude");
     }
 
+    /// Every rebuild reuses the one id documented as "not a reopen". A real id here would reset
+    /// the palette's input on each refresh, deleting whatever was half-typed.
     #[test]
-    fn the_payload_keeps_one_open_id_so_a_refresh_is_not_a_reopen() {
+    fn a_refresh_does_not_read_as_a_reopen() {
         let started = Started::with(Roster::of_one());
-        assert_eq!(started.launcher().open_id, OpenId::NONE);
+        assert!(!started.launcher().open_id.is_open());
     }
 
     #[test]

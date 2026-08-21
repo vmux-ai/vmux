@@ -17,13 +17,16 @@ mod pairing;
 mod qr_scanner;
 mod quic_api;
 mod session;
+mod start_page;
 mod world;
 
 use crate::api::{Api, ApiError};
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
 use crate::session::{AuthState, use_session};
+use crate::start_page::StartPagePlugin;
 use crate::world::World;
+use vmux_start::roster::Roster;
 
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -89,12 +92,15 @@ fn main() {
     // loop here — `LaunchBuilder::mobile()` never returns — and two loops was never an option:
     // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
     // the world runs on the thread the pages do, and nothing has to cross one to reach it.
-    let mut world = World::new(|_app| {});
+    World::new(|app| {
+        app.add_plugins(StartPagePlugin);
+    })
+    .install();
     lifecycle::install();
 
     let config = dioxus::mobile::Config::new()
         .with_background_color(webview_background())
-        .with_custom_event_handler(move |event, _| {
+        .with_custom_event_handler(|event, _| {
             use dioxus::mobile::tao::event::Event;
             match event {
                 Event::Opened { urls } => {
@@ -110,7 +116,9 @@ fn main() {
                 Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
                 // Every event for this turn has been dealt with by the time this arrives, which is
                 // what makes it the turn boundary rather than an arbitrary moment inside one.
-                Event::MainEventsCleared => world.tick(),
+                Event::MainEventsCleared => {
+                    World::with(World::tick);
+                }
                 _ => {}
             }
         });
@@ -170,6 +178,16 @@ fn AppBody() -> Element {
         if let Some(client) = api() {
             page_host::install(client, sessions, agents, session, composer);
         }
+    });
+
+    // The launcher is projected in the world from what the link last reported, so the roster has
+    // to get there. Reading both signals inside the effect is what subscribes it to their changes.
+    use_effect(move || {
+        let roster = Roster {
+            sessions: sessions(),
+            agents: agents(),
+        };
+        World::with(|world| world.insert(roster));
     });
 
     use_future(move || async move {

@@ -23,9 +23,15 @@
 //! a tokio task — pokes the loop through Dioxus's own proxy rather than by polling for it.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use bevy_app::{App, PluginsState};
+use bevy_ecs::change_detection::DetectChangesMut;
+use bevy_ecs::component::Mutable;
+use bevy_ecs::message::{Message, Messages};
+use bevy_ecs::resource::Resource;
 use bevy_window::AppLifecycle;
+use vmux_ui::hooks::transport::BytesListener;
 
 // Lifecycle reported by UIKit, held until the world's next turn.
 //
@@ -35,12 +41,31 @@ use bevy_window::AppLifecycle;
 // re-entering the schedule.
 thread_local! {
     static REPORTED: RefCell<Vec<AppLifecycle>> = const { RefCell::new(Vec::new()) };
+
+    /// The world the app is running, reachable from the page host without threading a handle
+    /// through Dioxus's context. One per thread, and only the main thread ever installs one.
+    static INSTALLED: RefCell<Option<World>> = const { RefCell::new(None) };
+}
+
+/// A payload a plugin wants delivered to whatever page registered for `id`.
+///
+/// The world knows nothing about which ids exist — a plugin says where its output goes and the
+/// world only carries it. That is what keeps a page crate free of page-transport concerns: it
+/// keeps a resource current, and the system that turns that resource into an emit lives here, in
+/// the app that owns the pages.
+#[derive(Message)]
+pub struct PageEmit {
+    pub id: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 /// One Bevy world, advanced a turn at a time.
 pub struct World {
     app: App,
     lifecycle: AppLifecycle,
+    /// Where a [`PageEmit`] goes, by id. Not `Send`, and it does not need to be: a listener closes
+    /// over Dioxus signals and is called on the thread that owns them, which is this one.
+    listeners: HashMap<&'static str, BytesListener>,
     /// Set once the app has exited, so a loop that keeps delivering events stops running systems.
     finished: bool,
 }
@@ -49,7 +74,7 @@ impl World {
     /// Build the world and run its plugins to completion, ready to tick.
     pub fn new(plugins: impl FnOnce(&mut App)) -> Self {
         let mut app = App::new();
-        app.add_message::<AppLifecycle>();
+        app.add_message::<AppLifecycle>().add_message::<PageEmit>();
         plugins(&mut app);
         while app.plugins_state() == PluginsState::Adding {
             bevy_tasks::tick_global_task_pools_on_main_thread();
@@ -59,8 +84,55 @@ impl World {
         Self {
             app,
             lifecycle: AppLifecycle::Idle,
+            listeners: HashMap::new(),
             finished: false,
         }
+    }
+
+    /// Put the world where the page host can reach it.
+    pub fn install(self) {
+        INSTALLED.with_borrow_mut(|slot| *slot = Some(self));
+    }
+
+    /// Do something with the installed world, if there is one.
+    ///
+    /// Refuses rather than panics when the world is already borrowed. That can only happen by
+    /// re-entering from a listener the world itself is calling, which is a bug — but one that
+    /// should show up as a line in the log rather than as a crash on someone's phone.
+    pub fn with<R>(act: impl FnOnce(&mut World) -> R) -> Option<R> {
+        INSTALLED
+            .try_with(|slot| match slot.try_borrow_mut() {
+                Ok(mut slot) => slot.as_mut().map(act),
+                Err(_) => {
+                    tracing::error!("world: re-entered while running, this turn is dropped");
+                    None
+                }
+            })
+            .ok()
+            .flatten()
+    }
+
+    /// Hand the world something a plugin reads.
+    pub fn insert<R: Resource>(&mut self, resource: R) {
+        self.app.insert_resource(resource);
+    }
+
+    /// Mark a resource changed without changing it, so whatever emits from it emits again.
+    ///
+    /// For a page that has just registered: the world pushes on change, and a page mounting after
+    /// the last change would otherwise wait for the next one — which on a phone may never come.
+    pub fn refresh<R: Resource<Mutability = Mutable>>(&mut self) {
+        if let Some(mut resource) = self.app.world_mut().get_resource_mut::<R>() {
+            resource.set_changed();
+        }
+    }
+
+    /// Say where emissions under `id` should go.
+    ///
+    /// One listener per id, replacing whatever was there: a page that remounts registers again,
+    /// and the previous closure is over signals belonging to a scope that has gone.
+    pub fn listen(&mut self, id: &'static str, on_bytes: BytesListener) {
+        self.listeners.insert(id, on_bytes);
     }
 
     /// Report what UIKit just said about the app. Called from the lifecycle observer.
@@ -82,11 +154,31 @@ impl World {
             return;
         }
         self.app.update();
+        self.deliver();
         if self.lifecycle == AppLifecycle::WillSuspend {
             self.lifecycle = AppLifecycle::Suspended;
         }
         if self.app.should_exit().is_some() {
             self.finished = true;
+        }
+    }
+
+    /// Hand this turn's emissions to whoever registered for them.
+    ///
+    /// Drained rather than read, so a page that registers later does not receive a payload built
+    /// before it existed — it asks for the current one on mount instead.
+    fn deliver(&mut self) {
+        let emitted = self
+            .app
+            .world_mut()
+            .resource_mut::<Messages<PageEmit>>()
+            .drain()
+            .collect::<Vec<_>>();
+        for emit in emitted {
+            let Some(listener) = self.listeners.get_mut(emit.id) else {
+                continue;
+            };
+            listener(&emit.bytes);
         }
     }
 
