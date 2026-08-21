@@ -409,12 +409,14 @@ fn AppBody() -> Element {
         };
     }
 
-    // The desktop's launcher, unmodified, with the link's own state floated over it. Overlaid
-    // rather than stacked so the page still owns the whole viewport, which is what lets its hero
-    // stay centred.
+    // The desktop's launcher, unmodified, under the link's own state.
+    //
+    // The header has its own row rather than floating over the page. Overlaying kept the hero
+    // centred against the whole screen, but a keyboard shrinks the viewport until the content no
+    // longer fits, and the moment centring gives up the hero starts at the top — behind the
+    // header. A row cannot be overlapped.
     rsx! {
-        div { class: "relative h-dvh",
-            vmux_start::page::Page {}
+        div { class: "flex h-dvh flex-col bg-background",
             LinkStatus {
                 reachable: reachable(),
                 on_team: move |_| team_open.set(true),
@@ -431,6 +433,12 @@ fn AppBody() -> Element {
                     auth.set(AuthState::Unpaired);
                 },
             }
+            // `min-h-0` because a flex child defaults to its content's minimum height, which for a
+            // page that scrolls is the whole scrollable length — it would push the row taller than
+            // the screen instead of scrolling inside it.
+            div { class: "min-h-0 flex-1",
+                vmux_start::page::Page {}
+            }
         }
     }
 }
@@ -438,7 +446,7 @@ fn AppBody() -> Element {
 /// Whether the Mac is answering, and the two things that can be done about it.
 ///
 /// The launcher has nowhere to say any of this: on the desktop the link is the machine it is
-/// running on. So it floats above, in the space the hero leaves empty.
+/// running on. So the phone gives it a row of its own above the page.
 #[component]
 fn LinkStatus(
     reachable: bool,
@@ -459,20 +467,20 @@ fn LinkStatus(
         )
     };
     rsx! {
-        header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+        header { class: "flex shrink-0 items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
             span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
-            span { class: "pointer-events-auto ml-auto {pill}",
+            span { class: "ml-auto {pill}",
                 span { class: "{dot}" }
                 {label}
             }
             button {
-                class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                 r#type: "button",
                 onclick: move |_| on_team.call(()),
                 {translate("mobile-start-team")}
             }
             button {
-                class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                class: "rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                 r#type: "button",
                 onclick: move |_| on_disconnect.call(()),
                 {translate("mobile-pair-disconnect")}

@@ -43,7 +43,11 @@ pub fn Page(
 
     rsx! {
         main {
-            class: "relative isolate flex h-dvh flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
+            // `h-full`, not `h-dvh`: a page fills what it was given and does not get to assume it
+            // was given the viewport. The desktop hands it a pane whose document body is already
+            // full height, and the phone hands it what is left under a status header — which it
+            // would overlap if it sized itself against the screen instead.
+            class: "relative isolate flex h-full flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
             StartBackdrop {}
             // `m-auto` rather than `justify-center`: a centred flex item whose content outgrows
