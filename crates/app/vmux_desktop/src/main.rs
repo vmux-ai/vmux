@@ -34,6 +34,7 @@ fn main() {
 
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
+    run_update_on_one_thread(&mut app);
 
     // Override Bevy's Ctrl+C handler with a synchronous signal handler.
     // Bevy's handler fires asynchronously via a pipe, giving macOS AppKit
@@ -48,6 +49,22 @@ fn main() {
     }
 
     app.run();
+}
+
+/// Run `Update` on the calling thread rather than across the task pool.
+///
+/// Bevy's multi-threaded executor pays a fixed cost per turn — spawning a task per system, a scope
+/// to join them, and the locks that coordinate it — and this app has nothing to spend it on. Under
+/// a keystroke, sampling put roughly 1% of the process in vmux's own systems and the rest in that
+/// coordination: ~1250 samples waiting on mutexes and ~290 in the executor itself.
+///
+/// A browser shell is not a game. Its systems are short, and what makes typing feel expensive is
+/// how often a turn runs, not how much work one turn holds — so paying to spread that work over
+/// eight threads buys nothing and costs the handshake every time.
+fn run_update_on_one_thread(app: &mut App) {
+    app.edit_schedule(Update, |schedule| {
+        schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+    });
 }
 
 extern "C" fn sigint_handler(_: libc::c_int) {
