@@ -74,7 +74,7 @@ fn push_composer_context_to_page(
         .entries
         .retain(|webview, _| live_views.contains(webview));
     for (webview, parent, ready) in &views {
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         let stack = parent.parent();

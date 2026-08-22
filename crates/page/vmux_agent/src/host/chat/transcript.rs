@@ -134,7 +134,7 @@ fn push_chat_to_page(
             owed.insert(stack);
             continue;
         };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             if owed.insert(stack) {
                 warn!(
                     ?stack,
@@ -331,7 +331,7 @@ fn sync_chat_to_ready_views(
         else {
             continue;
         };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -406,7 +406,7 @@ fn on_chat_history_request(
     let Ok((messages, state, turn_meta, imported)) = sessions.get(parent.parent()) else {
         return;
     };
-    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+    if !browsers.can_emit_to(&webview) {
         return;
     }
     let request = &trigger.event().payload;
