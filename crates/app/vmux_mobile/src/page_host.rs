@@ -7,10 +7,10 @@
 //! So this file is the join: [`send`](PageHost::send) turns a page's intent into a call on the
 //! link, and [`listen`](PageHost::listen) says where what comes back is to be delivered.
 //!
-//! Where a payload is *built* is moving out. An id served by the world registers a listener and
+//! Where a payload is *built* has moved out. An id served by the world registers a listener and
 //! nothing else, because a plugin in the page's own crate keeps it current — how a conversation
-//! folds is the chat page's knowledge, not this app's. What is left here is the ids still answered
-//! by watching a Dioxus signal.
+//! folds is the chat page's knowledge, not this app's. What is left is the ids that cannot be
+//! answered without asking the Mac first, and they still run a loop of their own.
 //!
 //! Ids with no route are refused rather than silently accepted, so a half-served page reports as
 //! much instead of rendering empty and looking broken. That refusal is quiet by design: a page
@@ -27,6 +27,7 @@ use vmux_chat::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
     ModelState, SelectModel, SetAgentEffort,
 };
+use vmux_chat::prompt::{Attach, Attachments};
 use vmux_chat::room::{Reported, Snapshot};
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
@@ -39,7 +40,7 @@ use vmux_ui::platform::sleep_ms;
 use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
 };
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
@@ -121,14 +122,12 @@ pub(crate) struct ComposerExchange {
     /// The desktop reads the file to answer; the phone never had it, and asking the Mac a second
     /// time for what it just sent would be a round trip to learn nothing.
     offered: Signal<Vec<RemoteMediaEntry>>,
-    attached: Signal<Vec<ChatAttachment>>,
 }
 
 pub(crate) fn use_composer_exchange() -> ComposerExchange {
     ComposerExchange {
         media_request: use_signal(|| None),
         offered: use_signal(Vec::new),
-        attached: use_signal(Vec::new),
     }
 }
 
@@ -194,13 +193,9 @@ impl PageHost for MobileHost {
                 });
             }
             CHAT_ATTACHMENTS_EVENT => {
-                let attached = self.composer.attached;
-                watch(self.epoch, on_bytes, move || {
-                    let attachments = attached.read().clone();
-                    if attachments.is_empty() {
-                        return None;
-                    }
-                    encode(&ChatAttachments { attachments })
+                World::with(|world| {
+                    world.listen(CHAT_ATTACHMENTS_EVENT, on_bytes);
+                    world.refresh::<Attachments>();
                 });
             }
             MODEL_STATE_EVENT => self.watch_models(on_bytes),
@@ -228,7 +223,6 @@ impl MobileHost {
         if self.session.sid().is_empty() {
             return Err(EventListenerError::Unsupported);
         }
-        let mut attached = self.composer.attached;
         let mut attachments = Vec::with_capacity(payload.attachments.len());
         for attachment in payload.attachments {
             attachments.push(AgentAttachment {
@@ -238,7 +232,7 @@ impl MobileHost {
                 size: attachment.size,
             });
         }
-        attached.set(Vec::new());
+        World::with(|world| world.insert(Attachments::default()));
         // The relay answers a prompt with a status event, but not before the next round trip. The
         // desktop's own page is told immediately, so match it rather than leave the composer
         // looking idle over a turn that has already started.
@@ -283,18 +277,14 @@ impl MobileHost {
     /// The page hands back paths it was offered, so the entries behind them are still here and no
     /// second round trip is needed to describe them.
     fn attach(&self, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
-        let mut attached = self.composer.attached;
         let offered = self.composer.offered.read();
-        let mut next = attached.peek().clone();
+        let mut resolved = Vec::with_capacity(payload.paths.len());
         for path in &payload.paths {
-            if next.iter().any(|held| &held.path == path) {
-                continue;
-            }
             for entry in offered.iter() {
                 if &entry.path != path || entry.is_dir {
                     continue;
                 }
-                next.push(ChatAttachment {
+                resolved.push(ChatAttachment {
                     path: entry.path.clone(),
                     name: entry.name.clone(),
                     mime_type: entry.mime_type.clone(),
@@ -304,7 +294,7 @@ impl MobileHost {
                 break;
             }
         }
-        attached.set(next);
+        World::with(|world| world.send(Attach(resolved)));
         Ok(())
     }
 
@@ -475,32 +465,6 @@ impl MobileHost {
             }
         });
     }
-}
-
-/// Push what `build` returns whenever a signal it read changes.
-///
-/// The desktop pushes because a daemon told it something. The phone has no such prompt: what a
-/// page needs to know is already in a signal, so the listener is a subscription to that signal
-/// rather than a poll. Scope-bound, so it stops when the page that subscribed goes away.
-fn watch(
-    epoch: u64,
-    mut on_bytes: BytesListener,
-    mut build: impl FnMut() -> Option<Vec<u8>> + 'static,
-) {
-    let (rc, mut changed) = ReactiveContext::new();
-    spawn(async move {
-        loop {
-            if superseded(epoch) {
-                return;
-            }
-            if let Some(bytes) = rc.reset_and_run_in(&mut build) {
-                on_bytes(&bytes);
-            }
-            if changed.next().await.is_none() {
-                return;
-            }
-        }
-    });
 }
 
 /// Whether `id` names `T`, as [`vmux_ui::hooks::send`] writes it.
