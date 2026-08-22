@@ -49,6 +49,8 @@ pub type ServerKey = (PathBuf, String);
 pub struct OpenDoc {
     pub key: ServerKey,
     pub version: i32,
+    /// How many editor panes are showing this document. `didClose` waits for zero.
+    pub refs: u32,
 }
 
 pub type PendingMap = Arc<Mutex<HashMap<i64, std::sync::mpsc::Sender<serde_json::Value>>>>;

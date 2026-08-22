@@ -26,9 +26,68 @@ pub struct ServerClient {
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
     next_id: AtomicI64,
+    capabilities: Capabilities,
     _reader: JoinHandle<()>,
     _writer: JoinHandle<()>,
     _stderr: JoinHandle<()>,
+}
+
+/// What a server answered `initialize` with, and the question every request site asks of it.
+///
+/// `Default` means "provides nothing", which is the right reading of a server whose reply did
+/// not parse. Asking before sending is what stops `foldingRange` and `documentSymbol` going to
+/// every server on every file open, and it is how the UI decides whether to offer rename.
+#[derive(Default)]
+pub struct Capabilities(lsp_types::ServerCapabilities);
+
+impl Capabilities {
+    fn of(reply: &serde_json::Value) -> Self {
+        let parsed = reply
+            .get("result")
+            .and_then(|result| result.get("capabilities"))
+            .cloned()
+            .and_then(|caps| serde_json::from_value(caps).ok())
+            .unwrap_or_default();
+        Self(parsed)
+    }
+
+    /// A method not listed here is allowed through: this models what we send, not the protocol.
+    pub fn allows(&self, method: &str) -> bool {
+        let caps = &self.0;
+        match method {
+            "textDocument/hover" => match &caps.hover_provider {
+                Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
+                Some(lsp_types::HoverProviderCapability::Options(_)) => true,
+                None => false,
+            },
+            "textDocument/foldingRange" => match &caps.folding_range_provider {
+                Some(lsp_types::FoldingRangeProviderCapability::Simple(yes)) => *yes,
+                Some(_) => true,
+                None => false,
+            },
+            "textDocument/codeAction" => match &caps.code_action_provider {
+                Some(lsp_types::CodeActionProviderCapability::Simple(yes)) => *yes,
+                Some(lsp_types::CodeActionProviderCapability::Options(_)) => true,
+                None => false,
+            },
+            "textDocument/completion" => caps.completion_provider.is_some(),
+            "textDocument/definition" => Self::offered(&caps.definition_provider),
+            "textDocument/references" => Self::offered(&caps.references_provider),
+            "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
+            "textDocument/rename" => Self::offered(&caps.rename_provider),
+            "textDocument/formatting" => Self::offered(&caps.document_formatting_provider),
+            _ => true,
+        }
+    }
+
+    /// `Some(Left(false))` is a server explicitly declining, which is not the same as absent.
+    fn offered<T>(provider: &Option<lsp_types::OneOf<bool, T>>) -> bool {
+        match provider {
+            Some(lsp_types::OneOf::Left(yes)) => *yes,
+            Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        }
+    }
 }
 
 impl ServerClient {
@@ -76,18 +135,23 @@ impl ServerClient {
             }
         });
 
-        let client = ServerClient {
+        let mut client = ServerClient {
             child,
             outgoing,
             pending,
             next_id: AtomicI64::new(1),
+            capabilities: Capabilities::default(),
             _reader: reader,
             _writer: writer,
             _stderr: stderr_thread,
         };
 
-        client.initialize(root)?;
+        client.capabilities = client.initialize(root)?;
         Ok(client)
+    }
+
+    pub fn provides(&self, method: &str) -> bool {
+        self.capabilities.allows(method)
     }
 
     fn notify(&self, method: &str, params: serde_json::Value) {
@@ -134,7 +198,7 @@ impl ServerClient {
         })
     }
 
-    fn initialize(&self, root: &std::path::Path) -> std::io::Result<()> {
+    fn initialize(&self, root: &std::path::Path) -> std::io::Result<Capabilities> {
         let root_uri = url::Url::from_file_path(root)
             .map(|u| u.to_string())
             .unwrap_or_default();
@@ -144,9 +208,9 @@ impl ServerClient {
             "capabilities": Self::capabilities(),
             "clientInfo": { "name": "vmux" }
         });
-        self.request("initialize", params, Duration::from_secs(10))?;
+        let reply = self.request("initialize", params, Duration::from_secs(10))?;
         self.notify("initialized", serde_json::json!({}));
-        Ok(())
+        Ok(Capabilities::of(&reply))
     }
 
     /// What this client tells a server it can do.
@@ -237,4 +301,56 @@ impl Drop for ServerClient {
 
 pub fn server_key(root: &std::path::Path, spec: &ServerSpec) -> ServerKey {
     (root.to_path_buf(), spec.command.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn advertising(capabilities: serde_json::Value) -> Capabilities {
+        Capabilities::of(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
+    }
+
+    #[test]
+    fn a_server_that_said_nothing_is_asked_for_nothing() {
+        let caps = advertising(json!({}));
+        assert!(!caps.allows("textDocument/hover"));
+        assert!(!caps.allows("textDocument/foldingRange"));
+        assert!(!caps.allows("textDocument/documentSymbol"));
+    }
+
+    /// Declining is not the same as staying silent, and both must stop the request.
+    #[test]
+    fn an_explicit_false_is_honoured() {
+        assert!(
+            !advertising(json!({ "definitionProvider": false })).allows("textDocument/definition")
+        );
+        assert!(
+            advertising(json!({ "definitionProvider": true })).allows("textDocument/definition")
+        );
+    }
+
+    #[test]
+    fn options_objects_count_as_provided() {
+        let caps = advertising(json!({
+            "renameProvider": { "prepareProvider": true },
+            "codeActionProvider": { "codeActionKinds": ["quickfix"] },
+            "hoverProvider": { "workDoneProgress": false },
+        }));
+        assert!(caps.allows("textDocument/rename"));
+        assert!(caps.allows("textDocument/codeAction"));
+        assert!(caps.allows("textDocument/hover"));
+    }
+
+    #[test]
+    fn a_method_we_do_not_model_is_not_blocked() {
+        assert!(advertising(json!({})).allows("textDocument/didOpen"));
+    }
+
+    #[test]
+    fn an_unparseable_reply_provides_nothing() {
+        let caps = Capabilities::of(&json!({ "id": 1, "result": "not an object" }));
+        assert!(!caps.allows("textDocument/hover"));
+    }
 }

@@ -208,7 +208,8 @@ impl LspManager {
     }
 
     pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) {
-        if self.open_docs.contains_key(path) {
+        if let Some(doc) = self.open_docs.get_mut(path) {
+            doc.refs += 1;
             return;
         }
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
@@ -235,8 +236,14 @@ impl LspManager {
         };
         if let Some(client) = self.servers.get(&key) {
             client.did_open(&uri, &spec.language_id, 1, &text);
-            self.open_docs
-                .insert(path.to_path_buf(), OpenDoc { key, version: 1 });
+            self.open_docs.insert(
+                path.to_path_buf(),
+                OpenDoc {
+                    key,
+                    version: 1,
+                    refs: 1,
+                },
+            );
         }
     }
 
@@ -270,7 +277,19 @@ impl LspManager {
         }
     }
 
+    /// Drop one holder's interest in `path`, closing the document once none are left.
+    ///
+    /// Two panes can show one file. Closing unconditionally on the first to navigate away sent
+    /// `didClose` out from under the other, after which its `change` silently no-ops and it
+    /// stops receiving diagnostics.
     pub fn close(&mut self, path: &Path) {
+        let Some(doc) = self.open_docs.get_mut(path) else {
+            return;
+        };
+        doc.refs = doc.refs.saturating_sub(1);
+        if doc.refs > 0 {
+            return;
+        }
         let Some(doc) = self.open_docs.remove(path) else {
             return;
         };
@@ -299,6 +318,9 @@ impl LspManager {
         let Some(client) = self.servers.get(&doc.key) else {
             return;
         };
+        if !client.provides(method) {
+            return;
+        }
         let mut params = serde_json::json!({
             "textDocument": { "uri": uri },
             "position": { "line": line, "character": utf16_col },
@@ -383,6 +405,9 @@ impl LspManager {
         let Some(client) = self.servers.get(&doc.key) else {
             return;
         };
+        if !client.provides("textDocument/foldingRange") {
+            return;
+        }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
         let (_, rx) = client.send_request("textDocument/foldingRange", params);
         self.inflight.push(InFlight {
@@ -404,6 +429,9 @@ impl LspManager {
         let Some(client) = self.servers.get(&doc.key) else {
             return;
         };
+        if !client.provides("textDocument/documentSymbol") {
+            return;
+        }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
         let (_, rx) = client.send_request("textDocument/documentSymbol", params);
         self.inflight.push(InFlight {
