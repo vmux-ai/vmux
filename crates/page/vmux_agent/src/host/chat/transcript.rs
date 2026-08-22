@@ -96,7 +96,7 @@ fn push_chat_to_page(
         Option<Ref<AgentConversationTitle>>,
     )>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
+    chat_views: Query<(), With<AgentChatView>>,
     choices: Query<&crate::host::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
@@ -124,7 +124,13 @@ fn push_chat_to_page(
             owed.insert(stack);
             continue;
         };
-        let Some(webview) = kids.iter().find(|&e| is_browser.contains(e)) else {
+        // The chat view, not merely the first `Browser` child. A stack collects webviews — an
+        // agent that opens a terminal gets a pane, and a pane is a webview like any other — so
+        // "the first browser under this stack" is whichever the children happen to be ordered by,
+        // and a snapshot aimed at a terminal is a snapshot the conversation never receives.
+        // `AgentChatView` is how the rest of the crate finds this view; this was the one place
+        // that guessed.
+        let Some(webview) = kids.iter().find(|&e| chat_views.contains(e)) else {
             owed.insert(stack);
             continue;
         };
