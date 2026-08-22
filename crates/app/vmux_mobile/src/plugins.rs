@@ -8,6 +8,7 @@
 //! carries it. That is why the list is names and nothing else.
 
 use bevy_app::{PluginGroup, PluginGroupBuilder};
+use vmux_chat::model::ChatModelPlugin;
 use vmux_chat::prompt::ChatPromptPlugin;
 use vmux_chat::room::ChatRoomPlugin;
 use vmux_start::roster::StartRosterPlugin;
@@ -26,5 +27,6 @@ impl PluginGroup for PagePlugins {
             .add(TeamRosterPlugin)
             .add(ChatRoomPlugin)
             .add(ChatPromptPlugin)
+            .add(ChatModelPlugin)
     }
 }

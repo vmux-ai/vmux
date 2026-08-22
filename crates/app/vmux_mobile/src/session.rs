@@ -81,9 +81,7 @@ impl Session {
             });
         });
         handle.connected.set(false);
-        handle
-            .generation
-            .set((handle.generation)().wrapping_add(1));
+        handle.generation.set((handle.generation)().wrapping_add(1));
     }
 
     /// Replay the open conversation and stay subscribed to it until it is replaced.

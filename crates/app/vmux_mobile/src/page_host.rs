@@ -25,9 +25,10 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
-    ModelState, SelectModel, SetAgentEffort,
+    SelectModel, SetAgentEffort,
 };
-use vmux_chat::prompt::{Attach, Attachments};
+use vmux_chat::model::{Models, Picker};
+use vmux_chat::prompt::{Attach, Attachments, Browsed};
 use vmux_chat::room::{Reported, Snapshot};
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
@@ -40,7 +41,7 @@ use vmux_ui::platform::sleep_ms;
 use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatMediaListRequest,
 };
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
@@ -207,10 +208,19 @@ impl PageHost for MobileHost {
                     world.refresh::<Attachments>();
                 });
             }
-            MODEL_STATE_EVENT => self.watch_models(on_bytes),
-            CHAT_MEDIA_ENTRIES_EVENT => self.watch_media(on_bytes),
-            // Served by the world now, like the launcher: the poll keeps  current and
-            //  emits from it. Registering here only says where that lands.
+            MODEL_STATE_EVENT => {
+                self.poll_models();
+                World::with(|world| {
+                    world.listen(MODEL_STATE_EVENT, on_bytes);
+                    world.refresh::<Picker>();
+                });
+            }
+            CHAT_MEDIA_ENTRIES_EVENT => {
+                self.poll_media();
+                World::with(|world| world.listen(CHAT_MEDIA_ENTRIES_EVENT, on_bytes));
+            }
+            // Served by the world, like the launcher: the poll keeps `Members` current and
+            // `TeamRosterPlugin` emits from it. Registering here only says where that lands.
             TEAM_EVENT => {
                 self.poll_team();
                 World::with(|world| {
@@ -354,11 +364,10 @@ impl MobileHost {
 
 /// What the phone pushes back at a page.
 impl MobileHost {
-    /// The session's models and effort, re-read whenever the session changes.
+    /// Ask the Mac what the open session can run on, and hand the answer to the world.
     ///
-    /// Fetched per session rather than carried on the session row, because the list arrives from
-    /// the agent after the session exists and a stale copy would offer models it has since
-    /// dropped.
+    /// Only the asking is here. What the picker is told is [`vmux_chat::model`]'s to decide — this
+    /// is the half that can reach the link, which is the one thing a page crate must not do.
     ///
     /// A refusal is retried rather than dropped. Waiting on the session to *change* is right for a
     /// conversation the phone opened — there is nothing else to wait for — but wrong for one it
@@ -366,7 +375,7 @@ impl MobileHost {
     /// first answer is `no such session` for a session that exists a moment later. The sid never
     /// changes after that, so a dropped first answer left the composer with no models for the life
     /// of the conversation.
-    fn watch_models(&self, mut on_bytes: BytesListener) {
+    fn poll_models(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let epoch = self.epoch;
         let (rc, mut changed) = ReactiveContext::new();
@@ -387,15 +396,7 @@ impl MobileHost {
                     }
                     match fetched {
                         Ok(state) => {
-                            if let Some(bytes) = encode(&ModelState {
-                                current_model_id: state.selected_id,
-                                models: state.models,
-                                effort_current: state.effort,
-                                effort_levels: state.effort_levels,
-                                ..ModelState::default()
-                            }) {
-                                on_bytes(&bytes);
-                            }
+                            World::with(|world| world.insert(Models(state)));
                             break;
                         }
                         // Pairing is gone, or the session is. Neither is fixed by asking again.
@@ -410,7 +411,12 @@ impl MobileHost {
         });
     }
 
-    fn watch_media(&self, mut on_bytes: BytesListener) {
+    /// Answer the composer's `@`-mentions by asking the Mac, and hand what came back to the world.
+    ///
+    /// Only the asking is here, as with [`Self::poll_models`]. The entries are also kept in
+    /// `offered` because [`Self::attach`] resolves a path against the last answer rather than
+    /// asking the Mac a second time for what it just sent.
+    fn poll_media(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let composer = self.composer;
         let mut offered = composer.offered;
@@ -431,25 +437,14 @@ impl MobileHost {
                         return;
                     }
                     if let Ok(found) = fetched {
-                        let mut entries = Vec::with_capacity(found.len());
-                        for entry in &found {
-                            entries.push(ChatMediaEntry {
-                                path: entry.path.clone(),
-                                name: entry.name.clone(),
-                                parent: entry.parent.clone(),
-                                mime_type: entry.mime_type.clone(),
-                                is_dir: entry.is_dir,
-                                preview_data_url: entry.preview_data_url.clone(),
+                        offered.set(found.clone());
+                        World::with(|world| {
+                            world.insert(Browsed {
+                                request_id: request.request_id,
+                                query: request.query,
+                                entries: found,
                             });
-                        }
-                        offered.set(found);
-                        if let Some(bytes) = encode(&ChatMediaEntries {
-                            request_id: request.request_id,
-                            query: request.query,
-                            entries,
-                        }) {
-                            on_bytes(&bytes);
-                        }
+                        });
                     }
                 }
                 if changed.next().await.is_none() {
@@ -509,18 +504,4 @@ where
     HostPayload::new(bytes)
         .decode::<T>()
         .ok_or(EventListenerError::SerializePayload)
-}
-
-pub(crate) fn encode<T>(payload: &T) -> Option<Vec<u8>>
-where
-    T: for<'a> rkyv::Serialize<
-            rkyv::api::high::HighSerializer<
-                rkyv::util::AlignedVec,
-                rkyv::ser::allocator::ArenaHandle<'a>,
-                rkyv::rancor::Error,
-            >,
-        >,
-{
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload).ok()?;
-    Some(bytes.to_vec())
 }

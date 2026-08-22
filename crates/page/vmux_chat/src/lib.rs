@@ -19,8 +19,9 @@ pub mod transcript;
 
 /// The conversation where there is no daemon underneath, only a relay.
 ///
-/// Neither is gated to iOS, though only the phone adds them: plain ECS over wire types, so leaving
+/// None is gated to iOS, though only the phone adds them: plain ECS over wire types, so leaving
 /// them unconditional keeps projections nobody can exercise locally inside the test suite.
+pub mod model;
 pub mod prompt;
 pub mod room;
 

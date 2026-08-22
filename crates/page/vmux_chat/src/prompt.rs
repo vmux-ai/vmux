@@ -8,7 +8,11 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_wire::page::PageEmit;
-use vmux_wire::prompt_media::{CHAT_ATTACHMENTS_EVENT, ChatAttachment, ChatAttachments};
+use vmux_wire::prompt_media::{
+    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachment, ChatAttachments,
+    ChatMediaEntries, ChatMediaEntry,
+};
+use vmux_wire::room::RemoteMediaEntry;
 
 /// Keeps [`Attachments`] current with what a host has attached, and hands it to the composer.
 pub struct ChatPromptPlugin;
@@ -18,6 +22,8 @@ impl Plugin for ChatPromptPlugin {
         app.add_message::<Attach>()
             .add_message::<PageEmit>()
             .init_resource::<Attachments>()
+            .init_resource::<Browsed>()
+            .init_resource::<Media>()
             .add_systems(
                 Update,
                 (
@@ -25,6 +31,12 @@ impl Plugin for ChatPromptPlugin {
                     Attachments::emit
                         .after(PromptProjection)
                         .run_if(resource_changed::<Attachments>),
+                    Media::project
+                        .in_set(PromptProjection)
+                        .run_if(resource_changed::<Browsed>),
+                    Media::emit
+                        .after(PromptProjection)
+                        .run_if(resource_changed::<Media>),
                 ),
             );
     }
@@ -41,6 +53,60 @@ pub struct Attach(pub Vec<ChatAttachment>);
 /// What the composer draws its pills from.
 #[derive(Resource, Default, PartialEq)]
 pub struct Attachments(pub Vec<ChatAttachment>);
+
+/// What the Mac answered the last `@`-mention with. Written by the app, read by nothing else.
+///
+/// The request is carried alongside the entries because the answer has to echo it: a composer that
+/// has typed on since asking matches `request_id` to know the reply is still the one it wants.
+#[derive(Resource, Default, PartialEq)]
+pub struct Browsed {
+    pub request_id: u64,
+    pub query: String,
+    pub entries: Vec<RemoteMediaEntry>,
+}
+
+/// The browse answer, as the composer expects to be told it.
+#[derive(Resource, Default)]
+pub struct Media(pub ChatMediaEntries);
+
+impl Media {
+    /// Describe what was found the way the shared composer expects to be told about it.
+    ///
+    /// `size` is the one field dropped: the mention list shows names and previews, and a byte count
+    /// for a directory listing is noise the page has nowhere to put.
+    fn project(browsed: Res<Browsed>, mut media: ResMut<Media>) {
+        let mut entries = Vec::with_capacity(browsed.entries.len());
+        for entry in &browsed.entries {
+            entries.push(ChatMediaEntry {
+                path: entry.path.clone(),
+                name: entry.name.clone(),
+                parent: entry.parent.clone(),
+                mime_type: entry.mime_type.clone(),
+                is_dir: entry.is_dir,
+                preview_data_url: entry.preview_data_url.clone(),
+            });
+        }
+        media.0 = ChatMediaEntries {
+            request_id: browsed.request_id,
+            query: browsed.query.clone(),
+            entries,
+        };
+    }
+
+    /// Hand the answer to whichever composer is listening for it.
+    ///
+    /// The default is not pushed. `request_id` 0 is the resource before anything was asked, and a
+    /// composer told about a request it never made would close its own mention list.
+    fn emit(media: Res<Media>, mut emits: MessageWriter<PageEmit>) {
+        if media.0.request_id == 0 {
+            return;
+        }
+        let Some(emit) = PageEmit::of(CHAT_MEDIA_ENTRIES_EVENT, &media.0) else {
+            return;
+        };
+        emits.write(emit);
+    }
+}
 
 impl Attachments {
     /// Hand the pile to the composer, if there is one to draw.
