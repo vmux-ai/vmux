@@ -4,9 +4,9 @@ use objc2_ui_kit::{UIUserInterfaceStyle, UIView};
 use tracing::warn;
 use wry::WebViewExtIOS;
 
-use super::{Appearance, PageSurface, SiblingOrder};
+use super::{Appearance, SiblingOrder, WebView};
 
-impl PageSurface {
+impl WebView {
     /// Put the view at one end of its parent's subview array, so UIKit asks it first or last.
     ///
     /// `hitTest:` walks siblings back to front and knows nothing of `zPosition`, so a view
@@ -43,7 +43,7 @@ impl PageSurface {
     ///
     /// It buys painting and nothing else. A layer's `zPosition` is invisible to `hitTest:`, which
     /// walks the subview array back to front, so this does not move a single touch;
-    /// [`PageSurface::order_among_siblings`] is what does.
+    /// [`WebView::order_among_siblings`] is what does.
     ///
     /// No `setWantsLayer` and no absent-layer path, unlike AppKit: every `UIView` is layer-backed
     /// from birth.

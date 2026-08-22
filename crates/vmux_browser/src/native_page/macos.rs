@@ -14,7 +14,7 @@ use bevy_cef_core::prelude::{
 use vmux_core::host::page::HostsPage;
 use vmux_core::page_metadata::PageMetadata;
 use vmux_layout::LayoutCef;
-use vmux_native::{Appearance, AssetReply, Embedding, NativePage, PageSurface, SiblingOrder};
+use vmux_native::{Appearance, AssetReply, Embedding, NativePage, SiblingOrder, WebView};
 use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
 
@@ -59,7 +59,7 @@ struct HostedPages(HashMap<Entity, HostedPage>);
 
 /// One page's view, and where it was told to put it.
 struct HostedPage {
-    surface: PageSurface,
+    surface: WebView,
     placement: Placement,
 }
 
@@ -134,7 +134,7 @@ fn open_native_pages(world: &mut World) {
         let built = WINIT_WINDOWS.with(|winit_windows| {
             let winit_windows = winit_windows.borrow();
             let window = winit_windows.get_window(window_entity)?;
-            Some(PageSurface::build(
+            Some(WebView::build(
                 page,
                 &**window,
                 bounds,

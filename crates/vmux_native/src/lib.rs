@@ -2,7 +2,7 @@
 //!
 //! The page's components and its `VirtualDom` execute here, in Rust, while a browser engine owns
 //! the document and does the layout, styling and painting. On macOS and iOS that engine is a
-//! `wry` webview this crate builds and drives — [`PageSurface`] — which makes this a small
+//! `wry` webview this crate builds and drives — [`WebView`] — which makes this a small
 //! `dioxus_desktop` cut to what vmux needs: no windowing stack of its own, no event loop, and a
 //! page described by a [`NativePage`] const rather than assembled by a builder.
 //!
@@ -42,9 +42,7 @@ pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
 
 #[cfg(ui)]
-mod view;
+mod webview;
 
 #[cfg(ui)]
-pub use view::{
-    Appearance, AssetReply, Assets, Embedding, Outbox, PageSurface, SiblingOrder, Wake,
-};
+pub use webview::{Appearance, AssetReply, Assets, Embedding, Outbox, SiblingOrder, Wake, WebView};

@@ -1,24 +1,39 @@
-//! A page's view: the webview that paints it, and the dom that fills it.
+//! The half of this crate that needs a webview to exist, and the webview itself.
 //!
-//! Everything a page asks of its view is here. What that view *is* — an `NSView` or a `UIView`,
-//! ordered and focused through different selectors — lives in the two siblings, so nothing in
-//! this file has to say which platform it is on.
+//! Gated once, here, rather than an attribute per module: everything below wants the same thing —
+//! a window to parent a `wry` webview into — so what decides whether it is compiled is one fact,
+//! and it should be written once. The page half above this is plain Rust and builds everywhere.
+//!
+//! Everything a page asks of its webview is here. What that webview *is* — an `NSView` or a
+//! `UIView`, ordered and focused through different selectors — lives in the two platform
+//! siblings, so nothing in this file has to say which platform it is on.
 
+mod dom;
+mod dom_request;
+mod element;
+mod embed;
+mod event_selection;
+mod frame;
 #[cfg(target_os = "ios")]
 mod ios;
 #[cfg(target_os = "macos")]
 mod macos;
+mod measurement;
+mod report;
+mod route;
+mod shim;
+
+pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
 
 use tracing::error;
 
 use crate::page::NativePage;
-use crate::view::dom::SurfaceDom;
-use crate::view::embed::Embedding;
-use crate::view::report::PageMessage;
-use crate::view::route::PageRoutes;
-use crate::view::shim::WRY_HOST_SHIM;
+use crate::webview::dom::Dom;
+use crate::webview::report::PageMessage;
+use crate::webview::route::PageRoutes;
+use crate::webview::shim::WRY_HOST_SHIM;
 
-/// What a view's `prefers-color-scheme` should answer.
+/// What a webview's `prefers-color-scheme` should answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Appearance {
     Light,
@@ -26,11 +41,11 @@ pub enum Appearance {
     System,
 }
 
-/// Which end of its parent's subview array a view sits at.
+/// Which end of its parent's subview array a webview sits at.
 ///
 /// Not where it is drawn. Hit testing walks the array back to front and knows nothing of
 /// `zPosition`, so a view's place in it decides who the platform hands a click to and nothing
-/// else — [`PageSurface::raise_above_layers`] is what decides what is painted over what.
+/// else — [`WebView::raise_above_layers`] is what decides what is painted over what.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SiblingOrder {
     /// Last, and so the first asked for any point it covers.
@@ -40,13 +55,13 @@ pub enum SiblingOrder {
 }
 
 /// One page running in this process, painted by a webview of its own.
-pub struct PageSurface {
+pub struct WebView {
     webview: wry::WebView,
-    dom: SurfaceDom,
+    dom: Dom,
 }
 
-impl PageSurface {
-    /// Build the view for a page, as a child of a window the host already has.
+impl WebView {
+    /// Build the webview for a page, as a child of a window the host already has.
     pub fn build(
         page: &'static NativePage,
         window: &impl wry::raw_window_handle::HasWindowHandle,
@@ -54,7 +69,7 @@ impl PageSurface {
         embed: Embedding,
         instance: crate::Instance,
     ) -> Result<Self, wry::Error> {
-        let dom = SurfaceDom::mount(page.component, instance, &embed);
+        let dom = Dom::mount(page.component, instance, &embed);
         let message = PageMessage::new(page, embed.outbox, dom.reads(), embed.waker);
         let routes = PageRoutes::new(page, dom.clone(), embed.assets);
         let webview = wry::WebViewBuilder::new()
@@ -77,7 +92,7 @@ impl PageSurface {
         }
     }
 
-    /// Whether the view is on screen at all.
+    /// Whether the webview is on screen at all.
     ///
     /// It has to be said explicitly: a host that leaves a hidden page out of its placement pass
     /// rather than giving it an empty rectangle would otherwise leave the view at whatever
@@ -102,3 +117,10 @@ impl PageSurface {
         self.dom.deliver(id, payload);
     }
 }
+
+// wry calls `objc2::exception::catch`, whose C shim ships as a static archive built by
+// `objc2-exception-helper`. Cargo puts that archive's directory on the link path but its `-l`
+// never reaches the binary, so the reference resolves to nothing. Naming the library here is what
+// pulls it in.
+#[link(name = "objc2_exception_helper_0_1", kind = "static")]
+unsafe extern "C" {}

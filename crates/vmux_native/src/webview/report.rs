@@ -1,6 +1,6 @@
 //! What a page says back, over wry's string IPC.
 //!
-//! The other direction from [`route`](crate::view::route): that is the page asking the host for
+//! The other direction from [`route`](crate::webview::route): that is the page asking the host for
 //! something, this is the page telling it something. The wire is text, because that is all
 //! `window.ipc` carries — which is why anything with a shape rides a request over `vmux://`
 //! instead, and why what is left here keeps shrinking.
@@ -10,8 +10,8 @@ use std::rc::Rc;
 use tracing::{error, info, warn};
 
 use crate::page::NativePage;
-use crate::view::embed::{Outbox, Wake};
-use crate::view::measurement::{Measured, PendingReads};
+use crate::webview::embed::{Outbox, Wake};
+use crate::webview::measurement::{Measured, PendingReads};
 
 /// One page-to-host message, decoded.
 enum PageReport<'a> {

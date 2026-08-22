@@ -7,9 +7,9 @@ use objc2_app_kit::{
 use tracing::{error, warn};
 use wry::WebViewExtMacOS;
 
-use super::{Appearance, PageSurface, SiblingOrder};
+use super::{Appearance, SiblingOrder, WebView};
 
-impl PageSurface {
+impl WebView {
     /// Put the view at one end of its parent's subview array, so AppKit asks it first or last.
     ///
     /// `hitTest:` walks siblings back to front and knows nothing of `zPosition`, so a view
@@ -50,7 +50,7 @@ impl PageSurface {
     ///
     /// It buys painting and nothing else. A layer's `zPosition` is invisible to `hitTest:`, which
     /// walks the subview array back to front, so this does not move a single click;
-    /// [`PageSurface::order_among_siblings`] is what does. That independence is the point: a page
+    /// [`WebView::order_among_siblings`] is what does. That independence is the point: a page
     /// can paint over every pane and still let their clicks through.
     pub fn raise_above_layers(&self) {
         let wk = self.webview.webview();
