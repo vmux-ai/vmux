@@ -11,7 +11,7 @@ use vmux_chat::prompt::{Attachments, ChatPromptPlugin, PromptProjection};
 use vmux_chat::room::{ChatRoomPlugin, RoomProjection, Snapshot};
 use vmux_wire::prompt_media::{CHAT_ATTACHMENTS_EVENT, ChatAttachments};
 
-use crate::world::PageEmit;
+use crate::runtime::PageEmit;
 
 /// The open conversation, model and delivery both.
 pub struct ChatPagePlugin;

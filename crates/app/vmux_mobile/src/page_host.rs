@@ -33,7 +33,7 @@ use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
-use crate::world::World;
+use crate::runtime::World;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
@@ -48,7 +48,7 @@ use vmux_wire::room::{
 };
 use vmux_wire::team::TEAM_EVENT;
 
-use crate::api::next_client_op_id;
+use crate::remote::next_client_op_id;
 use crate::session::Session;
 use crate::{Api, ApiError};
 

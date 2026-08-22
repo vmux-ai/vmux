@@ -10,7 +10,7 @@ use bevy_ecs::prelude::*;
 use vmux_start::event::START_COMMAND_BAR_OPEN_EVENT;
 use vmux_start::roster::{Launcher, LauncherProjection, StartRosterPlugin};
 
-use crate::world::PageEmit;
+use crate::runtime::PageEmit;
 
 /// The launcher: the model, and the delivery of what it produces.
 pub struct StartPagePlugin;

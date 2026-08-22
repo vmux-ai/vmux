@@ -7,29 +7,28 @@
 //! Bevy. What is left is the shell: finding a Mac, holding the link, and deciding which page is on
 //! screen.
 
-mod api;
 mod chat_page;
 mod credentials;
 mod lifecycle;
 mod logs;
-mod native_transition;
 mod page_host;
 mod pairing;
+mod plugins;
 mod qr_scanner;
-mod quic_api;
+mod quic;
+mod remote;
+mod runtime;
 mod session;
 mod start_page;
 mod team_page;
-mod world;
+mod transition;
 
-use crate::api::{Api, ApiError};
-use crate::chat_page::ChatPagePlugin;
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
+use crate::plugins::PagePlugins;
+use crate::remote::{Api, ApiError};
+use crate::runtime::World;
 use crate::session::{AuthState, use_session};
-use crate::start_page::StartPagePlugin;
-use crate::team_page::TeamPagePlugin;
-use crate::world::World;
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
@@ -98,7 +97,7 @@ fn main() {
     // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
     // the world runs on the thread the pages do, and nothing has to cross one to reach it.
     World::new(|app| {
-        app.add_plugins((StartPagePlugin, TeamPagePlugin, ChatPagePlugin));
+        app.add_plugins(PagePlugins);
     })
     .install();
     lifecycle::install();
@@ -150,7 +149,7 @@ fn App() -> Element {
 /// stylesheet the first time the branch changes, and nothing puts it back.
 #[component]
 fn AppBody() -> Element {
-    native_transition::install(&dioxus::mobile::window());
+    transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);

@@ -19,7 +19,7 @@ mod platform {
 
     use bevy_window::AppLifecycle;
 
-    use crate::world::World;
+    use crate::runtime::World;
 
     /// Start reporting the app's lifecycle.
     ///
@@ -107,7 +107,7 @@ mod platform {
 mod platform {
     use bevy_window::AppLifecycle;
 
-    use crate::world::World;
+    use crate::runtime::World;
 
     pub fn install() {
         World::report(AppLifecycle::Running);

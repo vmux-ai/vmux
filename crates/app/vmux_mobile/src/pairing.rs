@@ -37,14 +37,14 @@ impl Credentials {
     /// A pairing missing either cannot reach anything: the fingerprint is what the inner session
     /// pins, and the device is what the relay routes on. Returning `None` sends the phone back to
     /// the scanner rather than into a dial that would be refused.
-    pub(crate) fn endpoint(&self) -> Option<crate::quic_api::Endpoint> {
+    pub(crate) fn endpoint(&self) -> Option<crate::quic::Endpoint> {
         if self.fingerprint.is_empty() || self.device.is_empty() {
             return None;
         }
         let parsed = Url::parse(&self.base_url).ok()?;
         let host = parsed.host_str()?;
         let port = parsed.port().unwrap_or(443);
-        Some(crate::quic_api::Endpoint {
+        Some(crate::quic::Endpoint {
             address: format!("{host}:{port}"),
             token: self.token.clone(),
             fingerprint: self.fingerprint.clone(),
@@ -265,7 +265,7 @@ pub(crate) fn PairCard(props: PairCardProps) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::Api;
+    use crate::remote::Api;
 
     /// The fingerprint is the whole basis for trusting the desktop's certificate. If it were
     /// dropped while parsing, the phone would silently fall back to an unpinned connection —

@@ -9,7 +9,7 @@ use bevy_ecs::prelude::*;
 use vmux_team::roster::{Team, TeamProjection, TeamRosterPlugin};
 use vmux_wire::team::TEAM_EVENT;
 
-use crate::world::PageEmit;
+use crate::runtime::PageEmit;
 
 /// The team roster, model and delivery both.
 pub struct TeamPagePlugin;

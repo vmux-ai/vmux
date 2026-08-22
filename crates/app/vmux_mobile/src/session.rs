@@ -4,10 +4,10 @@
 //! the snapshot the page draws. This is the shell's side: opening and leaving a conversation, and
 //! the subscription that survives a suspend.
 
-use crate::api::{Api, ApiError, next_client_op_id, remote_event_from_shared};
-use crate::native_transition;
+use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
+use crate::runtime::World;
 use crate::take_resumed;
-use crate::world::World;
+use crate::transition;
 use dioxus::prelude::*;
 use std::time::Duration;
 use vmux_chat::room::{Conversation, LiveTurn, Log, Reported};
@@ -60,7 +60,7 @@ impl Session {
 
     /// Attach to `session` and start replaying it, replacing whatever was open.
     pub(crate) fn open(&self, api: Api, session: RemoteSession) {
-        native_transition::NativeSheet::open();
+        transition::NativeSheet::open();
         let mut handle = *self;
         let sid = session.sid.clone();
         handle.current.set(Some(session.clone()));
@@ -118,7 +118,7 @@ impl Session {
 
     pub(crate) fn leave(&self) {
         let mut handle = *self;
-        let dismissing = native_transition::NativeSheet::close();
+        let dismissing = transition::NativeSheet::close();
         handle.generation.set((handle.generation)().wrapping_add(1));
         handle.current.set(None);
         World::with(|world| {
