@@ -84,19 +84,17 @@ fn track_turn_duration(
 /// `Idle` a few hundred milliseconds later while the pane is still opening, and the pane keeps the
 /// installing snapshot for the life of the session.
 fn push_chat_to_page(
-    sessions: Query<
-        (
-            Entity,
-            Ref<AgentMessages>,
-            Ref<AgentRunState>,
-            Option<Ref<AgentTurnMeta>>,
-            Option<Ref<Profile>>,
-            Option<&PageMetadata>,
-            Ref<PromptQueue>,
-            Option<Ref<ImportedConversation>>,
-            Option<Ref<AgentConversationTitle>>,
-        ),
-    >,
+    sessions: Query<(
+        Entity,
+        Ref<AgentMessages>,
+        Ref<AgentRunState>,
+        Option<Ref<AgentTurnMeta>>,
+        Option<Ref<Profile>>,
+        Option<&PageMetadata>,
+        Ref<PromptQueue>,
+        Option<Ref<ImportedConversation>>,
+        Option<Ref<AgentConversationTitle>>,
+    )>,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
     choices: Query<&crate::host::PendingAgentChoice>,
@@ -132,7 +130,10 @@ fn push_chat_to_page(
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
             if owed.insert(stack) {
-                warn!(?stack, "chat snapshot owed: its view cannot receive one yet");
+                warn!(
+                    ?stack,
+                    "chat snapshot owed: its view cannot receive one yet"
+                );
             }
             continue;
         }

@@ -32,6 +32,7 @@ use bevy_ecs::message::{Message, Messages};
 use bevy_ecs::resource::Resource;
 use bevy_window::AppLifecycle;
 use vmux_ui::hooks::transport::BytesListener;
+use vmux_wire::page::PageEmit;
 
 // Lifecycle reported by UIKit, held until the world's next turn.
 //
@@ -45,18 +46,6 @@ thread_local! {
     /// The world the app is running, reachable from the page host without threading a handle
     /// through Dioxus's context. One per thread, and only the main thread ever installs one.
     static INSTALLED: RefCell<Option<World>> = const { RefCell::new(None) };
-}
-
-/// A payload a plugin wants delivered to whatever page registered for `id`.
-///
-/// The world knows nothing about which ids exist — a plugin says where its output goes and the
-/// world only carries it. That is what keeps a page crate free of page-transport concerns: it
-/// keeps a resource current, and the system that turns that resource into an emit lives here, in
-/// the app that owns the pages.
-#[derive(Message)]
-pub struct PageEmit {
-    pub id: &'static str,
-    pub bytes: Vec<u8>,
 }
 
 /// One Bevy world, advanced a turn at a time.

@@ -7,7 +7,6 @@
 //! Bevy. What is left is the shell: finding a Mac, holding the link, and deciding which page is on
 //! screen.
 
-mod chat_page;
 mod credentials;
 mod lifecycle;
 mod logs;
@@ -19,8 +18,6 @@ mod quic;
 mod remote;
 mod runtime;
 mod session;
-mod start_page;
-mod team_page;
 mod transition;
 
 use crate::logs::Logs;

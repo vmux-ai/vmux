@@ -14,19 +14,21 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_service::chat::group_turns_tail;
 use vmux_wire::chat::ChatItem;
+use vmux_wire::page::PageEmit;
 use vmux_wire::room::{
     AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
     RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
-use crate::event::ChatSnapshot;
+use crate::event::{CHAT_SNAPSHOT_EVENT, ChatSnapshot};
 
-/// Keeps [`Snapshot`] current with whatever the link last reported.
+/// Keeps [`Snapshot`] current with whatever the link last reported, and hands it to the page.
 pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Reported>()
+            .add_message::<PageEmit>()
             .init_resource::<Conversation>()
             .init_resource::<Log>()
             .init_resource::<LiveTurn>()
@@ -42,6 +44,9 @@ impl Plugin for ChatRoomPlugin {
                             .or_else(resource_changed::<LiveTurn>)
                             .or_else(resource_changed::<Agents>),
                     ),
+                    Snapshot::emit
+                        .after(RoomProjection)
+                        .run_if(resource_changed::<Snapshot>),
                 ),
             );
     }
@@ -56,13 +61,10 @@ impl Plugin for ChatRoomPlugin {
 #[derive(Message)]
 pub struct Reported(pub RemoteEvent);
 
-/// When [`Snapshot`] is rebuilt.
-///
-/// Public because a host has to deliver the payload the same turn it is built: ordering after this
-/// is the difference between the page seeing a token now and seeing it whenever the next event
-/// happens to arrive.
+/// When [`Snapshot`] is rebuilt, so the emit ordered after it carries this turn's tokens rather
+/// than the last turn's.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RoomProjection;
+struct RoomProjection;
 
 /// Which conversation is open and how its run is going.
 ///
@@ -178,6 +180,14 @@ pub struct Agents(pub Vec<RemoteAgent>);
 pub struct Snapshot(pub ChatSnapshot);
 
 impl Snapshot {
+    /// Hand the rebuilt conversation to whichever page is listening for it.
+    fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
+        let Some(emit) = PageEmit::of(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
+            return;
+        };
+        emits.write(emit);
+    }
+
     fn project(
         conversation: Res<Conversation>,
         log: Res<Log>,

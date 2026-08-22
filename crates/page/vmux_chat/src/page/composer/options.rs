@@ -8,8 +8,8 @@
 use crate::event::{ModelOptionEntry, SetAgentEffort};
 use crate::page::state::Chat;
 use dioxus::prelude::*;
-use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 

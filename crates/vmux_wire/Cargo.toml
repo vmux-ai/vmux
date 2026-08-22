@@ -17,7 +17,9 @@ vmux_macro = { path = "../vmux_macro" }
 url = { workspace = true }
 uuid = { workspace = true }
 
-[target.'cfg(not(target_os = "ios"))'.dependencies]
+# Not iOS-excluded, unlike the bevy blocks elsewhere in the tree. Those exclude `bevy` proper and
+# `bevy_cef`, which cannot build for a phone. These two are plain Rust and the phone's world wants
+# them, so what decides whether they are pulled in is the feature, not the target.
 bevy_ecs = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }
 

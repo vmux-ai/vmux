@@ -7,24 +7,32 @@
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::prompt_media::ChatAttachment;
+use vmux_wire::page::PageEmit;
+use vmux_wire::prompt_media::{CHAT_ATTACHMENTS_EVENT, ChatAttachment, ChatAttachments};
 
-/// Keeps [`Attachments`] current with what a host has attached.
+/// Keeps [`Attachments`] current with what a host has attached, and hands it to the composer.
 pub struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Attach>()
+            .add_message::<PageEmit>()
             .init_resource::<Attachments>()
-            .add_systems(Update, Attachments::fold.in_set(PromptProjection));
+            .add_systems(
+                Update,
+                (
+                    Attachments::fold.in_set(PromptProjection),
+                    Attachments::emit
+                        .after(PromptProjection)
+                        .run_if(resource_changed::<Attachments>),
+                ),
+            );
     }
 }
 
 /// When [`Attachments`] settles for the turn.
-///
-/// Public because a host has to deliver the payload the same turn it is built.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PromptProjection;
+struct PromptProjection;
 
 /// Attachments a host has resolved and wants on the next prompt.
 #[derive(Message)]
@@ -35,6 +43,23 @@ pub struct Attach(pub Vec<ChatAttachment>);
 pub struct Attachments(pub Vec<ChatAttachment>);
 
 impl Attachments {
+    /// Hand the pile to the composer, if there is one to draw.
+    ///
+    /// An empty pile is not pushed. The page clears its own pills when it submits, so saying so
+    /// would only repeat what it already did — and on mount an empty payload would be noise.
+    fn emit(attachments: Res<Attachments>, mut emits: MessageWriter<PageEmit>) {
+        if attachments.0.is_empty() {
+            return;
+        }
+        let payload = ChatAttachments {
+            attachments: attachments.0.clone(),
+        };
+        let Some(emit) = PageEmit::of(CHAT_ATTACHMENTS_EVENT, &payload) else {
+            return;
+        };
+        emits.write(emit);
+    }
+
     /// Append what has not been attached already.
     ///
     /// A mention can name a path that is already on the pile — the page offers the same directory

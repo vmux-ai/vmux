@@ -19,7 +19,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 serde_json = { workspace = true }

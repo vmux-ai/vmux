@@ -12,6 +12,9 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_wire::command_bar::{CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId};
+use vmux_wire::page::PageEmit;
+
+use crate::event::START_COMMAND_BAR_OPEN_EVENT;
 use vmux_wire::icon::PageIcon;
 use vmux_wire::room::{RemoteAgent, RemoteSession};
 
@@ -22,22 +25,25 @@ impl Plugin for StartRosterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Roster>()
             .init_resource::<Launcher>()
+            .add_message::<PageEmit>()
             .add_systems(
                 Update,
-                Launcher::project
-                    .in_set(LauncherProjection)
-                    .run_if(resource_changed::<Roster>),
+                (
+                    Launcher::project
+                        .in_set(LauncherProjection)
+                        .run_if(resource_changed::<Roster>),
+                    Launcher::emit
+                        .after(LauncherProjection)
+                        .run_if(resource_changed::<Launcher>),
+                ),
             );
     }
 }
 
-/// When [`Launcher`] is rebuilt.
-///
-/// Public because a host has to deliver the payload the same turn it is built: ordering after this
-/// is the difference between the page seeing a change now and seeing it on whatever event happens
-/// to arrive next, which on a phone may be a while.
+/// When [`Launcher`] is rebuilt, so the emit ordered after it carries what this turn produced
+/// rather than what the last one did.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct LauncherProjection;
+struct LauncherProjection;
 
 /// What the paired Mac last said it had. Written by the app, read by nothing else.
 #[derive(Resource, Default, PartialEq)]
@@ -58,6 +64,14 @@ impl Launcher {
     /// one list came over a relay.
     fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
         launcher.0 = Self::of(&roster);
+    }
+
+    /// Hand the rebuilt launcher to whichever page is listening for it.
+    fn emit(launcher: Res<Launcher>, mut emits: MessageWriter<PageEmit>) {
+        let Some(emit) = PageEmit::of(START_COMMAND_BAR_OPEN_EVENT, &launcher.0) else {
+            return;
+        };
+        emits.write(emit);
     }
 
     fn of(roster: &Roster) -> CommandBarOpenEvent {

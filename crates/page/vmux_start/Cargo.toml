@@ -28,7 +28,7 @@ serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../../vmux_core" }
 vmux_ui = { path = "../../vmux_ui" }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
