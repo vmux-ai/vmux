@@ -14,12 +14,18 @@ use vmux_wire::prompt_media::{
 };
 use vmux_wire::room::RemoteMediaEntry;
 
+use crate::room::Submitted;
+
 /// Keeps [`Attachments`] current with what a host has attached, and hands it to the composer.
 pub struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Attach>()
+            // Registered here as well as by `ChatRoomPlugin`, because this plugin reads it and a
+            // plugin that depends on a message registering itself elsewhere only works while the
+            // two are always added together. `add_message` is idempotent.
+            .add_message::<Submitted>()
             .add_message::<PageEmit>()
             .init_resource::<Attachments>()
             .init_resource::<Browsed>()
@@ -28,6 +34,7 @@ impl Plugin for ChatPromptPlugin {
                 Update,
                 (
                     Attachments::fold.in_set(PromptProjection),
+                    Attachments::spend.in_set(PromptProjection),
                     Attachments::emit
                         .after(PromptProjection)
                         .run_if(resource_changed::<Attachments>),
@@ -126,6 +133,19 @@ impl Attachments {
         emits.write(emit);
     }
 
+    /// Empty the pile once the prompt carrying it has gone.
+    ///
+    /// A submitted attachment belongs to that turn, so leaving it would put the same file on the
+    /// next prompt too. Guarded rather than assigned: an empty pile is the common case — most
+    /// prompts carry nothing — and `ResMut` marks its resource changed on `DerefMut` whatever the
+    /// value, which would redraw the composer on every send.
+    fn spend(mut submitted: MessageReader<Submitted>, mut attachments: ResMut<Attachments>) {
+        if submitted.read().count() == 0 || attachments.0.is_empty() {
+            return;
+        }
+        attachments.0.clear();
+    }
+
     /// Append what has not been attached already.
     ///
     /// A mention can name a path that is already on the pile — the page offers the same directory
@@ -177,6 +197,11 @@ mod tests {
             self.0.update();
         }
 
+        fn submit(&mut self) {
+            self.0.world_mut().write_message(Submitted);
+            self.0.update();
+        }
+
         fn paths(&self) -> Vec<&str> {
             let mut paths = Vec::new();
             for attachment in &self.0.world().resource::<Attachments>().0 {
@@ -195,5 +220,16 @@ mod tests {
         started.attach(&["b.png", "a.png"]);
 
         assert_eq!(started.paths(), ["a.png", "b.png"]);
+    }
+
+    /// An attachment belongs to the turn that carried it. Left on the pile it would ride the next
+    /// prompt as well, which is the Mac being sent a file the reader did not attach to it.
+    #[test]
+    fn submitting_spends_the_pile() {
+        let mut started = Started::empty();
+        started.attach(&["a.png", "b.png"]);
+        started.submit();
+
+        assert!(started.paths().is_empty());
     }
 }

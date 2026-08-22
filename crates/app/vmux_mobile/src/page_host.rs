@@ -29,7 +29,7 @@ use vmux_chat::event::{
 };
 use vmux_chat::model::{Models, Picker};
 use vmux_chat::prompt::{Attach, Attachments, Browsed};
-use vmux_chat::room::{Reported, Snapshot};
+use vmux_chat::room::{Reported, Snapshot, Submitted};
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
@@ -237,8 +237,8 @@ impl PageHost for MobileHost {
 /// What a page asks the phone to do.
 impl MobileHost {
     fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
-        // Ahead of any mutation: the optimistic status and the cleared attachments below are only
-        // honest if the call they are anticipating is actually going to be made.
+        // Ahead of saying anything: what the world is about to be told is only honest if the call
+        // it anticipates is actually going to be made.
         if self.session.sid().is_empty() {
             return Err(EventListenerError::Unsupported);
         }
@@ -251,11 +251,10 @@ impl MobileHost {
                 size: attachment.size,
             });
         }
-        World::with(|world| world.insert(Attachments::default()));
-        // The relay answers a prompt with a status event, but not before the next round trip. The
-        // desktop's own page is told immediately, so match it rather than leave the composer
-        // looking idle over a turn that has already started.
-        Self::report(RemoteStatus::Streaming);
+        // What submitting *means* — the run goes optimistically to streaming, the pills are spent
+        // — is the conversation's to decide, and `vmux_chat` decides it. This half only reports
+        // that it happened and then reaches the agent, which is the part no page crate can do.
+        World::with(|world| world.send(Submitted));
         self.agent_call(move |api, sid| async move {
             let request = PromptRequest {
                 client_op_id: next_client_op_id(),

@@ -28,6 +28,7 @@ pub struct ChatRoomPlugin;
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Reported>()
+            .add_message::<Submitted>()
             .add_message::<PageEmit>()
             .init_resource::<Conversation>()
             .init_resource::<Log>()
@@ -61,6 +62,14 @@ impl Plugin for ChatRoomPlugin {
 #[derive(Message)]
 pub struct Reported(pub RemoteEvent);
 
+/// The page asked for a turn.
+///
+/// What that *means* to a conversation is decided here rather than by whichever host carried the
+/// request: the run goes optimistically to streaming, and the composer's attachments are spent (see
+/// [`crate::prompt`]). A host is left with the half only it can do — reaching the agent.
+#[derive(Message)]
+pub struct Submitted;
+
 /// When [`Snapshot`] is rebuilt, so the emit ordered after it carries this turn's tokens rather
 /// than the last turn's.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -93,11 +102,20 @@ impl Conversation {
     /// Each arm derefs only what it writes: a token must not mark the conversation changed, or a
     /// streaming turn would rebuild the session's half of the snapshot once per token.
     fn fold(
+        mut submitted: MessageReader<Submitted>,
         mut reported: MessageReader<Reported>,
         mut conversation: ResMut<Conversation>,
         mut log: ResMut<Log>,
         mut live: ResMut<LiveTurn>,
     ) {
+        // Read before the link's own events, so a status that actually arrived this turn wins over
+        // the guess. The relay answers a prompt with a status, but not before the next round trip,
+        // and a composer that looks idle over a turn already running reads as a dropped message.
+        for Submitted in submitted.read() {
+            if conversation.session.is_some() {
+                conversation.status = RemoteStatus::Streaming;
+            }
+        }
         for Reported(event) in reported.read() {
             match event {
                 RemoteEvent::Session { session } => {
@@ -323,6 +341,15 @@ mod tests {
             self.0.update();
         }
 
+        fn submit(&mut self) {
+            self.0.world_mut().write_message(Submitted);
+            self.0.update();
+        }
+
+        fn status(&self) -> RemoteStatus {
+            self.0.world().resource::<Conversation>().status.clone()
+        }
+
         fn log(&self) -> &Log {
             self.0.world().resource::<Log>()
         }
@@ -498,6 +525,29 @@ mod tests {
 
     /// Moving to another room has to leave the previous transcript behind, or the new conversation
     /// opens showing the old one until its own replay lands.
+    /// The relay answers a prompt with a status, but not until the next round trip. Left idle over
+    /// a turn that has already started, the composer reads as though the send was dropped.
+    #[test]
+    fn submitting_runs_the_conversation_before_the_relay_says_so() {
+        let mut started = Started::open();
+        started.submit();
+
+        assert!(matches!(started.status(), RemoteStatus::Streaming));
+    }
+
+    /// The guess only stands until the link disagrees. A turn that ended between the send and the
+    /// next event must not be shown as still running.
+    #[test]
+    fn a_reported_status_overrides_the_guess_in_the_same_turn() {
+        let mut started = Started::open();
+        started.0.world_mut().write_message(Submitted);
+        started.report(RemoteEvent::Status {
+            status: RemoteStatus::Idle,
+        });
+
+        assert!(matches!(started.status(), RemoteStatus::Idle));
+    }
+
     #[test]
     fn switching_rooms_drops_the_log_the_previous_one_built() {
         let mut started = Started::open();
