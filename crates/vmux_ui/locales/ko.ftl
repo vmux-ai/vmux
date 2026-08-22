@@ -758,6 +758,7 @@ mobile-error-no-answer = { $address }에서 { $seconds }초 동안 응답이 없
 mobile-start-stacks = 스택
 mobile-start-no-stacks = 열린 스택 없음
 mobile-start-team = 팀
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = 검색하거나 질문하기…
 mobile-start-new-chat = 채팅 시작
 mobile-start-starting = 시작하는 중…

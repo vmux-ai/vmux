@@ -743,6 +743,7 @@ mobile-error-no-answer = { $address } から { $seconds } 秒待っても応答�
 mobile-start-stacks = スタック
 mobile-start-no-stacks = 開いているスタックがありません
 mobile-start-team = チーム
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = 検索または質問…
 mobile-start-new-chat = チャットを開始
 mobile-start-starting = 開始中…

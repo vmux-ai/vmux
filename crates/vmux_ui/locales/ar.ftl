@@ -758,6 +758,7 @@ mobile-error-no-answer = لا استجابة من { $address } بعد { $seconds
 mobile-start-stacks = الطبقات
 mobile-start-no-stacks = لا توجد طبقات مفتوحة
 mobile-start-team = الفريق
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = ابحث أو اسأل…
 mobile-start-new-chat = بدء محادثة
 mobile-start-starting = جارٍ البدء…

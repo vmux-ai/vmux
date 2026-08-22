@@ -193,9 +193,8 @@ impl PageHost for MobileHost {
                     world.refresh::<Snapshot>();
                 });
             }
-            // The world serves this one. `StartPagePlugin` keeps the payload current and emits it;
-            // registering here only says where it lands, and asks for one now because the page has
-            // just mounted and the last change may be long past.
+            // Refreshed on mount, not only listened for: the last change may be long past, and a
+            // page that arrives after it would otherwise wait for the next one.
             START_COMMAND_BAR_OPEN_EVENT => {
                 World::with(|world| {
                     world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);

@@ -758,6 +758,7 @@ mobile-error-no-answer = Нет ответа от { $address } через { $sec
 mobile-start-stacks = Стеки
 mobile-start-no-stacks = Нет открытых стеков
 mobile-start-team = Команда
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = Найти или спросить…
 mobile-start-new-chat = Начать чат
 mobile-start-starting = Запуск…

@@ -85,7 +85,16 @@ impl Launcher {
                 // What comes back on activation, so it has to index the list this was built from.
                 tab_index: index as u32,
                 is_active: false,
-                location: format!("{runtime} · {cwd}", runtime = session.runtime),
+                location: vmux_ui::i18n::translate_with(
+                    "mobile-start-tab-location",
+                    &[
+                        (
+                            "runtime",
+                            vmux_ui::i18n::TranslationValue::String(&session.runtime),
+                        ),
+                        ("cwd", vmux_ui::i18n::TranslationValue::String(cwd)),
+                    ],
+                ),
             });
         }
         let mut pages = Vec::with_capacity(roster.agents.len());

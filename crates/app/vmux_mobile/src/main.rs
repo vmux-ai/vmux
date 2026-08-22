@@ -181,8 +181,7 @@ fn AppBody() -> Element {
         }
     });
 
-    // The launcher is projected in the world from what the link last reported, so the roster has
-    // to get there. Reading both signals inside the effect is what subscribes it to their changes.
+    // Both signals are read inside the effect, which is what subscribes it to their changes.
     use_effect(move || {
         let roster = Roster {
             sessions: sessions(),
