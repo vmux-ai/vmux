@@ -193,6 +193,7 @@ impl AcpShared {
     }
 
     fn mark_startup_ready(&self) {
+        tracing::info!(target: "acp", sid = %self.sid, "session established");
         self.startup_ready.store(true, Ordering::SeqCst);
     }
 
@@ -387,6 +388,12 @@ impl AcpShared {
     }
 
     fn emit_status(&self, status: AgentRunStatus) {
+        // A failure the user is shown is a failure the log should carry. Without this the only
+        // record of a refused or timed-out startup is a string in a pane that is closed with the
+        // conversation, so an agent that never starts leaves nothing behind to read afterwards.
+        if let AgentRunStatus::Errored(message) = &status {
+            tracing::warn!(target: "acp", sid = %self.sid, "{message}");
+        }
         if !matches!(status, AgentRunStatus::Streaming) {
             *self.approval.lock().unwrap() = None;
         }
@@ -955,6 +962,11 @@ pub async fn run(
                         return Ok(());
                     }
                 };
+            // The middle rung of the startup ladder. With "session established" below and the
+            // errored statuses now logged, where a stall happened is readable from the log alone:
+            // nothing at all means the transport never carried a request, this line alone means
+            // the agent answered the handshake and then stopped establishing the session.
+            tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
