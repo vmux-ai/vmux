@@ -35,7 +35,7 @@ use crate::format::composer::{
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
-use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::hooks::{
     KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim, use_listener,
 };
