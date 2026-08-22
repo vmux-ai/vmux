@@ -323,8 +323,17 @@ fn host_of(relay_url: &str) -> Result<String, String> {
 }
 
 /// This desktop's identity to the relay, minted once and kept.
+///
+/// [`RemotePaths::relay_device`], not [`RemotePaths::relay_registration`]. The two look
+/// interchangeable and are opposites: the first is who this desktop is, the second is a claim that
+/// lives only as long as a registration holds, which [`RegisteredDevice`] deletes on drop and again
+/// at startup. Reading identity out of the claim meant every dropped control connection erased it
+/// and the next dial minted a new id — a phone paired minutes earlier was then addressing a
+/// desktop that no longer answered to that name, with nothing to say so but a link that never came
+/// up. `vmux_desktop` already mints into `relay_device` "so both agree before the first
+/// registration"; this is the half that did not.
 fn ensure_device_id() -> std::io::Result<DeviceId> {
-    let path = RemotePaths::current().relay_registration();
+    let path = RemotePaths::current().relay_device();
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let existing = existing.trim();
         if !existing.is_empty() {
