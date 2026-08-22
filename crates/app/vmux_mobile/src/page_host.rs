@@ -4,10 +4,13 @@
 //! ids it wants pushed back. On the desktop those ids cross a process boundary into Bevy. Here they
 //! cross the QUIC link instead, and the page cannot tell.
 //!
-//! What the desktop answers from a daemon holding the whole session, the phone answers from a
-//! session row and a folded room log. So this file is the join: [`listen`](PageHost::listen) turns
-//! the phone's state into the payloads a page expects to be pushed, and [`send`](PageHost::send)
-//! turns a page's intent into a call on the link.
+//! So this file is the join: [`send`](PageHost::send) turns a page's intent into a call on the
+//! link, and [`listen`](PageHost::listen) says where what comes back is to be delivered.
+//!
+//! Where a payload is *built* has moved out. An id served by the world registers a listener and
+//! nothing else, because a plugin in the page's own crate keeps it current — how a conversation
+//! folds is the chat page's knowledge, not this app's. What is left is the ids that cannot be
+//! answered without asking the Mac first, and they still run a loop of their own.
 //!
 //! Ids with no route are refused rather than silently accepted, so a half-served page reports as
 //! much instead of rendering empty and looking broken. That refusal is quiet by design: a page
@@ -22,27 +25,31 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
-    ModelState, SelectModel, SetAgentEffort,
+    SelectModel, SetAgentEffort,
 };
+use vmux_chat::model::{Models, Picker};
+use vmux_chat::prompt::{Attach, Attachments, Browsed};
+use vmux_chat::room::{Reported, Snapshot, Submitted};
 use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
+use vmux_start::roster::Launcher;
+use vmux_team::roster::{Members, Team};
+
+use crate::runtime::World;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
-use vmux_wire::command_bar::{
-    CommandBarActionEvent, CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId,
-};
-use vmux_wire::icon::PageIcon;
+use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatMediaListRequest,
 };
 use vmux_wire::room::{
-    AgentAttachment, ApprovalRequest, PromptRequest, RemoteAgent, RemoteMediaEntry, RemoteSession,
+    AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
+use vmux_wire::team::TEAM_EVENT;
 
-use crate::api::next_client_op_id;
+use crate::remote::next_client_op_id;
 use crate::session::Session;
 use crate::{Api, ApiError};
 
@@ -53,13 +60,21 @@ use crate::{Api, ApiError};
 /// needs no interval at all.
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 
+/// How long to keep asking for a session's models before giving up on it.
+///
+/// A conversation the phone itself started is asked about before the Mac has finished registering
+/// it, so the first answer is a refusal that resolves on its own within a second or so. Anything
+/// still refusing after this many tries is refusing for a reason retrying will not fix.
+const MODEL_FETCH_ATTEMPTS: u8 = 5;
+
+const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
+
 pub(crate) struct MobileHost {
     /// Which installation this host is. A watcher compares it against [`EPOCH`] to find out that
     /// it is serving a page on behalf of a link nobody holds any more.
     epoch: u64,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
-    agents: Signal<Vec<RemoteAgent>>,
     session: Session,
     composer: ComposerExchange,
 }
@@ -82,7 +97,6 @@ thread_local! {
 pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
-    agents: Signal<Vec<RemoteAgent>>,
     session: Session,
     composer: ComposerExchange,
 ) {
@@ -95,7 +109,6 @@ pub(crate) fn install(
         epoch,
         api,
         sessions,
-        agents,
         session,
         composer,
     }));
@@ -119,14 +132,12 @@ pub(crate) struct ComposerExchange {
     /// The desktop reads the file to answer; the phone never had it, and asking the Mac a second
     /// time for what it just sent would be a round trip to learn nothing.
     offered: Signal<Vec<RemoteMediaEntry>>,
-    attached: Signal<Vec<ChatAttachment>>,
 }
 
 pub(crate) fn use_composer_exchange() -> ComposerExchange {
     ComposerExchange {
         media_request: use_signal(|| None),
         offered: use_signal(Vec::new),
-        attached: use_signal(Vec::new),
     }
 }
 
@@ -177,30 +188,45 @@ impl PageHost for MobileHost {
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         match id {
             CHAT_SNAPSHOT_EVENT => {
-                let (session, agents) = (self.session, self.agents);
-                watch(self.epoch, on_bytes, move || {
-                    encode(&session.snapshot(&agents.read()))
+                World::with(|world| {
+                    world.listen(CHAT_SNAPSHOT_EVENT, on_bytes);
+                    world.refresh::<Snapshot>();
                 });
             }
+            // Refreshed on mount, not only listened for: the last change may be long past, and a
+            // page that arrives after it would otherwise wait for the next one.
             START_COMMAND_BAR_OPEN_EVENT => {
-                let (sessions, agents) = (self.sessions, self.agents);
-                watch(self.epoch, on_bytes, move || {
-                    encode(&launcher(&sessions.read(), &agents.read()))
+                World::with(|world| {
+                    world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);
+                    world.refresh::<Launcher>();
                 });
             }
             CHAT_ATTACHMENTS_EVENT => {
-                let attached = self.composer.attached;
-                watch(self.epoch, on_bytes, move || {
-                    let attachments = attached.read().clone();
-                    if attachments.is_empty() {
-                        return None;
-                    }
-                    encode(&ChatAttachments { attachments })
+                World::with(|world| {
+                    world.listen(CHAT_ATTACHMENTS_EVENT, on_bytes);
+                    world.refresh::<Attachments>();
                 });
             }
-            MODEL_STATE_EVENT => self.watch_models(on_bytes),
-            CHAT_MEDIA_ENTRIES_EVENT => self.watch_media(on_bytes),
-            TEAM_EVENT => self.watch_team(on_bytes),
+            MODEL_STATE_EVENT => {
+                self.poll_models();
+                World::with(|world| {
+                    world.listen(MODEL_STATE_EVENT, on_bytes);
+                    world.refresh::<Picker>();
+                });
+            }
+            CHAT_MEDIA_ENTRIES_EVENT => {
+                self.poll_media();
+                World::with(|world| world.listen(CHAT_MEDIA_ENTRIES_EVENT, on_bytes));
+            }
+            // Served by the world, like the launcher: the poll keeps `Members` current and
+            // `TeamRosterPlugin` emits from it. Registering here only says where that lands.
+            TEAM_EVENT => {
+                self.poll_team();
+                World::with(|world| {
+                    world.listen(TEAM_EVENT, on_bytes);
+                    world.refresh::<Team>();
+                });
+            }
             _ => return Err(EventListenerError::Unsupported),
         }
         Ok(())
@@ -210,13 +236,11 @@ impl PageHost for MobileHost {
 /// What a page asks the phone to do.
 impl MobileHost {
     fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
-        // Ahead of any mutation: the optimistic status and the cleared attachments below are only
-        // honest if the call they are anticipating is actually going to be made.
+        // Ahead of saying anything: what the world is about to be told is only honest if the call
+        // it anticipates is actually going to be made.
         if self.session.sid().is_empty() {
             return Err(EventListenerError::Unsupported);
         }
-        let mut status = self.session.status;
-        let mut attached = self.composer.attached;
         let mut attachments = Vec::with_capacity(payload.attachments.len());
         for attachment in payload.attachments {
             attachments.push(AgentAttachment {
@@ -226,11 +250,10 @@ impl MobileHost {
                 size: attachment.size,
             });
         }
-        attached.set(Vec::new());
-        // The relay answers a prompt with a status event, but not before the next round trip. The
-        // desktop's own page is told immediately, so match it rather than leave the composer
-        // looking idle over a turn that has already started.
-        status.set(RemoteStatus::Streaming);
+        // What submitting *means* — the run goes optimistically to streaming, the pills are spent
+        // — is the conversation's to decide, and `vmux_chat` decides it. This half only reports
+        // that it happened and then reaches the agent, which is the part no page crate can do.
+        World::with(|world| world.send(Submitted));
         self.agent_call(move |api, sid| async move {
             let request = PromptRequest {
                 client_op_id: next_client_op_id(),
@@ -238,9 +261,14 @@ impl MobileHost {
                 attachments,
             };
             if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
-                status.set(RemoteStatus::Errored(message));
+                MobileHost::report(RemoteStatus::Errored(message));
             }
         })
+    }
+
+    /// Tell the world where the run has got to, ahead of the relay saying so.
+    fn report(status: RemoteStatus) {
+        World::with(|world| world.send(Reported(RemoteEvent::Status { status })));
     }
 
     fn cancel(&self) -> Result<(), EventListenerError> {
@@ -250,8 +278,8 @@ impl MobileHost {
     }
 
     fn approve(&self, payload: ChatApproval) -> Result<(), EventListenerError> {
-        let mut approval = self.session.approval;
-        approval.set(None);
+        // The prompt goes away as the decision is made, not a round trip later.
+        World::with(|world| world.send(Reported(RemoteEvent::Approval { approval: None })));
         self.agent_call(move |api, sid| async move {
             let request = ApprovalRequest {
                 call_id: payload.call_id,
@@ -266,18 +294,14 @@ impl MobileHost {
     /// The page hands back paths it was offered, so the entries behind them are still here and no
     /// second round trip is needed to describe them.
     fn attach(&self, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
-        let mut attached = self.composer.attached;
         let offered = self.composer.offered.read();
-        let mut next = attached.peek().clone();
+        let mut resolved = Vec::with_capacity(payload.paths.len());
         for path in &payload.paths {
-            if next.iter().any(|held| &held.path == path) {
-                continue;
-            }
             for entry in offered.iter() {
                 if &entry.path != path || entry.is_dir {
                     continue;
                 }
-                next.push(ChatAttachment {
+                resolved.push(ChatAttachment {
                     path: entry.path.clone(),
                     name: entry.name.clone(),
                     mime_type: entry.mime_type.clone(),
@@ -287,7 +311,7 @@ impl MobileHost {
                 break;
             }
         }
-        attached.set(next);
+        World::with(|world| world.send(Attach(resolved)));
         Ok(())
     }
 
@@ -305,7 +329,7 @@ impl MobileHost {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
-                self.session.open(self.api.clone(), session);
+                self.session.open(session);
                 Ok(())
             }
             // Nothing was opened, so there is nothing to dismiss — but the launcher is entitled to
@@ -338,12 +362,18 @@ impl MobileHost {
 
 /// What the phone pushes back at a page.
 impl MobileHost {
-    /// The session's models and effort, re-read whenever the session changes.
+    /// Ask the Mac what the open session can run on, and hand the answer to the world.
     ///
-    /// Fetched per session rather than carried on the session row, because the list arrives from
-    /// the agent after the session exists and a stale copy would offer models it has since
-    /// dropped.
-    fn watch_models(&self, mut on_bytes: BytesListener) {
+    /// Only the asking is here. What the picker is told is [`vmux_chat::model`]'s to decide — this
+    /// is the half that can reach the link, which is the one thing a page crate must not do.
+    ///
+    /// A refusal is retried rather than dropped. Waiting on the session to *change* is right for a
+    /// conversation the phone opened — there is nothing else to wait for — but wrong for one it
+    /// just created: the Mac is still registering the session when the page mounts and asks, so the
+    /// first answer is `no such session` for a session that exists a moment later. The sid never
+    /// changes after that, so a dropped first answer left the composer with no models for the life
+    /// of the conversation.
+    fn poll_models(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let epoch = self.epoch;
         let (rc, mut changed) = ReactiveContext::new();
@@ -353,23 +383,23 @@ impl MobileHost {
                     return;
                 }
                 let sid = rc.reset_and_run_in(|| session.sid());
-                if !sid.is_empty() {
+                let mut attempts = MODEL_FETCH_ATTEMPTS;
+                while !sid.is_empty() && attempts > 0 {
+                    attempts -= 1;
                     let fetched = api.models(&sid).await;
                     // The link can be replaced while a request is in flight, and an answer that
                     // arrives after that belongs to a page nobody is looking at any more.
                     if superseded(epoch) {
                         return;
                     }
-                    if let Ok(state) = fetched
-                        && let Some(bytes) = encode(&ModelState {
-                            current_model_id: state.selected_id,
-                            models: state.models,
-                            effort_current: state.effort,
-                            effort_levels: state.effort_levels,
-                            ..ModelState::default()
-                        })
-                    {
-                        on_bytes(&bytes);
+                    match fetched {
+                        Ok(state) => {
+                            World::with(|world| world.insert(Models(state)));
+                            break;
+                        }
+                        // Pairing is gone, or the session is. Neither is fixed by asking again.
+                        Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                        Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
                     }
                 }
                 if changed.next().await.is_none() {
@@ -379,7 +409,12 @@ impl MobileHost {
         });
     }
 
-    fn watch_media(&self, mut on_bytes: BytesListener) {
+    /// Answer the composer's `@`-mentions by asking the Mac, and hand what came back to the world.
+    ///
+    /// Only the asking is here, as with [`Self::poll_models`]. The entries are also kept in
+    /// `offered` because [`Self::attach`] resolves a path against the last answer rather than
+    /// asking the Mac a second time for what it just sent.
+    fn poll_media(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let composer = self.composer;
         let mut offered = composer.offered;
@@ -400,25 +435,14 @@ impl MobileHost {
                         return;
                     }
                     if let Ok(found) = fetched {
-                        let mut entries = Vec::with_capacity(found.len());
-                        for entry in &found {
-                            entries.push(ChatMediaEntry {
-                                path: entry.path.clone(),
-                                name: entry.name.clone(),
-                                parent: entry.parent.clone(),
-                                mime_type: entry.mime_type.clone(),
-                                is_dir: entry.is_dir,
-                                preview_data_url: entry.preview_data_url.clone(),
+                        offered.set(found.clone());
+                        World::with(|world| {
+                            world.insert(Browsed {
+                                request_id: request.request_id,
+                                query: request.query,
+                                entries: found,
                             });
-                        }
-                        offered.set(found);
-                        if let Some(bytes) = encode(&ChatMediaEntries {
-                            request_id: request.request_id,
-                            query: request.query,
-                            entries,
-                        }) {
-                            on_bytes(&bytes);
-                        }
+                        });
                     }
                 }
                 if changed.next().await.is_none() {
@@ -428,10 +452,14 @@ impl MobileHost {
         });
     }
 
-    fn watch_team(&self, mut on_bytes: BytesListener) {
+    /// Keep the world's roster current, and let `TeamPagePlugin` decide what reaches the page.
+    ///
+    /// The dedupe this used to keep in a `last` local is gone: [`World::insert`] already refuses a
+    /// value equal to the one it holds, so an unchanged poll marks nothing changed and the emit
+    /// system does not run.
+    fn poll_team(&self) {
         let (api, epoch) = (self.api.clone(), self.epoch);
         spawn(async move {
-            let mut last: Option<Vec<TeamMemberRow>> = None;
             loop {
                 if superseded(epoch) {
                     return;
@@ -442,15 +470,7 @@ impl MobileHost {
                 }
                 match fetched {
                     Ok(members) => {
-                        if last.as_ref() != Some(&members) {
-                            let payload = TeamEvent {
-                                members: members.clone(),
-                            };
-                            if let Some(bytes) = encode(&payload) {
-                                on_bytes(&bytes);
-                            }
-                            last = Some(members);
-                        }
+                        World::with(|world| world.insert(Members(members)));
                     }
                     // Pairing is gone, or there is no such session. Neither is fixed by asking
                     // again every few seconds.
@@ -462,73 +482,6 @@ impl MobileHost {
             }
         });
     }
-}
-
-/// Describe the desktop the way the shared launcher expects to be told about it.
-///
-/// Sessions become the open-stack rows and agents the prompt targets, which is the same shape the
-/// desktop contributes — so the launcher ranks, filters and renders them without knowing one list
-/// came over a relay.
-fn launcher(sessions: &[RemoteSession], agents: &[RemoteAgent]) -> CommandBarOpenEvent {
-    let mut tabs = Vec::with_capacity(sessions.len());
-    for (index, session) in sessions.iter().enumerate() {
-        let cwd = vmux_ui::file_icon::FilePath(&session.cwd).name();
-        tabs.push(CommandBarTab {
-            title: session.name.clone(),
-            url: format!("vmux://agent/{sid}", sid = session.sid),
-            pane_id: 0,
-            // What comes back on activation, so it has to index the list this was built from.
-            tab_index: index as u32,
-            is_active: false,
-            location: format!("{runtime} · {cwd}", runtime = session.runtime),
-        });
-    }
-    let mut pages = Vec::with_capacity(agents.len());
-    for agent in agents {
-        pages.push(CommandBarPage {
-            host: agent.id.clone(),
-            url: agent.url.clone(),
-            title: agent.name.clone(),
-            keywords: Vec::new(),
-            icon: PageIcon::favicon(agent.icon.clone()),
-            shortcut: String::new(),
-            prompt_target: true,
-        });
-    }
-    CommandBarOpenEvent {
-        // Documented as the start page's live-refresh id: reusing it is what stops each refresh
-        // reading as a reopen and clobbering what is being typed.
-        open_id: OpenId::NONE,
-        tabs,
-        pages,
-        ..CommandBarOpenEvent::default()
-    }
-}
-
-/// Push what `build` returns whenever a signal it read changes.
-///
-/// The desktop pushes because a daemon told it something. The phone has no such prompt: what a
-/// page needs to know is already in a signal, so the listener is a subscription to that signal
-/// rather than a poll. Scope-bound, so it stops when the page that subscribed goes away.
-fn watch(
-    epoch: u64,
-    mut on_bytes: BytesListener,
-    mut build: impl FnMut() -> Option<Vec<u8>> + 'static,
-) {
-    let (rc, mut changed) = ReactiveContext::new();
-    spawn(async move {
-        loop {
-            if superseded(epoch) {
-                return;
-            }
-            if let Some(bytes) = rc.reset_and_run_in(&mut build) {
-                on_bytes(&bytes);
-            }
-            if changed.next().await.is_none() {
-                return;
-            }
-        }
-    });
 }
 
 /// Whether `id` names `T`, as [`vmux_ui::hooks::send`] writes it.
@@ -549,95 +502,4 @@ where
     HostPayload::new(bytes)
         .decode::<T>()
         .ok_or(EventListenerError::SerializePayload)
-}
-
-fn encode<T>(payload: &T) -> Option<Vec<u8>>
-where
-    T: for<'a> rkyv::Serialize<
-            rkyv::api::high::HighSerializer<
-                rkyv::util::AlignedVec,
-                rkyv::ser::allocator::ArenaHandle<'a>,
-                rkyv::rancor::Error,
-            >,
-        >,
-{
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload).ok()?;
-    Some(bytes.to_vec())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_wire::room::RoomId;
-
-    /// `RemoteSession` is another crate's type, so the fixture that builds one cannot be an
-    /// inherent method however much it wants to be.
-    trait Sample {
-        fn sample(name: &str) -> Self;
-    }
-
-    impl Sample for RemoteSession {
-        fn sample(name: &str) -> Self {
-            Self {
-                sid: format!("sid-{name}"),
-                room_id: RoomId::for_session(name),
-                title: String::new(),
-                name: name.to_string(),
-                runtime: "acp".to_string(),
-                model: None,
-                cwd: "/tmp/work".to_string(),
-                status: RemoteStatus::Idle,
-                approval: None,
-                created_at_ms: 0,
-            }
-        }
-    }
-
-    /// The launcher hands an activated row back by index alone, so the list it was built from is
-    /// the only thing that can name the session again. A row whose index stops addressing its own
-    /// session opens the wrong conversation — silently, and only for whoever has two of them.
-    #[test]
-    fn every_offered_session_is_addressed_by_the_index_it_comes_back_as() {
-        let sessions = vec![
-            RemoteSession::sample("alpha"),
-            RemoteSession::sample("beta"),
-            RemoteSession::sample("gamma"),
-        ];
-
-        let offered = launcher(&sessions, &[]);
-
-        assert_eq!(offered.tabs.len(), 3);
-        for tab in &offered.tabs {
-            let addressed = &sessions[tab.tab_index as usize];
-            assert_eq!(tab.title, addressed.name);
-        }
-    }
-
-    /// An agent has to arrive as something the launcher will send a prompt to. Contributed without
-    /// this flag it renders as an ordinary row that opens a url, and the phone has no browser to
-    /// open one in — so the agent would be listed and unreachable.
-    #[test]
-    fn every_offered_agent_accepts_a_prompt() {
-        let agents = vec![RemoteAgent {
-            id: "claude".to_string(),
-            name: "Claude".to_string(),
-            url: "vmux://agent/claude".to_string(),
-            icon: String::new(),
-        }];
-
-        let offered = launcher(&[], &agents);
-
-        assert_eq!(offered.pages.len(), 1);
-        assert!(offered.pages[0].prompt_target);
-        assert_eq!(offered.pages[0].url, "vmux://agent/claude");
-    }
-
-    /// Every refresh reuses the one id documented as "not a reopen". A real id here would reset
-    /// the palette's input on each poll, deleting whatever was half-typed.
-    #[test]
-    fn a_refresh_does_not_read_as_a_reopen() {
-        let offered = launcher(&[], &[]);
-
-        assert!(!offered.open_id.is_open());
-    }
 }

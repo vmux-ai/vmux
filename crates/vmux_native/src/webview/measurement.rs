@@ -1,8 +1,8 @@
 //! A question a mounted component asked about its element, waiting for the page to answer it.
 //!
-//! The instructions in [`SurfaceElement`](crate::surface_element::SurfaceElement) need no reply and
+//! The instructions in [`Element`](crate::webview::element::Element) need no reply and
 //! resolve the moment they are queued. These need one, and it comes back over `window.ipc` rather
-//! than on a request. Unlike the caret in [`event_selection`](crate::event_selection), a
+//! than on a request. Unlike the caret in [`event_selection`](crate::webview::event_selection), a
 //! `RenderedElementBacking` read is a future with no deadline to beat — so the reply owes nothing
 //! to any particular request, and IPC is both prompter than waiting for the page to ask for its
 //! next frame and free of what a header may hold.

@@ -16,7 +16,7 @@
 
 use tracing::error;
 
-use crate::dom_request::DomRequest;
+use crate::webview::dom_request::DomRequest;
 
 /// One answer to the page: the batch to apply, and what to do to the elements it produces.
 pub(crate) struct PageFrame {

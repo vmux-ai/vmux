@@ -226,7 +226,7 @@ pub struct AgentStrategySummary {
     pub model: String,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
     pub active_space_id: String,
@@ -234,7 +234,7 @@ pub struct CommandBarSpacesSnapshot {
     pub spaces_page_url: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpaceSummary {
     pub id: String,
     pub name: String,

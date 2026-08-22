@@ -160,10 +160,29 @@ pub fn PromptComposer(
                     }
                     textarea {
                         id: "{input_id}",
-                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
+                        // The placeholder is ellipsised rather than wrapped, because
+                        // `field-sizing:content` does not count it as content: an empty field
+                        // stays one line tall however many lines its placeholder would need, so a
+                        // wrapped one has its second line cut off by the box. Where it fits — every
+                        // width but a phone's — this changes nothing.
+                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
                         autofocus,
                         disabled,
                         rows: "1",
+                        // Text checking off, and it is not only a matter of taste.
+                        //
+                        // WebKit runs spelling, grammar and data detection on a focused editable
+                        // field continuously, on a USER_INTERACTIVE queue. This field is focused
+                        // the moment the launcher mounts and stays focused, so that queue never
+                        // stops: it measured at 1589 of 6047 samples — a quarter of the process —
+                        // with the app doing nothing at all.
+                        //
+                        // What it was checking is commands, paths and urls, which it underlines as
+                        // misspelt anyway.
+                        spellcheck: "false",
+                        autocapitalize: "off",
+                        autocomplete: "off",
+                        "autocorrect": "off",
                         placeholder: if preview.is_empty() && !has_ghost { placeholder } else { String::new() },
                         value: "{value}",
                         oninput: move |event| on_input.call(event.value()),

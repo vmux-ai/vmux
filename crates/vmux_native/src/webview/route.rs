@@ -6,9 +6,9 @@
 
 use std::rc::Rc;
 
-use crate::dom::SurfaceDom;
-use crate::embed::{AssetReply, Assets};
 use crate::page::NativePage;
+use crate::webview::dom::Dom;
+use crate::webview::embed::{AssetReply, Assets};
 
 /// One page's `vmux://` handler: what it is, what fills it, and where its assets come from.
 ///
@@ -16,12 +16,12 @@ use crate::page::NativePage;
 /// through a free function.
 pub(crate) struct PageRoutes {
     page: &'static NativePage,
-    dom: SurfaceDom,
+    dom: Dom,
     assets: Rc<dyn Assets>,
 }
 
 impl PageRoutes {
-    pub(crate) fn new(page: &'static NativePage, dom: SurfaceDom, assets: Rc<dyn Assets>) -> Self {
+    pub(crate) fn new(page: &'static NativePage, dom: Dom, assets: Rc<dyn Assets>) -> Self {
         Self { page, dom, assets }
     }
 

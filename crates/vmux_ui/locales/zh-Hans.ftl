@@ -758,6 +758,7 @@ mobile-error-no-answer = { $seconds } 秒后仍未收到 { $address } 的响应�
 mobile-start-stacks = 堆栈
 mobile-start-no-stacks = 没有打开的堆栈
 mobile-start-team = 团队
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = 搜索或提问…
 mobile-start-new-chat = 开始聊天
 mobile-start-starting = 正在启动…

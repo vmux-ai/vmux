@@ -26,7 +26,7 @@ pub(crate) fn next_client_op_id() -> ClientOpId {
 
 #[derive(Clone)]
 pub(crate) struct Api {
-    quic: crate::quic_api::QuicApi,
+    quic: crate::quic::QuicApi,
 }
 
 pub(crate) enum ApiError {
@@ -58,7 +58,7 @@ impl Api {
             )));
         };
         Ok(Self {
-            quic: crate::quic_api::QuicApi::new(endpoint),
+            quic: crate::quic::QuicApi::new(endpoint),
         })
     }
 
@@ -128,10 +128,7 @@ impl Api {
     }
 
     /// Subscribe to a session's events.
-    pub(crate) async fn subscribe(
-        &self,
-        sid: &str,
-    ) -> Result<crate::quic_api::Subscription, ApiError> {
+    pub(crate) async fn subscribe(&self, sid: &str) -> Result<crate::quic::Subscription, ApiError> {
         self.quic.subscribe(sid).await.map_err(Into::into)
     }
 
@@ -192,7 +189,7 @@ impl Api {
     /// twice, which is exactly what the idempotency key is for.
     pub(crate) fn applied(
         &self,
-        outcome: Result<SharedResponse, crate::quic_api::QuicError>,
+        outcome: Result<SharedResponse, crate::quic::QuicError>,
     ) -> Result<(), ApiError> {
         match outcome {
             Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Ok(()),
@@ -276,7 +273,7 @@ pub(crate) fn remote_event_from_shared(
 /// GUI-held state comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
 /// than re-typed on the wire — the shape belongs to the page that renders it.
 async fn broker_json<T: serde::de::DeserializeOwned>(
-    quic: &crate::quic_api::QuicApi,
+    quic: &crate::quic::QuicApi,
     command: SharedAgentCommand,
 ) -> Result<T, ApiError> {
     match quic.request(SharedMessage::AgentCommand(command)).await {
@@ -290,9 +287,9 @@ async fn broker_json<T: serde::de::DeserializeOwned>(
     }
 }
 
-impl From<crate::quic_api::QuicError> for ApiError {
-    fn from(error: crate::quic_api::QuicError) -> Self {
-        use crate::quic_api::QuicError;
+impl From<crate::quic::QuicError> for ApiError {
+    fn from(error: crate::quic::QuicError) -> Self {
+        use crate::quic::QuicError;
         use vmux_wire::protocol::SharedFailure;
         match error {
             QuicError::Unauthorized => Self::Unauthorized,

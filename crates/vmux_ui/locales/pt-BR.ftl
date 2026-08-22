@@ -758,6 +758,7 @@ mobile-error-no-answer = Sem resposta de { $address } após { $seconds }s.
 mobile-start-stacks = Pilhas
 mobile-start-no-stacks = Nenhuma pilha aberta
 mobile-start-team = Equipe
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = Buscar ou perguntar…
 mobile-start-new-chat = Iniciar chat
 mobile-start-starting = Iniciando…

@@ -758,6 +758,7 @@ mobile-error-no-answer = Geen antwoord van { $address } na { $seconds }s.
 mobile-start-stacks = Stapels
 mobile-start-no-stacks = Geen open stapels
 mobile-start-team = Team
+mobile-start-tab-location = { $runtime } · { $cwd }
 mobile-start-search-placeholder = Zoek of vraag…
 mobile-start-new-chat = Start chat
 mobile-start-starting = Starten…

@@ -1,10 +1,10 @@
 //! Run a vmux page in this process instead of compiling it to wasm.
 //!
 //! The page's components and its `VirtualDom` execute here, in Rust, while a browser engine owns
-//! the document and does the layout, styling and painting. On macOS that engine is a `wry` webview
-//! this crate builds and drives — [`PageSurface`] — which makes this a small `dioxus_desktop` cut
-//! to what vmux needs: no windowing stack of its own, no event loop, and a page described by a
-//! [`NativePage`] const rather than assembled by a builder.
+//! the document and does the layout, styling and painting. On macOS and iOS that engine is a
+//! `wry` webview this crate builds and drives — [`WebView`] — which makes this a small
+//! `dioxus_desktop` cut to what vmux needs: no windowing stack of its own, no event loop, and a
+//! page described by a [`NativePage`] const rather than assembled by a builder.
 //!
 //! Two directions, and they are not symmetric:
 //!
@@ -41,38 +41,8 @@ pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
 
-#[cfg(target_os = "macos")]
-mod dom;
-#[cfg(target_os = "macos")]
-mod dom_request;
-#[cfg(target_os = "macos")]
-mod embed;
-#[cfg(target_os = "macos")]
-mod event_selection;
-#[cfg(target_os = "macos")]
-mod frame;
-#[cfg(target_os = "macos")]
-mod measurement;
-#[cfg(target_os = "macos")]
-mod report;
-#[cfg(target_os = "macos")]
-mod route;
-#[cfg(target_os = "macos")]
-mod shim;
-#[cfg(target_os = "macos")]
-mod surface;
-#[cfg(target_os = "macos")]
-mod surface_element;
+#[cfg(ui)]
+mod webview;
 
-#[cfg(target_os = "macos")]
-pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
-#[cfg(target_os = "macos")]
-pub use surface::{Appearance, PageSurface, SiblingOrder};
-
-// wry calls `objc2::exception::catch`, whose C shim ships as a static archive built by
-// `objc2-exception-helper`. Cargo puts that archive's directory on the link path but its `-l`
-// never reaches the binary, so the reference resolves to nothing. Naming the library here is what
-// pulls it in.
-#[cfg(target_os = "macos")]
-#[link(name = "objc2_exception_helper_0_1", kind = "static")]
-unsafe extern "C" {}
+#[cfg(ui)]
+pub use webview::{Appearance, AssetReply, Assets, Embedding, Outbox, SiblingOrder, Wake, WebView};

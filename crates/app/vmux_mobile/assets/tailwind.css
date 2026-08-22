@@ -1,5 +1,14 @@
 @import "../../../vmux_ui/assets/theme.css";
 @import "tailwindcss";
+
+/* The whole page bucket, not the pages this app names today.
+ *
+ * A class used only by an unscanned crate is not an error: it is simply absent, and the rule it
+ * would have applied silently does nothing. That is how the launcher lost `m-auto` — the phone
+ * started mounting `vmux_start` without this list following, so the hero stopped centring and
+ * looked like a layout bug for as long as nobody grepped the stylesheet.
+ *
+ * Enumerating the bucket costs a larger stylesheet and buys never having to remember this. */
 @source "../src";
-@source "../../../page/vmux_chat/src";
+@source "../../../page";
 @source "../../../vmux_ui/src";
