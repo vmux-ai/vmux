@@ -58,11 +58,15 @@ impl Session {
         }
     }
 
-    /// Attach to `session` and start replaying it, replacing whatever was open.
-    pub(crate) fn open(&self, api: Api, session: RemoteSession) {
+    /// Attach to `session`, replacing whatever was open.
+    ///
+    /// Opening does not start the stream. It is called from the launcher's own scope, and opening
+    /// is what replaces the launcher with the conversation — so a task spawned here belongs to a
+    /// scope Dioxus drops on the very next render, and is cancelled before its first poll. The
+    /// stream is owned by [`Self::stream`], driven from a component that never unmounts.
+    pub(crate) fn open(&self, session: RemoteSession) {
         transition::NativeSheet::open();
         let mut handle = *self;
-        let sid = session.sid.clone();
         handle.current.set(Some(session.clone()));
         World::with(|world| {
             world.insert(Log {
@@ -77,43 +81,65 @@ impl Session {
             });
         });
         handle.connected.set(false);
-        let next_generation = (handle.generation)().wrapping_add(1);
-        handle.generation.set(next_generation);
-        spawn(async move {
-            loop {
-                if (handle.generation)() != next_generation {
-                    return;
-                }
-                // A connection that survived a suspend is a connection whose socket the OS already
-                // closed. Drop it before dialling rather than waiting for a request to stall.
-                if take_resumed() {
-                    api.reset_transport().await;
-                }
-                match api.subscribe(&sid).await {
-                    Ok(mut subscription) => {
-                        handle.connected.set(true);
-                        while let Some(event) = subscription.next().await {
-                            if (handle.generation)() != next_generation {
-                                return;
-                            }
-                            let Some(event) = remote_event_from_shared(event) else {
-                                continue;
-                            };
-                            let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
-                            handle.apply(event);
-                            if refresh_now {
-                                tokio::task::yield_now().await;
-                            }
+        handle
+            .generation
+            .set((handle.generation)().wrapping_add(1));
+    }
+
+    /// Replay the open conversation and stay subscribed to it until it is replaced.
+    ///
+    /// Held by the shell rather than by whatever opened the room, so the task outlives the page
+    /// that asked for it. `generation` is the shell's own record of which open this is: the caller
+    /// restarts this future when it moves, and the checks below stop a stream that was outlived
+    /// mid-await from writing over its successor.
+    pub(crate) async fn stream(self, api: Api, sid: String, generation: u64) {
+        let mut handle = self;
+        loop {
+            if (handle.generation)() != generation {
+                return;
+            }
+            // A connection that survived a suspend is a connection whose socket the OS already
+            // closed. Drop it before dialling rather than waiting for a request to stall.
+            if take_resumed() {
+                api.reset_transport().await;
+            }
+            // The phone's one inbound path, and until now it said nothing at all: a conversation
+            // that stayed empty looked the same whether the task never ran, the stream never
+            // opened, it opened and carried nothing, or it ended and was not retried.
+            tracing::info!(%sid, "room stream dialling");
+            match api.subscribe(&sid).await {
+                Ok(mut subscription) => {
+                    tracing::info!(%sid, "room stream open");
+                    handle.connected.set(true);
+                    while let Some(event) = subscription.next().await {
+                        if (handle.generation)() != generation {
+                            return;
+                        }
+                        let Some(event) = remote_event_from_shared(event) else {
+                            tracing::warn!("room event not understood");
+                            continue;
+                        };
+                        tracing::info!(kind = event.kind(), "room event");
+                        let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
+                        handle.apply(event);
+                        if refresh_now {
+                            tokio::task::yield_now().await;
                         }
                     }
-                    // Pairing is gone, or the stream route is — reconnecting brings back neither.
-                    Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                    Err(ApiError::Message(_)) => {}
+                    tracing::warn!(%sid, "room stream ended");
                 }
-                handle.connected.set(false);
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                // Pairing is gone, or the stream route is — reconnecting brings back neither.
+                Err(ApiError::Unauthorized | ApiError::NotFound) => {
+                    tracing::warn!(%sid, "room stream refused for good");
+                    return;
+                }
+                Err(ApiError::Message(error)) => {
+                    tracing::warn!(%sid, %error, "room stream failed; retrying");
+                }
             }
-        });
+            handle.connected.set(false);
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
 
     pub(crate) fn leave(&self) {
@@ -170,7 +196,7 @@ impl Session {
                 }
                 sessions.set(next);
                 if let Some(created) = created {
-                    handle.open(api, created);
+                    handle.open(created);
                     return;
                 }
             }

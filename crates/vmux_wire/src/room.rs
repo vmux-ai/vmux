@@ -508,6 +508,22 @@ pub enum RemoteEvent {
     },
 }
 
+impl RemoteEvent {
+    /// Which kind this is, for a log line that must not carry a transcript.
+    ///
+    /// `Debug` would print the payload, and a replayed room is every message a conversation has
+    /// ever held, so the variant is named on its own.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Session { .. } => "session",
+            Self::Snapshot { .. } => "snapshot",
+            Self::Delta { .. } => "delta",
+            Self::Status { .. } => "status",
+            Self::Approval { .. } => "approval",
+        }
+    }
+}
+
 /// One row in the `/model` picker, and one model a session can be switched to.
 ///
 /// The page and the phone pick from the same list through the same component, so they read the

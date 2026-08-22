@@ -197,6 +197,31 @@ fn AppBody() -> Element {
         World::with(|world| world.insert(Agents(agents())));
     });
 
+    // The room stream is owned here, not by whatever opened the room.
+    //
+    // `Session::open` is reached from the launcher's own scope, and opening is exactly what
+    // replaces the launcher with the conversation — so a task spawned there belongs to a scope
+    // Dioxus drops on the next render and is cancelled before its first poll. This component is
+    // the one that never unmounts.
+    //
+    // `use_resource` rather than `use_future`, which runs once on mount and would have caught only
+    // the empty sid the launcher starts with. This restarts when the three reads below move, and
+    // drops the previous stream as it does.
+    let _room = use_resource(move || {
+        let client = api();
+        let sid = session.sid();
+        let generation = (session.generation)();
+        async move {
+            let Some(client) = client else {
+                return;
+            };
+            if sid.is_empty() {
+                return;
+            }
+            session.stream(client, sid, generation).await;
+        }
+    });
+
     use_future(move || async move {
         if let Some(opened) = take_opened_url() {
             deep_link_received.set(true);

@@ -321,7 +321,7 @@ impl MobileHost {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
-                self.session.open(self.api.clone(), session);
+                self.session.open(session);
                 Ok(())
             }
             // Nothing was opened, so there is nothing to dismiss — but the launcher is entitled to

@@ -182,6 +182,12 @@ impl World {
             .collect::<Vec<_>>();
         for emit in emitted {
             let Some(listener) = self.listeners.get_mut(emit.id) else {
+                // Not an error on its own — a page that is not mounted has no listener, and a
+                // plugin keeps its resource current regardless. It is worth saying, though: a
+                // payload built for a page nobody registered for is the difference between "the
+                // world never produced it" and "the world produced it and it went nowhere", and
+                // from outside those look identical.
+                tracing::debug!(id = emit.id, "page emit had no listener");
                 continue;
             };
             listener(&emit.bytes);
