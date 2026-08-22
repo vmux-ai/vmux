@@ -193,6 +193,7 @@ impl AcpShared {
     }
 
     fn mark_startup_ready(&self) {
+        tracing::info!(target: "acp", sid = %self.sid, "session established");
         self.startup_ready.store(true, Ordering::SeqCst);
     }
 
@@ -387,6 +388,12 @@ impl AcpShared {
     }
 
     fn emit_status(&self, status: AgentRunStatus) {
+        // A failure the user is shown is a failure the log should carry. Without this the only
+        // record of a refused or timed-out startup is a string in a pane that is closed with the
+        // conversation, so an agent that never starts leaves nothing behind to read afterwards.
+        if let AgentRunStatus::Errored(message) = &status {
+            tracing::warn!(target: "acp", sid = %self.sid, "{message}");
+        }
         if !matches!(status, AgentRunStatus::Streaming) {
             *self.approval.lock().unwrap() = None;
         }
@@ -955,6 +962,11 @@ pub async fn run(
                         return Ok(());
                     }
                 };
+            // The middle rung of the startup ladder. With "session established" below and the
+            // errored statuses now logged, where a stall happened is readable from the log alone:
+            // nothing at all means the transport never carried a request, this line alone means
+            // the agent answered the handshake and then stopped establishing the session.
+            tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
@@ -972,12 +984,29 @@ pub async fn run(
                     load.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
+                    // Bounded like the `session/new` below it: a resume that hangs is
+                    // indistinguishable from one that failed, and a failed load already falls
+                    // through to a fresh session rather than stopping. Logged because
+                    // `load_requested_session` discards the error to make that fall-through.
                     async move {
-                        cx.send_request(load).block_task().await.map(|response| {
-                            shared.publish_model_info(
-                                response.config_options.as_deref().unwrap_or_default(),
+                        let answered = tokio::time::timeout(
+                            ACP_STARTUP_TIMEOUT,
+                            cx.send_request(load).block_task(),
+                        )
+                        .await;
+                        let Ok(loaded) = answered else {
+                            tracing::warn!(
+                                target: "acp",
+                                "session/load did not answer within {}s; starting a fresh session",
+                                ACP_STARTUP_TIMEOUT.as_secs()
                             );
-                        })
+                            return Err("session/load timed out".to_string());
+                        };
+                        let response = loaded.map_err(|err| err.to_string())?;
+                        shared.publish_model_info(
+                            response.config_options.as_deref().unwrap_or_default(),
+                        );
+                        Ok(())
                     }
                 })
                 .await;
@@ -997,16 +1026,33 @@ pub async fn run(
                     new_session.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
+                    // Bounded for the same reason `initialize` is, and likelier than `initialize`
+                    // to hang: this is where the agent dials its MCP servers, so one that never
+                    // answers holds the whole startup open. Neither existing net catches that —
+                    // the handshake timeout is already spent, and `drain_stderr` only surfaces a
+                    // subprocess that *died*, where this one stays alive and idle. Unbounded, the
+                    // status below is never emitted and the GUI shows "Preparing agent…" for as
+                    // long as the app is left running.
                     async move {
-                        cx.send_request(new_session)
-                            .block_task()
-                            .await
-                            .map(|response| {
+                        match tokio::time::timeout(
+                            ACP_STARTUP_TIMEOUT,
+                            cx.send_request(new_session).block_task(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(response)) => {
                                 shared.publish_model_info(
                                     response.config_options.as_deref().unwrap_or_default(),
                                 );
-                                response.session_id
-                            })
+                                Ok(response.session_id)
+                            }
+                            Ok(Err(err)) => Err(err.to_string()),
+                            Err(_) => Err(format!(
+                                "no answer within {}s{}",
+                                ACP_STARTUP_TIMEOUT.as_secs(),
+                                shared.stderr_detail()
+                            )),
+                        }
                     }
                 })
                 .await;

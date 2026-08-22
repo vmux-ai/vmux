@@ -7,12 +7,6 @@
 
 pub mod event;
 
-/// `ui`, because a caret claim needs a caret: the only caller is [`page::Page`], and a host with no
-/// page has nothing to focus. The split *inside* it is `web` against the rest, which is a different
-/// question — whether the claim is made by reaching the document or by asking the host for it.
-#[cfg(ui)]
-pub mod focus;
-
 #[cfg(ui)]
 pub mod page;
 
@@ -20,6 +14,13 @@ pub mod page;
 mod host;
 #[cfg(host)]
 pub use host::StartPlugin;
+
+/// The launcher's model where there is no desktop underneath, only a relay.
+///
+/// Not gated to iOS, though only the phone adds it: it is plain ECS over wire types, so leaving it
+/// unconditional is what keeps the one projection nobody can exercise locally inside the reach of
+/// the test suite.
+pub mod roster;
 
 pub use vmux_wire::agent::supports_inline_agent_transition;
 

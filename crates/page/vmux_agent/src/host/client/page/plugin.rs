@@ -234,6 +234,14 @@ fn consume_page_agent_stream(
         }
     }
     for status in statuses.read() {
+        // The run state lives on the stack entity, so a status whose sid no stack claims is not
+        // one that arrives late — it is one the conversation never receives, leaving the pane on
+        // whatever it was last set to. During startup that is "Preparing agent…", which then never
+        // clears however cleanly the agent came up. Silence here is what made that
+        // indistinguishable from a daemon that never answered.
+        if !by_sid.contains_key(&status.sid) {
+            warn!(sid = %status.sid, "dropping a run status no stack claims");
+        }
         if let Some(&entity) = by_sid.get(&status.sid)
             && let Ok((_, _, mut state, mut queue, _, _, _, mut pending, _)) = q.get_mut(entity)
         {

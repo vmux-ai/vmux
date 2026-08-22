@@ -7,20 +7,27 @@
 //! Bevy. What is left is the shell: finding a Mac, holding the link, and deciding which page is on
 //! screen.
 
-mod api;
 mod credentials;
+mod lifecycle;
 mod logs;
-mod native_transition;
 mod page_host;
 mod pairing;
+mod plugins;
 mod qr_scanner;
-mod quic_api;
+mod quic;
+mod remote;
+mod runtime;
 mod session;
+mod transition;
 
-use crate::api::{Api, ApiError};
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
+use crate::plugins::PagePlugins;
+use crate::remote::{Api, ApiError};
+use crate::runtime::World;
 use crate::session::{AuthState, use_session};
+use vmux_chat::room::Agents;
+use vmux_start::roster::Roster;
 
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -82,6 +89,16 @@ fn webview_background() -> (u8, u8, u8, u8) {
 fn main() {
     Logs::start();
 
+    // The world rides in the event handler rather than on a thread of its own. Dioxus owns the
+    // loop here — `LaunchBuilder::mobile()` never returns — and two loops was never an option:
+    // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
+    // the world runs on the thread the pages do, and nothing has to cross one to reach it.
+    World::new(|app| {
+        app.add_plugins(PagePlugins);
+    })
+    .install();
+    lifecycle::install();
+
     let config = dioxus::mobile::Config::new()
         .with_background_color(webview_background())
         .with_custom_event_handler(|event, _| {
@@ -98,6 +115,11 @@ fn main() {
                     );
                 }
                 Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
+                // Every event for this turn has been dealt with by the time this arrives, which is
+                // what makes it the turn boundary rather than an arbitrary moment inside one.
+                Event::MainEventsCleared => {
+                    World::with(World::tick);
+                }
                 _ => {}
             }
         });
@@ -124,7 +146,7 @@ fn App() -> Element {
 /// stylesheet the first time the branch changes, and nothing puts it back.
 #[component]
 fn AppBody() -> Element {
-    native_transition::install(&dioxus::mobile::window());
+    transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);
@@ -155,8 +177,24 @@ fn AppBody() -> Element {
     // mounts. Keying off the signal covers every path that pairs, not just the resume-on-launch one.
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, agents, session, composer);
+            page_host::install(client, sessions, session, composer);
         }
+    });
+
+    // The launcher is projected in the world from what the link last reported, so the roster has
+    // to get there. Reading both signals inside the effect is what subscribes it to their changes.
+    use_effect(move || {
+        let roster = Roster {
+            sessions: sessions(),
+            agents: agents(),
+        };
+        World::with(|world| world.insert(roster));
+    });
+
+    // The open conversation names its agent but does not carry the icon, so the chat snapshot
+    // needs the list too.
+    use_effect(move || {
+        World::with(|world| world.insert(Agents(agents())));
     });
 
     use_future(move || async move {
@@ -378,12 +416,18 @@ fn AppBody() -> Element {
         };
     }
 
-    // The desktop's launcher, unmodified, with the link's own state floated over it. Overlaid
-    // rather than stacked so the page still owns the whole viewport, which is what lets its hero
-    // stay centred.
+    // The desktop's launcher, unmodified, with the link's own state floated over it.
+    //
+    // Floated rather than stacked, because a header row shifts everything below it down by its
+    // whole height and the hero then centres half a header lower than the eye expects. What a row
+    // did buy was the guarantee that a page whose content outgrows the screen — a keyboard is
+    // enough — cannot start underneath the header. The inset below buys the same thing: symmetric,
+    // so the centre stays where it was, and deep enough at the top that yielding lands clear.
     rsx! {
-        div { class: "relative h-dvh",
-            vmux_start::page::Page {}
+        div { class: "relative h-dvh bg-background",
+            div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
+                vmux_start::page::Page {}
+            }
             LinkStatus {
                 reachable: reachable(),
                 on_team: move |_| team_open.set(true),
@@ -407,7 +451,7 @@ fn AppBody() -> Element {
 /// Whether the Mac is answering, and the two things that can be done about it.
 ///
 /// The launcher has nowhere to say any of this: on the desktop the link is the machine it is
-/// running on. So it floats above, in the space the hero leaves empty.
+/// running on. So the phone gives it a row of its own above the page.
 #[component]
 fn LinkStatus(
     reachable: bool,

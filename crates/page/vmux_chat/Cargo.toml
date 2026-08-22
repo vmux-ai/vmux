@@ -10,6 +10,8 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 dioxus = { version = "=0.7.9", default-features = false, features = [
     "minimal",
     "document",
@@ -26,5 +28,6 @@ serde_json = { workspace = true }
 similar = "2"
 unicode-segmentation = "1"
 vmux_core = { path = "../../vmux_core" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_ui = { path = "../../vmux_ui" }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }

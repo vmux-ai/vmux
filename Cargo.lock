@@ -10197,6 +10197,8 @@ dependencies = [
 name = "vmux_chat"
 version = "0.0.30"
 dependencies = [
+ "bevy_app",
+ "bevy_ecs",
  "dioxus",
  "dioxus-primitives",
  "pulldown-cmark",
@@ -10206,6 +10208,7 @@ dependencies = [
  "similar",
  "unicode-segmentation",
  "vmux_core",
+ "vmux_service",
  "vmux_ui",
  "vmux_wire",
 ]
@@ -10542,6 +10545,10 @@ dependencies = [
 name = "vmux_mobile"
 version = "0.0.30"
 dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "bevy_window",
  "block2 0.6.2",
  "dioxus",
  "dispatch2",
@@ -10581,6 +10588,7 @@ dependencies = [
  "dioxus-interpreter-js",
  "objc2-app-kit 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "objc2-ui-kit 0.3.2",
  "serde",
  "serde_json",
  "tokio",
@@ -10730,6 +10738,7 @@ name = "vmux_start"
 version = "0.0.30"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
@@ -10753,6 +10762,7 @@ name = "vmux_team"
 version = "0.0.30"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_ecs",
  "dioxus",

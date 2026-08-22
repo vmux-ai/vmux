@@ -26,11 +26,11 @@ use std::rc::Rc;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, TextCaret};
-use vmux_ui::components::icon::Icon;
-use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
-use vmux_ui::components::prompt_composer::{
+use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
+use vmux_ui::components::icon::Icon;
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};

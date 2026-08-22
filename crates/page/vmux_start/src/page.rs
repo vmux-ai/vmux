@@ -8,8 +8,9 @@ use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use crate::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
 };
-use crate::focus::StartFocus;
-use vmux_command::page::{CommandPalette, PaletteVariant, StartInlineTransition};
+use vmux_command::page::{
+    CommandPalette, PaletteVariant, StartInlineTransition, focus_prompt_input,
+};
 
 /// The `vmux://start/` launcher page: a cinematic centered hero that requests its
 /// entries on mount and renders [`CommandPalette`] in [`PaletteVariant::Start`].
@@ -25,21 +26,30 @@ pub fn Page(
     let mut mounted = use_signal(|| false);
 
     let _focus_listener = use_listener::<StartFocusInput, _>(START_FOCUS_INPUT_EVENT, move |_| {
-        StartFocus::request();
+        focus_prompt_input();
     });
 
+    // Reading `locale` is the subscription: the host titles the entries, so a language change has
+    // to ask for them again rather than re-render what the last language produced.
     use_effect(move || {
         locale();
         let _ = send(&StartDataRequest);
-        StartFocus::claim_on_mount();
+    });
+
+    use_effect(move || {
+        focus_prompt_input();
         mounted.set(true);
     });
 
-    use_effect(StartFocus::install);
-
     rsx! {
         main {
-            class: "relative isolate flex h-dvh flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
+            // Grown by flex rather than sized against the viewport, because a page fills what it
+            // was given and does not get to assume it was given the screen — the phone hands it
+            // what is left under a status header, which `h-dvh` would overlap. Not `h-full`
+            // either: a percentage height needs every ancestor to have resolved one, and where
+            // that chain breaks the box collapses to its content and `m-auto` has no room left to
+            // centre in. Both hosts put this in a flex column, so growing into it always works.
+            class: "relative isolate flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-4 py-6 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
             StartBackdrop {}
             // `m-auto` rather than `justify-center`: a centred flex item whose content outgrows
@@ -74,9 +84,4 @@ pub fn StartPage() -> Element {
     rsx! {
         Page {}
     }
-}
-
-/// Disable launcher-only focus capture before switching this document to an agent page.
-pub fn begin_agent_transition() {
-    StartFocus::release_for_agent_transition();
 }

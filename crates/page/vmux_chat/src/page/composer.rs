@@ -17,7 +17,7 @@ use super::transcript::QueuedPrompts;
 use crate::event::{ChatPasteMedia, ChatPickFiles};
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::components::prompt_composer::PromptComposer;
+use vmux_ui::components::composer::PromptComposer;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 

@@ -325,7 +325,7 @@ fn push_acp_model_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
             continue;
         };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         let cross = acp_agent_kind(&session.agent_id)
@@ -361,7 +361,7 @@ fn push_removed_acp_model_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
             continue;
         };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         let cross = acp_agent_kind(&session.agent_id)

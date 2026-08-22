@@ -3,7 +3,7 @@
 use crate::event::{ChatCreateWorktree, ChatSelectWorkspace};
 use crate::page::state::Chat;
 use dioxus::prelude::*;
-use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::hooks::send;
 
 /// Which project the turn will run in, and what its repository looks like.

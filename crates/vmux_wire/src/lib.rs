@@ -9,6 +9,8 @@ pub mod history;
 pub mod icon;
 pub mod layout;
 pub mod open_target;
+#[cfg(feature = "bevy")]
+pub mod page;
 pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;

@@ -1,6 +1,6 @@
 //! One page's `VirtualDom`, run here rather than compiled into a wasm bundle.
 //!
-//! [`PageSurface`](crate::PageSurface) owns the webview; this owns what fills it. The webview is
+//! [`WebView`](crate::WebView) owns the webview; this owns what fills it. The webview is
 //! handed a document carrying nothing but the interpreter, and every element it displays arrives
 //! as a batch of edits the page asks for and applies itself.
 //!
@@ -22,17 +22,17 @@ use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
 
-use crate::dom_request::{DomRequest, RequestQueue};
-use crate::embed::{Embedding, Outbox, Wake};
-use crate::event_selection::EventSelection;
-use crate::frame::PageFrame;
-use crate::measurement::PendingReads;
-use crate::surface_element::SurfaceElement;
+use crate::webview::dom_request::{DomRequest, RequestQueue};
+use crate::webview::element::Element;
+use crate::webview::embed::{Embedding, Outbox, Wake};
+use crate::webview::event_selection::EventSelection;
+use crate::webview::frame::PageFrame;
+use crate::webview::measurement::PendingReads;
 use crate::{EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.
 #[derive(Clone)]
-pub(crate) struct SurfaceDom {
+pub(crate) struct Dom {
     page: Rc<RefCell<PageDom>>,
     host: Rc<dyn PageHost>,
     reactor: Rc<tokio::runtime::Runtime>,
@@ -58,7 +58,7 @@ const FRAME_APPLIED: &str = "x-vmux-applied";
 /// the page reacting, not a message crossing a thread.
 type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 
-impl SurfaceDom {
+impl Dom {
     /// Mount a page and build the transport its components reach the host through.
     ///
     /// The transport is entered as a [`HostScope`] around every entry into the dom rather than
@@ -286,7 +286,7 @@ impl SurfaceDom {
         // Held for the handler and no longer, so a component reading it from anywhere else finds
         // nothing rather than a stale answer wearing the face of a current one.
         *self.selection.borrow_mut() = selection;
-        let element = SurfaceElement::new(event.element, self.requests.clone(), self.reads.clone());
+        let element = Element::new(event.element, self.requests.clone(), self.reads.clone());
         let outcome = page.handle(event, element);
         *self.selection.borrow_mut() = EventSelection::default();
         drop(page);
@@ -340,7 +340,7 @@ struct SurfaceHost {
     listeners: Listeners,
     requests: RequestQueue,
     reads: PendingReads,
-    /// Only ever read while [`SurfaceDom::handle_event`] holds it, which is the only time a page
+    /// Only ever read while [`Dom::handle_event`] holds it, which is the only time a page
     /// can meaningfully ask.
     selection: Rc<RefCell<EventSelection>>,
 }

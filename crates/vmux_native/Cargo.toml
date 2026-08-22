@@ -20,16 +20,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
 
-# The view half. wry is macOS-only here for the same reason it is in `vmux_browser`: that is the
-# only target with a window to parent a webview into.
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSAppearance",
-    "NSResponder",
-    "NSView",
-    "NSWindow",
-] }
+# The view half, on the two targets that have a window to parent a webview into. Spelled out
+# rather than as the `ui` alias because Cargo resolves dependencies before any build script runs;
+# `build_platform_cfg.rs` requires the manifest and the alias to say the same thing.
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",
     "CALayer",
@@ -38,6 +32,26 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 vmux_clipboard = { path = "../vmux_clipboard" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wry = { version = "0.53", features = ["transparent"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSAppearance",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-ui-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "UIInterface",
+    "UIResponder",
+    "UIView",
+    # `UIView::layer` is gated on this, and `raise_above_layers` is the whole reason we reach for
+    # a view at all.
+    "objc2-quartz-core",
+] }
 
 [dev-dependencies]
 dioxus = { workspace = true }

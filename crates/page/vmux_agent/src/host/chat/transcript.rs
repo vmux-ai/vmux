@@ -72,51 +72,44 @@ fn track_turn_duration(
 
 /// Push each changed session's conversation + run-state to its pane webview (the child
 /// `Browser` of the session entity).
+///
+/// A skipped push is remembered rather than dropped, which is why the change filter is read from
+/// [`Ref`] here instead of being a `Changed<..>` on the query. A change ticks once: if the webview
+/// is absent or not yet ready on the frame it lands, filtering on `Changed` retires the entity from
+/// the query and nothing brings it back, because the next thing to move the session may be minutes
+/// away or never. [`sync_chat_to_ready_views`] is not the backstop it looks like — `ChatSynced`
+/// makes it fire once per mount, so a change arriving after that first push is simply lost.
+///
+/// That is how a conversation strands on "Preparing agent…": the agent comes up, the daemon reports
+/// `Idle` a few hundred milliseconds later while the pane is still opening, and the pane keeps the
+/// installing snapshot for the life of the session.
 fn push_chat_to_page(
-    sessions: Query<
-        (
-            Entity,
-            Ref<AgentMessages>,
-            Ref<AgentRunState>,
-            Option<Ref<AgentTurnMeta>>,
-            Option<Ref<Profile>>,
-            Option<&PageMetadata>,
-            Ref<PromptQueue>,
-            Option<Ref<ImportedConversation>>,
-            Option<Ref<AgentConversationTitle>>,
-        ),
-        Or<(
-            Changed<AgentMessages>,
-            Changed<AgentRunState>,
-            Changed<AgentTurnMeta>,
-            Changed<PromptQueue>,
-            Changed<Profile>,
-            Changed<ImportedConversation>,
-            Changed<AgentConversationTitle>,
-        )>,
-    >,
+    sessions: Query<(
+        Entity,
+        Ref<AgentMessages>,
+        Ref<AgentRunState>,
+        Option<Ref<AgentTurnMeta>>,
+        Option<Ref<Profile>>,
+        Option<&PageMetadata>,
+        Ref<PromptQueue>,
+        Option<Ref<ImportedConversation>>,
+        Option<Ref<AgentConversationTitle>>,
+    )>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
+    chat_views: Query<(), With<AgentChatView>>,
     choices: Query<&crate::host::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
+    mut owed: Local<std::collections::HashSet<Entity>>,
     mut removed_messages: RemovedComponents<AgentMessages>,
     mut commands: Commands,
 ) {
     for stack in removed_messages.read() {
         last_push.remove(&stack);
+        owed.remove(&stack);
     }
     for (stack, messages, state, turn_meta, profile, meta, queue, imported, title) in &sessions {
-        let Ok(kids) = children.get(stack) else {
-            continue;
-        };
-        let Some(webview) = kids.iter().find(|&e| is_browser.contains(e)) else {
-            continue;
-        };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
-            continue;
-        }
-        let urgent = state.is_changed()
+        let moved = state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
             || profile.as_ref().is_some_and(|profile| profile.is_changed())
             || queue.is_changed()
@@ -124,27 +117,74 @@ fn push_chat_to_page(
                 .as_ref()
                 .is_some_and(|imported| imported.is_changed())
             || title.as_ref().is_some_and(|title| title.is_changed());
+        if !moved && !messages.is_changed() && !owed.contains(&stack) {
+            continue;
+        }
+        let Ok(kids) = children.get(stack) else {
+            owed.insert(stack);
+            continue;
+        };
+        // The chat view, not merely the first `Browser` child. A stack collects webviews — an
+        // agent that opens a terminal gets a pane, and a pane is a webview like any other — so
+        // "the first browser under this stack" is whichever the children happen to be ordered by,
+        // and a snapshot aimed at a terminal is a snapshot the conversation never receives.
+        // `AgentChatView` is how the rest of the crate finds this view; this was the one place
+        // that guessed.
+        let Some(webview) = kids.iter().find(|&e| chat_views.contains(e)) else {
+            owed.insert(stack);
+            continue;
+        };
+        if !browsers.can_emit_to(&webview) {
+            if owed.insert(stack) {
+                warn!(
+                    ?stack,
+                    "chat snapshot owed: its view cannot receive one yet"
+                );
+            }
+            continue;
+        }
         let now = std::time::Instant::now();
         let elapsed = last_push
             .get(&stack)
             .map(|last| now.saturating_duration_since(*last));
-        if !chat_snapshot_due(matches!(*state, AgentRunState::Streaming), urgent, elapsed) {
+        // Urgency stays tied to a real change rather than to being owed, because all it does is
+        // skip the streaming throttle. An owed push that inherited it would push every frame for
+        // as long as the turn ran; retried without it, it lands within the interval anyway.
+        if !chat_snapshot_due(matches!(*state, AgentRunState::Streaming), moved, elapsed) {
+            owed.insert(stack);
             continue;
+        }
+        owed.remove(&stack);
+        // The last hop with nothing to show for itself. Everything upstream now accounts for
+        // itself — the daemon reports the agent up, the status reaches the GUI, the run state
+        // takes it — and a pane still showing "Preparing agent…" means either this never runs
+        // again after the installing snapshot, or it runs and the page does not act on it.
+        // Streaming is left out: it pushes every 50ms for the length of a turn and says nothing
+        // this does not.
+        let snapshot = snapshot_of(
+            &messages,
+            &state,
+            turn_meta.as_deref(),
+            profile.as_deref(),
+            meta,
+            &queue,
+            imported.as_deref(),
+            title.as_deref(),
+            choices.get(webview).ok(),
+        );
+        if !matches!(*state, AgentRunState::Streaming) {
+            info!(
+                ?stack,
+                ?webview,
+                error = %snapshot.error,
+                items = messages.0.len(),
+                "chat snapshot pushed"
+            );
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(
-                &messages,
-                &state,
-                turn_meta.as_deref(),
-                profile.as_deref(),
-                meta,
-                &queue,
-                imported.as_deref(),
-                title.as_deref(),
-                choices.get(webview).ok(),
-            ),
+            &snapshot,
         ));
         last_push.insert(stack, now);
     }
@@ -291,7 +331,7 @@ fn sync_chat_to_ready_views(
         else {
             continue;
         };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -366,7 +406,7 @@ fn on_chat_history_request(
     let Ok((messages, state, turn_meta, imported)) = sessions.get(parent.parent()) else {
         return;
     };
-    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+    if !browsers.can_emit_to(&webview) {
         return;
     }
     let request = &trigger.event().payload;

@@ -2,17 +2,19 @@
 @import "tailwindcss";
 @source "../src";
 @source "../../vmux_browser/src";
-@source "../../page/vmux_agent/src";
-@source "../../page/vmux_chat/src";
-@source "../../page/vmux_command/src";
-@source "../../page/vmux_editor/src";
-@source "../../page/vmux_history/src";
-@source "../../page/vmux_layout/src";
 @source "../../host/vmux_service/src";
-@source "../../page/vmux_setting/src";
-@source "../../page/vmux_space/src";
-@source "../../page/vmux_team/src";
-@source "../../page/vmux_terminal/src";
+
+/* The whole page bucket, not a list of the pages that existed when someone last edited this.
+ *
+ * The list this replaces named twelve crates and was missing `vmux_start`, so `m-auto` — used by
+ * the launcher and nowhere else — was never generated, and the hero had never once been centred
+ * on either platform. A missing utility is not an error: the rule is simply absent and the layout
+ * is quietly wrong, which is why it went unnoticed for so long.
+ *
+ * `build.rs` already enumerates this bucket for change detection, for the reason given there:
+ * "what keeps a page added later from being silently unscanned". The same argument applies to
+ * what gets compiled, and this was the half still written out by hand. */
+@source "../../page";
 @source ".";
 
 @theme {

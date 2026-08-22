@@ -39,7 +39,7 @@ pub trait Assets {
 /// Where a page's emitted bytes go.
 ///
 /// One method, because the other direction is not the host's: a page registers its own listeners
-/// here and [`PageSurface::deliver`](crate::PageSurface::deliver) runs them.
+/// here and [`WebView::deliver`](crate::WebView::deliver) runs them.
 pub trait Outbox {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
 }

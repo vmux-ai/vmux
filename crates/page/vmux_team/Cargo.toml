@@ -13,9 +13,13 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+# Unconditional, unlike  below: the roster's model is plain ECS over wire types and the
+# phone runs it too. Only the desktop half needs the whole engine.
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 serde_json = { workspace = true }
@@ -23,7 +27,6 @@ vmux_service = { path = "../../host/vmux_service" }
 vmux_core = { path = "../../vmux_core" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
-bevy_ecs = { workspace = true }
 ron = { workspace = true }
 vmux_agent = { path = "../vmux_agent" }
 vmux_command = { path = "../vmux_command" }
