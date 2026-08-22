@@ -972,12 +972,29 @@ pub async fn run(
                     load.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
+                    // Bounded like the `session/new` below it: a resume that hangs is
+                    // indistinguishable from one that failed, and a failed load already falls
+                    // through to a fresh session rather than stopping. Logged because
+                    // `load_requested_session` discards the error to make that fall-through.
                     async move {
-                        cx.send_request(load).block_task().await.map(|response| {
-                            shared.publish_model_info(
-                                response.config_options.as_deref().unwrap_or_default(),
+                        let answered = tokio::time::timeout(
+                            ACP_STARTUP_TIMEOUT,
+                            cx.send_request(load).block_task(),
+                        )
+                        .await;
+                        let Ok(loaded) = answered else {
+                            tracing::warn!(
+                                target: "acp",
+                                "session/load did not answer within {}s; starting a fresh session",
+                                ACP_STARTUP_TIMEOUT.as_secs()
                             );
-                        })
+                            return Err("session/load timed out".to_string());
+                        };
+                        let response = loaded.map_err(|err| err.to_string())?;
+                        shared.publish_model_info(
+                            response.config_options.as_deref().unwrap_or_default(),
+                        );
+                        Ok(())
                     }
                 })
                 .await;
@@ -997,16 +1014,33 @@ pub async fn run(
                     new_session.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
+                    // Bounded for the same reason `initialize` is, and likelier than `initialize`
+                    // to hang: this is where the agent dials its MCP servers, so one that never
+                    // answers holds the whole startup open. Neither existing net catches that —
+                    // the handshake timeout is already spent, and `drain_stderr` only surfaces a
+                    // subprocess that *died*, where this one stays alive and idle. Unbounded, the
+                    // status below is never emitted and the GUI shows "Preparing agent…" for as
+                    // long as the app is left running.
                     async move {
-                        cx.send_request(new_session)
-                            .block_task()
-                            .await
-                            .map(|response| {
+                        match tokio::time::timeout(
+                            ACP_STARTUP_TIMEOUT,
+                            cx.send_request(new_session).block_task(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(response)) => {
                                 shared.publish_model_info(
                                     response.config_options.as_deref().unwrap_or_default(),
                                 );
-                                response.session_id
-                            })
+                                Ok(response.session_id)
+                            }
+                            Ok(Err(err)) => Err(err.to_string()),
+                            Err(_) => Err(format!(
+                                "no answer within {}s{}",
+                                ACP_STARTUP_TIMEOUT.as_secs(),
+                                shared.stderr_detail()
+                            )),
+                        }
                     }
                 })
                 .await;
