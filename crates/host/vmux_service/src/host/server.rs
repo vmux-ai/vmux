@@ -423,7 +423,17 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                // Dropped frames, not a dropped connection. The remote path treats
+                                // a lag as significant and resends a snapshot; this one resumed
+                                // mid-stream and said nothing, so whatever the GUI missed — a run
+                                // status among it — was simply gone.
+                                Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                                    tracing::warn!(
+                                        dropped,
+                                        "service stream lagged; frames were dropped"
+                                    );
+                                    continue;
+                                }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
                         }
@@ -611,7 +621,10 @@ async fn handle_client(
                                     break;
                                 }
                             }
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                                tracing::warn!(dropped, "agent stream lagged; frames were dropped");
+                                continue;
+                            }
                             Err(broadcast::error::RecvError::Closed) => break,
                         }
                     }
@@ -882,7 +895,17 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                // Dropped frames, not a dropped connection. The remote path treats
+                                // a lag as significant and resends a snapshot; this one resumed
+                                // mid-stream and said nothing, so whatever the GUI missed — a run
+                                // status among it — was simply gone.
+                                Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                                    tracing::warn!(
+                                        dropped,
+                                        "service stream lagged; frames were dropped"
+                                    );
+                                    continue;
+                                }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
                         }
@@ -1077,7 +1100,17 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                // Dropped frames, not a dropped connection. The remote path treats
+                                // a lag as significant and resends a snapshot; this one resumed
+                                // mid-stream and said nothing, so whatever the GUI missed — a run
+                                // status among it — was simply gone.
+                                Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                                    tracing::warn!(
+                                        dropped,
+                                        "service stream lagged; frames were dropped"
+                                    );
+                                    continue;
+                                }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
                         }

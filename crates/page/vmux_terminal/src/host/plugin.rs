@@ -1659,6 +1659,11 @@ fn poll_service_messages(
                     .write(vmux_service::agent_events::PageAgentDelta { sid, text });
             }
             ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
+                // The one hop never yet observed. A conversation stranded on "Preparing agent…"
+                // has the daemon reporting the agent came up and the pane showing otherwise, and
+                // every step in between now accounts for itself — so either this line appears and
+                // the status reached the GUI, or it does not and the stream never carried it.
+                tracing::info!(%sid, ?status, "run status from the daemon");
                 writers
                     .page_agent_run_status
                     .write(vmux_service::agent_events::PageAgentRunStatus { sid, status });
