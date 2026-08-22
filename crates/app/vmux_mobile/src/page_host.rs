@@ -59,6 +59,15 @@ use crate::{Api, ApiError};
 /// needs no interval at all.
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 
+/// How long to keep asking for a session's models before giving up on it.
+///
+/// A conversation the phone itself started is asked about before the Mac has finished registering
+/// it, so the first answer is a refusal that resolves on its own within a second or so. Anything
+/// still refusing after this many tries is refusing for a reason retrying will not fix.
+const MODEL_FETCH_ATTEMPTS: u8 = 5;
+
+const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
+
 pub(crate) struct MobileHost {
     /// Which installation this host is. A watcher compares it against [`EPOCH`] to find out that
     /// it is serving a page on behalf of a link nobody holds any more.
@@ -350,6 +359,13 @@ impl MobileHost {
     /// Fetched per session rather than carried on the session row, because the list arrives from
     /// the agent after the session exists and a stale copy would offer models it has since
     /// dropped.
+    ///
+    /// A refusal is retried rather than dropped. Waiting on the session to *change* is right for a
+    /// conversation the phone opened — there is nothing else to wait for — but wrong for one it
+    /// just created: the Mac is still registering the session when the page mounts and asks, so the
+    /// first answer is `no such session` for a session that exists a moment later. The sid never
+    /// changes after that, so a dropped first answer left the composer with no models for the life
+    /// of the conversation.
     fn watch_models(&self, mut on_bytes: BytesListener) {
         let (api, session) = (self.api.clone(), self.session);
         let epoch = self.epoch;
@@ -360,23 +376,31 @@ impl MobileHost {
                     return;
                 }
                 let sid = rc.reset_and_run_in(|| session.sid());
-                if !sid.is_empty() {
+                let mut attempts = MODEL_FETCH_ATTEMPTS;
+                while !sid.is_empty() && attempts > 0 {
+                    attempts -= 1;
                     let fetched = api.models(&sid).await;
                     // The link can be replaced while a request is in flight, and an answer that
                     // arrives after that belongs to a page nobody is looking at any more.
                     if superseded(epoch) {
                         return;
                     }
-                    if let Ok(state) = fetched
-                        && let Some(bytes) = encode(&ModelState {
-                            current_model_id: state.selected_id,
-                            models: state.models,
-                            effort_current: state.effort,
-                            effort_levels: state.effort_levels,
-                            ..ModelState::default()
-                        })
-                    {
-                        on_bytes(&bytes);
+                    match fetched {
+                        Ok(state) => {
+                            if let Some(bytes) = encode(&ModelState {
+                                current_model_id: state.selected_id,
+                                models: state.models,
+                                effort_current: state.effort,
+                                effort_levels: state.effort_levels,
+                                ..ModelState::default()
+                            }) {
+                                on_bytes(&bytes);
+                            }
+                            break;
+                        }
+                        // Pairing is gone, or the session is. Neither is fixed by asking again.
+                        Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                        Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
                     }
                 }
                 if changed.next().await.is_none() {
