@@ -149,20 +149,36 @@ fn push_chat_to_page(
             continue;
         }
         owed.remove(&stack);
+        // The last hop with nothing to show for itself. Everything upstream now accounts for
+        // itself — the daemon reports the agent up, the status reaches the GUI, the run state
+        // takes it — and a pane still showing "Preparing agent…" means either this never runs
+        // again after the installing snapshot, or it runs and the page does not act on it.
+        // Streaming is left out: it pushes every 50ms for the length of a turn and says nothing
+        // this does not.
+        let snapshot = snapshot_of(
+            &messages,
+            &state,
+            turn_meta.as_deref(),
+            profile.as_deref(),
+            meta,
+            &queue,
+            imported.as_deref(),
+            title.as_deref(),
+            choices.get(webview).ok(),
+        );
+        if !matches!(*state, AgentRunState::Streaming) {
+            info!(
+                ?stack,
+                ?webview,
+                error = %snapshot.error,
+                items = messages.0.len(),
+                "chat snapshot pushed"
+            );
+        }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(
-                &messages,
-                &state,
-                turn_meta.as_deref(),
-                profile.as_deref(),
-                meta,
-                &queue,
-                imported.as_deref(),
-                title.as_deref(),
-                choices.get(webview).ok(),
-            ),
+            &snapshot,
         ));
         last_push.insert(stack, now);
     }
