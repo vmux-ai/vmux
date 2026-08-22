@@ -1,44 +1,9 @@
 use std::path::PathBuf;
 
-use serde_json::Value;
-
 use crate::lsp::{LspOutbox, PendingMap};
 
 pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri).ok()?.to_file_path().ok()
-}
-
-pub fn dispatch_message(msg: Value, pending: &PendingMap, outbox: &LspOutbox) {
-    if let Some(id) = msg.get("id").and_then(|v| v.as_i64())
-        && msg.get("method").is_none()
-    {
-        if let Some(tx) = pending
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&id)
-        {
-            let _ = tx.send(msg);
-        }
-        return;
-    }
-    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    if method == "textDocument/publishDiagnostics" {
-        let Some(params) = msg.get("params") else {
-            return;
-        };
-        let Ok(parsed) =
-            serde_json::from_value::<lsp_types::PublishDiagnosticsParams>(params.clone())
-        else {
-            return;
-        };
-        if let Some(path) = path_from_uri(parsed.uri.as_str()) {
-            outbox
-                .0
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push((path, parsed.diagnostics));
-        }
-    }
 }
 
 use std::io::BufReader;
@@ -51,7 +16,9 @@ use std::time::Duration;
 
 use std::collections::HashMap;
 
+use crate::lsp::reader::Reader;
 use crate::lsp::registry::ServerSpec;
+use crate::lsp::server_request::ServerEvent;
 use crate::lsp::{ServerKey, framing};
 
 pub struct ServerClient {
@@ -69,6 +36,7 @@ impl ServerClient {
         spec: &ServerSpec,
         root: &std::path::Path,
         outbox: LspOutbox,
+        events: crossbeam_channel::Sender<ServerEvent>,
     ) -> std::io::Result<Self> {
         let store_root = crate::lsp::store::default_root();
         let mut child = Command::new(&spec.command)
@@ -96,14 +64,8 @@ impl ServerClient {
             }
         });
 
-        let r_pending = pending.clone();
-        let r_outbox = outbox.clone();
-        let reader = std::thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            while let Ok(Some(msg)) = framing::read_message(&mut r) {
-                dispatch_message(msg, &r_pending, &r_outbox);
-            }
-        });
+        let dispatcher = Reader::new(pending.clone(), outbox, outgoing.clone(), events, root);
+        let reader = std::thread::spawn(move || dispatcher.run(stdout));
 
         let cmd_name = spec.command.clone();
         let stderr_thread = std::thread::spawn(move || {
@@ -179,17 +141,52 @@ impl ServerClient {
         let params = serde_json::json!({
             "processId": std::process::id(),
             "rootUri": root_uri,
-            "capabilities": {
-                "textDocument": {
-                    "publishDiagnostics": { "relatedInformation": false },
-                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true }
-                }
-            },
+            "capabilities": Self::capabilities(),
             "clientInfo": { "name": "vmux" }
         });
         self.request("initialize", params, Duration::from_secs(10))?;
         self.notify("initialized", serde_json::json!({}));
         Ok(())
+    }
+
+    /// What this client tells a server it can do.
+    ///
+    /// Every entry here is a promise the reader thread or a system actually keeps. Advertising
+    /// more than that is worse than advertising less: a server sends work that then goes
+    /// unanswered, which is invisible from this side.
+    fn capabilities() -> lsp_types::ClientCapabilities {
+        lsp_types::ClientCapabilities {
+            workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                apply_edit: Some(true),
+                workspace_edit: Some(lsp_types::WorkspaceEditClientCapabilities {
+                    document_changes: Some(true),
+                    // Empty, not absent: file create/rename/delete is refused, so a conforming
+                    // server will not put one in a `WorkspaceEdit`.
+                    resource_operations: Some(vec![]),
+                    failure_handling: Some(lsp_types::FailureHandlingKind::Abort),
+                    ..Default::default()
+                }),
+                configuration: Some(true),
+                workspace_folders: Some(true),
+                ..Default::default()
+            }),
+            text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                publish_diagnostics: Some(lsp_types::PublishDiagnosticsClientCapabilities {
+                    related_information: Some(false),
+                    ..Default::default()
+                }),
+                document_symbol: Some(lsp_types::DocumentSymbolClientCapabilities {
+                    hierarchical_document_symbol_support: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            window: Some(lsp_types::WindowClientCapabilities {
+                work_done_progress: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 
     pub fn did_open(&self, uri: &str, language_id: &str, version: i32, text: &str) {
@@ -240,69 +237,4 @@ impl Drop for ServerClient {
 
 pub fn server_key(root: &std::path::Path, spec: &ServerSpec) -> ServerKey {
     (root.to_path_buf(), spec.command.clone())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::sync::mpsc;
-
-    fn outbox() -> LspOutbox {
-        LspOutbox::default()
-    }
-
-    fn pending() -> PendingMap {
-        PendingMap::default()
-    }
-
-    #[test]
-    fn publish_diagnostics_lands_in_outbox() {
-        let ob = outbox();
-        let pd = pending();
-        let msg = json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/publishDiagnostics",
-            "params": {
-                "uri": "file:///tmp/main.rs",
-                "diagnostics": [{
-                    "range": {"start": {"line": 1, "character": 2},
-                              "end": {"line": 1, "character": 5}},
-                    "severity": 1,
-                    "message": "boom",
-                    "source": "rustc"
-                }]
-            }
-        });
-        dispatch_message(msg, &pd, &ob);
-        let q = ob.0.lock().unwrap();
-        assert_eq!(q.len(), 1);
-        assert_eq!(q[0].0, PathBuf::from("/tmp/main.rs"));
-        assert_eq!(q[0].1.len(), 1);
-        assert_eq!(q[0].1[0].message, "boom");
-    }
-
-    #[test]
-    fn response_routes_to_pending_sender() {
-        let ob = outbox();
-        let pd = pending();
-        let (tx, rx) = mpsc::channel();
-        pd.lock().unwrap().insert(7, tx);
-        dispatch_message(json!({"jsonrpc": "2.0", "id": 7, "result": {}}), &pd, &ob);
-        let got = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
-        assert_eq!(got["id"], 7);
-        assert!(pd.lock().unwrap().is_empty(), "pending entry consumed");
-    }
-
-    #[test]
-    fn unknown_notification_is_ignored() {
-        let ob = outbox();
-        let pd = pending();
-        dispatch_message(
-            json!({"method": "window/logMessage", "params": {}}),
-            &pd,
-            &ob,
-        );
-        assert!(ob.0.lock().unwrap().is_empty());
-    }
 }

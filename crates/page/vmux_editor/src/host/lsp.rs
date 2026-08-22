@@ -14,14 +14,19 @@ pub mod lint;
 pub mod manager;
 pub mod manager_page;
 pub mod purl;
+pub mod reader;
 pub mod registry;
+pub mod server_request;
 pub mod store;
 pub mod target;
+pub mod wire;
+pub mod workspace_edit;
 
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let outbox = LspOutbox::default();
-        app.insert_resource(outbox.clone());
+        app.insert_resource(outbox.clone())
+            .add_plugins(server_request::ServerRequestPlugin);
         manager::build(app, outbox);
         app.add_plugins(manager_page::ManagerPlugin);
     }

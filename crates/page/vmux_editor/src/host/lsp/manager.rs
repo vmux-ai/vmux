@@ -87,6 +87,7 @@ use bevy::prelude::*;
 
 use crate::lsp::client::{ServerClient, server_key};
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
+use crate::lsp::server_request::{ServerEvent, ServerEvents};
 use crate::lsp::{LspOutbox, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
@@ -138,12 +139,12 @@ pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldR
         .unwrap_or_default()
 }
 
-#[derive(Default)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
     outbox: LspOutbox,
+    events: crossbeam_channel::Sender<ServerEvent>,
     inflight: Vec<InFlight>,
 }
 
@@ -160,8 +161,25 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager {
+    pub(crate) fn new(outbox: LspOutbox, events: crossbeam_channel::Sender<ServerEvent>) -> Self {
+        Self {
+            servers: HashMap::new(),
+            open_docs: HashMap::new(),
+            failed: HashSet::new(),
+            outbox,
+            events,
+            inflight: Vec::new(),
+        }
+    }
+
     fn is_open(&self, path: &Path) -> bool {
         self.open_docs.contains_key(path)
+    }
+
+    /// The version last sent to the server, for checking a `WorkspaceEdit` was computed against
+    /// the text we still hold.
+    pub(crate) fn document_version(&self, path: &Path) -> Option<i32> {
+        self.open_docs.get(path).map(|doc| doc.version)
     }
 
     fn ensure_server(
@@ -176,7 +194,7 @@ impl LspManager {
         if self.failed.contains(&key) {
             return None;
         }
-        match ServerClient::spawn(spec, root, self.outbox.clone()) {
+        match ServerClient::spawn(spec, root, self.outbox.clone(), self.events.clone()) {
             Ok(client) => {
                 self.servers.insert(key.clone(), client);
                 Some(key)
@@ -706,27 +724,25 @@ fn drain_lsp_requests(
 }
 
 pub fn build(app: &mut App, outbox: LspOutbox) {
-    app.insert_non_send(LspManager {
-        outbox,
-        ..Default::default()
-    })
-    .init_resource::<LintOutbox>()
-    .init_resource::<DiagState>()
-    .add_message::<LspGoto>()
-    .add_message::<LspFolds>()
-    .add_systems(
-        Update,
-        (
-            lsp_open_documents,
-            lint_on_open,
-            drain_lsp_diagnostics,
-            drain_lint,
-            drain_lsp_requests,
-            emit_diagnostics_system,
-            lsp_status_system,
-        )
-            .chain(),
-    );
+    let events = app.world().resource::<ServerEvents>().sender();
+    app.insert_non_send(LspManager::new(outbox, events))
+        .init_resource::<LintOutbox>()
+        .init_resource::<DiagState>()
+        .add_message::<LspGoto>()
+        .add_message::<LspFolds>()
+        .add_systems(
+            Update,
+            (
+                lsp_open_documents,
+                lint_on_open,
+                drain_lsp_diagnostics,
+                drain_lint,
+                drain_lsp_requests,
+                emit_diagnostics_system,
+                lsp_status_system,
+            )
+                .chain(),
+        );
 }
 
 use bevy_cef::prelude::{BinHostEmitEvent, Browsers};

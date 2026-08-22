@@ -10386,6 +10386,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
+ "crossbeam-channel",
  "dioxus",
  "flate2",
  "image",

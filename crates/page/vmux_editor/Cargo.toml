@@ -25,6 +25,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
+crossbeam-channel = { workspace = true }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 lsp-types = "0.97"
