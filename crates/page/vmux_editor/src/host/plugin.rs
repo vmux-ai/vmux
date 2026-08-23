@@ -278,6 +278,87 @@ impl EditState {
     }
 }
 
+/// Editor state for files this view has already shown.
+///
+/// Switching files replaces a view's contents in place, and discarding the state meant the undo
+/// tree, cursor, marks, jump list and search all started over on the way back. Holding them here
+/// is what makes the open-editors list behave like a tab strip rather than a history of reloads.
+#[derive(Component, Default)]
+struct ParkedEdits {
+    by_path: HashMap<PathBuf, ParkedEdit>,
+    recent: Vec<PathBuf>,
+}
+
+struct ParkedEdit {
+    edit: EditState,
+    diff: vmux_git::GitDiffSource,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl ParkedEdits {
+    /// `EditCore` keeps a whole-rope snapshot per undo group, so this is bounded by count rather
+    /// than left to grow with every file a session visits.
+    const CAPACITY: usize = 8;
+
+    /// Move the view's current editor state off `entity` and hold it under `path`.
+    fn park(entity: &mut EntityWorldMut, path: PathBuf) {
+        if !entity.contains::<EditState>() || !entity.contains::<vmux_git::GitDiffSource>() {
+            return;
+        }
+        let Some(edit) = entity.take::<EditState>() else {
+            return;
+        };
+        let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
+            return;
+        };
+        let parked = ParkedEdit {
+            edit,
+            diff,
+            modified: Self::modified_at(&path),
+        };
+        let mut edits = entity.take::<ParkedEdits>().unwrap_or_default();
+        edits.insert(path, parked);
+        entity.insert(edits);
+    }
+
+    fn insert(&mut self, path: PathBuf, edit: ParkedEdit) {
+        self.recent.retain(|p| p != &path);
+        self.recent.push(path.clone());
+        self.by_path.insert(path, edit);
+        while self.recent.len() > Self::CAPACITY {
+            let evicted = self.recent.remove(0);
+            self.by_path.remove(&evicted);
+        }
+    }
+
+    /// Take back the state for `path`, unless the file moved on underneath it.
+    ///
+    /// Unsaved edits win over a changed file: dropping them would lose work, and the external
+    /// change path already refuses to overwrite a dirty buffer and warns instead.
+    fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
+        let parked = self.by_path.remove(path)?;
+        self.recent.retain(|p| p != path);
+        if parked.edit.core.dirty || parked.modified == Self::modified_at(path) {
+            return Some(parked);
+        }
+        None
+    }
+
+    /// Whether a file this view is no longer showing has unsaved changes.
+    ///
+    /// Before parking, only the visible file's dirtiness was knowable at all — every other entry
+    /// in the open-editors list had nowhere to read it from.
+    fn is_dirty(&self, path: &Path) -> bool {
+        self.by_path
+            .get(path)
+            .is_some_and(|parked| parked.edit.core.dirty)
+    }
+
+    fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).ok()?.modified().ok()
+    }
+}
+
 struct CachedWrapView {
     generation: u64,
     mode: vmux_core::editor::WordWrap,
@@ -619,12 +700,12 @@ fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_co
 }
 
 fn load_file_buffers(
-    q: Query<(Entity, &FileView), UnloadedFileView>,
+    mut q: Query<(Entity, &FileView, Option<&mut ParkedEdits>), UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
-    for (entity, fv) in &q {
+    for (entity, fv, mut parked) in &mut q {
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
             commands
@@ -670,6 +751,25 @@ fn load_file_buffers(
             }
             _ => {}
         }
+        let kind = settings_keymap(&settings);
+        let (maps, leader) = settings_mappings(&settings);
+        let markdown = crate::markdown::is_markdown_path(&fv.path);
+        if let Some(parked) = parked.as_mut()
+            && let Some(resumed) = parked.resume(&fv.path)
+        {
+            let mut entity_commands = commands.entity(entity);
+            entity_commands
+                .insert((
+                    resumed.edit,
+                    EditorKeymap(kind.make(&maps, &leader)),
+                    resumed.diff,
+                ))
+                .remove::<MissingFileView>();
+            if markdown {
+                entity_commands.remove::<NoteSent>().insert(OutlineDirty);
+            }
+            continue;
+        }
         let text = match std::fs::read(&fv.path) {
             Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(t) => t,
@@ -699,7 +799,6 @@ fn load_file_buffers(
             }
         };
         let hl = HighlightCache::new(&fv.path);
-        let kind = settings_keymap(&settings);
         let mut core = EditCore::new(
             fv.path.clone(),
             hl.language.clone(),
@@ -713,8 +812,6 @@ fn load_file_buffers(
             folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
-        let (maps, leader) = settings_mappings(&settings);
-        let markdown = crate::markdown::is_markdown_path(&fv.path);
         let mut entity_commands = commands.entity(entity);
         entity_commands
             .insert((
@@ -1696,24 +1793,29 @@ fn navigate_file_view(
     manager: &mut crate::lsp::manager::LspManager,
     commands: &mut Commands,
 ) {
-    manager.close(&fv.path);
-    let url = url::Url::from_file_path(&path)
+    let previous = std::mem::replace(&mut fv.path, path);
+    manager.close(&previous);
+    let url = url::Url::from_file_path(&fv.path)
         .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
-    meta.title = path
+        .unwrap_or_else(|_| format!("file://{}", fv.path.to_string_lossy()));
+    meta.title = fv
+        .path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string_lossy().to_string());
+        .unwrap_or_else(|| fv.path.to_string_lossy().to_string());
     meta.url = url;
-    fv.path = path;
     vp.top_row = top_line;
+    commands.queue(move |world: &mut World| {
+        let Ok(mut entity) = world.get_entity_mut(entity) else {
+            return;
+        };
+        ParkedEdits::park(&mut entity, previous);
+    });
     commands
         .entity(entity)
         .remove::<FileDir>()
         .remove::<FileBuffer>()
         .remove::<FileMedia>()
-        .remove::<EditState>()
-        .remove::<vmux_git::GitDiffSource>()
         .remove::<EditorKeymap>()
         .remove::<NoteSent>()
         .remove::<LspEditDirty>()
@@ -3768,29 +3870,38 @@ fn open_editor_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
+type OpenEditorsView = (
+    Entity,
+    &'static FileView,
+    &'static ExplorerState,
+    Option<&'static EditState>,
+    Option<&'static ParkedEdits>,
+);
+
 fn emit_open_editors(
-    q: Query<(Entity, &FileView, &ExplorerState, Option<&EditState>), OpenEditorsDirtyReady>,
+    q: Query<OpenEditorsView, OpenEditorsDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, fv, st, edit) in &q {
+    for (entity, fv, st, edit, parked) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
         let active_dirty = edit.map(|e| e.core.dirty).unwrap_or(false);
-        let items = st
-            .open_editors
-            .iter()
-            .map(|p| {
-                let active = *p == fv.path;
-                OpenEditorItem {
-                    name: open_editor_name(p),
-                    path: p.to_string_lossy().into_owned(),
-                    active,
-                    dirty: active && active_dirty,
-                }
-            })
-            .collect();
+        let mut items = Vec::with_capacity(st.open_editors.len());
+        for path in &st.open_editors {
+            let active = *path == fv.path;
+            let dirty = match active {
+                true => active_dirty,
+                false => parked.is_some_and(|p| p.is_dirty(path)),
+            };
+            items.push(OpenEditorItem {
+                name: open_editor_name(path),
+                path: path.to_string_lossy().into_owned(),
+                active,
+                dirty,
+            });
+        }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             EXPLORER_OPEN_EDITORS_EVENT,
@@ -4850,6 +4961,186 @@ mod url_tests {
     #[test]
     fn empty_path_is_root() {
         assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
+    }
+}
+
+#[cfg(test)]
+mod parked_edit_tests {
+    use super::*;
+
+    /// One view navigating between two files, driven through the observer production uses.
+    struct Session {
+        app: App,
+        entity: Entity,
+        dir: tempfile::TempDir,
+    }
+
+    impl Session {
+        fn open(first: &str) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_systems(Update, load_file_buffers)
+                .add_observer(on_file_open);
+            app.world_mut().insert_non_send(SelfWrites::default());
+            app.world_mut().insert_non_send(Browsers::default());
+            app.world_mut()
+                .insert_non_send(crate::lsp::manager::LspManager::new(
+                    crate::lsp::LspOutbox::default(),
+                    crate::lsp::server_request::ServerEvents::default().sender(),
+                ));
+            let entity = app
+                .world_mut()
+                .spawn((
+                    FileView {
+                        path: dir.path().join(first),
+                    },
+                    FileViewport {
+                        top_row: 0,
+                        rows: 0,
+                        wrap_columns: 0,
+                        word_wrap: vmux_core::editor::WordWrap::default(),
+                        word_wrap_column: 80,
+                    },
+                    PageMetadata::default(),
+                ))
+                .id();
+            Self { app, entity, dir }
+        }
+
+        fn write(&self, name: &str, text: &str) {
+            std::fs::write(self.dir.path().join(name), text).unwrap();
+        }
+
+        fn navigate_to(&mut self, name: &str) {
+            let path = self.dir.path().join(name).to_string_lossy().into_owned();
+            self.app.world_mut().trigger(BinReceive {
+                webview: self.entity,
+                payload: FileOpenEvent { path },
+            });
+            self.app.update();
+        }
+
+        fn type_into_buffer(&mut self, text: &str) {
+            let mut edit = self
+                .app
+                .world_mut()
+                .get_mut::<EditState>(self.entity)
+                .expect("a loaded buffer");
+            edit.core.apply(EditCommand::InsertText(text.to_string()));
+        }
+
+        fn text(&self) -> String {
+            self.app
+                .world()
+                .get::<EditState>(self.entity)
+                .unwrap()
+                .core
+                .buffer
+                .text()
+        }
+
+        fn undo(&mut self) {
+            self.app
+                .world_mut()
+                .get_mut::<EditState>(self.entity)
+                .unwrap()
+                .core
+                .apply(EditCommand::Undo);
+        }
+    }
+
+    /// The bug this exists to stop: edit a file, look at another, come back, and the undo tree,
+    /// cursor and marks were all gone because `navigate_file_view` dropped `EditState`.
+    #[test]
+    fn returning_to_a_file_keeps_its_undo_history() {
+        let mut s = Session::open("main.rs");
+        s.write("main.rs", "one\n");
+        s.write("lib.rs", "two\n");
+        s.app.update();
+        assert_eq!(s.text(), "one\n");
+
+        s.type_into_buffer("EDIT");
+        assert_eq!(s.text(), "EDITone\n");
+
+        s.navigate_to("lib.rs");
+        assert_eq!(s.text(), "two\n");
+
+        s.navigate_to("main.rs");
+        assert_eq!(
+            s.text(),
+            "EDITone\n",
+            "unsaved edit survives the round trip"
+        );
+        s.undo();
+        assert_eq!(s.text(), "one\n", "and so does the undo tree behind it");
+    }
+
+    /// A clean buffer whose file moved on must not be restored over the newer text.
+    #[test]
+    fn a_file_changed_while_parked_is_reloaded() {
+        let mut s = Session::open("main.rs");
+        s.write("main.rs", "before\n");
+        s.write("lib.rs", "other\n");
+        s.app.update();
+        assert_eq!(s.text(), "before\n");
+
+        s.navigate_to("lib.rs");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        s.write("main.rs", "changed on disk\n");
+        s.navigate_to("main.rs");
+
+        assert_eq!(s.text(), "changed on disk\n");
+    }
+
+    /// Losing unsaved work to an external write would be worse than showing stale text; the
+    /// external-change path warns about the conflict instead.
+    #[test]
+    fn unsaved_edits_survive_a_file_changing_while_parked() {
+        let mut s = Session::open("main.rs");
+        s.write("main.rs", "before\n");
+        s.write("lib.rs", "other\n");
+        s.app.update();
+
+        s.type_into_buffer("MINE");
+        s.navigate_to("lib.rs");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        s.write("main.rs", "theirs\n");
+        s.navigate_to("main.rs");
+
+        assert_eq!(s.text(), "MINEbefore\n");
+    }
+
+    #[test]
+    fn only_the_most_recent_files_are_held() {
+        let mut edits = ParkedEdits::default();
+        for i in 0..ParkedEdits::CAPACITY + 3 {
+            let path = PathBuf::from(format!("/tmp/{i}.rs"));
+            let core = EditCore::new(
+                path.clone(),
+                "Rust".into(),
+                "x\n",
+                crate::edit::EditMode::Normal,
+            );
+            edits.insert(
+                path,
+                ParkedEdit {
+                    edit: EditState::new(
+                        core,
+                        HighlightCache::new(Path::new("/tmp/a.rs")),
+                        crate::fold::FoldState::default(),
+                    ),
+                    diff: vmux_git::GitDiffSource {
+                        content: String::new(),
+                        dirty: false,
+                    },
+                    modified: None,
+                },
+            );
+        }
+        assert_eq!(edits.by_path.len(), ParkedEdits::CAPACITY);
+        assert!(edits.by_path.contains_key(Path::new("/tmp/10.rs")));
+        assert!(!edits.by_path.contains_key(Path::new("/tmp/0.rs")));
     }
 }
 
