@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use dioxus_core::{Element, Event, VirtualDom};
+use dioxus_core::{Element, Event, VirtualDom, WriteMutations};
 use dioxus_html::{EventData, HtmlEvent, MountedData, PlatformEventData, RenderedElementBacking};
 use dioxus_interpreter_js::MutationState;
 
@@ -15,18 +15,22 @@ use crate::event_request::EventOutcome;
 pub type PageComponent = fn() -> Element;
 
 /// A page whose components run here, rendering into a document owned by something else.
-pub struct PageDom {
+///
+/// `W` is where a render is written. It defaults to the interpreter's binary channel, which is
+/// what a webview applies; [`ShadowTree`](crate::ShadowTree) is the other sink in this crate, and
+/// swapping it in is what lets a test read the document the page would have been given.
+pub struct PageDom<W = MutationState> {
     dom: VirtualDom,
-    mutations: MutationState,
+    mutations: W,
     unflushed: bool,
 }
 
-impl PageDom {
-    /// Mount `app` without rendering it. Call [`PageDom::rebuild`] for the first batch.
+impl<W: WriteMutations + Default> PageDom<W> {
+    /// Mount `app` without rendering it.
     ///
     /// `instance` is provided before the first render rather than after, so a page that differs
     /// per view reads its difference on the render that produces the document.
-    pub fn mount(app: PageComponent, instance: crate::Instance) -> Self {
+    pub(crate) fn with_sink(app: PageComponent, instance: crate::Instance) -> Self {
         Self::install_event_converter();
 
         let dom = VirtualDom::new(app);
@@ -34,7 +38,7 @@ impl PageDom {
 
         Self {
             dom,
-            mutations: MutationState::default(),
+            mutations: W::default(),
             unflushed: false,
         }
     }
@@ -52,37 +56,34 @@ impl PageDom {
         });
     }
 
-    /// The first render, which always produces a batch: the document starts empty.
-    pub fn rebuild(&mut self) -> Vec<u8> {
+    /// The first render, which always describes a document that does not exist yet.
+    pub(crate) fn diff_rebuild(&mut self) {
         self.dom.rebuild(&mut self.mutations);
         self.unflushed = true;
-        self.mutations.export_memory()
     }
 
-    /// Every render after the first.
-    ///
-    /// `None` means there is nothing to send — either nothing changed, or the last batch has not
-    /// been acknowledged yet. A caller that gets `None` must ask again after [`PageDom::flushed`],
-    /// or the page stops updating.
-    ///
-    /// Rendering is withheld while a batch is in flight because an effect may read the document,
-    /// and the document does not yet reflect the render that scheduled the effect.
-    pub fn render(&mut self) -> Option<Vec<u8>> {
+    /// Every render after the first, and whether one happened.
+    pub(crate) fn diff_render(&mut self) -> bool {
         if self.unflushed || !self.has_work() {
-            return None;
+            return false;
         }
 
         self.dom.render_immediate(&mut self.mutations);
         self.unflushed = true;
 
-        Some(self.mutations.export_memory())
+        true
+    }
+
+    /// What the renders so far have been written into.
+    pub(crate) fn sink(&self) -> &W {
+        &self.mutations
     }
 
     /// Whether a render would change anything, asked without blocking.
     ///
-    /// An empty batch cannot answer this: `export_memory` always emits the channel's header, so a
-    /// render with no work still yields bytes — 36 of them, whose contents move with channel state
-    /// and so cannot be compared against a fixed baseline either.
+    /// An empty batch cannot answer this: the interpreter's `export_memory` always emits the
+    /// channel's header, so a render with no work still yields bytes — 36 of them, whose contents
+    /// move with channel state and so cannot be compared against a fixed baseline either.
     ///
     /// `wait_for_work` is `process_events` followed by a dirty-scope check, and awaits only once
     /// both say there is nothing to do. Polling it against a no-op waker runs exactly that check.
@@ -151,6 +152,36 @@ impl PageDom {
     /// Wait until the page has work to do.
     pub async fn wait_for_work(&mut self) {
         self.dom.wait_for_work().await;
+    }
+}
+
+impl PageDom<MutationState> {
+    /// Mount `app` without rendering it. Call [`PageDom::rebuild`] for the first batch.
+    pub fn mount(app: PageComponent, instance: crate::Instance) -> Self {
+        Self::with_sink(app, instance)
+    }
+
+    /// The first render, which always produces a batch: the document starts empty.
+    pub fn rebuild(&mut self) -> Vec<u8> {
+        self.diff_rebuild();
+
+        self.mutations.export_memory()
+    }
+
+    /// Every render after the first.
+    ///
+    /// `None` means there is nothing to send — either nothing changed, or the last batch has not
+    /// been acknowledged yet. A caller that gets `None` must ask again after [`PageDom::flushed`],
+    /// or the page stops updating.
+    ///
+    /// Rendering is withheld while a batch is in flight because an effect may read the document,
+    /// and the document does not yet reflect the render that scheduled the effect.
+    pub fn render(&mut self) -> Option<Vec<u8>> {
+        if !self.diff_render() {
+            return None;
+        }
+
+        Some(self.mutations.export_memory())
     }
 }
 

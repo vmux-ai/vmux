@@ -33,12 +33,18 @@ mod event_request;
 mod instance;
 mod page;
 mod page_dom;
+mod probe;
+mod selector;
+mod shadow_tree;
 mod shell;
 
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
 pub use instance::{Instance, PageScope};
 pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};
+pub use probe::{PageProbe, ProbeError};
+pub use selector::{Selector, SelectorError};
+pub use shadow_tree::ShadowTree;
 pub use shell::InterpreterShell;
 
 #[cfg(ui)]
