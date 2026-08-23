@@ -52,7 +52,7 @@ impl std::fmt::Display for EventRequestError {
 impl std::error::Error for EventRequestError {}
 
 /// What the page is told once its handlers have run.
-#[derive(Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct EventOutcome {
     #[serde(rename = "preventDefault")]
     prevent_default: bool,
