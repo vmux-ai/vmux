@@ -60,8 +60,20 @@ fn split_custom_scheme_host_and_tail(path_part: &str) -> Option<(&str, &str)> {
 
 /// Whether a normalized path tail looks like a concrete file (its last segment has an extension)
 /// rather than an SPA route. Routes (no extension) fall back to the host's default document.
+/// Whether the last path segment names a file rather than an SPA route.
+///
+/// A dot alone is not enough: a route can carry a dotted segment, as
+/// `vmux://simulator/ios/27.0` does with an iOS runtime version, and treating that as a file
+/// asks the asset server for something that was never bundled. Every real asset extension has a
+/// letter in it (`html`, `wasm`, `js`, `png`), while a version's trailing component is digits.
 fn tail_has_extension(tail: &str) -> bool {
-    tail.rsplit('/').next().is_some_and(|seg| seg.contains('.'))
+    let Some(segment) = tail.rsplit('/').next() else {
+        return false;
+    };
+    let Some((stem, extension)) = segment.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty() && extension.chars().any(|c| c.is_ascii_alphabetic())
 }
 
 fn normalize_url_path_tail(path: &str) -> String {
@@ -463,7 +475,7 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
 
 #[cfg(test)]
 mod custom_scheme_url_tests {
-    use super::asset_load_path_from_request_url_with;
+    use super::{asset_load_path_from_request_url_with, tail_has_extension};
     use crate::util::{CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig};
 
     fn test_scheme() -> &'static str {
@@ -510,6 +522,31 @@ mod custom_scheme_url_tests {
             asset_load_path_from_request_url_with(&format!("{p}history/other/page.html"), &cfg),
             "embedded://history/other/page.html"
         );
+    }
+
+    #[test]
+    fn a_dotted_route_segment_still_serves_the_spa() {
+        let cfg = history_config();
+        let p = cfg.scheme_prefix();
+        for url in [
+            format!("{p}history/ios/27.0"),
+            format!("{p}history/v1.2.3"),
+            format!("{p}history/ios/27.0?q=1"),
+        ] {
+            assert_eq!(
+                asset_load_path_from_request_url_with(&url, &cfg),
+                "embedded://history/index.html",
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dotfile_or_extensionless_segment_is_not_an_asset() {
+        assert!(!tail_has_extension(".gitignore"));
+        assert!(!tail_has_extension("plain"));
+        assert!(tail_has_extension("index.html"));
+        assert!(tail_has_extension("history_app_bg.wasm"));
     }
 
     #[test]
