@@ -59,7 +59,8 @@ dev-rust:
 		crates/vmux_server/assets crates/vmux_server/src crates/vmux_ui/assets crates/vmux_ui/src \
 		crates/page/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/page/vmux_editor/src \
 		crates/vmux_git/src crates/page/vmux_history/src crates/page/vmux_layout/src crates/vmux_profile/src \
-		crates/host/vmux_service/src crates/page/vmux_setting/src crates/page/vmux_space/src \
+		crates/host/vmux_service/src crates/page/vmux_setting/src \
+		crates/page/vmux_simulator/src crates/page/vmux_space/src \
 		crates/page/vmux_team/src crates/page/vmux_terminal/assets/fonts crates/page/vmux_terminal/src \
 		crates/vmux_wire/src \
 		-type f -newer "$$wasm" -print -quit 2>/dev/null)"; \

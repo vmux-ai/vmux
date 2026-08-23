@@ -7,6 +7,10 @@
 pub const PAGE_HOST: &str = "simulator";
 pub const PLATFORM: &str = "ios";
 
+/// The only URL that opens. The pinned form is reached by rewriting the address bar in place,
+/// which is a `replaceState`, not a navigation — so nothing needs to route it.
+pub const UNPINNED_URL: &str = "vmux://simulator/ios";
+
 /// An iOS runtime version, as it appears in a URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IosVersion(String);

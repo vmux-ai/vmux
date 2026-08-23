@@ -21,7 +21,18 @@ pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            // Registered to route the URL, but never prewarmed: a hidden copy would connect to
+            // the stream and hold an `axe` child at full frame rate for a page nobody is looking
+            // at. Measured three concurrent children with a pool of one.
+            vmux_core::page::PrewarmPage {
+                host: PAGE_HOST,
+                url: crate::url::UNPINNED_URL,
+                title: PAGE_MANIFEST.title,
+                pool_size: 0,
+            },
+        ));
         vmux_core::register_host_spawn(app, PAGE_HOST);
         app.init_resource::<Announced>()
             .add_systems(Startup, Self::attach_device)
