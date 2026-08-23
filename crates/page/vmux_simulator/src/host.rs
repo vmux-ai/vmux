@@ -4,12 +4,12 @@ mod device;
 mod input;
 mod stream;
 
-use crate::event::{SIMULATOR_READY_EVENT, SimulatorGesture, SimulatorReady};
+use crate::event::{SIMULATOR_READY_EVENT, SimulatorGesture, SimulatorKey, SimulatorReady};
 use crate::url::PAGE_HOST;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use input::DeviceGesture;
+use input::{DeviceGesture, DeviceKey};
 use stream::StreamServer;
 use vmux_core::page::PageReady;
 use vmux_core::{
@@ -32,10 +32,11 @@ impl Plugin for SimulatorPlugin {
                 Self::claim_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
             .add_systems(Update, Self::announce)
-            .add_plugins(BinEventEmitterPlugin::<(SimulatorGesture,)>::for_hosts(&[
-                PAGE_HOST,
-            ]))
+            .add_plugins(
+                BinEventEmitterPlugin::<(SimulatorGesture, SimulatorKey)>::for_hosts(&[PAGE_HOST]),
+            )
             .add_observer(Self::on_gesture)
+            .add_observer(Self::on_key)
             .add_observer(Self::forget_on_reload);
     }
 }
@@ -180,6 +181,13 @@ impl SimulatorPlugin {
             return;
         };
         gesture.dispatch();
+    }
+
+    fn on_key(trigger: On<BinReceive<SimulatorKey>>, device: Option<Res<SimulatorDevice>>) {
+        let Some(device) = device.as_deref() else {
+            return;
+        };
+        DeviceKey::resolve(&trigger.event().payload, device).dispatch();
     }
 }
 

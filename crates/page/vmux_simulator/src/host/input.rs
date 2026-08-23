@@ -1,5 +1,5 @@
 use super::device::{Axe, SimulatorDevice};
-use crate::event::SimulatorGesture;
+use crate::event::{SimulatorGesture, SimulatorKey};
 
 /// A gesture resolved onto a specific device, in the points `axe` addresses.
 pub struct DeviceGesture {
@@ -46,9 +46,39 @@ impl DeviceGesture {
                 .args(["--end-y", &format!("{:.0}", self.to.1)]);
         }
         command.args(["--udid", &self.udid]);
-        std::thread::spawn(move || {
-            let _ = command.status();
-        });
+        Axe::run_detached(command);
+    }
+}
+
+/// A keystroke resolved onto a specific device.
+pub struct DeviceKey {
+    udid: String,
+    key: SimulatorKey,
+}
+
+impl DeviceKey {
+    pub fn resolve(key: &SimulatorKey, device: &SimulatorDevice) -> Self {
+        Self {
+            udid: device.udid.clone(),
+            key: key.clone(),
+        }
+    }
+
+    pub fn dispatch(self) {
+        let mut command = Axe::command();
+        match &self.key {
+            SimulatorKey::Text(text) => {
+                command.arg("type").arg(text);
+            }
+            SimulatorKey::Code(code) => {
+                command.arg("key").arg(code.to_string());
+            }
+            SimulatorKey::Button(button) => {
+                command.arg("button").arg(button.as_arg());
+            }
+        }
+        command.args(["--udid", &self.udid]);
+        Axe::run_detached(command);
     }
 }
 

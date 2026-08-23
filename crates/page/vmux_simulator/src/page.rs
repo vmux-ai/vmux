@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::event::{SIMULATOR_READY_EVENT, SimulatorGesture, SimulatorReady};
+use crate::event::{
+    HardwareButton, SIMULATOR_READY_EVENT, SimulatorGesture, SimulatorKey, SimulatorReady,
+};
 use crate::url::{IosVersion, SimulatorRoute};
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_event, use_theme};
@@ -42,31 +44,69 @@ pub fn Page() -> Element {
 
 /// The live device. `object-contain` letterboxes it, which is what makes a pointer fraction of
 /// the rendered box a fraction of the device.
+///
+/// `tabindex` is what lets the mirror take keyboard focus at all — an `<img>` cannot — and
+/// clicking it focuses it, so typing follows the tap that put the caret in a field.
 #[component]
 fn Mirror(port: u16) -> Element {
     let mut press = use_signal(|| None::<(f32, f32)>);
 
     rsx! {
-        img {
-            class: "h-full w-full object-contain select-none",
-            draggable: false,
-            src: "http://127.0.0.1:{port}/",
-            onmousedown: move |event| press.set(Pointer::fraction(&event)),
-            onmouseup: move |event| {
-                let Some(from) = press.take() else {
+        div {
+            class: "flex h-full w-full items-center justify-center outline-none",
+            tabindex: 0,
+            onkeydown: move |event| {
+                let Some(key) = Keystroke::of(&event) else {
                     return;
                 };
-                let Some(to) = Pointer::fraction(&event) else {
-                    return;
-                };
-                let _ = send(&SimulatorGesture {
-                    from_x: from.0,
-                    from_y: from.1,
-                    to_x: to.0,
-                    to_y: to.1,
-                });
+                event.prevent_default();
+                let _ = send(&key);
             },
+            img {
+                class: "h-full w-full object-contain select-none",
+                draggable: false,
+                src: "http://127.0.0.1:{port}/",
+                onmousedown: move |event| press.set(Pointer::fraction(&event)),
+                onmouseup: move |event| {
+                    let Some(from) = press.take() else {
+                        return;
+                    };
+                    let Some(to) = Pointer::fraction(&event) else {
+                        return;
+                    };
+                    let _ = send(&SimulatorGesture {
+                        from_x: from.0,
+                        from_y: from.1,
+                        to_x: to.0,
+                        to_y: to.1,
+                    });
+                },
+            }
         }
+    }
+}
+
+/// What a key press on the focused mirror means to the device.
+struct Keystroke;
+
+impl Keystroke {
+    fn of(event: &Event<KeyboardData>) -> Option<SimulatorKey> {
+        let modifiers = event.modifiers();
+        let key = event.key().to_string();
+        // Cmd+Shift is the escape hatch for buttons that are not on the screen; there is nowhere
+        // to put a button for them without inventing a toolbar.
+        if modifiers.meta() && modifiers.shift() {
+            return match key.to_ascii_lowercase().as_str() {
+                "h" => Some(SimulatorKey::Button(HardwareButton::Home)),
+                "l" => Some(SimulatorKey::Button(HardwareButton::Lock)),
+                _ => None,
+            };
+        }
+        // Anything else held with a host modifier is a vmux shortcut, not device input.
+        if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
+            return None;
+        }
+        SimulatorKey::of_browser_key(&key)
     }
 }
 

@@ -65,9 +65,121 @@ impl SimulatorGesture {
     }
 }
 
+/// Page → native: a keystroke to replay on the device.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum SimulatorKey {
+    /// Printable input, typed as-is.
+    Text(String),
+    /// A key that produces no text, as a USB HID usage code.
+    Code(u16),
+    /// A button on the side of the device rather than on its screen.
+    Button(HardwareButton),
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum HardwareButton {
+    Home,
+    Lock,
+    Siri,
+}
+
+impl HardwareButton {
+    /// The name `axe button` takes.
+    pub fn as_arg(&self) -> &'static str {
+        match self {
+            Self::Home => "home",
+            Self::Lock => "lock",
+            Self::Siri => "siri",
+        }
+    }
+}
+
+impl SimulatorKey {
+    /// From a browser `KeyboardEvent.key`, or `None` when the key means nothing to the device.
+    ///
+    /// Printable keys are typed rather than sent as codes: `axe type` handles any character,
+    /// including ones no HID code names, and keeps the keyboard layout out of this.
+    pub fn of_browser_key(key: &str) -> Option<Self> {
+        // USB HID usage codes, as `axe key` documents them.
+        let code = match key {
+            "Enter" => 40,
+            "Escape" => 41,
+            "Backspace" => 42,
+            "Tab" => 43,
+            "ArrowRight" => 79,
+            "ArrowLeft" => 80,
+            "ArrowDown" => 81,
+            "ArrowUp" => 82,
+            _ => {
+                let mut chars = key.chars();
+                let (Some(c), None) = (chars.next(), chars.next()) else {
+                    return None;
+                };
+                return Some(Self::Text(c.to_string()));
+            }
+        };
+        Some(Self::Code(code))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_printable_key_is_typed_rather_than_coded() {
+        assert_eq!(
+            SimulatorKey::of_browser_key("a"),
+            Some(SimulatorKey::Text("a".into()))
+        );
+        assert_eq!(
+            SimulatorKey::of_browser_key("あ"),
+            Some(SimulatorKey::Text("あ".into()))
+        );
+    }
+
+    #[test]
+    fn keys_with_no_text_become_hid_codes() {
+        assert_eq!(
+            SimulatorKey::of_browser_key("Enter"),
+            Some(SimulatorKey::Code(40))
+        );
+        assert_eq!(
+            SimulatorKey::of_browser_key("Backspace"),
+            Some(SimulatorKey::Code(42))
+        );
+        assert_eq!(
+            SimulatorKey::of_browser_key("ArrowUp"),
+            Some(SimulatorKey::Code(82))
+        );
+    }
+
+    #[test]
+    fn a_modifier_or_unknown_named_key_is_dropped() {
+        for key in ["Shift", "Meta", "F13", "Unidentified"] {
+            assert_eq!(SimulatorKey::of_browser_key(key), None, "{key}");
+        }
+    }
 
     #[test]
     fn a_stationary_press_is_a_tap() {

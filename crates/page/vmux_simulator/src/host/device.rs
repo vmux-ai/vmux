@@ -23,6 +23,14 @@ impl Axe {
     pub fn command() -> Command {
         Command::new(Self::BIN)
     }
+
+    /// Waits off-thread: every gesture and keystroke costs a process spawn, and blocking on it
+    /// would stall the frame that produced it.
+    pub fn run_detached(mut command: Command) {
+        std::thread::spawn(move || {
+            let _ = command.status();
+        });
+    }
 }
 
 /// A booted simulator, identified the way AXe addresses it.
