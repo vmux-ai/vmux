@@ -38,22 +38,32 @@ pub struct ServerClient {
 /// not parse. Asking before sending is what stops `foldingRange` and `documentSymbol` going to
 /// every server on every file open, and it is how the UI decides whether to offer rename.
 #[derive(Default)]
-pub struct Capabilities(lsp_types::ServerCapabilities);
+pub struct Capabilities {
+    server: lsp_types::ServerCapabilities,
+    /// Resolved once here rather than on every response: the legend is the only way to read a
+    /// semantic-tokens reply, and it never changes for the life of the server.
+    semantic: Option<crate::lsp::semantic::SemanticLegend>,
+}
 
 impl Capabilities {
     fn of(reply: &serde_json::Value) -> Self {
-        let parsed = reply
+        let server: lsp_types::ServerCapabilities = reply
             .get("result")
             .and_then(|result| result.get("capabilities"))
             .cloned()
             .and_then(|caps| serde_json::from_value(caps).ok())
             .unwrap_or_default();
-        Self(parsed)
+        let semantic = crate::lsp::semantic::SemanticLegend::of(&server);
+        Self { server, semantic }
+    }
+
+    pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
+        self.semantic.as_ref()
     }
 
     /// A method not listed here is allowed through: this models what we send, not the protocol.
     pub fn allows(&self, method: &str) -> bool {
-        let caps = &self.0;
+        let caps = &self.server;
         match method {
             "textDocument/hover" => match &caps.hover_provider {
                 Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
@@ -70,6 +80,7 @@ impl Capabilities {
                 Some(lsp_types::CodeActionProviderCapability::Options(_)) => true,
                 None => false,
             },
+            "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
             "textDocument/completion" => caps.completion_provider.is_some(),
             "textDocument/definition" => Self::offered(&caps.definition_provider),
             "textDocument/references" => Self::offered(&caps.references_provider),
@@ -152,6 +163,10 @@ impl ServerClient {
 
     pub fn provides(&self, method: &str) -> bool {
         self.capabilities.allows(method)
+    }
+
+    pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
+        self.capabilities.semantic_legend()
     }
 
     fn notify(&self, method: &str, params: serde_json::Value) {
@@ -241,6 +256,21 @@ impl ServerClient {
                 }),
                 document_symbol: Some(lsp_types::DocumentSymbolClientCapabilities {
                     hierarchical_document_symbol_support: Some(true),
+                    ..Default::default()
+                }),
+                semantic_tokens: Some(lsp_types::SemanticTokensClientCapabilities {
+                    requests: lsp_types::SemanticTokensClientCapabilitiesRequests {
+                        // Whole document only: the range and delta forms need state this client
+                        // does not keep, and a re-request is cheap next to getting them wrong.
+                        full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                        range: Some(false),
+                    },
+                    token_types: crate::lsp::semantic::SEMANTIC_TOKEN_TYPES
+                        .iter()
+                        .map(|name| lsp_types::SemanticTokenType::new(name))
+                        .collect(),
+                    token_modifiers: Vec::new(),
+                    formats: vec![lsp_types::TokenFormat::RELATIVE],
                     ..Default::default()
                 }),
                 ..Default::default()

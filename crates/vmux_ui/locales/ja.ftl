@@ -582,6 +582,7 @@ agent-working-mulling = 検討中
 agent-working-spelunking = 探索中
 
 editor-toggle-explorer = エクスプローラーを切り替え（Cmd+B）
+editor-cannot-open = このファイルを開けませんでした
 editor-unsaved = 未保存
 editor-rendered-markdown = ライブ編集付きMarkdownプレビュー
 editor-note = メモ

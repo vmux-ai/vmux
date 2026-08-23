@@ -16,6 +16,7 @@ pub mod manager_page;
 pub mod purl;
 pub mod reader;
 pub mod registry;
+pub mod semantic;
 pub mod server_request;
 pub mod store;
 pub mod target;

@@ -597,6 +597,7 @@ agent-working-mulling = Waży pomysły
 agent-working-spelunking = Eksploruje
 
 editor-toggle-explorer = Przełącz Eksplorator (Cmd+B)
+editor-cannot-open = Nie można otworzyć tego pliku
 editor-unsaved = niezapisane
 editor-rendered-markdown = Wyrenderowany Markdown z edycją na żywo
 editor-note = Notatka

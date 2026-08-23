@@ -597,6 +597,7 @@ agent-working-mulling = Обмозговывает
 agent-working-spelunking = Копается
 
 editor-toggle-explorer = Показать/скрыть проводник (Cmd+B)
+editor-cannot-open = Не удалось открыть этот файл
 editor-unsaved = не сохранено
 editor-rendered-markdown = Отображённый Markdown с живым редактированием
 editor-note = Заметка

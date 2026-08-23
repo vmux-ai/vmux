@@ -571,16 +571,28 @@ type ChromeUnsentReady = (
     With<vmux_core::page::PageReady>,
 );
 
+/// The path a `file://` url names.
+///
+/// Read off the raw string rather than through `Url`, because everything after the scheme is the
+/// path here and the parser does not treat it that way. `file://Users/me/a.rs` — two slashes
+/// instead of three, the usual typo — parses `Users` as a *host*, so reading `.path()` silently
+/// opens `/me/a.rs`: a different file, or more often a missing one blamed on a path nobody
+/// typed. A host is also case-folded, so `Users` cannot be put back afterwards. `localhost` is
+/// the one host that really does mean this machine, and it is the one that gets dropped.
 fn path_from_files_url(url: &str) -> Option<PathBuf> {
-    let parsed = url::Url::parse(url).ok()?;
-    if parsed.scheme() != "file" {
+    let rest = url
+        .strip_prefix("file://")
+        .or_else(|| url.strip_prefix("FILE://"))?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    let rest = rest.split(['?', '#']).next().unwrap_or_default();
+    if rest.is_empty() {
         return None;
     }
-    let raw = parsed.path();
-    if raw.is_empty() {
-        return None;
-    }
-    let decoded = percent_encoding::percent_decode_str(raw)
+    let raw = match rest.starts_with('/') {
+        true => rest.to_string(),
+        false => format!("/{rest}"),
+    };
+    let decoded = percent_encoding::percent_decode_str(&raw)
         .decode_utf8()
         .ok()?;
     let path = PathBuf::from(decoded.as_ref());
@@ -725,7 +737,13 @@ fn load_file_buffers(
                 .insert(FileMedia { kind, mime });
             continue;
         }
-        match std::fs::metadata(&fv.path).map(|m| m.len()) {
+        let size = std::fs::metadata(&fv.path).map(|m| m.len());
+        // Past this the file still opens, it just opens plainly. Highlighting keeps a parser
+        // state per line, so that is the cost that has to come off, not the text.
+        let heavy = size
+            .as_ref()
+            .is_ok_and(|len| *len > crate::highlight::HIGHLIGHT_MAX_BYTES);
+        match size {
             Ok(len) if len > crate::highlight::FILE_VIEW_MAX_BYTES => {
                 commands
                     .entity(entity)
@@ -798,7 +816,10 @@ fn load_file_buffers(
                 continue;
             }
         };
-        let hl = HighlightCache::new(&fv.path);
+        let hl = match heavy {
+            true => HighlightCache::plain(&fv.path),
+            false => HighlightCache::new(&fv.path),
+        };
         let mut core = EditCore::new(
             fv.path.clone(),
             hl.language.clone(),
@@ -806,10 +827,12 @@ fn load_file_buffers(
             kind.initial_mode(),
         );
         let mut folds = crate::fold::FoldState::default();
-        folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
-        if let Some(store) = &store {
-            folds.collapsed.extend(store.get(&fv.path));
-            folds.reconcile();
+        if !heavy {
+            folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+            if let Some(store) = &store {
+                folds.collapsed.extend(store.get(&fv.path));
+                folds.reconcile();
+            }
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
         let mut entity_commands = commands.entity(entity);
@@ -1208,6 +1231,18 @@ fn wrapped_view<'a>(edit: &'a mut EditState, vp: &FileViewport) -> &'a WrapView 
         });
     }
     &edit.wrap_cache.as_ref().expect("wrap cache").view
+}
+
+/// Redraw the visible window for a caller outside this module that changed how the text should
+/// look rather than what it says.
+pub(crate) fn repaint_window(
+    entity: Entity,
+    edit: &mut EditState,
+    vp: &FileViewport,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    emit_window(entity, edit, vp, browsers, commands);
 }
 
 fn emit_window(
@@ -3208,6 +3243,7 @@ fn flush_lsp_changes(
     for (entity, fv, edit) in &q {
         manager.change_with_text(&fv.path, &edit.core.buffer.text());
         manager.folding_range(entity, &fv.path);
+        manager.semantic_tokens(entity, &fv.path);
         if !crate::explorer_model::is_markdown(&fv.path) {
             manager.document_symbol(entity, &fv.path);
         }
@@ -4987,6 +5023,24 @@ mod url_tests {
     #[test]
     fn empty_path_is_root() {
         assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
+    }
+
+    /// Two slashes instead of three is the common typo. Reading only the path opens `/me/a.rs`
+    /// and then blames a path the user never typed.
+    #[test]
+    fn a_host_is_folded_back_onto_the_path() {
+        assert_eq!(
+            path_from_files_url("file://Users/me/a.rs"),
+            Some(PathBuf::from("/Users/me/a.rs"))
+        );
+    }
+
+    #[test]
+    fn localhost_really_does_mean_this_machine() {
+        assert_eq!(
+            path_from_files_url("file://localhost/Users/me/a.rs"),
+            Some(PathBuf::from("/Users/me/a.rs"))
+        );
     }
 }
 

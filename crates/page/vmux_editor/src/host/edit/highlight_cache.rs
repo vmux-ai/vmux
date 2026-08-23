@@ -10,6 +10,12 @@ pub struct HighlightCache {
     theme: Theme,
     dark: bool,
     befores: Vec<(ParseState, HighlightState)>,
+    /// What the language server said each identifier actually is, laid over syntect's guess.
+    /// Absent until the server answers, and stale for an edit or two after one — which shows as
+    /// colour lagging a keystroke, not as wrong text.
+    semantic: crate::lsp::semantic::SemanticHighlight,
+    /// Serve the text without colouring it, for a file too large to keep a parser state per line.
+    plain: bool,
     pub language: String,
 }
 
@@ -22,7 +28,28 @@ impl HighlightCache {
             theme: default_theme(),
             dark: is_dark_theme(),
             befores: Vec::new(),
+            semantic: Default::default(),
+            plain: false,
         }
+    }
+
+    /// A cache for a file too large to colour, which serves the text and nothing else.
+    ///
+    /// The saving is not the parsing but [`Self::befores`]: one syntect parser state per line is
+    /// what makes a large file unaffordable, and this never fills it.
+    pub fn plain(path: &std::path::Path) -> Self {
+        Self {
+            plain: true,
+            ..Self::new(path)
+        }
+    }
+
+    pub fn is_plain(&self) -> bool {
+        self.plain
+    }
+
+    pub fn set_semantic(&mut self, semantic: crate::lsp::semantic::SemanticHighlight) {
+        self.semantic = semantic;
     }
 
     fn refresh_theme(&mut self) {
@@ -72,6 +99,9 @@ impl HighlightCache {
         if start >= end {
             return Vec::new();
         }
+        if self.plain {
+            return self.plain_window(rope, start, end);
+        }
         self.ensure_before(rope, end - 1);
         let ss = syntax_set();
         let hl = Highlighter::new(&self.theme);
@@ -84,10 +114,39 @@ impl HighlightCache {
                 .map(|(style, t)| styled_span(style, t))
                 .filter(|s| !s.text.is_empty())
                 .collect();
+            let spans = self.semantic.apply(i as u32, spans, self.dark);
             out.push(FileLine {
                 line_no: i as u32,
                 fold: vmux_core::event::FoldGutter::None,
                 spans,
+            });
+        }
+        out
+    }
+
+    /// One span per line in the theme's foreground colour, keeping no parser state.
+    ///
+    /// The saving is `befores`, not the parsing: a syntect state per line is what makes a large
+    /// file unaffordable, and this never fills it. Semantic tokens still apply — the server
+    /// answers for a large file just as readily, and colour from it costs nothing per line.
+    fn plain_window(&self, rope: &Rope, start: usize, end: usize) -> Vec<FileLine> {
+        let fg = crate::highlight::theme_foreground(&self.theme);
+        let mut out = Vec::with_capacity(end - start);
+        for i in start..end {
+            let text: String = rope.line(i).chars().filter(|c| *c != '\n').collect();
+            let spans = match text.is_empty() {
+                true => Vec::new(),
+                false => vec![StyledSpan {
+                    text,
+                    fg,
+                    bold: false,
+                    italic: false,
+                }],
+            };
+            out.push(FileLine {
+                line_no: i as u32,
+                fold: vmux_core::event::FoldGutter::None,
+                spans: self.semantic.apply(i as u32, spans, self.dark),
             });
         }
         out
@@ -123,6 +182,37 @@ mod tests {
         let w = c.line_window(&r, 2, 3);
         let joined: String = w[0].spans.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(joined.trim_end(), "let c = 3;");
+    }
+
+    /// A file too large to colour still has to serve its text, and each line has to stay one
+    /// line: returning nothing, or folding the file into one span, is what "too large" used to
+    /// mean here.
+    #[test]
+    fn a_plain_cache_still_serves_the_text() {
+        let mut c = HighlightCache::plain(std::path::Path::new("a.rs"));
+        let r = rope("fn main() {}\nlet x = 1;\n");
+        let w = c.line_window(&r, 0, 2);
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0].spans[0].text, "fn main() {}");
+        assert_eq!(w[1].spans[0].text, "let x = 1;");
+    }
+
+    /// The saving is the per-line parser state, so a plain window must not fill it however many
+    /// lines it serves.
+    #[test]
+    fn a_plain_cache_keeps_no_parser_state() {
+        let mut c = HighlightCache::plain(std::path::Path::new("a.rs"));
+        let r = rope(&"let x = 1;\n".repeat(500));
+        let _ = c.line_window(&r, 0, 500);
+        assert!(c.befores.is_empty());
+    }
+
+    #[test]
+    fn a_plain_cache_uses_one_colour() {
+        let mut c = HighlightCache::plain(std::path::Path::new("a.rs"));
+        let r = rope("fn main() {}\n");
+        let w = c.line_window(&r, 0, 1);
+        assert_eq!(w[0].spans.len(), 1, "no colour means no splitting");
     }
 
     #[test]

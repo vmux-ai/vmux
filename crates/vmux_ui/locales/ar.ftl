@@ -597,6 +597,7 @@ agent-working-mulling = يمعن النظر
 agent-working-spelunking = ينقّب
 
 editor-toggle-explorer = تبديل المستكشف (Cmd+B)
+editor-cannot-open = تعذّر فتح هذا الملف
 editor-unsaved = غير محفوظ
 editor-rendered-markdown = Markdown معروض مع تحرير مباشر
 editor-note = ملاحظة

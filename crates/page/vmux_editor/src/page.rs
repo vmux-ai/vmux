@@ -1007,6 +1007,16 @@ pub fn Page() -> Element {
                 })
             }
 
+            // A path that cannot be opened — mistyped, deleted, unreadable, too large — used to
+            // leave the pane blank: the host sent the reason and nothing rendered it.
+            if !error().is_empty() {
+                div {
+                    class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center",
+                    div { class: "text-sm font-medium text-foreground", {translate("editor-cannot-open")} }
+                    div { class: "max-w-xl break-all font-mono text-xs text-muted-foreground", "{error()}" }
+                }
+            }
+
             match mode() {
                 Mode::Media(kind) => rsx! {
                     div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",

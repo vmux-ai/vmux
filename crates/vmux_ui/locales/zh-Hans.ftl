@@ -597,6 +597,7 @@ agent-working-mulling = 正在权衡
 agent-working-spelunking = 正在深入探索
 
 editor-toggle-explorer = 切换资源管理器（Cmd+B）
+editor-cannot-open = 无法打开此文件
 editor-unsaved = 未保存
 editor-rendered-markdown = 已渲染 Markdown，可实时编辑
 editor-note = 备注

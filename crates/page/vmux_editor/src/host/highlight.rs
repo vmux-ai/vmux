@@ -6,7 +6,18 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_core::event::{FileLine, StyledSpan};
 
-pub const FILE_VIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// Where the editor stops opening a file at all, matching the cap VS Code's text model has.
+///
+/// Well past the point where the features come off: a rope of this size is affordable, and a
+/// user who asked for a file would rather read it plainly than be told no.
+pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Where syntax highlighting, folding and the language server come off.
+///
+/// `HighlightCache` keeps a syntect parser state *per line*, so what actually bites on a large
+/// file is highlighting rather than the text. Past this the file still opens and still edits, it
+/// is just uncoloured — which is what VS Code's `editor.largeFileOptimizations` does.
+pub const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
@@ -47,6 +58,15 @@ fn theme_name() -> &'static str {
 
 pub fn default_theme() -> syntect::highlighting::Theme {
     ThemeSet::load_defaults().themes[theme_name()].clone()
+}
+
+/// The theme's plain text colour, for text served without highlighting.
+pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
+    theme
+        .settings
+        .foreground
+        .map(|c| [c.r, c.g, c.b])
+        .unwrap_or([0xc0, 0xc5, 0xce])
 }
 
 pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {

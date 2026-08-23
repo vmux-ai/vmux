@@ -610,6 +610,7 @@ agent-working-spelunking = Spelunking
 agents-terminal-coding-agent = Terminal-based coding agent
 
 editor-toggle-explorer = Toggle Explorer (Cmd+B)
+editor-cannot-open = This file could not be opened
 editor-unsaved = unsaved
 editor-rendered-markdown = Rendered Markdown with live editing
 editor-note = Note

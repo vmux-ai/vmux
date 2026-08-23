@@ -92,7 +92,10 @@ use crate::lsp::{LspOutbox, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
-const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// The same point at which highlighting comes off: a file too large to colour is too large to
+/// hand a language server, and the two limits moving together is what keeps the degraded view
+/// coherent rather than half-featured.
+const LSP_MAX_BYTES: u64 = crate::highlight::HIGHLIGHT_MAX_BYTES;
 
 pub enum ReqKind {
     Hover { line: u32, col: u32 },
@@ -101,6 +104,7 @@ pub enum ReqKind {
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
+    SemanticTokens { key: ServerKey },
 }
 
 pub struct InFlight {
@@ -440,6 +444,38 @@ impl LspManager {
             rx,
         });
     }
+
+    /// Ask what each identifier in the document actually is, so the colours can say so.
+    pub fn semantic_tokens(&mut self, entity: Entity, path: &Path) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let key = doc.key.clone();
+        let Some(client) = self.servers.get(&key) else {
+            return;
+        };
+        if !client.provides("textDocument/semanticTokens/full") {
+            return;
+        }
+        let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let (_, rx) = client.send_request("textDocument/semanticTokens/full", params);
+        self.inflight.push(InFlight {
+            entity,
+            kind: ReqKind::SemanticTokens { key },
+            rx,
+        });
+    }
+
+    /// The token legend the server declared, needed to read its indices back.
+    pub fn semantic_legend(
+        &self,
+        key: &ServerKey,
+    ) -> Option<&crate::lsp::semantic::SemanticLegend> {
+        self.servers.get(key)?.semantic_legend()
+    }
 }
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
@@ -606,7 +642,7 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::host::plugin::{EditState, FileView};
+use crate::host::plugin::{EditState, FileView, FileViewport};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -638,6 +674,7 @@ fn lsp_open_documents(
     for (entity, fv, _edit) in &q {
         manager.open(&fv.path, &overrides);
         manager.folding_range(entity, &fv.path);
+        manager.semantic_tokens(entity, &fv.path);
         if !crate::explorer_model::is_markdown(&fv.path) {
             manager.document_symbol(entity, &fv.path);
         }
@@ -650,6 +687,7 @@ fn drain_lsp_requests(
     browsers: NonSend<Browsers>,
     mut goto_w: MessageWriter<LspGoto>,
     mut folds_w: MessageWriter<LspFolds>,
+    mut semantic_w: MessageWriter<LspSemantic>,
     mut commands: Commands,
 ) {
     use vmux_core::event::{
@@ -746,9 +784,65 @@ fn drain_lsp_requests(
                     ));
                 }
             }
+            ReqKind::SemanticTokens { key } => {
+                semantic_w.write(LspSemantic {
+                    entity: f.entity,
+                    tokens: parse_semantic_tokens(&value, manager.semantic_legend(&key)),
+                });
+            }
         }
     }
     manager.inflight = still;
+}
+
+/// Decode a `textDocument/semanticTokens/full` reply against the server's own legend.
+fn parse_semantic_tokens(
+    value: &serde_json::Value,
+    legend: Option<&crate::lsp::semantic::SemanticLegend>,
+) -> Vec<crate::lsp::semantic::SemanticToken> {
+    let Some(legend) = legend else {
+        return Vec::new();
+    };
+    let Some(data) = value.pointer("/result/data").and_then(|d| d.as_array()) else {
+        return Vec::new();
+    };
+    let data: Vec<u32> = data
+        .iter()
+        .filter_map(|n| n.as_u64().map(|n| n as u32))
+        .collect();
+    legend.decode(&data)
+}
+
+#[derive(Message)]
+pub struct LspSemantic {
+    pub entity: Entity,
+    pub tokens: Vec<crate::lsp::semantic::SemanticToken>,
+}
+
+/// Hand the decoded tokens to the highlighter that lays them over syntect's output, then redraw:
+/// the window was already painted with the guessed colours by the time the server answered.
+fn apply_semantic_tokens(
+    mut reader: MessageReader<LspSemantic>,
+    mut views: Query<(&mut EditState, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for message in reader.read() {
+        let Ok((mut edit, vp)) = views.get_mut(message.entity) else {
+            continue;
+        };
+        edit.hl
+            .set_semantic(crate::lsp::semantic::SemanticHighlight::of(
+                message.tokens.clone(),
+            ));
+        crate::host::plugin::repaint_window(
+            message.entity,
+            &mut edit,
+            vp,
+            &browsers,
+            &mut commands,
+        );
+    }
 }
 
 pub fn build(app: &mut App, outbox: LspOutbox) {
@@ -758,6 +852,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         .init_resource::<DiagState>()
         .add_message::<LspGoto>()
         .add_message::<LspFolds>()
+        .add_message::<LspSemantic>()
         .add_systems(
             Update,
             (
@@ -766,6 +861,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
                 drain_lsp_diagnostics,
                 drain_lint,
                 drain_lsp_requests,
+                apply_semantic_tokens,
                 emit_diagnostics_system,
                 lsp_status_system,
             )
