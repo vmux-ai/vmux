@@ -1,55 +1,75 @@
-pub mod mjpeg;
-pub mod source;
-
 use super::device::{Axe, SimulatorDevice};
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use source::{AxeStream, LatestFrame, WakeFn};
-use std::sync::Arc;
+use std::io;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+use std::process::Stdio;
 
-/// Owns the `axe stream-video` child and hands decoded frames to the mirror.
-pub struct StreamPlugin;
-
-impl Plugin for StreamPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<LatestFrame>()
-            .add_systems(Startup, Self::start);
-    }
+/// Serves the device's MJPEG stream on loopback so the view can point an `<img>` at it.
+///
+/// `axe stream-video` writes a complete HTTP response — status line, then
+/// `multipart/x-mixed-replace` parts — so this copies its stdout to the socket verbatim rather
+/// than parsing and re-encoding. That is also why the page needs no decoder: Chromium renders
+/// this format natively, and the frames never enter the Bevy world at all.
+#[derive(Resource)]
+pub struct StreamServer {
+    port: u16,
 }
 
-impl StreamPlugin {
-    fn start(
-        mut commands: Commands,
-        slot: Res<LatestFrame>,
-        proxy: Option<Res<EventLoopProxyWrapper>>,
-    ) {
-        let Some(version) = Axe::version() else {
-            error!(
-                "`{}` not found on PATH — install it with `brew install cameroncooke/axe/axe`",
-                Axe::BIN
-            );
-            return;
-        };
-        let Some(device) = SimulatorDevice::booted() else {
-            error!("no booted simulator — boot one, then restart");
-            return;
-        };
-        info!("axe {version}, mirroring {} ({})", device.name, device.udid);
+impl StreamServer {
+    const FPS: &'static str = "20";
+    const SCALE: &'static str = "0.5";
 
-        // Frames arrive off a reader thread while the loop sits in `Reactive`; without a wake
-        // the mirror would only advance on cursor movement.
-        let wake: Option<WakeFn> = proxy.map(|p| {
-            let proxy = (**p).clone();
-            Arc::new(move || {
-                let _ = proxy.send_event(WinitUserEvent::WakeUp);
-            }) as WakeFn
-        });
+    /// Binds an ephemeral loopback port and serves one `axe` child per connection.
+    ///
+    /// A child per connection rather than one shared child: the stream cannot seek or replay, so
+    /// a reload needs a fresh one, and dying with the socket is what stops `axe` when the page
+    /// goes away.
+    pub fn start(device: SimulatorDevice) -> io::Result<Self> {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
+        let port = listener.local_addr()?.port();
+        std::thread::Builder::new()
+            .name("vmux-simulator-stream".into())
+            .spawn(move || Self::accept_loop(listener, device))?;
+        Ok(Self { port })
+    }
 
-        let Some(stream) = AxeStream::start(&device, slot.clone(), wake) else {
-            error!("failed to start `{} stream-video`", Axe::BIN);
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    fn accept_loop(listener: TcpListener, device: SimulatorDevice) {
+        for connection in listener.incoming() {
+            let Ok(socket) = connection else {
+                continue;
+            };
+            let device = device.clone();
+            let spawned = std::thread::Builder::new()
+                .name("vmux-simulator-pipe".into())
+                .spawn(move || Self::pipe(socket, device));
+            if spawned.is_err() {
+                warn!("could not spawn a stream thread");
+            }
+        }
+    }
+
+    fn pipe(mut socket: TcpStream, device: SimulatorDevice) {
+        let child = Axe::command()
+            .args(["stream-video", "--udid", &device.udid])
+            .args(["--format", "mjpeg"])
+            .args(["--fps", Self::FPS])
+            .args(["--scale", Self::SCALE])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else {
+            warn!("could not start `{} stream-video`", Axe::BIN);
             return;
         };
-        commands.insert_resource(stream);
-        commands.insert_resource(device);
+        if let Some(mut stdout) = child.stdout.take() {
+            // Ends when the page navigates away and Chromium drops the socket.
+            let _ = io::copy(&mut stdout, &mut socket);
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

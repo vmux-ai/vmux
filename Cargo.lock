@@ -11703,14 +11703,15 @@ name = "vmux_simulator"
 version = "0.0.30"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "bevy_ecs",
- "crossbeam-channel",
  "dioxus",
- "image",
+ "rkyv",
+ "serde",
  "serde_json",
  "vmux_core",
- "vmux_layout",
  "vmux_ui",
+ "wasm-bindgen",
  "web-sys",
 ]
 

@@ -12,16 +12,26 @@ default = []
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
+bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
-crossbeam-channel = { workspace = true }
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
 serde_json = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
-vmux_layout = { path = "../vmux_layout" }
 
 [target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-web-sys = { version = "0.3", features = ["Location", "Window"] }
+wasm-bindgen = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "History",
+    "HtmlElement",
+    "Location",
+    "Window",
+] }

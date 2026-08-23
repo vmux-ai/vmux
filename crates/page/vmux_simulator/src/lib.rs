@@ -6,6 +6,7 @@
 //! mirror drawn over it cannot guarantee. Reaching the guest instead also means neither Screen
 //! Recording nor Accessibility permission is involved.
 
+pub mod event;
 pub mod url;
 
 #[cfg(ui)]
