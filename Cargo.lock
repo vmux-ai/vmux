@@ -10752,6 +10752,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_space",
  "vmux_ui",
  "vmux_wire",
