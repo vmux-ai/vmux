@@ -2771,25 +2771,36 @@ fn apply_planned_documents(
             continue;
         }
 
-        let Some((.., edit, _, _, _)) = views
+        // The server computed these ranges against one text. If two panes on this file have
+        // drifted apart, at most one of them is that text and there is no way to tell which, so
+        // applying would corrupt the other rather than merely overwrite it.
+        let mut texts = open
             .iter()
-            .find(|(_, view, ..)| canon(&view.path) == wanted)
-        else {
-            continue;
-        };
-        let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
-            Ok(updated) => updated,
-            Err(e) => return Some(format!("{}: {e}", document.path.display())),
-        };
+            .filter_map(|entity| views.get(*entity).ok())
+            .map(|(_, _, edit, ..)| edit.core.buffer.text());
+        let first = texts.next().unwrap_or_default();
+        if texts.any(|text| text != first) {
+            return Some(format!(
+                "{} is open more than once with different contents",
+                document.path.display()
+            ));
+        }
 
         for entity in open {
             let Ok((_, _, mut edit, keymap, mut vp, mut diff_source)) = views.get_mut(entity)
             else {
                 continue;
             };
+            // Each pane owns its `EditCore`, so two panes on one file can hold different text.
+            // Computing once and broadcasting would overwrite whichever pane did not win with
+            // the other's unsaved work.
+            let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
+                Ok(updated) => updated,
+                Err(e) => return Some(format!("{}: {e}", document.path.display())),
+            };
             run_commands(
                 entity,
-                vec![EditCommand::ReplaceText(updated.clone())],
+                vec![EditCommand::ReplaceText(updated)],
                 &mut edit,
                 &mut diff_source,
                 keymap.0.as_ref(),
@@ -5324,6 +5335,39 @@ mod workspace_edit_tests {
 
         h.undo(view);
         assert_eq!(h.text(view), ApplyEdit::BEFORE);
+    }
+
+    /// Two panes on one file hold independent buffers. The server's ranges were computed
+    /// against one text, so once the panes drift there is no text to apply them to: applying
+    /// the first pane's result to the second overwrites its unsaved work, and re-applying the
+    /// stale ranges to the second's own text corrupts it. Refuse instead.
+    #[test]
+    fn panes_that_have_drifted_apart_are_refused_rather_than_corrupted() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.rs");
+        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+
+        let mut h = ApplyEdit::of(&path, 2);
+        let second = h.views[1];
+        h.app
+            .world_mut()
+            .get_mut::<EditState>(second)
+            .unwrap()
+            .core
+            .apply(EditCommand::InsertText("MINE ".to_string()));
+        h.app.update();
+
+        assert_eq!(h.text(h.views[0]), ApplyEdit::BEFORE, "left untouched");
+        assert_eq!(h.text(second), "MINE one two three\n", "left untouched");
+
+        let reply = h.sent.try_recv().expect("the server must be answered");
+        assert_eq!(reply["result"]["applied"], false);
+        assert!(
+            reply["result"]["failureReason"]
+                .as_str()
+                .is_some_and(|r| r.contains("different contents")),
+            "the server is told why: {reply}"
+        );
     }
 
     #[test]
