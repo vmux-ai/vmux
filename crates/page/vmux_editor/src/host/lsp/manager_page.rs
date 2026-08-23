@@ -321,13 +321,13 @@ fn drain_manager_outbox(
     for (entity, msg) in drained {
         match msg {
             ManagerMsg::Catalog(ev) => {
-                if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                if browsers.can_emit_to(&entity) {
                     commands.trigger(BinHostEmitEvent::from_rkyv(entity, LSP_CATALOG_EVENT, &ev));
                 }
             }
             ManagerMsg::Progress(ev) => {
                 for target in install_targets(entity, &ev.name, &views) {
-                    if browsers.has_browser(target) && browsers.host_emit_ready(&target) {
+                    if browsers.can_emit_to(&target) {
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             target,
                             LSP_INSTALL_PROGRESS_EVENT,
@@ -352,7 +352,7 @@ fn drain_manager_outbox(
                     }
                 }
                 for target in targets {
-                    if browsers.has_browser(target) && browsers.host_emit_ready(&target) {
+                    if browsers.can_emit_to(&target) {
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             target,
                             LSP_PKG_STATUS_EVENT,

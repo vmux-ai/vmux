@@ -705,7 +705,7 @@ fn drain_lsp_requests(
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => continue,
         };
-        let ready = browsers.has_browser(f.entity) && browsers.host_emit_ready(&f.entity);
+        let ready = browsers.can_emit_to(&f.entity);
         match f.kind {
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
@@ -894,7 +894,7 @@ fn emit_diagnostics_system(
     mut commands: Commands,
 ) {
     for (entity, fv, sent) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let target = canon(&fv.path);
@@ -1016,7 +1016,7 @@ fn lsp_status_system(
         if sent.is_some_and(|s| s.state == desired && s.path == fv.path) {
             continue;
         }
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(

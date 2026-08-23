@@ -928,7 +928,7 @@ fn send_initial_meta(
     mut commands: Commands,
 ) {
     for (entity, buf) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         if let Some(message) = buf.language.strip_prefix("__error__:") {
@@ -959,7 +959,7 @@ fn send_initial_text_meta(
     mut commands: Commands,
 ) {
     for (entity, fv, mut edit, keymap, vp) in &mut q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -994,7 +994,7 @@ fn send_file_theme(
     mut commands: Commands,
 ) {
     for entity in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let (font_family, font_size, line_height) = settings
@@ -1027,7 +1027,7 @@ fn send_file_view_mode(
 ) {
     let event = FileViewModeEvent { mode: mode.0 };
     for entity in &pending {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1039,7 +1039,7 @@ fn send_file_view_mode(
     }
     if mode.is_changed() {
         for entity in &sent {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1062,7 +1062,7 @@ fn send_file_keymap(
         keymap: settings_keymap(&settings),
     };
     for entity in &pending {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1077,7 +1077,7 @@ fn send_file_keymap(
         .is_some_and(|settings| settings.is_changed())
     {
         for entity in &sent {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1122,7 +1122,7 @@ fn send_note(
             commands.entity(entity).insert(NoteSent);
             continue;
         }
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let Some(mut note) = edit.parsed_note.clone() else {
@@ -1187,7 +1187,7 @@ fn send_initial_dir(
     mut commands: Commands,
 ) {
     for (entity, fv, dir) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let (parent_path, parent_entries) = parent_listing(&fv.path);
@@ -1252,7 +1252,7 @@ fn emit_window(
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
-    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+    if !browsers.can_emit_to(&entity) {
         return;
     }
     let total = edit.core.buffer.len_lines() as u32;
@@ -1304,7 +1304,7 @@ fn emit_cursor(
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
-    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+    if !browsers.can_emit_to(&entity) {
         return;
     }
     let total = edit.core.buffer.len_lines() as u32;
@@ -1669,7 +1669,7 @@ fn send_initial_media(
     mut commands: Commands,
 ) {
     for (entity, fv, media) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1695,7 +1695,7 @@ fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: No
         if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
             continue;
         }
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         browsers.attach_media_overlay(&entity, &fv.path.to_string_lossy());
@@ -1708,6 +1708,8 @@ fn on_file_video_rect(
     browsers: NonSend<Browsers>,
 ) {
     let entity = trigger.event().webview;
+    // `has_browser` rather than `can_emit_to`, unlike every other guard here: the overlay is
+    // CEF's own machinery, not a host event, and a natively hosted page has none of it.
     if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
         return;
     }
@@ -1764,7 +1766,7 @@ fn on_file_preview_request(
         });
         return;
     }
-    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+    if !browsers.can_emit_to(&entity) {
         return;
     }
     let kind = preview::build_preview_sync(&path);
@@ -1789,8 +1791,7 @@ fn drain_thumb_tasks(
             let webview = t.webview;
             commands.entity(task_entity).despawn();
             if let Ok(bytes) = result
-                && browsers.has_browser(webview)
-                && browsers.host_emit_ready(&webview)
+                && browsers.can_emit_to(&webview)
             {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
                     webview,
@@ -1933,7 +1934,7 @@ fn on_knowledge_link_open(
             ) {
                 Ok(path) => path,
                 Err(error) => {
-                    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                    if browsers.can_emit_to(&entity) {
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
                             FILE_ERROR_EVENT,
@@ -2087,7 +2088,7 @@ fn reload_changed_files(
 ) {
     for (entity, fv, edit) in &q {
         commands.entity(entity).remove::<FileReloadRequested>();
-        let ready = browsers.has_browser(entity) && browsers.host_emit_ready(&entity);
+        let ready = browsers.can_emit_to(&entity);
 
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
@@ -2214,7 +2215,7 @@ fn emit_wiki_completions(
     let Some((line, replace_from_col, prefix)) = wiki_completion_context(edit) else {
         return false;
     };
-    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+    if !browsers.can_emit_to(&entity) {
         return true;
     }
     let items = index
@@ -2277,7 +2278,7 @@ fn run_commands(
     let mut viewport_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
-            if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            if browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
                     entity,
                     FILE_SCROLL_BY_EVENT,
@@ -2392,7 +2393,7 @@ fn run_commands(
                 }
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
-                    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                    if browsers.can_emit_to(&entity) {
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
                             FILE_ERROR_EVENT,
@@ -3329,7 +3330,7 @@ fn emit_explorer_focus(
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
-    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+    if browsers.can_emit_to(&entity) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             EXPLORER_FOCUS_EVENT,
@@ -3383,7 +3384,7 @@ fn emit_explorer_tree(
     mut commands: Commands,
 ) {
     for (entity, fv, mut st) in &mut q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let rows = flatten_tree(&st.root, &st.expanded, &st.loading, &st.children);
@@ -3677,7 +3678,7 @@ fn emit_explorer_fs_result(
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
-    if browsers.has_browser(webview) && browsers.host_emit_ready(&webview) {
+    if browsers.can_emit_to(&webview) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             EXPLORER_FS_RESULT_EVENT,
@@ -3806,7 +3807,7 @@ fn emit_explorer_chrome(
     mut commands: Commands,
 ) {
     for (entity, child_of) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let scope = child_of.map(ChildOf::parent).unwrap_or(entity);
@@ -3946,7 +3947,7 @@ fn emit_open_editors(
     mut commands: Commands,
 ) {
     for (entity, fv, st, edit, parked) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let active_dirty = edit.map(|e| e.core.dirty).unwrap_or(false);
@@ -3993,7 +3994,7 @@ fn emit_outline_markdown(
     mut commands: Commands,
 ) {
     for (entity, edit) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         let items = crate::explorer_model::markdown_outline(&edit.core.buffer.text());
@@ -4012,7 +4013,7 @@ fn clear_outline_on_file_change(
     mut commands: Commands,
 ) {
     for entity in &q {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 EXPLORER_OUTLINE_EVENT,
@@ -4104,7 +4105,7 @@ fn emit_global_search(
     mut commands: Commands,
 ) {
     for (entity, search) in &q {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
