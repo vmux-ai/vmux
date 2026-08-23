@@ -7,8 +7,8 @@
 pub const PAGE_HOST: &str = "simulator";
 pub const PLATFORM: &str = "ios";
 
-/// The only URL that opens. The pinned form is reached by rewriting the address bar in place,
-/// which is a `replaceState`, not a navigation — so nothing needs to route it.
+/// The shorthand URL, which the view canonicalises to a pinned one. Both forms open: the host
+/// claims any route this module parses.
 pub const UNPINNED_URL: &str = "vmux://simulator/ios";
 
 /// An iOS runtime version, as it appears in a URL.
@@ -72,6 +72,17 @@ impl SimulatorRoute {
         IosVersion::parse(version).map(Self::Pinned)
     }
 
+    /// From a whole `vmux://simulator/...` URL, as page-open tasks carry it.
+    pub fn of_url(url: &str) -> Option<Self> {
+        let rest = url.strip_prefix("vmux://")?;
+        let (host, path) = rest.split_once('/')?;
+        if host != PAGE_HOST {
+            return None;
+        }
+        let path = path.split(['?', '#']).next().unwrap_or(path);
+        Self::parse(path)
+    }
+
     pub fn version(&self) -> Option<&IosVersion> {
         match self {
             Self::Unpinned => None,
@@ -123,6 +134,28 @@ mod tests {
         assert_eq!(SimulatorRoute::parse("/ios/latest"), None);
         assert_eq!(SimulatorRoute::parse("/ios/27.0/extra"), None);
         assert_eq!(SimulatorRoute::parse("/ios/27.x"), None);
+    }
+
+    #[test]
+    fn whole_urls_route_here_only_for_this_host() {
+        assert_eq!(
+            SimulatorRoute::of_url(UNPINNED_URL),
+            Some(SimulatorRoute::Unpinned)
+        );
+        assert_eq!(
+            SimulatorRoute::of_url("vmux://simulator/ios/27.0")
+                .and_then(|r| r.version().map(IosVersion::as_str).map(str::to_string)),
+            Some("27.0".to_string())
+        );
+        assert!(SimulatorRoute::of_url("vmux://simulator/ios/27.0?x=1").is_some());
+    }
+
+    #[test]
+    fn another_host_or_a_bare_host_does_not_route_here() {
+        assert_eq!(SimulatorRoute::of_url("vmux://terminal/ios"), None);
+        assert_eq!(SimulatorRoute::of_url("vmux://simulator/"), None);
+        assert_eq!(SimulatorRoute::of_url("vmux://simulator/android/15"), None);
+        assert_eq!(SimulatorRoute::of_url("https://simulator/ios"), None);
     }
 
     #[test]

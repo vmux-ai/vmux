@@ -11,8 +11,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use input::DeviceGesture;
 use stream::StreamServer;
-use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
+use vmux_core::{
+    CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+};
 
 pub use device::{Axe, SimulatorDevice};
 
@@ -21,21 +23,14 @@ pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            // Registered to route the URL, but never prewarmed: a hidden copy would connect to
-            // the stream and hold an `axe` child at full frame rate for a page nobody is looking
-            // at. Measured three concurrent children with a pool of one.
-            vmux_core::page::PrewarmPage {
-                host: PAGE_HOST,
-                url: crate::url::UNPINNED_URL,
-                title: PAGE_MANIFEST.title,
-                pool_size: 0,
-            },
-        ));
+        app.world_mut().spawn(PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, PAGE_HOST);
         app.init_resource::<Announced>()
             .add_systems(Startup, Self::attach_device)
+            .add_systems(
+                Update,
+                Self::claim_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
             .add_systems(Update, Self::announce)
             .add_plugins(BinEventEmitterPlugin::<(SimulatorGesture,)>::for_hosts(&[
                 PAGE_HOST,
@@ -61,9 +56,37 @@ struct DevicePoints(f32, f32);
 #[derive(Resource, Default)]
 struct Announced(HashMap<Entity, SimulatorReady>);
 
+/// A page-open task nobody has claimed or failed yet.
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
 impl SimulatorPlugin {
     /// URL prefix identifying a browser showing this page, used in place of a marker component.
     const URL_PREFIX: &'static str = "vmux://simulator/";
+
+    /// Claims every simulator URL, pinned or not.
+    ///
+    /// A `PrewarmPage` would only match one exact string, which leaves
+    /// `vmux://simulator/ios/27.0` unroutable from a bookmark or the command bar even though the
+    /// page reaches that URL itself. Prewarming is also wrong here: a hidden warm copy connects
+    /// to the stream and holds an `axe` child at full frame rate for a page nobody is looking at.
+    fn claim_page_open(
+        tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+        mut attach: MessageWriter<CefPageAttachRequest>,
+        mut commands: Commands,
+    ) {
+        for (entity, task) in &tasks {
+            if crate::url::SimulatorRoute::of_url(&task.url).is_none() {
+                continue;
+            }
+            attach.write(CefPageAttachRequest {
+                stack: task.stack,
+                url: task.url.clone(),
+                title: PAGE_MANIFEST.title.to_string(),
+                bg_color: None,
+            });
+            commands.entity(entity).insert(PageOpenHandled);
+        }
+    }
 
     fn attach_device(mut commands: Commands) {
         if Axe::version().is_none() {
