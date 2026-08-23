@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = ቦታ ሰርዝ
 
 team-title = ቡድን
+simulator-title = አስመሳይ
 team-just-you = በዚህ ቦታ ውስጥ እርስዎ ብቻ ነዎት
 team-agents = { $count ->
     [one] እርስዎ እና 1 ኤጀንት

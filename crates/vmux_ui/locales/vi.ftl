@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Xóa không gian
 
 team-title = Nhóm
+simulator-title = Trình mô phỏng
 team-just-you = Chỉ có bạn trong không gian này
 team-agents = { $count ->
     [one] Bạn và 1 tác nhân

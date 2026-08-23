@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Space ဖျက်မည်
 
 team-title = အဖွဲ့
+simulator-title = ပုံတူရိုက်စက်
 team-just-you = ဤ space တွင် သင်တစ်ဦးတည်းရှိသည်
 team-agents = { $count ->
     [one] သင်နှင့် agent 1 ခု

@@ -1143,6 +1143,7 @@ fn page_title_message_id(host: &str) -> Option<&'static str> {
         "lsp" => Some("lsp-title"),
         "services" => Some("services-title"),
         "settings" => Some("settings-title"),
+        "simulator" => Some("simulator-title"),
         "spaces" => Some("spaces-title"),
         "start" => Some("start-title"),
         "team" => Some("team-title"),

@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = حذف مساحة العمل
 
 team-title = الفريق
+simulator-title = المحاكي
 team-just-you = أنت وحدك في مساحة العمل هذه
 team-agents = { $count ->
     [one] أنت ووكيل واحد

@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Kustuta tööruum
 
 team-title = Tiim
+simulator-title = Simulator
 team-just-you = Selles tööruumis oled ainult sina
 team-agents = { $count ->
     [one] Sina ja 1 agent

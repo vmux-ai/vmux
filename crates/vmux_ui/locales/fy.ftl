@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Romte wiskje
 
 team-title = Team
+simulator-title = Simulator
 team-just-you = Allinnich do yn dizze romte
 team-agents = { $count ->
     [one] Do en 1 agent

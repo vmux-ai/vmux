@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Dele spatium
 
 team-title = Grex
+simulator-title = Simulator
 team-just-you = Tu solus in hoc spatio
 team-agents = { $count ->
     [one] Tu et 1 agens

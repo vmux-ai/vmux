@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Dileu lle
 
 team-title = Tîm
+simulator-title = Efelychydd
 team-just-you = Dim ond chi yn y lle hwn
 team-agents = { $count ->
     [one] Chi ac 1 asiant

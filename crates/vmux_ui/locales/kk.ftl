@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Кеңістікті өшіру
 
 team-title = Топ
+simulator-title = Симулятор
 team-just-you = Бұл кеңістікте тек сіз барсыз
 team-agents = { $count ->
     [one] Сіз және 1 агент

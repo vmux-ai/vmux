@@ -164,6 +164,7 @@ spaces-tabs = { $count } タブ
 spaces-delete = スペースを削除
 
 team-title = チーム
+simulator-title = シミュレータ
 team-just-you = このスペースにはあなたのみ参加中です
 team-agents = あなたと { $count } エージェント
 team-empty = まだ誰もいません

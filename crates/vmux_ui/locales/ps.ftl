@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = ځای ړنګ کړئ
 
 team-title = ټیم
+simulator-title = سمولیټر
 team-just-you = په دې ځای کې یوازې تاسې یاست
 team-agents = { $count ->
     [one] تاسې او 1 اجنټ

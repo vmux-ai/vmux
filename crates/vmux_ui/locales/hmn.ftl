@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Rho tawm chaw ua haujlwm
 
 team-title = Pab pawg
+simulator-title = Simulator
 team-just-you = Tsuas yog koj hauv qhov chaw ua haujlwm no
 team-agents = { $count ->
     [one] Koj thiab 1 agent

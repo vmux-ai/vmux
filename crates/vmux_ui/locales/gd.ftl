@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Sguab às an t-àite
 
 team-title = Sgioba
+simulator-title = Simulator
 team-just-you = ’S tusa a-mhàin san àite seo
 team-agents = { $count ->
     [one] Thu fhèin is 1 àidseant

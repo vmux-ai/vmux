@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Goge wuri
 
 team-title = Ƙungiya
+simulator-title = Simulator
 team-just-you = Kai kaɗai ne a wannan wuri
 team-agents = { $count ->
     [one] Kai da wakilin AI 1

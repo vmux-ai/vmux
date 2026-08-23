@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Tirtir goobta
 
 team-title = Koox
+simulator-title = Simulator
 team-just-you = Adiga keliya ayaa goobtan ku jira
 team-agents = { $count ->
     [one] Adiga iyo 1 ajan

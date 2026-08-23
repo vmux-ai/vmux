@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Διαγραφή χώρου
 
 team-title = Ομάδα
+simulator-title = Προσομοιωτής
 team-just-you = Μόνο εσείς σε αυτόν τον χώρο
 team-agents = { $count ->
     [one] Εσείς και 1 agent

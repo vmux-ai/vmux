@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = ماكاننى ئۆچۈرۈش
 
 team-title = گۇرۇپپا
+simulator-title = تەقلىدلىگۈچ
 team-just-you = بۇ ماكاندا پەقەت سىزلا بار
 team-agents = { $count ->
     [one] سىز ۋە 1 ئاگېنت

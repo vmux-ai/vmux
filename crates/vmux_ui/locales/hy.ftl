@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Ջնջել աշխատատարածքը
 
 team-title = Թիմ
+simulator-title = Սիմուլյատոր
 team-just-you = Այս աշխատատարածքում միայն դուք եք
 team-agents = { $count ->
     [one] Դուք և 1 գործակալ

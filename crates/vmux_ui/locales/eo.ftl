@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Forigi spacon
 
 team-title = Teamo
+simulator-title = Simulilo
 team-just-you = Nur vi en ĉi tiu spaco
 team-agents = { $count ->
     [one] Vi kaj 1 agento

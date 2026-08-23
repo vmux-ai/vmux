@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Hlakola sebaka
 
 team-title = Sehlopha
+simulator-title = Simulator
 team-just-you = Ke wena feela sebakeng sena
 team-agents = { $count ->
     [one] Wena le agent e 1

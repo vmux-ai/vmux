@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Tape le avanoa
 
 team-title = Au
+simulator-title = Simulator
 team-just-you = Na o oe i lenei avanoa
 team-agents = { $count ->
     [one] Oe ma le 1 sui AI

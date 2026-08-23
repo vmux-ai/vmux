@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Efase espas la
 
 team-title = Ekip
+simulator-title = Simulator
 team-just-you = Se ou sèlman nan espas sa a
 team-agents = { $count ->
     [one] Ou menm ak 1 ajan

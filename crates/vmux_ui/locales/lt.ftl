@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Ištrinti darbo sritį
 
 team-title = Komanda
+simulator-title = Simuliatorius
 team-just-you = Šioje darbo srityje esate tik jūs
 team-agents = { $count ->
     [one] Jūs ir 1 agentas

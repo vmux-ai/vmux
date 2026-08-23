@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Mukua te wāhi
 
 team-title = Tīma
+simulator-title = Simulator
 team-just-you = Ko koe anake i tēnei wāhi
 team-agents = { $count ->
     [one] Ko koe me te āpiha AI 1

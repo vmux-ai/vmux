@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = លុបកន្លែងការ
 
 team-title = ក្រុម
+simulator-title = ក្មុមអ្នកយកតម្រាប់
 team-just-you = មានតែអ្នកក្នុងកន្លែងការនេះ
 team-agents = { $count ->
     [one] អ្នក និងភ្នាក់ងារ AI 1

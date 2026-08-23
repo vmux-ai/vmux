@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = I-delete ang workspace
 
 team-title = Team
+simulator-title = Simulator
 team-just-you = Ikaw lang sa workspace na ito
 team-agents = { $count ->
     [one] Ikaw at 1 agent

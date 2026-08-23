@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Munkatér törlése
 
 team-title = Csapat
+simulator-title = Szimulátor
 team-just-you = Csak Ön van ebben a munkatérben
 team-agents = { $count ->
     [one] Ön és 1 agent

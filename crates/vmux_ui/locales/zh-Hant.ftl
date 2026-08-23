@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = 刪除工作區
 
 team-title = 團隊
+simulator-title = 模擬器
 team-just-you = 這個工作區只有你
 team-agents = { $count ->
     [one] 你和 1 個 Agent

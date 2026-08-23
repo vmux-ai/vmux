@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Iş giňişligini poz
 
 team-title = Topar
+simulator-title = Simulator
 team-just-you = Bu iş giňişliginde diňe siz bar
 team-agents = { $count ->
     [one] Siz we 1 agent

@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Ħassar l-ispazju
 
 team-title = Tim
+simulator-title = Simulator
 team-just-you = Int biss f’dan l-ispazju
 team-agents = { $count ->
     [one] Int u aġent wieħed

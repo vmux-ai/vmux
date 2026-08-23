@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Ish maydonini o‘chirish
 
 team-title = Jamoa
+simulator-title = Simulator
 team-just-you = Bu ish maydonida faqat siz
 team-agents = { $count ->
     [one] Siz va 1 ta agent

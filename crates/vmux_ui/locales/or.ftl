@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = କାର୍ଯ୍ୟସ୍ଥଳ ଡିଲିଟ୍ କରନ୍ତୁ
 
 team-title = ଟିମ୍
+simulator-title = ସିମୁଲେଟର
 team-just-you = ଏହି କାର୍ଯ୍ୟସ୍ଥଳରେ କେବଳ ଆପଣ
 team-agents = { $count ->
     [one] ଆପଣ ଏବଂ 1 ଏଜେଣ୍ଟ

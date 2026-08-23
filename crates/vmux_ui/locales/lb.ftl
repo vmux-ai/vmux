@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Beräich läschen
 
 team-title = Team
+simulator-title = Simulator
 team-just-you = Just du an dësem Beräich
 team-agents = { $count ->
     [one] Du an 1 Agent

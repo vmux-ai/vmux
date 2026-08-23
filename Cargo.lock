@@ -11364,6 +11364,7 @@ dependencies = [
  "vmux_server",
  "vmux_service",
  "vmux_setting",
+ "vmux_simulator",
  "vmux_space",
  "vmux_team",
  "vmux_terminal",
@@ -11614,6 +11615,7 @@ dependencies = [
  "vmux_layout",
  "vmux_service",
  "vmux_setting",
+ "vmux_simulator",
  "vmux_space",
  "vmux_team",
  "vmux_terminal",
@@ -11694,6 +11696,22 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_simulator"
+version = "0.0.30"
+dependencies = [
+ "bevy",
+ "bevy_ecs",
+ "crossbeam-channel",
+ "dioxus",
+ "image",
+ "serde_json",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_ui",
+ "web-sys",
 ]
 
 [[package]]

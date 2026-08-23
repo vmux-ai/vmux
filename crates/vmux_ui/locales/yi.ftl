@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = אויסמעקן אָרט
 
 team-title = קאָלעקטיוו
+simulator-title = סימולאטאר
 team-just-you = נאָר איר אין דעם אָרט
 team-agents = { $count ->
     [one] איר און 1 אַגענט

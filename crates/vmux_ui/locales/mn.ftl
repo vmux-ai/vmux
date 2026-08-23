@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Орчин устгах
 
 team-title = Баг
+simulator-title = Симулятор
 team-just-you = Энэ орчинд зөвхөн та байна
 team-agents = { $count ->
     [one] Та болон 1 агент

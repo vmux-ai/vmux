@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Pupus rohangan
 
 team-title = Tim
+simulator-title = Simulator
 team-just-you = Ngan anjeun di rohangan ieu
 team-agents = { $count ->
     [one] Anjeun jeung 1 agén

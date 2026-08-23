@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Slet arbejdsrum
 
 team-title = Team
+simulator-title = Simulator
 team-just-you = Kun dig i dette arbejdsrum
 team-agents = { $count ->
     [one] Dig og 1 agent

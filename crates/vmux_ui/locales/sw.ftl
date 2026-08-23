@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Futa nafasi
 
 team-title = Timu
+simulator-title = Simulator
 team-just-you = Ni wewe tu katika nafasi hii
 team-agents = { $count ->
     [one] Wewe na ajenti 1

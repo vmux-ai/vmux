@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Нест кардани фазо
 
 team-title = Даста
+simulator-title = Симулятор
 team-just-you = Дар ин фазо танҳо шумо ҳастед
 team-agents = { $count ->
     [one] Шумо ва 1 агент

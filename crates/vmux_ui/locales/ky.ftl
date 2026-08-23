@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Мейкиндикти өчүрүү
 
 team-title = Команда
+simulator-title = Симулятор
 team-just-you = Бул мейкиндикте сиз гана барсыз
 team-agents = { $count ->
     [one] Сиз жана 1 агент

@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Chotsa malo
 
 team-title = Gulu
+simulator-title = Simulator
 team-just-you = Muli nokha m'malo muno
 team-agents = { $count ->
     [one] Inu ndi ajenti 1

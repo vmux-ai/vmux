@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Мохитне бетерү
 
 team-title = Команда
+simulator-title = Симулятор
 team-just-you = Бу мохиттә әлегә сез генә
 team-agents = { $count ->
     [one] Сез һәм 1 агент

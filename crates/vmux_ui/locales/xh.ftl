@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Cima indawo
 
 team-title = Iqela
+simulator-title = Simulator
 team-just-you = Nguwe wedwa kule ndawo
 team-agents = { $count ->
     [one] Wena nearhente eyi-1

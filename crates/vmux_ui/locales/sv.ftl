@@ -170,6 +170,7 @@ spaces-tabs = { $count ->
 spaces-delete = Radera yta
 
 team-title = Team
+simulator-title = Simulator
 team-just-you = Bara du i den här ytan
 team-agents = { $count ->
     [one] Du och 1 agent
