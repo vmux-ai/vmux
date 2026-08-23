@@ -1,4 +1,5 @@
 use crate::url::IosVersion;
+use std::path::PathBuf;
 use std::process::Command;
 
 /// The `axe` CLI, which injects HID events straight into the guest.
@@ -7,21 +8,61 @@ use std::process::Command;
 /// `CGEventPostToPid` is silently dropped and a global tap would need the window visible and
 /// unobstructed. AXe links Xcode's private CoreSimulator/SimulatorKit and absorbs the
 /// per-Xcode-version churn in those signatures.
-pub struct Axe;
+#[derive(bevy::prelude::Resource)]
+pub struct Axe {
+    path: PathBuf,
+}
 
 impl Axe {
     pub const BIN: &'static str = "axe";
 
-    pub fn version() -> Option<String> {
-        let output = Command::new(Self::BIN).arg("--version").output().ok()?;
+    /// Where Homebrew puts it on Apple silicon and on Intel.
+    ///
+    /// Searched explicitly because a bundle launched from Finder inherits `launchd`'s minimal
+    /// `PATH`, not a login shell's — so a plain `Command::new("axe")` resolves under
+    /// `make dev` and then fails for everyone running the shipped app.
+    const BREW_PATHS: [&'static str; 2] = ["/opt/homebrew/bin/axe", "/usr/local/bin/axe"];
+
+    /// First working `axe`, preferring one the user installed over one we shipped, so an Xcode
+    /// upgrade can be fixed with `brew upgrade axe` rather than a vmux release.
+    pub fn locate() -> Option<Self> {
+        let mut candidates: Vec<PathBuf> = vec![PathBuf::from(Self::BIN)];
+        candidates.extend(Self::BREW_PATHS.iter().map(PathBuf::from));
+        candidates.extend(Self::bundled());
+        for path in candidates {
+            let probe = Command::new(&path).arg("--version").output();
+            let Ok(output) = probe else {
+                continue;
+            };
+            if output.status.success() {
+                return Some(Self { path });
+            }
+        }
+        None
+    }
+
+    /// A copy shipped inside the app bundle, alongside the executable's `Resources`.
+    fn bundled() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let contents = exe.parent()?.parent()?;
+        let bundled = contents.join("Resources").join("axe").join(Self::BIN);
+        bundled.exists().then_some(bundled)
+    }
+
+    pub fn version(&self) -> Option<String> {
+        let output = Command::new(&self.path).arg("--version").output().ok()?;
         if !output.status.success() {
             return None;
         }
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    pub fn command() -> Command {
-        Command::new(Self::BIN)
+    pub fn command(&self) -> Command {
+        Command::new(&self.path)
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
     }
 
     /// Waits off-thread: every gesture and keystroke costs a process spawn, and blocking on it
@@ -94,8 +135,9 @@ impl SimulatorDevice {
     ///
     /// Read from the accessibility root rather than assumed from the device name: the stream
     /// reports pixels and the two differ by the device scale (3x on this phone, 2x on iPads).
-    pub fn point_size(&self) -> Option<(f32, f32)> {
-        let output = Axe::command()
+    pub fn point_size(&self, axe: &Axe) -> Option<(f32, f32)> {
+        let output = axe
+            .command()
             .args(["describe-ui", "--udid", &self.udid])
             .output()
             .ok()?;

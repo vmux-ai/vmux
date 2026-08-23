@@ -90,22 +90,27 @@ impl SimulatorPlugin {
     }
 
     fn attach_device(mut commands: Commands) {
-        if Axe::version().is_none() {
+        let Some(axe) = Axe::locate() else {
             warn!(
-                "`{}` not found on PATH — the simulator page needs it; \
+                "`{}` not found — the simulator page needs it; \
                  install with `brew install cameroncooke/axe/axe`",
                 Axe::BIN
             );
             return;
-        }
+        };
+        info!(
+            "axe {} at {}",
+            axe.version().unwrap_or_default(),
+            axe.path().display()
+        );
         let Some(device) = SimulatorDevice::booted() else {
             info!("no booted simulator; the simulator page will be empty");
             return;
         };
-        if let Some((w, h)) = device.point_size() {
+        if let Some((w, h)) = device.point_size(&axe) {
             commands.insert_resource(DevicePoints(w, h));
         }
-        match StreamServer::start(device.clone()) {
+        match StreamServer::start(&axe, device.clone()) {
             Ok(server) => {
                 info!(
                     "mirroring {} on loopback port {}",
@@ -117,6 +122,7 @@ impl SimulatorPlugin {
             Err(error) => error!("could not serve the simulator stream: {error}"),
         }
         commands.insert_resource(device);
+        commands.insert_resource(axe);
     }
 
     /// Tells every ready simulator view where to point its `<img>`.
@@ -171,8 +177,11 @@ impl SimulatorPlugin {
         trigger: On<BinReceive<SimulatorGesture>>,
         device: Option<Res<SimulatorDevice>>,
         points: Option<Res<DevicePoints>>,
+        axe: Option<Res<Axe>>,
     ) {
-        let (Some(device), Some(points)) = (device.as_deref(), points.as_deref()) else {
+        let (Some(device), Some(points), Some(axe)) =
+            (device.as_deref(), points.as_deref(), axe.as_deref())
+        else {
             return;
         };
         let Some(gesture) =
@@ -180,14 +189,18 @@ impl SimulatorPlugin {
         else {
             return;
         };
-        gesture.dispatch();
+        gesture.dispatch(axe);
     }
 
-    fn on_key(trigger: On<BinReceive<SimulatorKey>>, device: Option<Res<SimulatorDevice>>) {
-        let Some(device) = device.as_deref() else {
+    fn on_key(
+        trigger: On<BinReceive<SimulatorKey>>,
+        device: Option<Res<SimulatorDevice>>,
+        axe: Option<Res<Axe>>,
+    ) {
+        let (Some(device), Some(axe)) = (device.as_deref(), axe.as_deref()) else {
             return;
         };
-        DeviceKey::resolve(&trigger.event().payload, device).dispatch();
+        DeviceKey::resolve(&trigger.event().payload, device).dispatch(axe);
     }
 }
 

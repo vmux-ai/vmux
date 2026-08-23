@@ -24,12 +24,13 @@ impl StreamServer {
     /// A child per connection rather than one shared child: the stream cannot seek or replay, so
     /// a reload needs a fresh one, and dying with the socket is what stops `axe` when the page
     /// goes away.
-    pub fn start(device: SimulatorDevice) -> io::Result<Self> {
+    pub fn start(axe: &Axe, device: SimulatorDevice) -> io::Result<Self> {
+        let axe = axe.path().to_path_buf();
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
         let port = listener.local_addr()?.port();
         std::thread::Builder::new()
             .name("vmux-simulator-stream".into())
-            .spawn(move || Self::accept_loop(listener, device))?;
+            .spawn(move || Self::accept_loop(listener, axe, device))?;
         Ok(Self { port })
     }
 
@@ -37,23 +38,24 @@ impl StreamServer {
         self.port
     }
 
-    fn accept_loop(listener: TcpListener, device: SimulatorDevice) {
+    fn accept_loop(listener: TcpListener, axe: std::path::PathBuf, device: SimulatorDevice) {
         for connection in listener.incoming() {
             let Ok(socket) = connection else {
                 continue;
             };
             let device = device.clone();
+            let axe = axe.clone();
             let spawned = std::thread::Builder::new()
                 .name("vmux-simulator-pipe".into())
-                .spawn(move || Self::pipe(socket, device));
+                .spawn(move || Self::pipe(socket, axe, device));
             if spawned.is_err() {
                 warn!("could not spawn a stream thread");
             }
         }
     }
 
-    fn pipe(mut socket: TcpStream, device: SimulatorDevice) {
-        let child = Axe::command()
+    fn pipe(mut socket: TcpStream, axe: std::path::PathBuf, device: SimulatorDevice) {
+        let child = std::process::Command::new(axe)
             .args(["stream-video", "--udid", &device.udid])
             .args(["--format", "mjpeg"])
             .args(["--fps", Self::FPS])

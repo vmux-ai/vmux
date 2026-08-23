@@ -30,8 +30,8 @@ impl DeviceGesture {
     }
 
     /// Runs `axe` off-thread: a gesture costs a process spawn, which would otherwise stall a frame.
-    pub fn dispatch(self) {
-        let mut command = Axe::command();
+    pub fn dispatch(self, axe: &Axe) {
+        let mut command = axe.command();
         if self.tap {
             command
                 .arg("tap")
@@ -64,8 +64,8 @@ impl DeviceKey {
         }
     }
 
-    pub fn dispatch(self) {
-        let mut command = Axe::command();
+    pub fn dispatch(self, axe: &Axe) {
+        let mut command = axe.command();
         match &self.key {
             SimulatorKey::Text(text) => {
                 command.arg("type").arg(text);
