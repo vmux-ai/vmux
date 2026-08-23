@@ -6,6 +6,7 @@ mod stream;
 
 use crate::event::{SIMULATOR_READY_EVENT, SimulatorGesture, SimulatorReady};
 use crate::url::PAGE_HOST;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use input::DeviceGesture;
@@ -22,12 +23,14 @@ impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, PAGE_HOST);
-        app.add_systems(Startup, Self::attach_device)
+        app.init_resource::<Announced>()
+            .add_systems(Startup, Self::attach_device)
             .add_systems(Update, Self::announce)
             .add_plugins(BinEventEmitterPlugin::<(SimulatorGesture,)>::for_hosts(&[
                 PAGE_HOST,
             ]))
-            .add_observer(Self::on_gesture);
+            .add_observer(Self::on_gesture)
+            .add_observer(Self::forget_on_reload);
     }
 }
 
@@ -42,6 +45,10 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 /// The device's point size, measured once; gestures arrive as fractions and need it to land.
 #[derive(Resource)]
 struct DevicePoints(f32, f32);
+
+/// What each view has already been told, so the announcement is not re-sent every tick.
+#[derive(Resource, Default)]
+struct Announced(HashMap<Entity, SimulatorReady>);
 
 impl SimulatorPlugin {
     /// URL prefix identifying a browser showing this page, used in place of a marker component.
@@ -83,7 +90,7 @@ impl SimulatorPlugin {
         views: Query<(Entity, &PageMetadata), With<PageReady>>,
         server: Option<Res<StreamServer>>,
         device: Option<Res<SimulatorDevice>>,
-        mut last: Local<SimulatorReady>,
+        mut told: ResMut<Announced>,
         mut commands: Commands,
     ) {
         let payload = match (server.as_deref(), device.as_deref()) {
@@ -98,9 +105,14 @@ impl SimulatorPlugin {
             },
             _ => SimulatorReady::default(),
         };
-        let mut announced = false;
+        // Per view, not one global latch: a second view opening later must still be told, and a
+        // reload resets the page's copy without changing the payload.
+        told.0.retain(|entity, _| views.contains(*entity));
         for (entity, meta) in views.iter() {
             if !meta.url.starts_with(Self::URL_PREFIX) {
+                continue;
+            }
+            if told.0.get(&entity) == Some(&payload) {
                 continue;
             }
             if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -111,11 +123,13 @@ impl SimulatorPlugin {
                 SIMULATOR_READY_EVENT,
                 &payload,
             ));
-            announced = true;
+            told.0.insert(entity, payload.clone());
         }
-        if announced {
-            *last = payload;
-        }
+    }
+
+    /// A reload clears the page's copy, so the view must be told again.
+    fn forget_on_reload(trigger: On<BinReceive<PageReady>>, mut told: ResMut<Announced>) {
+        told.0.remove(&trigger.event().webview);
     }
 
     fn on_gesture(
