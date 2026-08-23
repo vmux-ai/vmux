@@ -13,6 +13,7 @@ use dioxus_core::ElementId;
 use dioxus_html::{EventData, HtmlEvent, SerializedMouseData};
 
 use crate::event_request::EventOutcome;
+use crate::host_binding::HostBinding;
 use crate::page_dom::{PageComponent, PageDom};
 use crate::selector::{Selector, SelectorError};
 use crate::shadow_tree::ShadowTree;
@@ -20,6 +21,7 @@ use crate::shadow_tree::ShadowTree;
 /// A mounted page, queried and driven by selector.
 pub struct PageProbe {
     page: PageDom<ShadowTree>,
+    host: HostBinding,
 }
 
 /// Why a probe could not do what it was asked.
@@ -75,10 +77,21 @@ const SETTLE_LIMIT: usize = 64;
 
 impl PageProbe {
     /// Mount `app` and render it, leaving the document ready to query.
+    ///
+    /// Nothing is installed for the page to reach, which suits a component that only renders its
+    /// props. A page that emits, listens or reads a theme wants [`PageProbe::hosted`].
     pub fn mount(app: PageComponent, instance: crate::Instance) -> Self {
+        Self::hosted(app, instance, HostBinding::default())
+    }
+
+    /// Mount `app` with `host` installed around every render and every event.
+    pub fn hosted(app: PageComponent, instance: crate::Instance, host: HostBinding) -> Self {
         let mut page = PageDom::with_sink(app, instance);
-        page.diff_rebuild();
-        let mut probe = Self { page };
+        {
+            let _entered = host.entered();
+            page.diff_rebuild();
+        }
+        let mut probe = Self { page, host };
         let _ = probe.settle();
 
         probe
@@ -111,15 +124,18 @@ impl PageProbe {
             });
         }
 
-        let outcome = self.page.handle(
-            HtmlEvent {
-                element,
-                name: event.to_string(),
-                bubbles: true,
-                data,
-            },
-            (),
-        );
+        let outcome = {
+            let _entered = self.host.entered();
+            self.page.handle(
+                HtmlEvent {
+                    element,
+                    name: event.to_string(),
+                    bubbles: true,
+                    data,
+                },
+                (),
+            )
+        };
         self.settle()?;
 
         Ok(outcome)
@@ -188,6 +204,7 @@ impl PageProbe {
     fn settle(&mut self) -> Result<(), ProbeError> {
         for _ in 0..SETTLE_LIMIT {
             self.page.flushed();
+            let _entered = self.host.entered();
             if !self.page.diff_render() {
                 return Ok(());
             }
@@ -209,6 +226,90 @@ mod tests {
         fn of(app: PageComponent) -> Self {
             Self::mount(app, crate::Instance::default())
         }
+    }
+
+    /// Records whether the page ran with its host installed, from inside the page.
+    ///
+    /// A component cannot see a [`HostBinding`], only the thread state one leaves behind, which is
+    /// exactly what a real page's transport reads.
+    struct Witness;
+
+    thread_local! {
+        static DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static RAN_UNHOSTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Undoes its install on drop, the way `HostScope` does.
+    struct Installed;
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            DEPTH.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
+
+    impl Witness {
+        fn binding() -> HostBinding {
+            HostBinding::of(|| {
+                DEPTH.with(|depth| depth.set(depth.get() + 1));
+                Installed
+            })
+        }
+
+        /// Called from wherever a real page would reach its host.
+        fn note() {
+            if DEPTH.with(|depth| depth.get()) == 0 {
+                RAN_UNHOSTED.with(|seen| seen.set(true));
+            }
+        }
+
+        fn ran_unhosted() -> bool {
+            RAN_UNHOSTED.with(|seen| seen.get())
+        }
+    }
+
+    #[component]
+    fn Reaching() -> Element {
+        let mut count = use_signal(|| 0);
+        Witness::note();
+
+        rsx! {
+            button {
+                "data-testid": "go",
+                onclick: move |_| {
+                    Witness::note();
+                    count += 1;
+                },
+                "{count}"
+            }
+        }
+    }
+
+    /// A page emits from its render *and* from its handlers, and the render a handler schedules is
+    /// a third entry again. Installing the host for only one of them leaves a real page reaching
+    /// into an empty slot on the others.
+    #[test]
+    fn a_hosted_page_never_runs_without_its_host() {
+        let mut page = PageProbe::hosted(Reaching, crate::Instance::default(), Witness::binding());
+
+        page.click("[data-testid=go]").unwrap();
+
+        assert_eq!(page.text("[data-testid=go]").unwrap(), "1");
+        assert!(
+            !Witness::ran_unhosted(),
+            "the mount render, the handler, or the render it scheduled ran with no host installed"
+        );
+    }
+
+    /// The counterpart, so the test above cannot pass by never looking: unbound, the same page runs
+    /// with nothing installed.
+    #[test]
+    fn an_unhosted_page_runs_with_nothing_installed() {
+        let mut page = PageProbe::of(Reaching);
+
+        page.click("[data-testid=go]").unwrap();
+
+        assert!(Witness::ran_unhosted());
     }
 
     #[component]

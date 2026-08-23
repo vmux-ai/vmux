@@ -30,6 +30,7 @@
 //! two in flight cannot take each other's answer.
 
 mod event_request;
+mod host_binding;
 mod instance;
 mod page;
 mod page_dom;
@@ -39,6 +40,7 @@ mod shadow_tree;
 mod shell;
 
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
+pub use host_binding::HostBinding;
 pub use instance::{Instance, PageScope};
 pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};

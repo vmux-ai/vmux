@@ -30,6 +30,12 @@ vmux_core = { path = "../../vmux_core" }
 vmux_ui = { path = "../../vmux_ui" }
 vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
 
+# Spelled out rather than as the `ui` alias, the same way `vmux_native`'s own manifest is: Cargo
+# resolves dependencies before any build script runs, so a cfg that script defines cannot gate one.
+# These are the targets on which `page` exists to be probed at all.
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dev-dependencies]
+vmux_native = { path = "../../vmux_native" }
+
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }

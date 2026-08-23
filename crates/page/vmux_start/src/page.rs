@@ -85,3 +85,67 @@ pub fn StartPage() -> Element {
         Page {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use vmux_native::{HostBinding, Instance, PageProbe};
+    use vmux_ui::transport::event_listener::EventListenerError;
+    use vmux_ui::transport::{BytesListener, HostScope, PageHost};
+
+    use super::*;
+
+    /// A host that remembers what the page asked it for.
+    #[derive(Default)]
+    struct Recording {
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl PageHost for Recording {
+        fn send(&self, id: &str, _bytes: &[u8]) -> Result<(), EventListenerError> {
+            self.sent.borrow_mut().push(id.to_string());
+            Ok(())
+        }
+
+        fn listen(&self, _id: &str, _on_bytes: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    impl Recording {
+        /// Mount the launcher against a fresh recording host, and hand both back.
+        fn probing() -> (PageProbe, Rc<Self>) {
+            let host = Rc::new(Self::default());
+            let installed = host.clone();
+            let probe = PageProbe::hosted(
+                StartPage,
+                Instance::default(),
+                HostBinding::of(move || HostScope::enter(installed.clone())),
+            );
+
+            (probe, host)
+        }
+
+        fn sent(&self) -> Vec<String> {
+            self.sent.borrow().clone()
+        }
+    }
+
+    /// The launcher renders empty and fills in when the host answers, so the request it makes on
+    /// mount is the only thing standing between a user and a permanently blank start page. Nothing
+    /// in the rendered document says whether it was made.
+    #[test]
+    fn the_launcher_asks_the_host_for_its_entries_on_mount() {
+        let (_probe, host) = Recording::probing();
+
+        assert!(
+            host.sent()
+                .iter()
+                .any(|id| id == std::any::type_name::<StartDataRequest>()),
+            "the page mounted without asking for anything, so it would stay empty; it sent {:?}",
+            host.sent()
+        );
+    }
+}
