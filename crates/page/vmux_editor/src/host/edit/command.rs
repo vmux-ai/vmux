@@ -254,6 +254,34 @@ pub enum EditCommand {
     FoldToggleRecursive,
     FoldAll,
     UnfoldAll,
+    /// Put back every caret the user added, keeping the one they placed last.
+    CollapseCarets,
+}
+
+impl EditCommand {
+    /// Whether this means "do it at each caret" rather than "do it to the buffer".
+    ///
+    /// Deliberately a small allowlist. Multi-caret editing is reachable from the VS Code keymap
+    /// only, so this covers typing, deleting and moving; everything else — undo, search, ex
+    /// ranges, folds, whole-buffer replacement — runs once against the first caret, which is
+    /// what a command with buffer-wide meaning should do.
+    pub fn is_per_caret(&self) -> bool {
+        matches!(
+            self,
+            Self::Move(_)
+                | Self::Select(_)
+                | Self::InsertText(_)
+                | Self::OvertypeText(_)
+                | Self::InsertNewline
+                | Self::InsertTab
+                | Self::DeleteBack
+                | Self::DeleteForward
+                | Self::DeleteWordBack
+                | Self::ReplaceChar { .. }
+                | Self::SelectTextObject(_)
+                | Self::SwapSelectionEnds
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

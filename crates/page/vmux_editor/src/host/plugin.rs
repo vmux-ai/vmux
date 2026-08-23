@@ -1288,8 +1288,18 @@ fn emit_cursor(
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
+    let raw_carets: Vec<_> = edit
+        .core
+        .cursor_positions()
+        .into_iter()
+        .filter(|caret| !view.is_hidden(caret.line))
+        .collect();
     let wrap = wrapped_view(edit, vp);
     (primary.row, primary.col) = wrap.position(primary.line, primary.col);
+    let mut carets = raw_carets;
+    for caret in &mut carets {
+        (caret.row, caret.col) = wrap.position(caret.line, caret.col);
+    }
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1299,6 +1309,7 @@ fn emit_cursor(
             mode: keymap.mode(),
             mode_label: keymap.mode_label(),
             primary,
+            carets,
             selections,
             source_primary,
             source_selections: raw_selections,
@@ -3156,10 +3167,14 @@ fn on_file_pointer(
         .core
         .buffer
         .coords_to_char(p.line as usize, p.col as usize);
-    if p.extend {
+    if p.add {
+        edit.core.toggle_caret(at);
+    } else if p.extend {
         let anchor = edit.core.primary().anchor;
         edit.core.selections = vec![Selection { anchor, head: at }];
     } else {
+        // A plain click means "one caret, here", so it puts back any the user had added.
+        edit.core.collapse_carets();
         edit.core.set_caret(at);
     }
     if let Some(command) = keymap.0.pointer_selection_mode(p.extend) {

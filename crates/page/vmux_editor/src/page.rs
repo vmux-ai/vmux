@@ -94,6 +94,8 @@ pub fn Page() -> Element {
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
+    // Every caret. The primary is drawn from `cursor` as before; these are the rest.
+    let mut carets = use_signal(Vec::<vmux_core::editor::CursorPos>::new);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -222,6 +224,9 @@ pub fn Page() -> Element {
         }
         if moved {
             cursor.set(c.primary);
+        }
+        if carets.peek().as_slice() != c.carets.as_slice() {
+            carets.set(c.carets.clone());
         }
         if sel.peek().as_slice() != c.selections.as_slice() {
             sel.set(c.selections.clone());
@@ -1322,6 +1327,7 @@ pub fn Page() -> Element {
                                                 line,
                                                 col,
                                                 extend: true,
+                                                add: false,
                                             });
                                         }
                                     },
@@ -1428,6 +1434,7 @@ pub fn Page() -> Element {
                                                                         line,
                                                                         col,
                                                                         extend: e.modifiers().shift(),
+                                                                        add: e.modifiers().alt(),
                                                                     });
                                                                 }
                                                             }
@@ -1586,7 +1593,10 @@ pub fn Page() -> Element {
                                                 };
                                                 rsx! {
                                                     div {
-                                                        key: "sel{s.line}",
+                                                        // Row and column, not line: two carets on
+                                                        // one line each produce a span, and keying
+                                                        // by line alone collides.
+                                                        key: "sel{s.row}:{s.start}:{s.end}",
                                                         class: "pointer-events-none absolute z-0 bg-cyan-400/20",
                                                         style: "{style}",
                                                     }
@@ -1598,6 +1608,25 @@ pub fn Page() -> Element {
                                             key: "{cursor_key}",
                                             class: "pointer-events-none absolute z-20 rounded-[1px]",
                                             style: "{cursor_style}",
+                                        }
+
+                                        // The added carets. The primary is the block above; it
+                                        // keeps the hidden textarea and so the IME with it.
+                                        for extra in carets().iter().filter(|c| **c != cursor()) {
+                                            {
+                                                let ex = gutter + extra.col as f64 * cw;
+                                                let ey = extra.row as f64 * ch;
+                                                let style = format!(
+                                                    "left:{ex}px;top:{ey}px;height:{ch}px;width:2px;background-color:currentColor;"
+                                                );
+                                                rsx! {
+                                                    div {
+                                                        key: "caret{extra.row}:{extra.col}",
+                                                        class: "pointer-events-none absolute z-20 rounded-[1px]",
+                                                        style: "{style}",
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         textarea {
@@ -2104,6 +2133,7 @@ fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint,
             line,
             col: prefix + offset,
             extend,
+            add: false,
         });
         focus_file_input();
     });
@@ -2120,6 +2150,7 @@ fn place_note_block_caret(index: usize, start_line: u32, source: String, at: Cli
             line,
             col,
             extend: false,
+            add: false,
         });
         focus_file_input();
     });

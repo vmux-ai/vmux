@@ -1790,6 +1790,8 @@ pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
     pub extend: bool,
+    /// Alt held: put another caret here rather than moving the one that exists.
+    pub add: bool,
 }
 
 #[derive(
@@ -1807,6 +1809,9 @@ pub struct FileCursorEvent {
     pub mode: crate::editor::EditMode,
     pub mode_label: String,
     pub primary: crate::editor::CursorPos,
+    /// Every caret, `primary` included — one entry for an ordinary buffer, more once the user
+    /// has added some. The page draws these rather than `primary` alone.
+    pub carets: Vec<crate::editor::CursorPos>,
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
@@ -2225,6 +2230,18 @@ mod tests {
                 row: 3,
                 col: 5,
             },
+            carets: vec![
+                CursorPos {
+                    line: 3,
+                    row: 3,
+                    col: 5,
+                },
+                CursorPos {
+                    line: 4,
+                    row: 4,
+                    col: 5,
+                },
+            ],
             selections: vec![SelSpan {
                 line: 3,
                 row: 3,

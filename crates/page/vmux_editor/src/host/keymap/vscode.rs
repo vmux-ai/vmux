@@ -46,6 +46,10 @@ impl Keymap for VscodeKeymap {
             return vec![TriggerCompletion];
         }
 
+        if k.key == "Escape" {
+            return vec![CollapseCarets];
+        }
+
         #[cfg(target_os = "macos")]
         let gui = m.meta;
         #[cfg(not(target_os = "macos"))]

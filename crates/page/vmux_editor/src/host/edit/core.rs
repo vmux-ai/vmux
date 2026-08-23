@@ -74,6 +74,16 @@ pub struct EditOutcome {
 pub struct EditCore {
     pub buffer: TextBuffer,
     pub selections: Vec<Selection>,
+    /// Which of [`Self::selections`] the current pass is editing.
+    ///
+    /// Every command was written against one caret and reads it through [`Self::primary`], so
+    /// multi-caret editing runs the same code once per caret and moves this instead of
+    /// threading a loop through each arm of the match.
+    active: usize,
+    /// Set while [`Self::apply`] is sweeping the carets, so the N passes of one keystroke
+    /// share a single undo entry instead of stacking N of them.
+    in_sweep: bool,
+    sweep_snapshotted: bool,
     pub mode: EditMode,
     pub rows: u16,
     pub top_row: u32,
@@ -105,6 +115,9 @@ impl EditCore {
         Self {
             buffer,
             selections: vec![Selection::caret(0)],
+            active: 0,
+            in_sweep: false,
+            sweep_snapshotted: false,
             mode: default_mode,
             rows: 0,
             top_row: 0,
@@ -136,6 +149,7 @@ impl EditCore {
                 *mark += n;
             }
         }
+        self.slide_inactive(|pos| if pos > at { pos + n } else { pos });
     }
 
     fn buf_remove(&mut self, range: std::ops::Range<usize>) {
@@ -147,6 +161,29 @@ impl EditCore {
             } else if *mark > range.start {
                 *mark = range.start;
             }
+        }
+        self.slide_inactive(|pos| {
+            if pos >= range.end {
+                pos - n
+            } else if pos > range.start {
+                range.start
+            } else {
+                pos
+            }
+        });
+    }
+
+    fn slide_inactive(&mut self, shift: impl Fn(usize) -> usize) {
+        if self.selections.len() == 1 {
+            return;
+        }
+        let active = self.active;
+        for (index, sel) in self.selections.iter_mut().enumerate() {
+            if index == active {
+                continue;
+            }
+            sel.anchor = shift(sel.anchor);
+            sel.head = shift(sel.head);
         }
     }
 
@@ -189,8 +226,41 @@ impl EditCore {
         self.last_group = None;
     }
 
+    /// The caret the current pass is editing, which is the only one for a single-caret buffer.
     pub fn primary(&self) -> Selection {
-        self.selections[0]
+        self.selections[self.active.min(self.selections.len() - 1)]
+    }
+
+    fn set_active(&mut self, sel: Selection) {
+        let at = self.active.min(self.selections.len() - 1);
+        self.selections[at] = sel;
+    }
+
+    /// Put a second caret at `at`, or take it away if one is already there.
+    ///
+    /// Toggling rather than always adding is what makes an alt-click on an existing caret undo
+    /// itself; the last caret is never removed, since a buffer with no caret has no meaning.
+    pub fn toggle_caret(&mut self, at: usize) {
+        let at = at.min(self.buffer.len_chars());
+        if let Some(index) = self.selections.iter().position(|s| s.head == at) {
+            if self.selections.len() > 1 {
+                self.selections.remove(index);
+            }
+            return;
+        }
+        self.selections.push(Selection::caret(at));
+        self.merge_overlapping_carets();
+    }
+
+    /// Drop every caret but the one the user last placed.
+    pub fn collapse_carets(&mut self) {
+        let keep = self.primary();
+        self.selections = vec![keep];
+        self.active = 0;
+    }
+
+    pub fn caret_count(&self) -> usize {
+        self.selections.len()
     }
 
     pub fn set_caret(&mut self, at: usize) {
@@ -204,12 +274,12 @@ impl EditCore {
         } else {
             at.min(self.buffer.len_chars())
         };
-        self.selections = vec![Selection::caret(at)];
+        self.set_active(Selection::caret(at));
     }
 
     fn set_head(&mut self, head: usize) {
-        let anchor = self.selections[0].anchor;
-        self.selections = vec![Selection { anchor, head }];
+        let anchor = self.primary().anchor;
+        self.set_active(Selection { anchor, head });
     }
 
     fn vis_col(&self, line_start: usize, col: usize) -> u32 {
@@ -223,8 +293,18 @@ impl EditCore {
     }
 
     pub fn cursor_pos(&self) -> CursorPos {
-        let head = self.primary().head;
-        let (line, col) = self.buffer.char_to_coords(head);
+        self.cursor_pos_of(self.primary())
+    }
+
+    /// Where every caret sits, in document order.
+    pub fn cursor_positions(&self) -> Vec<CursorPos> {
+        let mut sorted: Vec<Selection> = self.selections.clone();
+        sorted.sort_by_key(|s| s.head);
+        sorted.into_iter().map(|s| self.cursor_pos_of(s)).collect()
+    }
+
+    fn cursor_pos_of(&self, sel: Selection) -> CursorPos {
+        let (line, col) = self.buffer.char_to_coords(sel.head);
         let line_start = self.buffer.line_to_char(line);
         CursorPos {
             line: line as u32,
@@ -234,7 +314,10 @@ impl EditCore {
     }
 
     pub fn visual_range(&self) -> std::ops::Range<usize> {
-        let sel = self.primary();
+        self.visual_range_of(self.primary())
+    }
+
+    fn visual_range_of(&self, sel: Selection) -> std::ops::Range<usize> {
         let r = sel.range();
         match self.mode {
             EditMode::Visual => {
@@ -250,7 +333,17 @@ impl EditCore {
     }
 
     pub fn sel_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        let sel = self.primary();
+        if self.selections.len() == 1 {
+            return self.sel_spans_of(self.primary(), first, rows);
+        }
+        let mut out = Vec::new();
+        for sel in &self.selections {
+            out.extend(self.sel_spans_of(*sel, first, rows));
+        }
+        out
+    }
+
+    fn sel_spans_of(&self, sel: Selection, first: u32, rows: u16) -> Vec<SelSpan> {
         if sel.is_empty() && !self.mode.is_visual() {
             return Vec::new();
         }
@@ -277,7 +370,7 @@ impl EditCore {
                 .filter(|span| span.end > span.start)
                 .collect();
         }
-        let r = self.visual_range();
+        let r = self.visual_range_of(sel);
         if r.start >= r.end {
             return Vec::new();
         }
@@ -317,6 +410,7 @@ impl EditCore {
     fn restore(&mut self, state: crate::edit::undo::Restored) {
         self.buffer.rope = state.rope;
         self.selections = state.selections;
+        self.active = 0;
         self.rev = state.rev;
         self.dirty = self.saved_rev != Some(self.rev);
         self.break_group();
@@ -327,8 +421,10 @@ impl EditCore {
     }
 
     fn checkpoint(&mut self, group: Group) {
-        if self.last_group != Some(group) || group == Group::Other {
+        let wants_snapshot = self.last_group != Some(group) || group == Group::Other;
+        if wants_snapshot && !(self.in_sweep && self.sweep_snapshotted) {
             self.snapshot();
+            self.sweep_snapshotted = true;
         }
         self.last_group = Some(group);
         self.rev += 1;
@@ -1288,7 +1384,60 @@ impl EditCore {
         true
     }
 
+    /// Run `cmd` against every caret, back to front.
+    ///
+    /// Back to front so an edit never invalidates a caret still waiting its turn; the carets
+    /// already done are slid by [`Self::buf_insert`] and [`Self::buf_remove`] instead. The
+    /// undo checkpoint is taken once for the whole sweep, so N carets typing is one undo step
+    /// rather than N.
     pub fn apply(&mut self, cmd: EditCommand) -> EditOutcome {
+        if self.selections.len() == 1 || !cmd.is_per_caret() {
+            self.active = 0;
+            return self.apply_at_active(cmd);
+        }
+
+        let mut order: Vec<usize> = (0..self.selections.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(self.selections[i].range().start));
+
+        let mut outcome = EditOutcome::default();
+        self.in_sweep = true;
+        self.sweep_snapshotted = false;
+        for index in order {
+            self.active = index;
+            let out = self.apply_at_active(cmd.clone());
+            outcome.text_changed |= out.text_changed;
+            outcome.sel_changed |= out.sel_changed;
+            outcome.mode_changed |= out.mode_changed;
+            outcome.dirty_changed |= out.dirty_changed;
+            outcome.scroll_to = outcome.scroll_to.or(out.scroll_to);
+            outcome.yank = outcome.yank.or(out.yank);
+        }
+        self.in_sweep = false;
+        self.sweep_snapshotted = false;
+        self.active = 0;
+        self.merge_overlapping_carets();
+        outcome
+    }
+
+    /// Collapse carets that have run into each other, so a delete that pulls two together
+    /// leaves one rather than a pair that types the same characters twice.
+    fn merge_overlapping_carets(&mut self) {
+        if self.selections.len() == 1 {
+            return;
+        }
+        self.selections.sort_by_key(|s| (s.range().start, s.head));
+        let mut merged: Vec<Selection> = Vec::with_capacity(self.selections.len());
+        for sel in self.selections.drain(..) {
+            match merged.last() {
+                Some(prev) if prev.range().end >= sel.range().start && prev.head == sel.head => {}
+                Some(prev) if prev.head == sel.head && prev.anchor == sel.anchor => {}
+                _ => merged.push(sel),
+            }
+        }
+        self.selections = merged;
+    }
+
+    fn apply_at_active(&mut self, cmd: EditCommand) -> EditOutcome {
         let before_sel = self.primary();
         let before_mode = self.mode;
         let before_dirty = self.dirty;
@@ -1681,20 +1830,20 @@ impl EditCore {
             }
             EditCommand::SwapSelectionEnds => {
                 let sel = self.primary();
-                self.selections = vec![Selection {
+                self.set_active(Selection {
                     anchor: sel.head,
                     head: sel.anchor,
-                }];
+                });
             }
             EditCommand::SelectTextObject(obj) => {
                 if let Some(r) =
                     crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)
                     && r.start < r.end
                 {
-                    self.selections = vec![Selection {
+                    self.set_active(Selection {
                         anchor: r.start,
                         head: self.buffer.prev_grapheme(r.end),
-                    }];
+                    });
                 }
             }
             EditCommand::Save
@@ -1710,6 +1859,7 @@ impl EditCore {
             | EditCommand::FoldToggleRecursive
             | EditCommand::FoldAll
             | EditCommand::UnfoldAll => {}
+            EditCommand::CollapseCarets => self.collapse_carets(),
         }
 
         EditOutcome {
@@ -1774,6 +1924,107 @@ mod tests {
 
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+
+    /// A buffer with a caret on each of the given offsets, in the order the user placed them.
+    fn multi_caret(text: &str, at: &[usize]) -> EditCore {
+        let mut c = core(text);
+        c.set_caret(at[0]);
+        for &offset in &at[1..] {
+            c.toggle_caret(offset);
+        }
+        assert_eq!(c.caret_count(), at.len(), "fixture placed every caret");
+        c
+    }
+
+    fn heads(c: &EditCore) -> Vec<usize> {
+        let mut heads: Vec<usize> = c.selections.iter().map(|s| s.head).collect();
+        heads.sort_unstable();
+        heads
+    }
+
+    #[test]
+    fn typing_reaches_every_caret() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n");
+        assert_eq!(
+            heads(&c),
+            vec![1, 5, 9],
+            "each caret sits after its own insert"
+        );
+    }
+
+    /// The whole keystroke is one undo step, not one per caret.
+    #[test]
+    fn a_multi_caret_edit_undoes_in_one_step() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
+    }
+
+    /// Deleting is where back-to-front matters: sweeping the other way would invalidate every
+    /// later offset as soon as the first character came out.
+    #[test]
+    fn deleting_reaches_every_caret() {
+        let mut c = multi_caret("aXa\nbXb\ncXc\n", &[2, 6, 10]);
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
+        assert_eq!(heads(&c), vec![1, 4, 7]);
+    }
+
+    #[test]
+    fn a_caret_that_runs_into_another_is_merged_away() {
+        let mut c = multi_caret("ab\n", &[1, 2]);
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "\n");
+        assert_eq!(c.caret_count(), 1, "two carets collapsed onto one offset");
+    }
+
+    #[test]
+    fn toggling_an_existing_caret_takes_it_away() {
+        let mut c = multi_caret("abcdef\n", &[1, 3]);
+        c.toggle_caret(3);
+        assert_eq!(c.caret_count(), 1);
+        assert_eq!(heads(&c), vec![1]);
+    }
+
+    #[test]
+    fn the_last_caret_cannot_be_removed() {
+        let mut c = core("abc\n");
+        c.set_caret(1);
+        c.toggle_caret(1);
+        assert_eq!(c.caret_count(), 1, "a buffer with no caret has no meaning");
+    }
+
+    #[test]
+    fn collapsing_leaves_the_caret_the_user_last_placed() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.collapse_carets();
+        assert_eq!(c.caret_count(), 1);
+    }
+
+    /// Undo, unlike typing, means the buffer rather than each caret. Running it once per caret
+    /// would walk three steps back up the tree for one keystroke.
+    #[test]
+    fn a_buffer_wide_command_runs_once_however_many_carets() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        c.apply(EditCommand::Move(Motion::Right));
+        c.apply(EditCommand::InsertText("Y".into()));
+        assert_eq!(text_of(&c), "XaYa\nXbYb\nXcYc\n");
+
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n", "one step back, not three");
+    }
+
+    #[test]
+    fn every_caret_is_drawn_not_just_the_first() {
+        let mut c = multi_caret("aaaa\nbbbb\n", &[0, 5]);
+        c.apply(EditCommand::Select(Motion::Right));
+        let spans = c.sel_spans(0, 10);
+        assert_eq!(spans.len(), 2, "both selections render: {spans:?}");
     }
 
     fn op(operator: Operator, target: Target) -> EditCommand {
