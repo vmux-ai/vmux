@@ -1321,7 +1321,12 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                         }
                         div { class: "mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-hidden text-[10px] text-foreground/65",
                             if loaded {
-                                span { class: "whitespace-nowrap", {translate("common-installed")} }
+                                // Yields to the counts, which are the line's reason for existing.
+                                // The number beside the title has already said how many there are,
+                                // and the row is not wide enough to carry all three.
+                                if tools.updates == 0 && tools.conflicts == 0 {
+                                    span { class: "whitespace-nowrap", {translate("common-installed")} }
+                                }
                                 if tools.updates > 0 {
                                     span { class: "flex whitespace-nowrap items-center gap-1",
                                         span { class: "size-1.5 rounded-full bg-amber-500" }
