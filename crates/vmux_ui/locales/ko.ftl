@@ -265,6 +265,7 @@ command-composer-placeholder = /로 명령 입력 또는 @로 미디어 첨부
 command-send = 보내기(Enter)
 command-terminal = 터미널
 command-open-terminal = 터미널에서 열기
+command-open-editor = 편집기에서 열기
 command-stack = 스택
 command-tabs = { $count ->
     [one] 탭 1개

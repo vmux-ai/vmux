@@ -265,6 +265,7 @@ command-composer-placeholder = Wpisz / dla poleceń lub @ dla multimediów
 command-send = Wyślij (Enter)
 command-terminal = Terminal
 command-open-terminal = Otwórz w Terminalu
+command-open-editor = Otwórz w edytorze
 command-stack = Stos
 command-tabs = { $count ->
     [one] 1 karta

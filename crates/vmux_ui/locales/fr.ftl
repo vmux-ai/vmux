@@ -265,6 +265,7 @@ command-composer-placeholder = Tapez / pour les commandes ou @ pour les médias
 command-send = Envoyer (Entrée)
 command-terminal = Terminal
 command-open-terminal = Ouvrir dans Terminal
+command-open-editor = Ouvrir dans l’éditeur
 command-stack = Pile
 command-tabs = { $count ->
     [one] 1 onglet

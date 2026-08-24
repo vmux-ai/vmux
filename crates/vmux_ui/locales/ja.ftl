@@ -253,6 +253,7 @@ command-composer-placeholder = / でコマンド、@ でメディアを選択
 command-send = 送信（Enter）
 command-terminal = ターミナル
 command-open-terminal = ターミナルで開く
+command-open-editor = エディタで開く
 command-stack = スタック
 command-tabs = { $count } タブ
 command-prompt = プロンプト

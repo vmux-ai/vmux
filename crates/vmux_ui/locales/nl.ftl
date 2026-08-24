@@ -265,6 +265,7 @@ command-composer-placeholder = Typ / voor opdrachten of @ voor media
 command-send = Versturen (Enter)
 command-terminal = Terminal
 command-open-terminal = Openen in Terminal
+command-open-editor = Openen in editor
 command-stack = Stack
 command-tabs = { $count ->
     [one] 1 tabblad

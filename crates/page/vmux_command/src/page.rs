@@ -375,6 +375,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             Some(ResultItem::Page { title, .. }) => title.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => translate("command-terminal"),
             Some(ResultItem::Terminal { path }) => path.clone(),
+            Some(ResultItem::Editor { path }) => path.clone(),
             Some(ResultItem::History { title, url, .. }) => {
                 if title.is_empty() {
                     url.clone()
@@ -452,6 +453,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 let _ = send(&CommandBarActionEvent::Terminal {
                     value: path.clone(),
                 });
+            }
+            ResultItem::Editor { path } => {
+                let _ = send(&CommandBarActionEvent::open(
+                    &format!("file://{path}"),
+                    open_target,
+                ));
             }
             ResultItem::Stack {
                 pane_id, tab_index, ..
@@ -1029,6 +1036,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     Some(ResultItem::Command { .. }) => (true, false, false),
                                     Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
+                                    Some(ResultItem::Editor { .. }) => (false, true, false),
                                     Some(ResultItem::Stack { .. }) => (false, false, true),
                                     Some(ResultItem::Space { .. }) => (false, false, false),
                                     Some(ResultItem::Page { .. }) => (false, false, false),
@@ -1296,7 +1304,22 @@ impl PaletteRows {
                         is_dir: entry.is_dir,
                     })
                     .collect();
-                combined.extend(matched);
+                // A completion opens in the editor already, so the typed row would be the same
+                // action twice once the text names an entry exactly — which is precisely when
+                // the user is about to press Enter.
+                let listed: Vec<&str> = completions
+                    .iter()
+                    .take(8)
+                    .map(|entry| entry.full_path.as_str())
+                    .collect();
+                let rest: Vec<ResultItem> = matched
+                    .into_iter()
+                    .filter(|item| match item {
+                        ResultItem::Editor { path } => !listed.contains(&path.as_str()),
+                        _ => true,
+                    })
+                    .collect();
+                combined.extend(rest);
                 combined
             };
             if is_start {

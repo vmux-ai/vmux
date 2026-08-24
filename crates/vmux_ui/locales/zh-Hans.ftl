@@ -265,6 +265,7 @@ command-composer-placeholder = 输入 / 使用命令，或输入 @ 添加媒体
 command-send = 发送 (Enter)
 command-terminal = 终端
 command-open-terminal = 在终端中打开
+command-open-editor = 在编辑器中打开
 command-stack = 层页
 command-tabs = { $count ->
     [one] 1 个标签页

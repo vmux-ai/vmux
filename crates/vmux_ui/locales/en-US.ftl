@@ -289,6 +289,7 @@ command-composer-placeholder = Type / for commands or @ for media
 command-send = Send (Enter)
 command-terminal = Terminal
 command-open-terminal = Open in Terminal
+command-open-editor = Open in Editor
 command-stack = Stack
 command-tabs = { $count ->
     [one] 1 tab

@@ -265,6 +265,7 @@ command-composer-placeholder = Введите / для команд или @ д�
 command-send = Отправить (Enter)
 command-terminal = Терминал
 command-open-terminal = Открыть в Терминале
+command-open-editor = Открыть в редакторе
 command-stack = Слой
 command-tabs = { $count ->
     [one] 1 вкладка

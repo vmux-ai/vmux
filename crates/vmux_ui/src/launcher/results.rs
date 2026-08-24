@@ -10,6 +10,13 @@ pub enum CommandBarResultItem {
     Terminal {
         path: String,
     },
+    /// Read the path rather than `cd` to it.
+    ///
+    /// Distinct from [`Self::File`], which is one entry of a directory listing: this is the
+    /// literal text typed, offered whether or not anything on disk answers to it.
+    Editor {
+        path: String,
+    },
     Stack {
         title: String,
         url: String,
@@ -428,9 +435,20 @@ pub fn filter_results(
     let is_path = looks_like_path(search);
 
     if !starts_with_cmd && is_path {
-        items.push(CommandBarResultItem::Terminal {
+        // A trailing slash is the one thing the typed text says about what it names, and it
+        // decides which of the two is the likelier intent: a directory is somewhere to work,
+        // a file is something to read.
+        let names_a_directory = search.ends_with('/');
+        let editor = CommandBarResultItem::Editor {
             path: search.to_string(),
-        });
+        };
+        let terminal = CommandBarResultItem::Terminal {
+            path: search.to_string(),
+        };
+        match names_a_directory {
+            true => items.extend([terminal, editor]),
+            false => items.extend([editor, terminal]),
+        }
     }
 
     let terminal_label = translate("command-terminal").to_lowercase();
@@ -1243,6 +1261,60 @@ mod tests {
             .expect("recent file present");
         assert!(last_page < first_work, "work dirs come after pages");
         assert!(first_work < first_recent, "dirs before recent files");
+    }
+
+    fn path_results(query: &str) -> Vec<CommandBarResultItem> {
+        filter_results(query, &[], &[], &[], &sample_pages(), false, &[], &[], &[])
+    }
+
+    /// A file path in the bar used to mean one thing — spawn a shell next to it — so reading a
+    /// file you could name outright meant navigating to its directory first.
+    #[test]
+    fn a_file_path_leads_with_the_editor_and_still_offers_the_terminal() {
+        let results = path_results("/work/proj/main.rs");
+        let editor = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+            .expect("a path offers the editor");
+        let terminal = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Terminal { .. }))
+            .expect("a path still offers the terminal");
+        assert!(editor < terminal, "a file is likelier to be read than cd'd");
+    }
+
+    /// The other way round for a directory: it is somewhere to work, not something to read.
+    #[test]
+    fn a_directory_leads_with_the_terminal() {
+        let results = path_results("/work/proj/");
+        let editor = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+            .expect("a directory still opens in the editor");
+        let terminal = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Terminal { .. }))
+            .expect("a directory offers the terminal");
+        assert!(terminal < editor, "a directory is a place to work");
+    }
+
+    /// The editor row carries what was typed, because that is what the accept path turns into a
+    /// `file://` url — an empty one would open the page with no file.
+    #[test]
+    fn the_editor_row_carries_the_path_that_was_typed() {
+        assert!(path_results("~/notes.md").iter().any(|r| matches!(
+            r, CommandBarResultItem::Editor { path } if path == "~/notes.md"
+        )));
+    }
+
+    /// `>` is the command prefix, and a command is not a path however it is spelled.
+    #[test]
+    fn a_command_is_never_offered_to_the_editor() {
+        assert!(
+            !path_results("> /work/proj/main.rs")
+                .iter()
+                .any(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+        );
     }
 
     #[test]

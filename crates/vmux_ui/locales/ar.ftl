@@ -265,6 +265,7 @@ command-composer-placeholder = اكتب / للأوامر أو @ للوسائط
 command-send = إرسال (Enter)
 command-terminal = الطرفية
 command-open-terminal = فتح في الطرفية
+command-open-editor = فتح في المحرر
 command-stack = طبقة
 command-tabs = { $count ->
     [one] تبويب واحد

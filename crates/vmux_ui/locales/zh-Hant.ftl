@@ -265,6 +265,7 @@ command-composer-placeholder = 輸入 / 使用指令，或輸入 @ 加入媒體
 command-send = 傳送 (Enter)
 command-terminal = 終端機
 command-open-terminal = 在終端機中開啟
+command-open-editor = 在編輯器中開啟
 command-stack = Stack
 command-tabs = { $count ->
     [one] 1 個分頁

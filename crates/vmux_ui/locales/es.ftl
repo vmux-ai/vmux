@@ -265,6 +265,7 @@ command-composer-placeholder = Escribe / para comandos o @ para multimedia
 command-send = Enviar (Intro)
 command-terminal = Terminal
 command-open-terminal = Abrir en Terminal
+command-open-editor = Abrir en el editor
 command-stack = Pila
 command-tabs = { $count ->
     [one] 1 pestaña
