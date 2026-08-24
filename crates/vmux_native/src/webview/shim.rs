@@ -82,6 +82,27 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
 
     return pair.some((n) => n === undefined) ? [] : [pair[0], pair[1], 0, 0];
   };
+  // Bring a field's caret back into view after it has been moved from code.
+  //
+  // The engine scrolls a field to the caret only for the keys it handled itself, so a selection
+  // set through `setSelectionRange` leaves the view where it was — the caret ends up somewhere off
+  // the left or right of a field longer than its box. Measured rather than stepped, because the
+  // caret can land anywhere in the value and the field's font is not monospace.
+  let caretRuler = null;
+  const scrollCaretIntoView = (el, index) => {
+    if (el.scrollWidth <= el.clientWidth) return;
+    const style = getComputedStyle(el);
+    caretRuler = caretRuler || document.createElement('canvas');
+    const pen = caretRuler.getContext('2d');
+    pen.font = style.font;
+    const caret = pen.measureText(el.value.slice(0, index)).width;
+    const view =
+      el.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+    // A quarter of the box of lead, so the caret does not sit against the edge it came in over.
+    const margin = view / 4;
+    if (caret < el.scrollLeft) el.scrollLeft = Math.max(0, caret - margin);
+    else if (caret > el.scrollLeft + view) el.scrollLeft = caret - view + margin;
+  };
   // Which character of an element's text a point falls on. Counted in code points, the unit Rust
   // counts in, and scoped to the element the host named — the engine reports the caret against
   // whichever descendant text node holds it, and what the page asked for is the offset in the run.
@@ -193,6 +214,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const bytes = new TextEncoder().encode(el.value).slice(0, request.byte);
         const index = new TextDecoder().decode(bytes).length;
         el.setSelectionRange(index, index);
+        scrollCaretIntoView(el, index);
         break;
       }
       // A frame later, like `offerText` and for the same reason: the request rides the batch that

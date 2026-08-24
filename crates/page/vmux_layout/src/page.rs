@@ -480,7 +480,10 @@ fn HeaderView(
                 if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
+                    // `overflow-y-hidden` because CSS will not let one axis scroll while the other
+                    // stays `visible`: asking for `overflow-x: auto` alone computes the y axis to
+                    // `auto` as well, and the tab row would scroll away under the pointer.
+                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden pl-2",
                         for tab in tabs.iter() {
                             {
                                 let mut tab = tab.clone();
@@ -1316,7 +1319,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                                 span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{tools.installed}" }
                             }
                         }
-                        div { class: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground/65",
+                        div { class: "mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-hidden text-[10px] text-foreground/65",
                             if loaded {
                                 span { class: "whitespace-nowrap", {translate("common-installed")} }
                                 if tools.updates > 0 {

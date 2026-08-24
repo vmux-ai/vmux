@@ -54,7 +54,14 @@ impl WebView {
             | CACornerMask::LayerMaxXMinYCorner
             | CACornerMask::LayerMinXMaxYCorner
             | CACornerMask::LayerMaxXMaxYCorner;
-        let bottom = CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner;
+        // Which pair is the bottom depends on which way the layer's y runs, and a `WKWebView`'s
+        // runs downward — so naming `MinY` here, as the same code does for a CEF view, rounds the
+        // top of the pane and leaves the edge at the window's bottom square.
+        let bottom = if layer.isGeometryFlipped() {
+            CACornerMask::LayerMinXMaxYCorner | CACornerMask::LayerMaxXMaxYCorner
+        } else {
+            CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner
+        };
         layer.setCornerRadius(radius.max(0.0));
         layer.setMasksToBounds(true);
         layer.setMaskedCorners(if all_corners { all } else { bottom });
