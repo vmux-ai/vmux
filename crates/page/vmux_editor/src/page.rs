@@ -1351,27 +1351,10 @@ pub fn Page() -> Element {
                                             editor_drag_origin.set(None);
                                             return;
                                         }
-                                        if !editor_dragging() {
-                                            if !editor_drag_started(origin, (at.x as i32, at.y as i32)) {
-                                                return;
-                                            }
+                                        if !editor_dragging()
+                                            && editor_drag_started(origin, (at.x as i32, at.y as i32))
+                                        {
                                             editor_dragging.set(true);
-                                        }
-                                        if let Some((line, col)) = viewport.file_position(
-                                            at,
-                                            cell_dims(),
-                                            total_lines(),
-                                            &line_layouts.read(),
-                                            wrap_columns(),
-                                            false,
-                                        ) {
-                                            event.prevent_default();
-                                            let _ = send(&FilePointerEvent {
-                                                line,
-                                                col,
-                                                extend: true,
-                                                add: false,
-                                            });
                                         }
                                     },
                                     onpointerup: move |_| {
@@ -1427,10 +1410,15 @@ pub fn Page() -> Element {
                                                 let lt = layout.row as f64 * ch;
                                                 let line_height = layout.rows as f64 * ch;
                                                 let wrap_cols = wrap_columns();
+                                                // `pointer-events-none` so the row stays the target
+                                                // of its own pointer events. The offsets an event
+                                                // carries are measured from whatever it hit, and a
+                                                // hit on a syntax span reports a column counted
+                                                // from the start of that span rather than the line.
                                                 let text_class = if wrap_cols > 0 {
-                                                    "relative whitespace-pre-wrap break-all pr-8"
+                                                    "pointer-events-none relative whitespace-pre-wrap break-all pr-8"
                                                 } else {
-                                                    "relative whitespace-pre pr-8"
+                                                    "pointer-events-none relative whitespace-pre pr-8"
                                                 };
                                                 let text_style = if wrap_cols > 0 {
                                                     format!("box-sizing:border-box;width:calc(var(--cw) * {wrap_cols} + 2rem);")
@@ -1454,32 +1442,28 @@ pub fn Page() -> Element {
                                                         onpointerdown: move |e: Event<PointerData>| {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
-                                                            let at = e.client_coordinates();
-                                                            if let Some((line, col)) = viewport.file_position(
-                                                                at,
-                                                                cell_dims(),
-                                                                total_lines(),
-                                                                &line_layouts.read(),
+                                                            let cell = cell_dims();
+                                                            let (_, col) = column_in_line(
+                                                                e.element_coordinates(),
+                                                                gutter_px(total_lines(), cell.0),
+                                                                cell,
                                                                 wrap_cols,
                                                                 true,
-                                                            ) {
-                                                                editor_dragging.set(false);
-                                                                if e.modifiers().meta() {
-                                                                    editor_drag_origin.set(None);
-                                                                    let _ = send(&FileDefinitionRequest {
-                                                                        line,
-                                                                        col,
-                                                                    });
-                                                                } else {
-                                                                    editor_drag_origin
-                                                                        .set(Some((at.x as i32, at.y as i32)));
-                                                                    let _ = send(&FilePointerEvent {
-                                                                        line,
-                                                                        col,
-                                                                        extend: e.modifiers().shift(),
-                                                                        add: e.modifiers().alt(),
-                                                                    });
-                                                                }
+                                                            );
+                                                            let at = e.client_coordinates();
+                                                            editor_dragging.set(false);
+                                                            if e.modifiers().meta() {
+                                                                editor_drag_origin.set(None);
+                                                                let _ = send(&FileDefinitionRequest { line: ln, col });
+                                                            } else {
+                                                                editor_drag_origin
+                                                                    .set(Some((at.x as i32, at.y as i32)));
+                                                                let _ = send(&FilePointerEvent {
+                                                                    line: ln,
+                                                                    col,
+                                                                    extend: e.modifiers().shift(),
+                                                                    add: e.modifiers().alt(),
+                                                                });
                                                             }
                                                             focus_file_input();
                                                         },
@@ -1497,17 +1481,24 @@ pub fn Page() -> Element {
                                                             ctx_menu.set(Some((at.x, at.y, ln, col)));
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
-                                                            if editor_dragging() {
-                                                                return;
-                                                            }
                                                             let cell = cell_dims();
                                                             let (x, col) = column_in_line(
                                                                 e.element_coordinates(),
                                                                 gutter_px(total_lines(), cell.0),
                                                                 cell,
                                                                 wrap_cols,
-                                                                false,
+                                                                editor_dragging(),
                                                             );
+                                                            if editor_dragging() {
+                                                                e.prevent_default();
+                                                                let _ = send(&FilePointerEvent {
+                                                                    line: ln,
+                                                                    col,
+                                                                    extend: true,
+                                                                    add: false,
+                                                                });
+                                                                return;
+                                                            }
                                                             let in_gutter = x < 0.0;
                                                             if gutter_hover() != in_gutter {
                                                                 gutter_hover.set(in_gutter);
@@ -3797,7 +3788,6 @@ pub(crate) fn focus_file_input() {
 #[derive(Clone, Copy, Default, PartialEq)]
 struct ScrollBox {
     size: (f64, f64),
-    origin: (f64, f64),
 }
 
 impl ScrollBox {
@@ -3858,13 +3848,12 @@ impl FileViewport {
             return;
         }
         geometry.write().size = size;
-        self.locate();
     }
 
     fn mounted(self, element: Rc<MountedData>) {
         let mut current = self.element;
         current.set(Some(element));
-        self.locate();
+        self.measure();
     }
 
     fn field_mounted(self, element: Rc<MountedData>) {
@@ -3872,7 +3861,7 @@ impl FileViewport {
         current.set(Some(element));
     }
 
-    fn locate(self) {
+    fn measure(self) {
         spawn(async move {
             let Some(element) = self.element.peek().clone() else {
                 return;
@@ -3881,9 +3870,7 @@ impl FileViewport {
                 return;
             };
             let mut geometry = self.geometry;
-            let mut geometry = geometry.write();
-            geometry.origin = (rect.origin.x, rect.origin.y);
-            geometry.size = (rect.size.width, rect.size.height);
+            geometry.write().size = (rect.size.width, rect.size.height);
         });
     }
 
@@ -3913,40 +3900,6 @@ impl FileViewport {
             row as f64 * ch + ch * 0.5,
             geometry.size.1,
         ));
-    }
-
-    fn file_position(
-        self,
-        at: ClientPoint,
-        cell: (f64, f64),
-        total_lines: u32,
-        layouts: &[FileLineLayout],
-        wrap_columns: u16,
-        round: bool,
-    ) -> Option<(u32, u32)> {
-        let (cw, ch) = cell;
-        if cw <= 0.0 || ch <= 0.0 {
-            return None;
-        }
-        let geometry = *self.geometry.peek();
-        let offset = *self.offset.peek();
-        let row = ((at.y - geometry.origin.1 + offset.1).max(0.0) / ch).floor() as u32;
-        let layout = layouts
-            .iter()
-            .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
-        let x = at.x - geometry.origin.0 + offset.0 - gutter_px(total_lines, cw);
-        let local = if round {
-            (x.max(0.0) / cw).round()
-        } else {
-            (x.max(0.0) / cw).floor()
-        } as u32;
-        let col = if wrap_columns == 0 {
-            local
-        } else {
-            (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
-        };
-
-        Some((layout.line_no, col))
     }
 }
 
