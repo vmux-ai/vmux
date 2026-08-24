@@ -43,10 +43,12 @@ fn publish_native_page_owns_escape(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
 ) {
+    let overlay_owns_input = OverlayState::of_any(&overlay_q).owns_input();
     crate::set_native_page_owns_escape(page_owns_escape(
         !terminal_focus_q.is_empty(),
-        OverlayState::of_any(&overlay_q).owns_input(),
+        overlay_owns_input,
     ));
+    crate::set_native_text_entry_owns_keys(overlay_owns_input);
 }
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]

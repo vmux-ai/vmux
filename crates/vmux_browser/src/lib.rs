@@ -536,6 +536,7 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
+static NATIVE_TEXT_ENTRY_OWNS_KEYS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
@@ -550,6 +551,23 @@ pub(crate) fn set_native_page_owns_escape(owns: bool) {
 
 pub fn native_page_owns_escape() -> bool {
     NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_native_text_entry_owns_keys(owns: bool) {
+    NATIVE_TEXT_ENTRY_OWNS_KEYS.store(owns, Ordering::Relaxed);
+}
+
+/// Whether a field being typed into holds the keyboard, so the host must not read a keystroke as
+/// the start of a chord.
+///
+/// The leader is `ctrl+b` by default, which readline spells "back one character" — so in the
+/// command bar the two want the same key and the field has to win. Narrower than
+/// [`native_page_owns_escape`]: a focused terminal owns Escape but not the leader, since vmux is
+/// the multiplexer the leader belongs to and taking it away there removes the prefix entirely.
+///
+/// Read from the `NSEvent` monitor on the AppKit thread, hence the static rather than a resource.
+pub fn native_text_entry_owns_keys() -> bool {
+    NATIVE_TEXT_ENTRY_OWNS_KEYS.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {

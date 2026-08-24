@@ -15,6 +15,11 @@ pub struct PendingLaunch {
     pub dismiss_modal: bool,
 }
 
+impl PendingLaunch {
+    pub fn opened_elsewhere(&mut self) {
+        self.dismiss_modal = true;
+    }
+}
 #[derive(Component, Clone, Copy, Debug)]
 pub struct HostsLauncher;
 

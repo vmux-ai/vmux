@@ -50,7 +50,39 @@ impl Plugin for TabPlugin {
                 PostUpdate,
                 sync_tab_visibility.before(LayoutSystems::Layout),
             )
-            .add_systems(PostUpdate, sync_tab_order);
+            .add_systems(PostUpdate, sync_tab_order)
+            .add_systems(Update, dismiss_launcher_over_new_surfaces);
+    }
+}
+
+/// Close the command bar when something opens underneath it.
+///
+/// Picking from the bar closes it on the way out, but a tab, pane or stack opened any other way —
+/// Cmd+T, the new-tab button, a split — left the bar standing over the thing it just made.
+///
+/// The stack the bar itself stages is the exception, and the reason this watches for surfaces
+/// rather than being called by each opener: from here that stack is indistinguishable from any
+/// other, so it is named and skipped.
+fn dismiss_launcher_over_new_surfaces(
+    opened: Query<
+        Entity,
+        Or<(
+            Added<Tab>,
+            Added<crate::pane::Pane>,
+            Added<crate::stack::Stack>,
+        )>,
+    >,
+    pending_launch: Option<ResMut<vmux_core::launcher::PendingLaunch>>,
+) {
+    let Some(mut pending_launch) = pending_launch else {
+        return;
+    };
+    for entity in &opened {
+        if pending_launch.stack == Some(entity) {
+            continue;
+        }
+        pending_launch.opened_elsewhere();
+        return;
     }
 }
 
