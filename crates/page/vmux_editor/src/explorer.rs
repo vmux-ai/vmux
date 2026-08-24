@@ -229,6 +229,24 @@ impl TreeRows {
         rows.set(kept);
     }
 
+    /// Turn a directory's chevron now, and say it is working.
+    ///
+    /// The children cannot be shown before they are read, but the click can be acknowledged: over
+    /// a large directory the read plus the round trip is long enough that an unturned chevron
+    /// reads as a click that missed, and the second click closes what the first one opened.
+    fn expand(self, path: &str) {
+        self.claim();
+        let mut opened = self.rows.read().clone();
+        for motion in &mut opened {
+            if motion.row.path == path {
+                motion.row.expanded = true;
+                motion.row.loading = true;
+            }
+        }
+        let mut rows = self.rows;
+        rows.set(opened);
+    }
+
     /// Take ownership of the rows, abandoning whatever animation held them.
     fn claim(self) -> u32 {
         let mut generation = self.generation;
@@ -586,6 +604,8 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                     if is_dir {
                                                         if was_expanded {
                                                             tree.collapse(&path_click);
+                                                        } else {
+                                                            tree.expand(&path_click);
                                                         }
                                                         toggle_dir(path_click.clone());
                                                     } else {
