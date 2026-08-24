@@ -80,6 +80,7 @@ impl Plugin for EditorPlugin {
                 FileReferencesRequest,
                 FileFoldToggle,
                 FileRenameRequest,
+                FileEditorAction,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 FileCompletionRequest,
@@ -185,6 +186,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
             .add_observer(on_file_rename_request)
+            .add_observer(on_file_editor_action)
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
@@ -2790,7 +2792,7 @@ fn apply_lsp_workspace_edit(
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
-    mut renames: MessageReader<crate::lsp::manager::LspRenameEdit>,
+    mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
     mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
@@ -2841,8 +2843,8 @@ fn apply_lsp_workspace_edit(
         if browsers.can_emit_to(&rename.entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 rename.entity,
-                vmux_core::event::FILE_RENAME_FAILED_EVENT,
-                &vmux_core::event::FileRenameFailedEvent { reason },
+                vmux_core::event::FILE_EDIT_FAILED_EVENT,
+                &vmux_core::event::FileEditFailedEvent { reason },
             ));
         }
     }
@@ -3040,6 +3042,104 @@ fn on_file_definition_request(
     let (line, utf16, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.definition(entity, &path, line, utf16);
+}
+
+/// Every context-menu row lands here.
+///
+/// The rows split three ways: some are a language-server request, some are an `EditCommand` that
+/// has to go through `run_commands` so the clipboard and the viewport stay in step, and one is a
+/// message to the shell. Keeping them in one observer is what lets the menu stay a table of
+/// (label, shortcut, action) instead of a dozen bespoke wires.
+#[allow(clippy::too_many_arguments)]
+fn on_file_editor_action(
+    trigger: On<BinReceive<FileEditorAction>>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let action = trigger.event().payload;
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    let (line, utf16, ccol, lt) = caret_lsp(&edit);
+    let path = edit.core.buffer.path.clone();
+
+    let cmds = match action.action {
+        EditorAction::GotoDeclaration => {
+            manager.declaration(entity, &path, line, utf16);
+            return;
+        }
+        EditorAction::GotoTypeDefinition => {
+            manager.type_definition(entity, &path, line, utf16);
+            return;
+        }
+        EditorAction::GotoImplementation => {
+            manager.implementation(entity, &path, line, utf16);
+            return;
+        }
+        EditorAction::FormatDocument => {
+            manager.format_document(entity, &path);
+            return;
+        }
+        EditorAction::FormatSelection => {
+            let (from, to) = edit.core.selected_lines();
+            manager.format_range(entity, &path, from, to);
+            return;
+        }
+        EditorAction::Rename => {
+            let current = word_at_col(&lt, ccol);
+            if !current.is_empty() && browsers.can_emit_to(&entity) {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_RENAME_BEGIN_EVENT,
+                    &vmux_core::event::FileRenameBeginEvent {
+                        line,
+                        col: ccol as u32,
+                        current,
+                    },
+                ));
+            }
+            return;
+        }
+        EditorAction::Copy => vec![EditCommand::Op {
+            operator: crate::edit::command::Operator::Yank,
+            target: crate::edit::command::Target::Selection,
+            register: None,
+        }],
+        EditorAction::Cut => vec![EditCommand::Op {
+            operator: crate::edit::command::Operator::Delete,
+            target: crate::edit::command::Target::Selection,
+            register: None,
+        }],
+        EditorAction::Paste => vec![EditCommand::Put {
+            before: false,
+            count: 1,
+            register: None,
+        }],
+        EditorAction::ChangeAllOccurrences => vec![EditCommand::SelectAllOccurrences],
+    };
+    run_commands(
+        entity,
+        cmds,
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
 }
 
 fn on_file_rename_request(
@@ -5352,7 +5452,7 @@ mod workspace_edit_tests {
         fn renamed(path: &Path, panes: usize) -> Self {
             let (mut app, views) = Self::bare(path, panes);
             app.world_mut()
-                .write_message(crate::lsp::manager::LspRenameEdit {
+                .write_message(crate::lsp::manager::LspRequestedEdit {
                     entity: views[0],
                     result: Ok(Self::renaming(path)),
                 });
@@ -5388,7 +5488,7 @@ mod workspace_edit_tests {
                 MinimalPlugins,
                 crate::lsp::server_request::ServerRequestPlugin,
             ))
-            .add_message::<crate::lsp::manager::LspRenameEdit>()
+            .add_message::<crate::lsp::manager::LspRequestedEdit>()
             .add_systems(
                 Update,
                 apply_lsp_workspace_edit

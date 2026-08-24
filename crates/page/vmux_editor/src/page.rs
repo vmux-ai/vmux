@@ -502,18 +502,17 @@ pub fn Page() -> Element {
             }));
         });
 
-    let _rename_failed =
-        use_listener::<FileRenameFailedEvent, _>(FILE_RENAME_FAILED_EVENT, move |e| {
-            rename_failed.set(e.reason);
-            let id = rename_failed_generation().wrapping_add(1);
-            rename_failed_generation.set(id);
-            spawn(async move {
-                sleep_ms(RENAME_NOTICE_MS).await;
-                if rename_failed_generation() == id {
-                    rename_failed.set(String::new());
-                }
-            });
+    let _rename_failed = use_listener::<FileEditFailedEvent, _>(FILE_EDIT_FAILED_EVENT, move |e| {
+        rename_failed.set(e.reason);
+        let id = rename_failed_generation().wrapping_add(1);
+        rename_failed_generation.set(id);
+        spawn(async move {
+            sleep_ms(RENAME_NOTICE_MS).await;
+            if rename_failed_generation() == id {
+                rename_failed.set(String::new());
+            }
         });
+    });
 
     let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         error.set(String::new());

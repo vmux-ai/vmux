@@ -53,7 +53,7 @@ pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
 pub const FILE_RENAME_BEGIN_EVENT: &str = "file_rename_begin";
-pub const FILE_RENAME_FAILED_EVENT: &str = "file_rename_failed";
+pub const FILE_EDIT_FAILED_EVENT: &str = "file_edit_failed";
 pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
 pub const FILE_REFERENCES_EVENT: &str = "file_references";
 pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
@@ -2090,6 +2090,54 @@ pub struct FileRenameRequest {
     pub new_name: String,
 }
 
+/// What the editor's context menu can ask for.
+///
+/// One event rather than one per row: every entry is the same shape — a position and a verb — and
+/// the host answers them all in one place, so the alternative is a dozen near-identical events
+/// and a dozen observers that differ by a single call.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum EditorAction {
+    GotoDeclaration,
+    GotoTypeDefinition,
+    GotoImplementation,
+    Rename,
+    FormatDocument,
+    FormatSelection,
+    Cut,
+    Copy,
+    Paste,
+    ChangeAllOccurrences,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEditorAction {
+    pub action: EditorAction,
+    pub line: u32,
+    pub col: u32,
+}
+
 #[derive(
     Debug,
     Clone,
@@ -2101,7 +2149,7 @@ pub struct FileRenameRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct FileRenameFailedEvent {
+pub struct FileEditFailedEvent {
     pub reason: String,
 }
 

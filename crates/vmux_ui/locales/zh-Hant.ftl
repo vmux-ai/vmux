@@ -599,7 +599,7 @@ agent-working-spelunking = 深入探查中
 
 editor-toggle-explorer = 切換檔案總管（Cmd+B）
 editor-cannot-open = 無法開啟此檔案
-editor-rename-failed = 重新命名失敗
+editor-edit-failed = 重新命名失敗
 editor-unsaved = 未儲存
 editor-rendered-markdown = 已轉譯的 Markdown，可即時編輯
 editor-note = 備註

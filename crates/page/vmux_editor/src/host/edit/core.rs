@@ -250,6 +250,17 @@ impl EditCore {
         self.selections[self.active.min(self.selections.len() - 1)]
     }
 
+    /// The line range the primary selection covers, inclusive of both ends.
+    ///
+    /// A bare caret selects nothing, so both ends are its own line — which is what makes "format
+    /// selection" on an empty selection mean "format this line" rather than "format nothing".
+    pub fn selected_lines(&self) -> (u32, u32) {
+        let sel = self.primary();
+        let (from, _) = self.buffer.char_to_coords(sel.anchor.min(sel.head));
+        let (to, _) = self.buffer.char_to_coords(sel.anchor.max(sel.head));
+        (from as u32, to as u32)
+    }
+
     fn set_active(&mut self, sel: Selection) {
         let at = self.active.min(self.selections.len() - 1);
         self.selections[at] = sel;
@@ -298,6 +309,56 @@ impl EditCore {
         let keep = self.primary();
         self.selections = vec![keep];
         self.active = 0;
+    }
+
+    /// Select every whole-word occurrence of the identifier under the primary caret.
+    ///
+    /// Whole-word, so renaming `id` does not also rewrite the middle of `width`. Does nothing when
+    /// the caret is not in an identifier, which leaves the caret set alone rather than collapsing
+    /// it to a selection of nothing.
+    pub fn select_all_occurrences(&mut self) {
+        let text = self.buffer.text();
+        let chars: Vec<char> = text.chars().collect();
+        let caret = self.primary().head.min(chars.len());
+        let word = |i: usize| chars[i].is_alphanumeric() || chars[i] == '_';
+
+        let mut start = caret;
+        while start > 0 && word(start - 1) {
+            start -= 1;
+        }
+        let mut end = caret;
+        while end < chars.len() && word(end) {
+            end += 1;
+        }
+        if start == end {
+            return;
+        }
+        let needle = &chars[start..end];
+
+        let mut found = Vec::new();
+        let mut at = 0;
+        while at + needle.len() <= chars.len() {
+            let matches = chars[at..at + needle.len()] == *needle;
+            let bounded = (at == 0 || !word(at - 1))
+                && (at + needle.len() == chars.len() || !word(at + needle.len()));
+            if matches && bounded {
+                found.push(Selection {
+                    anchor: at,
+                    head: at + needle.len(),
+                });
+                at += needle.len();
+                continue;
+            }
+            at += 1;
+        }
+        if found.is_empty() {
+            return;
+        }
+        self.active = found
+            .iter()
+            .position(|sel| sel.anchor == start)
+            .unwrap_or(0);
+        self.selections = found;
     }
 
     pub fn caret_count(&self) -> usize {
@@ -1940,6 +2001,7 @@ impl EditCore {
             | EditCommand::FoldToggleRecursive
             | EditCommand::FoldAll
             | EditCommand::UnfoldAll => {}
+            EditCommand::SelectAllOccurrences => self.select_all_occurrences(),
             EditCommand::CollapseCarets => self.collapse_carets(),
             EditCommand::AddCaretVertically(direction) => self.add_caret_vertically(direction),
         }
@@ -2006,6 +2068,41 @@ mod tests {
 
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+
+    /// Whole-word, or renaming `id` also rewrites the middle of every `width` in the file.
+    #[test]
+    fn selecting_all_occurrences_skips_the_ones_inside_longer_words() {
+        let mut c = core("id width id_x\nid\n");
+        c.apply(EditCommand::SelectAllOccurrences);
+
+        let hits: Vec<&str> = c
+            .selections
+            .iter()
+            .map(|s| {
+                let text = c.buffer.text();
+                let chars: Vec<char> = text.chars().collect();
+                let r = s.range();
+                chars[r.start..r.end].iter().collect::<String>()
+            })
+            .map(|s| Box::leak(s.into_boxed_str()) as &str)
+            .collect();
+        assert_eq!(hits, vec!["id", "id"], "`width` and `id_x` are other words");
+    }
+
+    /// Nothing under the caret means nothing to change, and collapsing to an empty selection would
+    /// silently drop the carets the user already has.
+    ///
+    /// A caret touching a word still counts as being in it — resting just past `id` selects `id`,
+    /// as it does in VS Code — so this needs a position with a word character on neither side.
+    #[test]
+    fn selecting_all_occurrences_off_a_word_leaves_the_carets_alone() {
+        let mut c = core("id  id\n");
+        c.selections = vec![Selection { anchor: 3, head: 3 }];
+        c.apply(EditCommand::SelectAllOccurrences);
+
+        assert_eq!(c.selections.len(), 1);
+        assert_eq!(c.primary().head, 3);
     }
 
     /// A buffer with a caret on each of the given offsets, in the order the user placed them.

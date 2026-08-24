@@ -599,7 +599,7 @@ agent-working-spelunking = Eksploruje
 
 editor-toggle-explorer = Przełącz Eksplorator (Cmd+B)
 editor-cannot-open = Nie można otworzyć tego pliku
-editor-rename-failed = Zmiana nazwy nie powiodła się
+editor-edit-failed = Zmiana nazwy nie powiodła się
 editor-unsaved = niezapisane
 editor-rendered-markdown = Wyrenderowany Markdown z edycją na żywo
 editor-note = Notatka

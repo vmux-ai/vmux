@@ -599,7 +599,7 @@ agent-working-spelunking = Копается
 
 editor-toggle-explorer = Показать/скрыть проводник (Cmd+B)
 editor-cannot-open = Не удалось открыть этот файл
-editor-rename-failed = Не удалось переименовать
+editor-edit-failed = Не удалось переименовать
 editor-unsaved = не сохранено
 editor-rendered-markdown = Отображённый Markdown с живым редактированием
 editor-note = Заметка

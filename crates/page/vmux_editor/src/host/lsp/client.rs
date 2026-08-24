@@ -83,10 +83,16 @@ impl Capabilities {
             "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
             "textDocument/completion" => caps.completion_provider.is_some(),
             "textDocument/definition" => Self::offered(&caps.definition_provider),
+            "textDocument/declaration" => caps.declaration_provider.is_some(),
+            "textDocument/typeDefinition" => caps.type_definition_provider.is_some(),
+            "textDocument/implementation" => caps.implementation_provider.is_some(),
             "textDocument/references" => Self::offered(&caps.references_provider),
             "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
             "textDocument/rename" => Self::offered(&caps.rename_provider),
             "textDocument/formatting" => Self::offered(&caps.document_formatting_provider),
+            "textDocument/rangeFormatting" => {
+                Self::offered(&caps.document_range_formatting_provider)
+            }
             _ => true,
         }
     }

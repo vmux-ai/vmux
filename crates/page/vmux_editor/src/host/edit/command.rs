@@ -256,6 +256,11 @@ pub enum EditCommand {
     FoldToggleRecursive,
     FoldAll,
     UnfoldAll,
+    /// Put a caret on every whole-word occurrence of the identifier under the primary caret.
+    ///
+    /// The editor's own answer to renaming, for the cases a language server has none: a file with
+    /// no server, a local that no server tracks, or text that is not code at all.
+    SelectAllOccurrences,
     /// Put back every caret the user added, keeping the one they placed last.
     CollapseCarets,
     /// Add a caret one row above or below the active one, in the same column.

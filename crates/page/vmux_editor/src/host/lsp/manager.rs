@@ -102,6 +102,7 @@ pub enum ReqKind {
     Definition,
     References,
     Rename,
+    Formatting { path: PathBuf },
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
@@ -130,7 +131,7 @@ pub struct LspFolds {
 }
 
 #[derive(Message)]
-pub struct LspRenameEdit {
+pub struct LspRequestedEdit {
     pub entity: Entity,
     pub result: Result<lsp_types::WorkspaceEdit, String>,
 }
@@ -161,6 +162,24 @@ pub struct LspManager {
 
 fn uri_for(path: &Path) -> Option<String> {
     url::Url::from_file_path(path).ok().map(|u| u.to_string())
+}
+
+/// Wrap edits to one file in the envelope `workspace/applyEdit` already travels in.
+///
+/// `clippy::mutable_key_type` fires on `Uri`'s internal cache, but `changes` is keyed that way by
+/// `lsp-types` and nothing here mutates a key.
+#[allow(clippy::mutable_key_type)]
+fn one_document_edit(
+    path: &Path,
+    edits: Vec<lsp_types::TextEdit>,
+) -> Option<lsp_types::WorkspaceEdit> {
+    let uri: lsp_types::Uri = uri_for(path)?.parse().ok()?;
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(uri, edits);
+    Some(lsp_types::WorkspaceEdit {
+        changes: Some(changes),
+        ..Default::default()
+    })
 }
 
 fn read_text(path: &Path) -> Option<String> {
@@ -372,6 +391,35 @@ impl LspManager {
         );
     }
 
+    /// The three siblings of `definition`.
+    ///
+    /// All four answer in the same shape — a `Location`, a list of them, or `LocationLink`s — so
+    /// they share `ReqKind::Definition` and land on the same jump. Only the method name and the
+    /// capability behind it differ.
+    pub fn declaration(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.goto(entity, path, "textDocument/declaration", line, utf16_col);
+    }
+
+    pub fn type_definition(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.goto(entity, path, "textDocument/typeDefinition", line, utf16_col);
+    }
+
+    pub fn implementation(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.goto(entity, path, "textDocument/implementation", line, utf16_col);
+    }
+
+    fn goto(&mut self, entity: Entity, path: &Path, method: &str, line: u32, utf16_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            method,
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Definition,
+        );
+    }
+
     pub fn references(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
         self.send_doc_request(
             entity,
@@ -382,6 +430,74 @@ impl LspManager {
             serde_json::json!({ "context": { "includeDeclaration": true } }),
             ReqKind::References,
         );
+    }
+
+    pub fn format_document(&mut self, entity: Entity, path: &Path) {
+        self.send_format(
+            entity,
+            path,
+            "textDocument/formatting",
+            serde_json::json!({}),
+        );
+    }
+
+    pub fn format_range(&mut self, entity: Entity, path: &Path, from_line: u32, to_line: u32) {
+        // To the end of the last line rather than to its start, so formatting a selection that
+        // ends mid-line still hands the server a whole statement.
+        let end_col = self.line_len_utf16(path, to_line);
+        self.send_format(
+            entity,
+            path,
+            "textDocument/rangeFormatting",
+            serde_json::json!({
+                "range": {
+                    "start": { "line": from_line, "character": 0 },
+                    "end": { "line": to_line, "character": end_col },
+                }
+            }),
+        );
+    }
+
+    fn send_format(&mut self, entity: Entity, path: &Path, method: &str, extra: serde_json::Value) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        if !client.provides(method) {
+            return;
+        }
+        let mut params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        });
+        if let (Some(obj), Some(ex)) = (params.as_object_mut(), extra.as_object()) {
+            for (k, v) in ex {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let (_, rx) = client.send_request(method, params);
+        self.inflight.push(InFlight {
+            entity,
+            kind: ReqKind::Formatting {
+                path: path.to_path_buf(),
+            },
+            rx,
+        });
+    }
+
+    fn line_len_utf16(&self, path: &Path, line: u32) -> u32 {
+        let Some(text) = read_text(path) else {
+            return 0;
+        };
+        let Some(l) = text.lines().nth(line as usize) else {
+            return 0;
+        };
+        l.chars().map(|c| c.len_utf16() as u32).sum()
     }
 
     pub fn rename(
@@ -721,7 +837,7 @@ fn drain_lsp_requests(
     mut goto_w: MessageWriter<LspGoto>,
     mut folds_w: MessageWriter<LspFolds>,
     mut semantic_w: MessageWriter<LspSemantic>,
-    mut rename_w: MessageWriter<LspRenameEdit>,
+    mut edit_w: MessageWriter<LspRequestedEdit>,
     mut commands: Commands,
 ) {
     use vmux_core::event::{
@@ -768,7 +884,22 @@ fn drain_lsp_requests(
                     serde_json::from_value::<lsp_types::WorkspaceEdit>(value)
                         .map_err(|e| format!("the rename could not be read: {e}"))
                 };
-                rename_w.write(LspRenameEdit {
+                edit_w.write(LspRequestedEdit {
+                    entity: f.entity,
+                    result,
+                });
+            }
+            ReqKind::Formatting { path } => {
+                // Formatting answers with edits to the one document, not a `WorkspaceEdit`. Giving
+                // it the envelope the apply path already knows costs a wrap and saves a
+                // second implementation of the same thing.
+                let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(value) {
+                    Ok(edits) if edits.is_empty() => continue,
+                    Ok(edits) => one_document_edit(&path, edits)
+                        .ok_or_else(|| format!("{} has no URI to format", path.display())),
+                    Err(_) => Err("the language server would not format this".to_string()),
+                };
+                edit_w.write(LspRequestedEdit {
                     entity: f.entity,
                     result,
                 });
@@ -910,7 +1041,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         .add_message::<LspGoto>()
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
-        .add_message::<LspRenameEdit>()
+        .add_message::<LspRequestedEdit>()
         .add_systems(
             Update,
             (
