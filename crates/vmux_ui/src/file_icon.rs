@@ -204,6 +204,7 @@ mod components {
     use crate::components::icon::Icon;
     use dioxus::prelude::*;
 
+    const LOGO_INSET: f32 = 20.0 / 24.0;
     #[component]
     pub fn TypeIcon(path: String, is_dir: bool, class: String) -> Element {
         match file_icon_kind(&path, is_dir) {
@@ -220,7 +221,9 @@ mod components {
             },
             FileIcon::Logo(d) => rsx! {
                 Icon { class: "{class}", fill: "currentColor", stroke: "none",
-                    path { d: "{d}" }
+                    g { transform: "translate(2 2) scale({LOGO_INSET})",
+                        path { d: "{d}" }
+                    }
                 }
             },
             FileIcon::Config => rsx! {
