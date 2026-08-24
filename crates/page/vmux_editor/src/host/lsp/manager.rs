@@ -212,6 +212,44 @@ impl LspManager {
         self.open_docs.get(path).map(|doc| doc.version)
     }
 
+    /// Which menu rows the server behind this file can answer.
+    ///
+    /// Empty for a file with no server, which is the honest answer: the whole language half of the
+    /// menu is unavailable, and the editor's own rows do not come from here.
+    fn menu_actions(&self, path: &Path) -> Vec<vmux_core::event::EditorAction> {
+        use vmux_core::event::EditorAction;
+        let Some(doc) = self.open_docs.get(path) else {
+            return Vec::new();
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return Vec::new();
+        };
+        let offered = [
+            (EditorAction::GotoDeclaration, "textDocument/declaration"),
+            (
+                EditorAction::GotoTypeDefinition,
+                "textDocument/typeDefinition",
+            ),
+            (
+                EditorAction::GotoImplementation,
+                "textDocument/implementation",
+            ),
+            (EditorAction::Rename, "textDocument/rename"),
+            (EditorAction::FormatDocument, "textDocument/formatting"),
+            (
+                EditorAction::FormatSelection,
+                "textDocument/rangeFormatting",
+            ),
+        ];
+        let mut actions = Vec::new();
+        for (action, method) in offered {
+            if client.provides(method) {
+                actions.push(action);
+            }
+        }
+        actions
+    }
+
     fn ensure_server(
         &mut self,
         root: &Path,
@@ -1219,6 +1257,7 @@ fn lsp_status_system(
                     .flatten()
                     .map(str::to_string),
                 state: desired,
+                actions: manager.menu_actions(&fv.path),
             },
         ));
         commands.entity(entity).insert(LspStatusSent {

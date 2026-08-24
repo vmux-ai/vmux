@@ -743,6 +743,12 @@ pub struct FileLspStatusEvent {
     pub server: String,
     pub package: Option<String>,
     pub state: LspServerState,
+    /// Which context-menu rows this server can actually answer.
+    ///
+    /// The host refuses a request the server never advertised, so without this the menu would
+    /// offer rows that quietly do nothing — and a row that does nothing reads as a broken editor
+    /// rather than as a server that does not implement it.
+    pub actions: Vec<EditorAction>,
 }
 
 #[derive(
@@ -1512,6 +1518,7 @@ mod file_event_tests {
             server: "rust-analyzer".into(),
             package: Some("rust-analyzer".into()),
             state: LspServerState::Ready,
+            actions: vec![EditorAction::Rename, EditorAction::FormatDocument],
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
         let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
@@ -1519,6 +1526,10 @@ mod file_event_tests {
         assert_eq!(d.server, "rust-analyzer");
         assert_eq!(d.package.as_deref(), Some("rust-analyzer"));
         assert_eq!(d.state, LspServerState::Ready);
+        assert_eq!(
+            d.actions,
+            vec![EditorAction::Rename, EditorAction::FormatDocument]
+        );
     }
 
     #[test]

@@ -47,6 +47,7 @@ pub fn Page() -> Element {
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
     let mut lsp_status = use_signal(|| Option::<FileLspStatusEvent>::None);
+    let mut lsp_actions = use_signal(Vec::<EditorAction>::new);
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
     let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
     let mut lsp_notice_generation = use_signal(|| 0u32);
@@ -441,6 +442,7 @@ pub fn Page() -> Element {
                 let _ = send(&LspInstallRequest { name: package });
             }
         }
+        lsp_actions.set(s.actions.clone());
         lsp_status.set(Some(s));
     });
 
@@ -1883,25 +1885,24 @@ pub fn Page() -> Element {
                         },
                     }
                     div {
-                        class: "fixed z-50 min-w-44 overflow-hidden rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        class: "fixed z-50 min-w-56 overflow-hidden rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         style: "left:{x}px;top:{y}px;",
-                        div {
-                            class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
-                            onmousedown: move |e: Event<MouseData>| {
-                                e.prevent_default();
-                                let _ = send(&FileDefinitionRequest { line, col });
-                                ctx_menu.set(None);
-                            },
-                            {translate("editor-go-to-definition")}
-                        }
-                        div {
-                            class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
-                            onmousedown: move |e: Event<MouseData>| {
-                                e.prevent_default();
-                                let _ = send(&FileReferencesRequest { line, col });
-                                ctx_menu.set(None);
-                            },
-                            {translate("editor-find-references")}
+                        for (i, row) in EditorMenu::offering(&lsp_actions()).rows().into_iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                class: if row.opens_group && i > 0 {
+                                    "mt-1 flex cursor-default items-center gap-6 border-t border-foreground/10 px-3 pt-2 pb-1.5 hover:bg-cyan-400/15"
+                                } else {
+                                    "flex cursor-default items-center gap-6 px-3 py-1.5 hover:bg-cyan-400/15"
+                                },
+                                onmousedown: move |e: Event<MouseData>| {
+                                    e.prevent_default();
+                                    row.invoke(line, col);
+                                    ctx_menu.set(None);
+                                },
+                                span { class: "grow whitespace-nowrap", {translate(row.label)} }
+                                span { class: "shrink-0 text-[10px] text-foreground/40", "{row.shortcut}" }
+                            }
                         }
                     }
                 })
@@ -2060,6 +2061,134 @@ const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
+
+/// One row of the editor's context menu.
+#[derive(Clone, Copy, PartialEq)]
+struct MenuRow {
+    label: &'static str,
+    shortcut: &'static str,
+    /// `None` for the two rows that predate `FileEditorAction` and still send their own request.
+    action: Option<EditorAction>,
+    /// Draw a separator above this row. VS Code groups navigation, modification and clipboard.
+    opens_group: bool,
+}
+
+impl MenuRow {
+    fn invoke(self, line: u32, col: u32) {
+        match self.action {
+            Some(action) => {
+                let _ = send(&FileEditorAction { action, line, col });
+            }
+            None if self.label == "editor-go-to-definition" => {
+                let _ = send(&FileDefinitionRequest { line, col });
+            }
+            None => {
+                let _ = send(&FileReferencesRequest { line, col });
+            }
+        }
+    }
+}
+
+/// The context menu, minus whatever the language server behind this file cannot do.
+///
+/// The clipboard rows are always there — they are the editor's own and need no server — which is
+/// what keeps the menu useful in a file no server has claimed.
+struct EditorMenu {
+    offered: Vec<EditorAction>,
+}
+
+impl EditorMenu {
+    fn offering(offered: &[EditorAction]) -> Self {
+        Self {
+            offered: offered.to_vec(),
+        }
+    }
+
+    fn rows(&self) -> Vec<MenuRow> {
+        let lsp = |label, shortcut, action, opens_group| MenuRow {
+            label,
+            shortcut,
+            action: Some(action),
+            opens_group,
+        };
+        let mut rows = vec![
+            MenuRow {
+                label: "editor-go-to-definition",
+                shortcut: "F12",
+                action: None,
+                opens_group: false,
+            },
+            MenuRow {
+                label: "editor-find-references",
+                shortcut: "⇧F12",
+                action: None,
+                opens_group: false,
+            },
+        ];
+        for (action, label, shortcut) in [
+            (
+                EditorAction::GotoDeclaration,
+                "editor-go-to-declaration",
+                "",
+            ),
+            (
+                EditorAction::GotoTypeDefinition,
+                "editor-go-to-type-definition",
+                "",
+            ),
+            (
+                EditorAction::GotoImplementation,
+                "editor-go-to-implementation",
+                "⌘F12",
+            ),
+        ] {
+            if self.offered.contains(&action) {
+                rows.push(lsp(label, shortcut, action, false));
+            }
+        }
+
+        let mut modifying = Vec::new();
+        if self.offered.contains(&EditorAction::Rename) {
+            modifying.push(lsp(
+                "editor-rename-symbol",
+                "F2",
+                EditorAction::Rename,
+                false,
+            ));
+        }
+        modifying.push(lsp(
+            "editor-change-all-occurrences",
+            "⌘F2",
+            EditorAction::ChangeAllOccurrences,
+            false,
+        ));
+        if self.offered.contains(&EditorAction::FormatDocument) {
+            modifying.push(lsp(
+                "editor-format-document",
+                "⇧⌥F",
+                EditorAction::FormatDocument,
+                false,
+            ));
+        }
+        if self.offered.contains(&EditorAction::FormatSelection) {
+            modifying.push(lsp(
+                "editor-format-selection",
+                "",
+                EditorAction::FormatSelection,
+                false,
+            ));
+        }
+        if let Some(first) = modifying.first_mut() {
+            first.opens_group = true;
+        }
+        rows.append(&mut modifying);
+
+        rows.push(lsp("editor-cut", "⌘X", EditorAction::Cut, true));
+        rows.push(lsp("editor-copy", "⌘C", EditorAction::Copy, false));
+        rows.push(lsp("editor-paste", "⌘V", EditorAction::Paste, false));
+        rows
+    }
+}
 
 /// The rename box while it is open: where the caret sat when the host asked for it, what the
 /// symbol was called, and what the user has typed since.
@@ -3825,5 +3954,58 @@ fn NativeVideoHost(path: String) -> Element {
             },
             onresize: move |_| report.call(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    fn labels(offered: &[EditorAction]) -> Vec<&'static str> {
+        EditorMenu::offering(offered)
+            .rows()
+            .into_iter()
+            .map(|row| row.label)
+            .collect()
+    }
+
+    /// A file no server has claimed still has an editor behind it, so the rows that need no server
+    /// stay. Offering a rename that the host will refuse is the failure worth avoiding.
+    #[test]
+    fn a_file_without_a_server_keeps_only_the_rows_needing_none() {
+        let rows = labels(&[]);
+        assert!(rows.contains(&"editor-cut"));
+        assert!(rows.contains(&"editor-change-all-occurrences"));
+        assert!(!rows.contains(&"editor-rename-symbol"));
+        assert!(!rows.contains(&"editor-format-document"));
+    }
+
+    #[test]
+    fn a_row_appears_exactly_when_its_server_offers_it() {
+        let rows = labels(&[EditorAction::Rename, EditorAction::GotoImplementation]);
+        assert!(rows.contains(&"editor-rename-symbol"));
+        assert!(rows.contains(&"editor-go-to-implementation"));
+        assert!(!rows.contains(&"editor-go-to-declaration"));
+        assert!(!rows.contains(&"editor-format-selection"));
+    }
+
+    /// The separator is drawn as the row's own top border, so exactly one row per group may carry
+    /// it — two in a row would draw a line inside a group.
+    #[test]
+    fn each_group_opens_exactly_once() {
+        let all = [
+            EditorAction::GotoDeclaration,
+            EditorAction::GotoTypeDefinition,
+            EditorAction::GotoImplementation,
+            EditorAction::Rename,
+            EditorAction::FormatDocument,
+            EditorAction::FormatSelection,
+        ];
+        let opens = EditorMenu::offering(&all)
+            .rows()
+            .into_iter()
+            .filter(|row| row.opens_group)
+            .count();
+        assert_eq!(opens, 2, "modification and clipboard, navigation is first");
     }
 }
