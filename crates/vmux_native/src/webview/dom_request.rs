@@ -31,6 +31,9 @@ pub(crate) enum DomRequest {
         element: String,
         byte: usize,
     },
+    CaretToEnd {
+        element: String,
+    },
     RevealElement {
         elements: Vec<String>,
         block: &'static str,

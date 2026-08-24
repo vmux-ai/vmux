@@ -43,6 +43,15 @@ impl TextCaret {
     pub fn select_all_from_start_next_frame(self) {
         crate::transport::Host::offer_element_text(self.element_id);
     }
+
+    /// Past the last character, with the field scrolled until the caret shows.
+    ///
+    /// The length is the field's to know. A caller that has just replaced part of the value
+    /// through a signal has not seen the render that applied it, so a byte offset computed here
+    /// would be an offset into the text the field is about to stop holding.
+    pub fn to_end(self) {
+        crate::transport::Host::caret_to_end(self.element_id);
+    }
 }
 
 pub fn floor_char_boundary(s: &str, mut i: usize) -> usize {
@@ -77,59 +86,9 @@ pub fn byte_offset_to_utf16(s: &str, byte_offset: usize) -> u32 {
     units
 }
 
-pub fn caret_scroll_left(
-    caret_px: f64,
-    client_width: f64,
-    scroll_left: f64,
-    margin: f64,
-) -> Option<f64> {
-    if !caret_px.is_finite() || client_width <= 0.0 {
-        return None;
-    }
-    let margin = margin.clamp(0.0, client_width / 2.0);
-    let new_scroll = if caret_px < scroll_left + margin {
-        caret_px - margin
-    } else if caret_px > scroll_left + client_width - margin {
-        caret_px - client_width + margin
-    } else {
-        return None;
-    }
-    .max(0.0);
-    ((new_scroll - scroll_left).abs() >= 0.5).then_some(new_scroll)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn caret_within_view_needs_no_scroll() {
-        assert_eq!(caret_scroll_left(50.0, 200.0, 0.0, 12.0), None);
-    }
-
-    #[test]
-    fn caret_past_right_edge_scrolls_right_to_reveal_it() {
-        let s = caret_scroll_left(500.0, 200.0, 0.0, 12.0).expect("should scroll");
-        assert!((s - (500.0 - 200.0 + 12.0)).abs() < 0.001, "got {s}");
-        assert!(s < 500.0 && 500.0 <= s + 200.0);
-    }
-
-    #[test]
-    fn caret_before_left_edge_scrolls_left() {
-        let s = caret_scroll_left(40.0, 200.0, 300.0, 12.0).expect("should scroll");
-        assert!((s - (40.0 - 12.0)).abs() < 0.001, "got {s}");
-    }
-
-    #[test]
-    fn caret_at_home_clamps_scroll_to_zero() {
-        assert_eq!(caret_scroll_left(0.0, 200.0, 300.0, 12.0), Some(0.0));
-    }
-
-    #[test]
-    fn degenerate_geometry_is_ignored() {
-        assert_eq!(caret_scroll_left(100.0, 0.0, 0.0, 12.0), None);
-        assert_eq!(caret_scroll_left(f64::NAN, 200.0, 0.0, 12.0), None);
-    }
 
     #[test]
     fn utf16_offset_maps_to_bytes_for_ascii() {

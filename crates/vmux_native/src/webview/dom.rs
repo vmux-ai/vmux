@@ -339,4 +339,10 @@ impl PageHost for SurfaceHost {
             byte,
         });
     }
+
+    fn caret_to_end(&self, element_id: &str) {
+        self.request(DomRequest::CaretToEnd {
+            element: element_id.to_string(),
+        });
+    }
 }

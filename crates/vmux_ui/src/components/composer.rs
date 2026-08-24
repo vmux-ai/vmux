@@ -209,4 +209,8 @@ pub fn PromptComposer(
     }
 }
 
-pub fn focus_prompt_end(_input_id: &str) {}
+pub fn focus_prompt_end(input_id: impl Into<std::borrow::Cow<'static, str>>) {
+    crate::focus::FocusClaim::new(input_id)
+        .caret_at_end()
+        .request();
+}

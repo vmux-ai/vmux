@@ -192,6 +192,18 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         el.setSelectionRange(index, index);
         break;
       }
+      // A frame later, like `offerText` and for the same reason: the request rides the batch that
+      // wrote the value, and a caret placed before that lands past the end of the old text.
+      // Both scrolls, because the field may be a one-line input or the composer's textarea, and
+      // the one that does not apply is a no-op rather than a wrong position.
+      case 'caretToEnd':
+        requestAnimationFrame(() => {
+          const end = el.value.length;
+          el.setSelectionRange(end, end);
+          el.scrollLeft = el.scrollWidth;
+          el.scrollTop = el.scrollHeight;
+        });
+        break;
     }
   };
   // The page asks for its own frames rather than having them evaluated into it. The host holds the
