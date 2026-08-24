@@ -15,8 +15,6 @@ use super::model::{
 };
 use crate::extensions::bridge_page::ExtensionBridgeWebview;
 
-/// Projects the live layout into the [`ChromeModel`] extensions see, after the webview state
-/// and the focus set for the frame have both settled.
 pub(crate) struct ExtensionProjectPlugin;
 
 impl Plugin for ExtensionProjectPlugin {

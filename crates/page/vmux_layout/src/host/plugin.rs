@@ -22,8 +22,6 @@ use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
 use crate::{LayoutSpawnRequest, LayoutStartupSet, Open, TabLayoutSpawnRequest, apply, settings};
 
-/// Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,
-/// command-bar input, and layout apply/snapshot, aggregating the per-area sub-plugins.
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {

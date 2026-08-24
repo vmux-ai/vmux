@@ -1,5 +1,3 @@
-//! The macOS half: AppKit draws the windowed views, so its monitors do the asking.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::PointerButton;
 use bevy_cef_core::prelude::NativeMouseButtons;
@@ -9,11 +7,9 @@ use super::NativeBridge;
 use crate::present::WindowedFrameRect;
 use crate::{command_bar_windowed_frame_contains, native_command_bar_route};
 
-/// The frames the ECS published last, for the monitors to hit-test against.
 static WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// Pointer input the monitors captured, waiting for the next frame to deliver it.
 static COMMAND_BAR_POINTER_EVENTS: LazyLock<Mutex<Vec<CommandBarPointerEvent>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
@@ -45,7 +41,6 @@ impl NativeBridge {
         Self::command_bar_local_position(x_px, y_px).is_some()
     }
 
-    /// Publishes `frames` and hands back the previous vector, emptied, for the caller to refill.
     pub(crate) fn set_windowed_page_frames(
         mut frames: Vec<WindowedFrameRect>,
     ) -> Vec<WindowedFrameRect> {
@@ -72,8 +67,6 @@ impl NativeBridge {
         )
     }
 
-    /// Where the point lands inside the command bar's own coordinate space, or `None` when the
-    /// bar does not own input or the point is outside it.
     fn command_bar_local_position(x_px: f32, y_px: f32) -> Option<Vec2> {
         let route = native_command_bar_route();
         if !route.owns_input {
@@ -90,7 +83,6 @@ impl NativeBridge {
     }
 }
 
-/// Called by the AppKit monitor. Returns whether the command bar claimed the event.
 pub fn queue_command_bar_pointer_move(x_px: f32, y_px: f32, buttons: NativeMouseButtons) -> bool {
     let Some(position) = NativeBridge::command_bar_local_position(x_px, y_px) else {
         return false;
@@ -102,7 +94,6 @@ pub fn queue_command_bar_pointer_move(x_px: f32, y_px: f32, buttons: NativeMouse
     true
 }
 
-/// Called by the AppKit monitor. Returns whether the command bar claimed the event.
 pub fn queue_command_bar_pointer_button(x_px: f32, y_px: f32, button: u8, released: bool) -> bool {
     let Some(position) = NativeBridge::command_bar_local_position(x_px, y_px) else {
         return false;

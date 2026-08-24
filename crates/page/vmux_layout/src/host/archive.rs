@@ -586,10 +586,6 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
     if page.url.is_empty() {
         return;
     }
-    // CLI agent urls are `<kind>/cli` (fresh) or `<kind>/cli/<sid>` (resume). A plain
-    // `<kind>/<sid>` (no `cli` marker) is an ACP session and falls through to `PageOpenRequest`,
-    // which reconstructs it via the runtime agent handler. ("cli" is `url::CLI_FRESH_SID`, not
-    // imported here to avoid a vmux_layout -> vmux_agent dependency cycle.)
     let agent_cli = AgentKind::all().into_iter().find_map(|k| {
         let rest = page.url.strip_prefix(&k.cli_url_prefix())?;
         if rest == "cli" {

@@ -1,12 +1,5 @@
 #![allow(non_snake_case)]
 
-//! The phone app: a QUIC link to one Mac, and the desktop's own pages drawn over it.
-//!
-//! Nothing here draws a conversation or a launcher. Those are [`vmux_chat`] and [`vmux_start`],
-//! the same crates the desktop mounts, reaching this app through [`page_host`] instead of through
-//! Bevy. What is left is the shell: finding a Mac, holding the link, and deciding which page is on
-//! screen.
-
 mod credentials;
 mod lifecycle;
 mod logs;
@@ -41,34 +34,11 @@ use vmux_wire::room::{RemoteAgent, RemoteSession};
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// Set when the app comes back to the foreground.
-///
-/// iOS tears down the UDP socket while suspended without closing the QUIC connection, so a
-/// connection that still looks alive after a resume usually is not. Reconnecting on the next call
-/// is cheaper than discovering it through a stalled request.
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// `background` from `crates/vmux_ui/assets/theme.css`, as the webview wants it.
-///
-/// oklch(0.88 0 0) and oklch(0.145 0 0), converted to sRGB — the same two values
-/// `packaging/ios/Assets.xcassets/LaunchBackground.colorset` carries for the launch screen, so
-/// the launch screen and the first webview frame are the same colour.
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
-/// The webview's own background, which is what shows before the document loads at all.
-///
-/// Without this the first frame after the launch screen is plain white — a stylesheet cannot
-/// reach it, because there is no document yet. It has to be one colour decided up front, before
-/// there is any UIKit environment to consult, so this reads the appearance from
-/// `currentTraitCollection`, which UIKit documents as meaningful only inside a trait-environment
-/// callback and this is not one.
-///
-/// It does answer correctly here, checked both ways: a dark cold start produced a dark first
-/// frame, where an `Unspecified` reading would have fallen through to a light one, and forcing
-/// the reading to light produced a light frame in dark mode. There is no second line of defence
-/// behind it — an inline media query in the document was tried and does not repaint over this —
-/// so if the reading is ever wrong, the wrong colour shows until the app paints.
 #[cfg(target_os = "ios")]
 fn webview_background() -> (u8, u8, u8, u8) {
     use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
@@ -89,10 +59,6 @@ fn webview_background() -> (u8, u8, u8, u8) {
 fn main() {
     Logs::start();
 
-    // The world rides in the event handler rather than on a thread of its own. Dioxus owns the
-    // loop here — `LaunchBuilder::mobile()` never returns — and two loops was never an option:
-    // `UIApplicationMain` may be called once per process, and both tao and winit assert on it. So
-    // the world runs on the thread the pages do, and nothing has to cross one to reach it.
     World::new(|app| {
         app.add_plugins(PagePlugins);
     })
@@ -115,8 +81,6 @@ fn main() {
                     );
                 }
                 Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
-                // Every event for this turn has been dealt with by the time this arrives, which is
-                // what makes it the turn boundary rather than an arbitrary moment inside one.
                 Event::MainEventsCleared => {
                     World::with(World::tick);
                 }
@@ -126,7 +90,6 @@ fn main() {
     dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
 }
 
-/// Whether the app has resumed since this was last asked.
 pub(crate) fn take_resumed() -> bool {
     RESUMED.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
@@ -139,11 +102,6 @@ fn App() -> Element {
     }
 }
 
-/// Everything below the head: the link's state, and which page it is showing.
-///
-/// Split out so [`AppHead`] mounts exactly once. Dioxus records an inserted stylesheet href in a
-/// root context and skips that href ever after, so a head rendered inside a branch loses its
-/// stylesheet the first time the branch changes, and nothing puts it back.
 #[component]
 fn AppBody() -> Element {
     transition::install(&dioxus::mobile::window());
@@ -156,16 +114,12 @@ fn AppBody() -> Element {
     let mut agents = use_signal(Vec::<RemoteAgent>::new);
     let session = use_session();
     let composer = page_host::use_composer_exchange();
-    // Whether the Mac is answering, as opposed to whether this device is paired.
-    // Conflating the two let the header claim Connected while every request timed out.
     let mut reachable = use_signal(|| false);
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
     let mut team_open = use_signal(|| false);
 
-    // A page hosted here is the whole window, so the way out has to come from inside it. Provided
-    // unconditionally because it is a hook; leaving nothing is a no-op.
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
             team_open.set(false);
@@ -173,15 +127,12 @@ fn AppBody() -> Element {
         }))
     });
 
-    // Shared pages reach the desktop through the installed host, so it has to exist before one
-    // mounts. Keying off the signal covers every path that pairs, not just the resume-on-launch one.
     use_effect(move || {
         if let Some(client) = api() {
             page_host::install(client, sessions, session, composer);
         }
     });
 
-    // Both signals are read inside the effect, which is what subscribes it to their changes.
     use_effect(move || {
         let roster = Roster {
             sessions: sessions(),
@@ -190,22 +141,10 @@ fn AppBody() -> Element {
         World::with(|world| world.insert(roster));
     });
 
-    // The open conversation names its agent but does not carry the icon, so the chat snapshot
-    // needs the list too.
     use_effect(move || {
         World::with(|world| world.insert(Agents(agents())));
     });
 
-    // The room stream is owned here, not by whatever opened the room.
-    //
-    // `Session::open` is reached from the launcher's own scope, and opening is exactly what
-    // replaces the launcher with the conversation — so a task spawned there belongs to a scope
-    // Dioxus drops on the next render and is cancelled before its first poll. This component is
-    // the one that never unmounts.
-    //
-    // `use_resource` rather than `use_future`, which runs once on mount and would have caught only
-    // the empty sid the launcher starts with. This restarts when the three reads below move, and
-    // drops the previous stream as it does.
     let _room = use_resource(move || {
         let client = api();
         let sid = session.sid();
@@ -249,9 +188,6 @@ fn AppBody() -> Element {
                 return;
             }
         };
-        // Stored credentials already answer "is this paired?", so paint the start page now and let
-        // reachability resolve behind it. Waiting on the first round trip meant a spinner for as
-        // long as the dial takes to give up, which is the whole dial timeout when the Mac is off.
         let displaced = api.peek().clone();
         api.set(Some(client.clone()));
         if let Some(displaced) = displaced {
@@ -415,8 +351,6 @@ fn AppBody() -> Element {
     }
 
     if team_open() {
-        // The desktop's team page, unmodified — it reads its roster off the installed host exactly
-        // as it does inside CEF.
         return rsx! {
             div { class: "flex h-dvh flex-col bg-background text-foreground",
                 div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
@@ -433,20 +367,11 @@ fn AppBody() -> Element {
     }
 
     if session.is_open() {
-        // The desktop's chat page, unmodified. Everything it renders — transcript, approvals,
-        // model picker, composer — is fed by `page_host` off the QUIC link.
         return rsx! {
             vmux_chat::page::Page {}
         };
     }
 
-    // The desktop's launcher, unmodified, with the link's own state floated over it.
-    //
-    // Floated rather than stacked, because a header row shifts everything below it down by its
-    // whole height and the hero then centres half a header lower than the eye expects. What a row
-    // did buy was the guarantee that a page whose content outgrows the screen — a keyboard is
-    // enough — cannot start underneath the header. The inset below buys the same thing: symmetric,
-    // so the centre stays where it was, and deep enough at the top that yielding lands clear.
     rsx! {
         div { class: "relative h-dvh bg-background",
             div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
@@ -472,10 +397,6 @@ fn AppBody() -> Element {
     }
 }
 
-/// Whether the Mac is answering, and the two things that can be done about it.
-///
-/// The launcher has nowhere to say any of this: on the desktop the link is the machine it is
-/// running on. So the phone gives it a row of its own above the page.
 #[component]
 fn LinkStatus(
     reachable: bool,
@@ -518,7 +439,6 @@ fn LinkStatus(
     }
 }
 
-/// Finding a Mac in the first place, which is the one thing the desktop never has to do.
 #[component]
 fn PairScreen(
     value: String,
@@ -549,9 +469,6 @@ fn PairScreen(
 fn AppHead() -> Element {
     rsx! {
         document::Title { "Vmux" }
-        // This replaces the shell's own viewport tag, so it has to carry that tag's zoom lock
-        // forward as well as viewport-fit. Dropping maximum-scale is what let focusing an input
-        // zoom the page, which no font size on the input can prevent.
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" }
         document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }

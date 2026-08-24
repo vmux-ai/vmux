@@ -1,6 +1,3 @@
-//! macOS key storage: the login Keychain, reached directly or through the signed
-//! `vmux vault-key` broker subprocess when one ships alongside the app.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

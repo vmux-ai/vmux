@@ -11,7 +11,6 @@ use crate::cef::LayoutCef;
 use crate::window::VmuxWindow;
 use vmux_flex::prelude::*;
 
-/// Prewarms plain registered pages that use the standard browser bundle.
 pub struct PrewarmPagesPlugin;
 
 impl Plugin for PrewarmPagesPlugin {
@@ -38,7 +37,6 @@ impl Plugin for PrewarmPagesPlugin {
     }
 }
 
-/// A `vmux://` page that can keep hidden, fully-mounted webviews ready for reuse.
 pub trait WarmPage: Component {
     const HOST: &'static str;
     const URL: &'static str;
@@ -48,7 +46,6 @@ pub trait WarmPage: Component {
     fn spawn(commands: &mut Commands) -> Entity;
 }
 
-/// Prewarms a page after the layout shell is ready and claims warm webviews on open.
 pub struct WarmPagePlugin<M: WarmPage>(PhantomData<fn() -> M>);
 
 impl<M: WarmPage> Default for WarmPagePlugin<M> {
@@ -72,7 +69,6 @@ impl<M: WarmPage> Plugin for WarmPagePlugin<M> {
     }
 }
 
-/// Marks a hidden prewarmed webview that has not been claimed yet.
 #[derive(Component)]
 pub struct WarmPageSpare {
     url: &'static str,

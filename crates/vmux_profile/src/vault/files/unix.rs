@@ -1,5 +1,3 @@
-//! Unix filesystems, where mode bits and symlinks are native.
-
 use std::path::Path;
 
 impl super::FileAttributes {

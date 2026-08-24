@@ -781,7 +781,6 @@ fn ArrayBody(
     }
 }
 
-/// The hidden button that swallows the next keystroke while a chord is being recorded.
 const KEY_CAPTURE_ID: &str = "vmux-settings-key-capture";
 
 #[component]

@@ -1,8 +1,3 @@
-//! Dioxus WASM UI library: [`components`] and [`hooks`], over the [`transport`] seam that carries
-//! CEF IPC.
-//!
-//! Bevy-side hosting, embedded `dist/` serving, and GPU/UI tokens live in **`vmux_ui_native`**.
-
 pub mod agent_accent;
 
 pub mod caret;

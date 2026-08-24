@@ -1,37 +1,19 @@
-//! What layout produced: where a node ended up, and the corners every caller wants.
-
 use bevy::prelude::*;
 
-/// Space reserved inside a node's own box, resolved to physical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Insets {
-    /// Left and top.
     pub min: Vec2,
-    /// Right and bottom.
     pub max: Vec2,
 }
 
-/// The rectangle a laid-out node occupies, in physical pixels, origin at the window's top-left.
-///
-/// Position is stored as the **centre**, which is what the layout pass naturally produces: a node's
-/// offset accumulates relative to its parent's centre as the tree is walked. Nothing downstream
-/// wants a centre, so the corners are derived here rather than at each of the sixteen call sites
-/// that need them — a slipped sign in that arithmetic gives a plausible rectangle in the wrong
-/// place, which neither the type checker nor a test can see.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct ComputedNode {
     pub size: Vec2,
     pub center: Vec2,
     pub padding: Insets,
-    /// Reciprocal of the render target's scale factor — `0.5` on a Retina display.
     pub inverse_scale_factor: f32,
 }
 
-/// A node that has not been laid out yet is unscaled, not scaled by zero.
-///
-/// Deriving this would leave `inverse_scale_factor` at `0.0`, which is not a neutral value: it
-/// makes [`ComputedNode::scale`] report a million and [`ComputedNode::to_logical`] shrink by the
-/// same. `Node` requires this component, so every node holds the default for at least one frame.
 impl Default for ComputedNode {
     fn default() -> Self {
         Self {
@@ -44,7 +26,6 @@ impl Default for ComputedNode {
 }
 
 impl ComputedNode {
-    /// A rectangle of `size` with its top-left corner at the origin.
     pub fn from_origin(size: Vec2) -> Self {
         Self {
             size,
@@ -53,36 +34,28 @@ impl ComputedNode {
         }
     }
 
-    /// Top-left corner.
     pub fn min(self) -> Vec2 {
         self.center - self.size * 0.5
     }
 
-    /// Bottom-right corner.
     pub fn max(self) -> Vec2 {
         self.center + self.size * 0.5
     }
 
-    /// Inclusive on every edge, matching the pointer tests this serves.
     pub fn contains(self, point: Vec2) -> bool {
         let min = self.min();
         let max = self.max();
         point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
     }
 
-    /// Do the two rectangles share any rows? Directional pane navigation uses this to reject a
-    /// neighbour that lies the right way but does not sit beside the pane at all.
     pub fn overlaps_rows(self, other: Self) -> bool {
         self.min().y.max(other.min().y) < self.max().y.min(other.max().y)
     }
 
-    /// Do the two rectangles share any columns?
     pub fn overlaps_columns(self, other: Self) -> bool {
         self.min().x.max(other.min().x) < self.max().x.min(other.max().x)
     }
 
-    /// Nothing can be placed against this rectangle — it has no area, or layout produced a value
-    /// arithmetic cannot survive.
     pub fn is_empty(self) -> bool {
         !(self.size.x > 0.0
             && self.size.y > 0.0
@@ -90,13 +63,10 @@ impl ComputedNode {
             && self.size.y.is_finite())
     }
 
-    /// Physical pixels per logical pixel.
     pub fn scale(self) -> f32 {
         1.0 / self.inverse_scale_factor.max(1.0e-6)
     }
 
-    /// A window-space point in this rectangle's own logical coordinates, or `None` if it falls
-    /// outside. This is what a native view wants a cursor position expressed in.
     pub fn local_point(self, point: Vec2) -> Option<Vec2> {
         if !self.contains(point) {
             return None;
@@ -104,7 +74,6 @@ impl ComputedNode {
         Some((point - self.min()) / self.scale())
     }
 
-    /// The same rectangle in logical pixels, which is what AppKit frames and CSS offsets want.
     pub fn to_logical(self) -> Self {
         let inverse_scale = self.inverse_scale_factor.max(1.0e-6);
         Self {
@@ -118,8 +87,6 @@ impl ComputedNode {
         }
     }
 
-    /// Size including padding. `size` is the content box, so a node whose children are inset by
-    /// its padding covers more than `size` reports.
     pub fn padding_box(self) -> Vec2 {
         self.size + self.padding.min + self.padding.max
     }
@@ -139,7 +106,6 @@ mod tests {
         }
     }
 
-    /// A slipped sign here puts every native view in the wrong half of the window.
     #[test]
     fn corners_sit_half_a_size_either_side_of_the_centre() {
         let rect = ComputedNode::at(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
@@ -157,8 +123,6 @@ mod tests {
         assert!(!rect.contains(Vec2::new(74.9, 100.0)));
     }
 
-    /// The header on a Retina display: 1544x168 physical at scale 2 is 772x84 logical, and its left
-    /// edge lands 8 logical pixels in.
     #[test]
     fn halving_a_retina_rect_gives_the_logical_one() {
         let rect = ComputedNode {
@@ -201,8 +165,6 @@ mod tests {
         assert_eq!(rect.padding_box(), Vec2::new(110.0, 60.0));
     }
 
-    /// A node holds the default until its first layout, so converting one to logical space must be
-    /// a no-op rather than a division by a millionth.
     #[test]
     fn an_unscaled_rect_survives_conversion_to_logical() {
         let rect = ComputedNode::from_origin(Vec2::new(400.0, 300.0));

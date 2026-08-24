@@ -1,5 +1,3 @@
-//! Merge default Tailwind classes with optional overrides.
-
 pub fn merge_class(base: &str, extra: Option<&str>) -> String {
     match extra {
         None => base.to_string(),

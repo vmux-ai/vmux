@@ -29,7 +29,6 @@ use vmux_space::event::SPACES_PAGE_URL;
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
-/// Persists and restores the session: the space/layout world plus bookmarks.
 pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
@@ -107,9 +106,6 @@ struct TabPersistenceChanges<'w, 's> {
     removed_worktrees: RemovedComponents<'w, 's, TabWorktree>,
 }
 
-// v4: agent URL grammar changed (CLI moved to `vmux://agent/<kind>/cli/<sid>`, freeing the
-// two-segment form for ACP sessions). Persisted stores from v3 reference the old grammar, so
-// they are reset on upgrade rather than migrated in place.
 const STORE_SCHEMA_VERSION: u32 = 4;
 
 pub(crate) fn store_path() -> PathBuf {
@@ -216,9 +212,6 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         let _ = std::fs::create_dir_all(parent);
     }
     write_store_schema_version(&path);
-    // Use an allowlist to only save our model components.
-    // ChildOf is the source of truth for hierarchy; Children is derived
-    // automatically by Bevy's relationship system on load.
     let mut save = SaveWorld::default_into_file(path);
     save.components = WorldFilter::deny_all()
         .allow::<Save>()
@@ -257,7 +250,6 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     commands.trigger_save(save);
 }
 
-/// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(
     active: Res<ActiveSpace>,
     registry: Res<AppTypeRegistry>,
@@ -284,8 +276,6 @@ pub(crate) fn load_space_on_startup(
         }
         let _ = std::fs::remove_file(store_version_path());
     }
-    // Never load a schema-incompatible store, even if deletion failed above —
-    // loading it would hit deserialization errors / unknown component types.
     let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
@@ -409,9 +399,6 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
     tabs.into_iter().map(|(entity, _, _)| entity).collect()
 }
 
-/// Rebuild view components (Node, Transform, Browser, etc.) for entities
-/// that were loaded from space.ron. Loaded entities only have model
-/// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
     tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
@@ -476,7 +463,6 @@ pub(crate) fn rebuild_space_views(
         }
     }
 
-    // -- PaneSplit: add flex container with gap + direction --
     for (entity, split) in &splits_need_view {
         let flex_dir = match split.direction {
             PaneSplitDirection::Row => FlexDirection::Row,
@@ -498,7 +484,6 @@ pub(crate) fn rebuild_space_views(
         ));
     }
 
-    // -- Leaf Pane: add stretch layout --
     for entity in &panes_need_view {
         let grow = pane_sizes.get(entity).map(|s| s.flex_grow).unwrap_or(1.0);
         commands.entity(entity).insert((
@@ -513,7 +498,6 @@ pub(crate) fn rebuild_space_views(
         ));
     }
 
-    // -- Stack: add absolute-fill node + spawn Browser child --
     let mut despawned = std::collections::HashSet::new();
     for (entity, meta, saved_launch) in &stacks_need_view {
         if meta.url.is_empty() {
@@ -591,8 +575,6 @@ pub(crate) fn rebuild_space_views(
                         });
                     }
                     _ => {
-                        // ACP: reopen through the runtime page-open path, which reconstructs the
-                        // session (and requests loadSession when the url carries a session id).
                         commands.spawn(vmux_core::PageOpenTask {
                             id: vmux_core::PageOpenId::new(),
                             stack: entity,
@@ -630,12 +612,6 @@ pub(crate) fn rebuild_space_views(
         }
     }
 
-    // -- Re-insert ChildOf in saved Children order --
-    // Scene load deserializes ChildOf via reflection (bypassing hooks), so
-    // Bevy's relationship system hasn't populated Children from hooks yet.
-    // We re-insert ChildOf via commands so hooks fire and build the UI
-    // hierarchy. By iterating each parent's deserialized Children in order,
-    // the deferred commands preserve the saved sibling order.
     let mut seen_parents = std::collections::HashSet::new();
     for entity in splits_need_view
         .iter()
@@ -700,13 +676,6 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
-    /// A store names each component by type path, and [`space_has_unregistered_types`] deletes
-    /// the whole file when one of them no longer resolves. Type paths are derived from where a
-    /// type's file sits, so moving any of these between modules discards every saved space
-    /// unless `#[type_path = "..."]` pins it to the path already on disk. Several are already
-    /// pinned to `vmux_desktop::layout::*`, from before layout became its own crate.
-    ///
-    /// This table is that contract. Changing an entry is changing the on-disk format.
     #[test]
     fn saved_components_keep_the_type_paths_stores_name_them_by() {
         use bevy::reflect::TypePath;
@@ -1440,9 +1409,6 @@ mod tests {
 
     #[test]
     fn malformed_agent_url_marks_space_stale() {
-        // Under the ACP grammar `vmux://agent/<id>/<sid>` is a valid session url for any id, so an
-        // unknown id is no longer stale-by-parse (the runtime handler errors gracefully for an
-        // unconfigured agent). Only genuinely malformed urls (too many segments) are stale.
         assert!(!space_contains_stale_agent_url(
             r#"url: "vmux://agent/bogus/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
         ));

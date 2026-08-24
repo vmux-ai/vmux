@@ -875,10 +875,6 @@ fn recovery_key_complete(value: &str) -> bool {
     normalized_recovery_key(value).len() == 68
 }
 
-/// The provider the Vault was asked to connect, from `vmux://vault/?provider=<name>`.
-///
-/// A native host puts the view's [`vmux_core::PageMetadata`] in the root scope, so the query
-/// rides the url the host opened. On the web the document carries it instead.
 fn requested_provider() -> String {
     fn from_query(source: &str) -> Option<String> {
         Some(

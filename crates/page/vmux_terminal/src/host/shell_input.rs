@@ -4,10 +4,6 @@ pub fn shell_command_input(command: &str) -> Vec<u8> {
     data
 }
 
-/// Build PTY bytes that paste `text` into a TUI composer via bracketed-paste
-/// mode (so multiline / control characters insert literally). Any embedded
-/// terminator is stripped so a paste can't break out early. With `submit`, a
-/// trailing `\r` runs it. Empty (or terminator-only) text yields no bytes.
 pub fn bracketed_paste_input(text: &str, submit: bool) -> Vec<u8> {
     let sanitized = text.replace("\x1b[201~", "");
     if sanitized.is_empty() {

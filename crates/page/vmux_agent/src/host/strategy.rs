@@ -31,7 +31,6 @@ impl AgentStrategies {
         self.cli.values().map(Arc::as_ref)
     }
 
-    /// All resumable sessions across every registered CLI strategy, newest-first, deduped.
     pub fn list_all_sessions(&self) -> Vec<ResumableSession> {
         let all = self
             .cli_strategies()
@@ -47,13 +46,10 @@ impl AgentStrategies {
     }
 }
 
-/// Whether a kind's ACP and CLI runtimes share the same session id (so a session can be
-/// handed off between them). Single source of truth for the `cross_runtime` flag.
 pub fn kind_supports_cross_runtime(kind: AgentKind) -> bool {
     matches!(kind, AgentKind::Vibe | AgentKind::Claude | AgentKind::Codex)
 }
 
-/// Maps a built-in launcher id or its ACP registry id to the shared agent kind.
 pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
     AgentKind::all().into_iter().find(|kind| {
         let segment = kind.as_url_segment();
@@ -61,7 +57,6 @@ pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
     })
 }
 
-/// Sort newest-first and drop duplicate `(kind, sid)` keeping the newest.
 fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
     sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime));
     let mut seen = std::collections::HashSet::new();

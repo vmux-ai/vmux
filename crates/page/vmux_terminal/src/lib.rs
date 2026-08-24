@@ -1,5 +1,3 @@
-//! Terminal page: spawns and drives shell processes through the background service and renders
-//! them as a Dioxus grid of rows.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,

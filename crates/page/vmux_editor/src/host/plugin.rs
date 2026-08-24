@@ -23,8 +23,6 @@ use crate::wrap::WrapView;
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 use vmux_flex::prelude::*;
 
-/// Wires the file editor: buffer loading, filesystem watching, image and theme sends, LSP
-/// change flushing, and the file webview event bridge (adds [`LspPlugin`]).
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
@@ -232,8 +230,6 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
-/// A media file (image/video/audio/pdf) opened in a `file://` view. Holds only
-/// the kind and MIME; the bytes are served on demand over the CEF resource pipe.
 #[derive(Component, Clone, Debug)]
 pub struct FileMedia {
     pub kind: vmux_core::media::MediaKind,
@@ -394,7 +390,6 @@ impl Default for SharedFileViewMode {
     }
 }
 
-/// Requests a shared rendering mode for all open file editors.
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileViewModeRequest(pub FileViewMode);
 
@@ -579,8 +574,6 @@ pub fn handle_file_page_open(
             continue;
         };
         let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        // Record only actual files as history/recent-file entries — browsing a
-        // directory (the work-dir dir view) is not a "recent file".
         if !path.is_dir() {
             let title = path
                 .file_name()
@@ -733,8 +726,6 @@ fn load_file_buffers(
     }
 }
 
-/// Everything about the editor keymap that a settings edit can change. Comparing the whole thing
-/// is what makes a mappings-only or leader-only edit reach already-open editors.
 #[derive(PartialEq, Eq)]
 struct KeymapConfig {
     kind: vmux_core::KeymapKind,
@@ -742,12 +733,6 @@ struct KeymapConfig {
     leader: String,
 }
 
-/// Re-apply the editor keymap to already-open files when `editor.keymap`,
-/// `editor.mappings` or `editor.leader` changes at runtime (the keymap is otherwise only set at
-/// file open). Swaps the keymap, and when the kind itself changed also resets each editor to that
-/// keymap's initial mode (Vim -> Normal, VSCode -> Insert) so switching to Vim engages without
-/// reopening. A mappings-only edit keeps the current mode — being thrown back to Normal mid-insert
-/// because a binding changed would be surprising.
 fn reapply_keymap_on_change(
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut last: Local<Option<KeymapConfig>>,
@@ -1510,9 +1495,6 @@ fn apply_lsp_folds(
     }
 }
 
-/// Mirror the set of paths the raw-media handler may serve into the CEF allowlist
-/// each frame: open media views plus every file inside an open directory (so the
-/// dir browser can preview/play any of its files without a per-selection race).
 fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
     let mut paths: std::collections::HashSet<std::path::PathBuf> =
         media.iter().map(|fv| fv.path.clone()).collect();
@@ -1524,8 +1506,6 @@ fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&F
     set_media_allowlist(paths);
 }
 
-/// Build the raw-media URL (`file://<abs>?vmux-raw=1`) that the page points media
-/// elements at; the CEF resource handler range-serves the file behind it.
 fn raw_media_url(path: &std::path::Path) -> String {
     let mut url = url::Url::from_file_path(path)
         .map(|u| u.to_string())
@@ -1534,8 +1514,6 @@ fn raw_media_url(path: &std::path::Path) -> String {
     url
 }
 
-/// Emit [`FileMediaEvent`] once the page is ready, so it can render the media
-/// element pointed at the raw-media URL.
 fn send_initial_media(
     q: Query<(Entity, &FileView, &FileMedia), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
@@ -1559,16 +1537,10 @@ fn send_initial_media(
     }
 }
 
-/// Containers AVFoundation decodes but this codec-less CEF build cannot. Open-codec
-/// containers (webm/ogv) play in the page `<video>`, so we must not cover them with
-/// a native overlay that AVFoundation can't render.
 fn needs_native_video(path: &Path) -> bool {
     vmux_core::media::is_proprietary_video(&path.to_string_lossy())
 }
 
-/// Attach a native macOS `AVPlayer` overlay filling a full video view. This CEF
-/// build lacks proprietary codecs (H.264/HEVC), so `.mov`/`.mp4` won't play in
-/// `<video>`; the overlay decodes them through AVFoundation. Idempotent per path.
 fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: NonSend<Browsers>) {
     for (entity, fv, media) in &q {
         if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
@@ -1581,8 +1553,6 @@ fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: No
     }
 }
 
-/// Position/replace the native overlay over the dir-browser preview pane, using the
-/// rect the page measured for its video host element.
 fn on_file_video_rect(
     trigger: On<BinReceive<FileVideoRect>>,
     file_views: Query<(), With<FileView>>,
@@ -1599,8 +1569,6 @@ fn on_file_video_rect(
     browsers.set_media_overlay(&entity, &r.path, (r.x, r.y, r.w, r.h));
 }
 
-/// Tear down the native video overlay when a view stops being a video media view
-/// or a dir browser (navigated away, reloaded as text, or despawned).
 fn detach_video_overlays(
     mut removed_media: RemovedComponents<FileMedia>,
     mut removed_dir: RemovedComponents<FileDir>,
@@ -1692,8 +1660,6 @@ fn drain_thumb_tasks(
     }
 }
 
-/// Open a media file in the system default app (the PDF view's "Open externally"
-/// action). Restricted to the requesting view's own path.
 fn on_file_open_external(
     trigger: On<BinReceive<FileOpenExternalRequest>>,
     views: Query<&FileView, With<FileMedia>>,
@@ -2363,16 +2329,6 @@ fn run_commands(
     text_changed
 }
 
-/// Runs a keystroke the page handed over through the modal text keymap.
-///
-/// One of two readers of the same `BinReceive`. The other is [`vmux_command::PageKeyPlugin`],
-/// which resolves the app keymap, and the two observers run in no defined order — so this one asks
-/// [`ScopedKeys`] whether a context-scoped binding already spoke for the press and stands down when
-/// one has. Without that, a key bound in `settings.json` for an open panel would also reach the
-/// buffer, and `Escape` would close the panel *and* leave insert mode on one press.
-///
-/// Only *scoped* bindings win here. An unconditional one is the native keyboard's to resolve and
-/// says nothing about what the buffer should do with the key, which is why `Cmd+S` still saves.
 #[allow(clippy::too_many_arguments)]
 fn on_file_key(
     trigger: On<BinReceive<KeyStroke>>,
@@ -2642,13 +2598,9 @@ fn on_file_hover_request(
 struct PendingGoto {
     line: u32,
     utf16_col: u32,
-    /// When set, select from `utf16_col` to this column on `line` (highlights a
-    /// match); otherwise just place the caret.
     select_end_col: Option<u32>,
 }
 
-/// Parse an editor goto fragment from a `file://` URL: `#L<line>` (1-based) or
-/// `#L<line>:<col>-<end>` (0-based cols, to highlight a match).
 fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
     let body = url.split_once('#')?.1.strip_prefix('L')?;
     let (line_s, sel) = match body.split_once(':') {

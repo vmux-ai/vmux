@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use vmux_core::{CreatedAt, LastVisitedAt, Url, Visit, VisitedUrl, now_millis};
 
-/// Drops visits and urls older than [`RETENTION_MS`], once at startup and hourly after.
 pub struct HistoryPrunePlugin;
 
 impl Plugin for HistoryPrunePlugin {

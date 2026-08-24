@@ -54,9 +54,6 @@ pub fn unpack_crx(bytes: &[u8], dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// CWS CRXs carry several signing proofs (Google's publisher key, the
-// developer key, an ecdsa proof); the extension id derives from the developer
-// RSA key, so pick the proof whose id matches the expected Web Store id.
 pub fn crx_public_key_for(bytes: &[u8], expected_id: &str) -> Option<Vec<u8>> {
     crx_public_keys(bytes)
         .into_iter()
@@ -231,7 +228,6 @@ mod tests {
 
     #[test]
     fn extracts_public_keys_and_matches_id() {
-        // CrxFileHeader { sha256_with_rsa[0] { public_key: "PUBKEY" } }
         let header = [0x12u8, 0x08, 0x0a, 0x06, b'P', b'U', b'B', b'K', b'E', b'Y'];
         let mut crx = Vec::new();
         crx.extend_from_slice(b"Cr24");

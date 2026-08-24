@@ -1,8 +1,3 @@
-//! ACP host (Agent Client Protocol). vmux implements the `Client` role: external coding
-//! agents run as spawned subprocesses driven over JSON-RPC, surfaced through vmux's native
-//! panes. Mirrors [`crate::agent::AgentSessionManager`]: one broadcast channel per session
-//! that the server forwards to the connected client.
-
 mod driver;
 mod projector;
 
@@ -27,8 +22,6 @@ struct AcpHandle {
     created_at_ms: u64,
 }
 
-/// Tracks live ACP sessions by sid. Constructed once in the daemon and shared like
-/// [`crate::agent::AgentSessionManager`].
 #[derive(Default)]
 pub struct AcpSessionManager {
     sessions: HashMap<String, AcpHandle>,
@@ -159,9 +152,6 @@ impl AcpSessionManager {
             .rebind_cwd(cwd)
     }
 
-    /// Ask the session's driver to shut down: it observes `Close`, sends the ACP cancel
-    /// notification, and kills its child on the way out. Dropping the handle (no `abort`) lets the
-    /// task finish that cleanup instead of being killed mid-flight.
     pub fn close(&mut self, sid: &str) {
         if let Some(handle) = self.sessions.remove(sid) {
             let _ = handle.input_tx.send(AcpInput::Close);

@@ -1,15 +1,3 @@
-//! A conversation over a relay: what the link reports, and the snapshot the page reads.
-//!
-//! The desktop builds a [`ChatSnapshot`](crate::event::ChatSnapshot) from a daemon that holds the
-//! whole session. Over a relay the same facts arrive in pieces — a session row, a replayed event
-//! log, a stream of deltas — and this is where they meet. Every field the relay cannot answer is
-//! left at its default, which each of the page's features reads as "absent" and declines to
-//! render.
-//!
-//! The inputs are separate resources rather than one, because they move at wildly different rates:
-//! [`Log`] is rewritten once a turn, [`LiveTurn`] once a token. Folding them together would make
-//! every token cost a clone of the whole transcript.
-
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_service::chat::group_turns_tail;
@@ -22,7 +10,6 @@ use vmux_wire::room::{
 
 use crate::event::{CHAT_SNAPSHOT_EVENT, ChatSnapshot};
 
-/// Keeps [`Snapshot`] current with whatever the link last reported, and hands it to the page.
 pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
@@ -53,32 +40,15 @@ impl Plugin for ChatRoomPlugin {
     }
 }
 
-/// Something the link said about the open conversation.
-///
-/// A host may also report what it has just asked for and expects to be told about a round trip
-/// later — the relay answers a prompt with a status event, but not before the next request, and a
-/// composer that looks idle over a turn that has already started is worse than one that is briefly
-/// optimistic.
 #[derive(Message)]
 pub struct Reported(pub RemoteEvent);
 
-/// The page asked for a turn.
-///
-/// What that *means* to a conversation is decided here rather than by whichever host carried the
-/// request: the run goes optimistically to streaming, and the composer's attachments are spent (see
-/// [`crate::prompt`]). A host is left with the half only it can do — reaching the agent.
 #[derive(Message)]
 pub struct Submitted;
 
-/// When [`Snapshot`] is rebuilt, so the emit ordered after it carries this turn's tokens rather
-/// than the last turn's.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RoomProjection;
 
-/// Which conversation is open and how its run is going.
-///
-/// `status` is tracked apart from the row's own copy because the relay moves them independently:
-/// a status event updates this, a session event updates both.
 #[derive(Resource, PartialEq)]
 pub struct Conversation {
     pub session: Option<RemoteSession>,
@@ -97,10 +67,6 @@ impl Default for Conversation {
 }
 
 impl Conversation {
-    /// Fold everything reported since the last turn into the three resources it lands in.
-    ///
-    /// Each arm derefs only what it writes: a token must not mark the conversation changed, or a
-    /// streaming turn would rebuild the session's half of the snapshot once per token.
     fn fold(
         mut submitted: MessageReader<Submitted>,
         mut reported: MessageReader<Reported>,
@@ -108,9 +74,6 @@ impl Conversation {
         mut log: ResMut<Log>,
         mut live: ResMut<LiveTurn>,
     ) {
-        // Read before the link's own events, so a status that actually arrived this turn wins over
-        // the guess. The relay answers a prompt with a status, but not before the next round trip,
-        // and a composer that looks idle over a turn already running reads as a dropped message.
         for Submitted in submitted.read() {
             if conversation.session.is_some() {
                 conversation.status = RemoteStatus::Streaming;
@@ -174,7 +137,6 @@ impl Conversation {
     }
 }
 
-/// The room's event log, as far as it has been replayed.
 #[derive(Resource, Default, PartialEq)]
 pub struct Log {
     pub room_id: Option<RoomId>,
@@ -182,23 +144,16 @@ pub struct Log {
     pub events: Vec<RoomEvent>,
 }
 
-/// The assistant text arriving a token at a time, ahead of the log that will contain it.
 #[derive(Resource, Default, PartialEq)]
 pub struct LiveTurn(pub String);
 
-/// Who could be speaking.
-///
-/// The session says which agent it is by name; the icon lives here, on the list the app already
-/// holds, so naming the speaker costs no round trip and puts nothing new on the wire.
 #[derive(Resource, Default, PartialEq)]
 pub struct Agents(pub Vec<RemoteAgent>);
 
-/// The conversation as the page expects to be told about it.
 #[derive(Resource, Default)]
 pub struct Snapshot(pub ChatSnapshot);
 
 impl Snapshot {
-    /// Hand the rebuilt conversation to whichever page is listening for it.
     fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
         let Some(emit) = PageEmit::of(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
             return;
@@ -251,9 +206,6 @@ impl Snapshot {
             agent_name: session.name.clone(),
             conversation_title: session.name.clone(),
             agent_icon,
-            // Derived rather than sent: the accent is a pure function of the agent's url segment
-            // and already lives in the shared crate, so the phone reaches the same colour the
-            // desktop paints without the wire carrying a theme.
             accent_color: vmux_wire::avatar::agent_color(agent_segment),
             ..ChatSnapshot::default()
         };
@@ -267,11 +219,6 @@ impl Agents {
 }
 
 impl Log {
-    /// Fold the replayed log into rendered chat items, with any streaming delta as the tail of
-    /// the live turn.
-    ///
-    /// The phone has no imported history and no per-turn durations, so it always asks for the
-    /// whole transcript and lets every turn resolve its duration to `None`.
     pub fn chat_items(&self, live_turn: &str, running: bool) -> Vec<ChatItem> {
         let mut messages = Vec::with_capacity(self.events.len() + 1);
         for event in &self.events {
@@ -286,10 +233,6 @@ impl Log {
     }
 }
 
-/// The words the shared chat page matches a run's state on.
-///
-/// `RemoteStatus` names the same four states differently, and the page's status is a bare string,
-/// so the translation has to happen somewhere. Here, next to the snapshot that carries it.
 trait PageStatus {
     fn page_status(&self) -> &'static str;
 }
@@ -310,7 +253,6 @@ mod tests {
     use super::*;
     use vmux_wire::chat::ChatBlock;
 
-    /// A world running the plugin, so what is asserted is what the schedule produced.
     struct Started(App);
 
     impl Started {
@@ -451,8 +393,6 @@ mod tests {
         );
     }
 
-    /// The page reads its run state off a bare string, so a name that drifts from what it matches
-    /// on is a silent failure: the composer would show idle mid-turn and never offer Stop.
     #[test]
     fn every_remote_status_names_a_state_the_shared_page_knows() {
         assert_eq!(RemoteStatus::Idle.page_status(), "idle");
@@ -464,8 +404,6 @@ mod tests {
         );
     }
 
-    /// Every input reprojects, and a token is the one that arrives often enough to matter: a run
-    /// condition that forgot [`LiveTurn`] would leave the transcript frozen for a whole turn.
     #[test]
     fn a_token_reaches_the_page_without_waiting_for_the_log_to_catch_up() {
         let mut started = Started::open();
@@ -481,8 +419,6 @@ mod tests {
         );
     }
 
-    /// The snapshot is what the page draws, so a conversation that has been left has to empty it.
-    /// Leaving the last transcript up would show the previous chat behind a closed sheet.
     #[test]
     fn leaving_a_conversation_empties_the_snapshot() {
         let mut started = Started::open();
@@ -494,8 +430,6 @@ mod tests {
         assert!(started.snapshot().messages_json.is_empty());
     }
 
-    /// Snapshots are replayed, so a late one can carry an older log than what the deltas since have
-    /// already built. Taking it would rewind the transcript in front of the reader.
     #[test]
     fn a_snapshot_older_than_the_log_is_refused() {
         let mut started = Started::open();
@@ -508,8 +442,6 @@ mod tests {
         assert_eq!(started.log().through_seq, 9);
     }
 
-    /// A snapshot clears the live turn it supersedes. Leaving it would show the streamed text
-    /// twice: once folded into the log, once still hanging off the end.
     #[test]
     fn a_snapshot_retires_the_tokens_it_now_contains() {
         let mut started = Started::open();
@@ -523,10 +455,6 @@ mod tests {
         assert!(started.0.world().resource::<LiveTurn>().0.is_empty());
     }
 
-    /// Moving to another room has to leave the previous transcript behind, or the new conversation
-    /// opens showing the old one until its own replay lands.
-    /// The relay answers a prompt with a status, but not until the next round trip. Left idle over
-    /// a turn that has already started, the composer reads as though the send was dropped.
     #[test]
     fn submitting_runs_the_conversation_before_the_relay_says_so() {
         let mut started = Started::open();
@@ -535,8 +463,6 @@ mod tests {
         assert!(matches!(started.status(), RemoteStatus::Streaming));
     }
 
-    /// The guess only stands until the link disagrees. A turn that ended between the send and the
-    /// next event must not be shown as still running.
     #[test]
     fn a_reported_status_overrides_the_guess_in_the_same_turn() {
         let mut started = Started::open();
@@ -564,8 +490,6 @@ mod tests {
         assert_eq!(started.log().room_id, None);
     }
 
-    /// The session names its agent; the icon and the accent are only reachable through the list.
-    /// A roster arriving after the session has to repaint, or the speaker stays anonymous.
     #[test]
     fn a_roster_that_arrives_late_still_names_the_speaker() {
         let mut started = Started::open();

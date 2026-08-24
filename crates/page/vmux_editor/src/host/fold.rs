@@ -1,13 +1,8 @@
-//! Code-folding model: fold regions, collapse state, and the derived
-//! [`FoldView`] that maps between buffer lines and visual rows.
-
 use std::collections::HashSet;
 
 use ropey::Rope;
 use vmux_core::event::FoldGutter;
 
-/// A foldable region. The header line is [`FoldRegion::start`]; the collapsible
-/// body is `start + 1..=end`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FoldRegion {
     pub start: u32,
@@ -15,18 +10,15 @@ pub struct FoldRegion {
 }
 
 impl FoldRegion {
-    /// Whether `line` is part of this region's collapsible body (not the header).
     pub fn contains_body(self, line: u32) -> bool {
         line > self.start && line <= self.end
     }
 
-    /// Whether `line` lies anywhere in the region, header included.
     pub fn contains(self, line: u32) -> bool {
         line >= self.start && line <= self.end
     }
 }
 
-/// All fold regions for a buffer plus the set of currently-collapsed headers.
 #[derive(Default, Clone, Debug)]
 pub struct FoldState {
     pub regions: Vec<FoldRegion>,
@@ -34,8 +26,6 @@ pub struct FoldState {
 }
 
 impl FoldState {
-    /// Replace the region set, dropping collapse state for headers that no
-    /// longer begin a region.
     pub fn set_regions(&mut self, regions: Vec<FoldRegion>) {
         self.regions = regions;
         self.reconcile();
@@ -45,7 +35,6 @@ impl FoldState {
         self.regions.iter().copied().find(|r| r.start == start)
     }
 
-    /// Innermost region containing `line` (header or body).
     pub fn enclosing(&self, line: u32) -> Option<FoldRegion> {
         self.regions
             .iter()
@@ -54,7 +43,6 @@ impl FoldState {
             .min_by_key(|r| r.end - r.start)
     }
 
-    /// Gutter marker for `line`: a chevron state if it is a fold header.
     pub fn gutter(&self, line: u32) -> FoldGutter {
         match self.region_at_start(line) {
             Some(_) if self.collapsed.contains(&line) => FoldGutter::Collapsed,
@@ -63,7 +51,6 @@ impl FoldState {
         }
     }
 
-    /// Toggle the fold enclosing `line`.
     pub fn toggle(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line)
             && !self.collapsed.remove(&r.start)
@@ -72,21 +59,18 @@ impl FoldState {
         }
     }
 
-    /// Expand the fold enclosing `line`.
     pub fn open(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line) {
             self.collapsed.remove(&r.start);
         }
     }
 
-    /// Collapse the fold enclosing `line`.
     pub fn close(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line) {
             self.collapsed.insert(r.start);
         }
     }
 
-    /// Toggle the enclosing fold and all regions nested within it.
     pub fn toggle_recursive(&mut self, line: u32) {
         let Some(top) = self.enclosing(line) else {
             return;
@@ -107,17 +91,14 @@ impl FoldState {
         }
     }
 
-    /// Collapse every region.
     pub fn fold_all(&mut self) {
         self.collapsed = self.regions.iter().map(|r| r.start).collect();
     }
 
-    /// Expand every region.
     pub fn unfold_all(&mut self) {
         self.collapsed.clear();
     }
 
-    /// Header line of the innermost collapsed region whose body hides `line`.
     pub fn hiding_header(&self, line: u32) -> Option<u32> {
         self.regions
             .iter()
@@ -126,7 +107,6 @@ impl FoldState {
             .map(|r| r.start)
     }
 
-    /// Expand any collapsed region whose body hides `line`.
     pub fn reveal(&mut self, line: u32) {
         let open: Vec<u32> = self
             .collapsed
@@ -142,8 +122,6 @@ impl FoldState {
         }
     }
 
-    /// Shift collapsed headers at or after `at_line` by `delta` (for edits that
-    /// insert or remove lines).
     pub fn shift(&mut self, at_line: u32, delta: i64) {
         if delta == 0 {
             return;
@@ -161,13 +139,11 @@ impl FoldState {
             .collect();
     }
 
-    /// Drop collapse state for headers that no longer begin a region.
     pub fn reconcile(&mut self) {
         let starts: HashSet<u32> = self.regions.iter().map(|r| r.start).collect();
         self.collapsed.retain(|s| starts.contains(s));
     }
 
-    /// Build the derived [`FoldView`] for a buffer of `total` lines.
     pub fn view(&self, total: u32) -> FoldView {
         let mut spans: Vec<(u32, u32)> = self
             .collapsed
@@ -188,8 +164,6 @@ impl FoldState {
     }
 }
 
-/// Derived, immutable mapping between buffer lines and visual rows for a given
-/// collapse state. Hidden lines occupy no row.
 #[derive(Default, Clone, Debug)]
 pub struct FoldView {
     hidden: Vec<(u32, u32)>,
@@ -197,12 +171,10 @@ pub struct FoldView {
 }
 
 impl FoldView {
-    /// Whether `line` is hidden inside a collapsed region's body.
     pub fn is_hidden(&self, line: u32) -> bool {
         self.hidden.iter().any(|(a, b)| line >= *a && line <= *b)
     }
 
-    /// Count of hidden lines strictly before `line`.
     pub fn hidden_before(&self, line: u32) -> u32 {
         let mut n = 0;
         for (a, b) in &self.hidden {
@@ -215,18 +187,15 @@ impl FoldView {
         n
     }
 
-    /// Visual row for a (visible) buffer line.
     pub fn buffer_to_row(&self, line: u32) -> u32 {
         line - self.hidden_before(line)
     }
 
-    /// Number of visible rows.
     pub fn visible_count(&self) -> u32 {
         let hidden: u32 = self.hidden.iter().map(|(a, b)| b - a + 1).sum();
         self.total.saturating_sub(hidden).max(1)
     }
 
-    /// First visible line at or after `line`.
     pub fn next_visible(&self, line: u32) -> u32 {
         let mut l = line;
         while l + 1 < self.total && self.is_hidden(l) {
@@ -235,7 +204,6 @@ impl FoldView {
         l
     }
 
-    /// Move `delta` visible rows from `line`, skipping hidden lines.
     pub fn step_rows(&self, line: u32, delta: i64) -> u32 {
         if self.total == 0 {
             return 0;
@@ -258,7 +226,6 @@ impl FoldView {
         (l.max(0) as u32).min(last)
     }
 
-    /// Visible buffer lines for a window of `rows` rows starting at `first_row`.
     pub fn lines_for_window(&self, first_row: u32, rows: u32) -> Vec<u32> {
         let mut out = Vec::new();
         let mut count = 0u32;
@@ -288,7 +255,6 @@ fn indent_width(line: &str) -> Option<usize> {
     None
 }
 
-/// Derive fold regions from indentation depth (the fallback fold source).
 pub fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
     let total = rope.len_lines();
     let indents: Vec<Option<usize>> = (0..total)

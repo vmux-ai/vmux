@@ -1,16 +1,9 @@
-//! macOS LaunchAgent integration for vmux_service.
-//!
-//! The verbs live on [`LaunchAgent`], which names the profile they act on. [`kickstart`] does not:
-//! it takes a bare label so the bundled login item, which has no vmux profile of its own, can be
-//! restarted the same way.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::paths::{LaunchAgent, ServicePaths};
 
 impl LaunchAgent {
-    /// Render this agent's plist XML.
     pub fn plist_xml(&self, binary_path: &Path, log_path: &Path) -> String {
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -53,7 +46,6 @@ impl LaunchAgent {
         )
     }
 
-    /// Write this agent's plist pointing at `binary_path`, and load it.
     pub fn install(&self, binary_path: &Path) -> std::io::Result<PathBuf> {
         let plist = self.plist_path();
         std::fs::create_dir_all(ServicePaths::dir())?;
@@ -64,7 +56,6 @@ impl LaunchAgent {
         Ok(plist)
     }
 
-    /// Remove the plist and unload from launchd.
     pub fn uninstall(&self) -> std::io::Result<()> {
         let plist = self.plist_path();
         if plist.exists() {
@@ -74,7 +65,6 @@ impl LaunchAgent {
         Ok(())
     }
 
-    /// `launchctl bootout gui/<uid>/<label>`.
     pub fn bootout(&self) -> std::io::Result<()> {
         let uid = current_uid();
         let label = self.label();
@@ -87,8 +77,6 @@ impl LaunchAgent {
         Ok(())
     }
 
-    /// Make sure the daemon is installed and running. Idempotent.
-    /// `binary_path` is the daemon executable (resolved by the caller).
     pub fn ensure_running(&self, binary_path: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(ServicePaths::dir())?;
         std::fs::create_dir_all(ServicePaths::log_dir())?;
@@ -129,7 +117,6 @@ fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
-/// `launchctl bootstrap gui/<uid> <plist>`.
 fn bootstrap(plist: &Path) -> std::io::Result<()> {
     let uid = current_uid();
     let status = Command::new("launchctl")
@@ -142,10 +129,6 @@ fn bootstrap(plist: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `launchctl kickstart -k gui/<uid>/<label>` -- restart cleanly.
-///
-/// Free rather than a [`LaunchAgent`] method because the bundled login item is kickstarted by its
-/// packaged label, which belongs to no profile this build could name.
 pub fn kickstart(label: &str) -> std::io::Result<()> {
     let uid = current_uid();
     let status = Command::new("launchctl")

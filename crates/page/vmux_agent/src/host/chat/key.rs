@@ -1,14 +1,3 @@
-//! Handing a resolved chat key back to the page that pressed it.
-//!
-//! The chat page decides nothing about its own keyboard any more: it publishes `chat`, and
-//! `chat.list` or `chat.selector` when one is showing, hands over whatever the core claimed, and
-//! waits to be told what the press meant. This is the return leg — the only part of a chat
-//! shortcut that lives on the host.
-//!
-//! It reads [`CommandIssued`] rather than [`AppCommand`] because it has to answer *that* page. A
-//! broadcast command names no webview, and two chat panes can be open at once, so the wrong one
-//! would answer the approval.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_chat::event::{CHAT_KEY_EVENT, ChatKey};
@@ -40,7 +29,6 @@ mod tests {
     use super::*;
     use vmux_command::ChatKeyCommand;
 
-    /// What the plugin pushed back to a page, which is its only observable.
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
 
@@ -76,9 +64,6 @@ mod tests {
         }
     }
 
-    /// A chat key goes back to the pane that pressed it and to no other, which is the whole reason
-    /// this reads the caller-stamped bus instead of the broadcast one. Two panes can hold two
-    /// different approvals, and answering both would decide one of them for the user.
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
@@ -104,8 +89,6 @@ mod tests {
         );
     }
 
-    /// Every other command on the bus belongs to someone else. Echoing one would push a payload no
-    /// chat page can decode.
     #[test]
     fn a_command_that_is_not_a_chat_key_is_left_alone() {
         let mut app = Echo::app();

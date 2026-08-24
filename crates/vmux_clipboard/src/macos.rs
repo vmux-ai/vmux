@@ -1,5 +1,3 @@
-//! macOS clipboard: `pbcopy`/`pbpaste` for text, `NSPasteboard` for image data.
-
 use tracing::warn;
 
 impl super::Clipboard {
@@ -63,7 +61,6 @@ impl super::Clipboard {
     }
 }
 
-/// Whether `path` has a known raster-image extension.
 fn path_looks_like_image(path: &std::path::Path) -> bool {
     matches!(
         path.extension()

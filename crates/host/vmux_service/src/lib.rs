@@ -1,6 +1,3 @@
-//! Background daemon that hosts persistent terminal processes across app restarts, plus
-//! the processes-monitor webview page.
-
 pub mod chat;
 pub use vmux_wire::service as event;
 

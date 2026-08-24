@@ -1,12 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Event name for process list updates (host -> webview).
 pub const PROCESSES_LIST_EVENT: &str = "processes_list";
 
-/// Event name for process navigation (webview -> host).
 pub const PROCESSES_NAVIGATE_EVENT: &str = "processes_navigate";
 
-/// Service connection status + process list, sent periodically to the webview.
 #[derive(
     Debug,
     Clone,
@@ -22,7 +19,6 @@ pub struct ProcessesListEvent {
     pub processes: Vec<ProcessEntry>,
 }
 
-/// A single service-managed process's metadata.
 #[derive(
     Debug,
     Clone,
@@ -43,13 +39,10 @@ pub struct ProcessEntry {
     pub uptime_secs: u64,
     pub cpu_percent: f32,
     pub mem_bytes: u64,
-    /// Whether a GUI terminal is attached to this process.
     pub attached: bool,
-    /// Last few lines of terminal output for preview.
     pub preview_lines: Vec<PreviewLine>,
 }
 
-/// A simplified terminal line for the preview.
 #[derive(
     Debug,
     Clone,
@@ -79,32 +72,26 @@ pub fn format_mem(bytes: u64) -> String {
     }
 }
 
-/// Emitted by the processes webview when user clicks a process card.
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
-    /// Discriminator so serde doesn't confuse with ProcessKillEvent.
     pub navigate: bool,
 }
 
-/// Emitted to kill a single service-managed process.
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct ProcessKillEvent {
     pub process_id: String,
-    /// Discriminator so serde doesn't confuse with ProcessNavigateEvent.
     pub kill: bool,
 }
 
-/// Emitted to kill all service-managed processes.
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct ProcessKillAllEvent {
-    /// Discriminator field so serde doesn't match arbitrary IPC payloads.
     pub kill_all: bool,
 }
 

@@ -8,23 +8,15 @@ pub struct ServiceArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ServiceAction {
-    /// Print daemon status
     Status,
-    /// Start (kickstart) the daemon
     Start,
-    /// Stop the daemon (bootout)
     Stop,
-    /// Restart the daemon
     Restart,
-    /// Tail the service log file
     Logs {
-        /// Follow new log lines as they arrive
         #[arg(short, long)]
         follow: bool,
     },
-    /// Install the LaunchAgent plist for this profile
     Install,
-    /// Uninstall the LaunchAgent plist for this profile
     Uninstall,
 }
 

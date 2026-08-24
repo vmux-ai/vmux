@@ -1,14 +1,3 @@
-//! What a conversation calls itself, and what it is doing, in the tab holding it.
-//!
-//! Both used to be the page's job: it wrote `document.title` and a `<link rel=icon>`, and CEF
-//! turned those into `PageMetadata`. A native page has no document, and the host already holds
-//! everything the tab needs, so it reports directly instead.
-//!
-//! It reports on the chat view rather than on the session that owns the name: a tab renders from
-//! its view's copy, and the view's metadata is cloned upward, so a report made on the session
-//! would be overwritten on the next sync. That is the same entity a terminal reports its OSC
-//! title on.
-
 use super::AgentChatView;
 use crate::host::run_state::AgentRunState;
 use bevy::prelude::*;
@@ -27,8 +16,6 @@ impl Plugin for ChatTabPlugin {
     }
 }
 
-/// Only the tail is grouped: the icon is decided by the last block of the running turn, so
-/// rebuilding the whole transcript to find it would be work thrown away every frame of a stream.
 const TAIL_ITEMS: usize = 1;
 
 fn report_tab_identity(
@@ -66,8 +53,6 @@ fn report_tab_identity(
     }
 }
 
-/// The agent's current activity as an icon, or `None` when it is doing nothing worth showing —
-/// which leaves the agent's own favicon in place rather than replacing it with a generic one.
 fn activity_icon(
     messages: &AgentMessages,
     state: &AgentRunState,
@@ -102,7 +87,6 @@ mod tests {
     impl Conversation {
         fn start(app: &mut App) -> Self {
             app.add_plugins(ChatTabPlugin);
-            // What attach.rs puts on a session, so the fixture matches the query production hits.
             let session = app
                 .world_mut()
                 .spawn((AgentMessages::default(), AgentRunState::default()))

@@ -46,9 +46,6 @@ pub enum OpenCommand {
         chord = "Ctrl+g, \"",
         variant = "InPane { direction: PaneDirection::Bottom, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack, url: None }"
     )]
-    // Hidden from the agent MCP surface: superseded by the self-relative
-    // `open_page` tool (in_pane targets the focused pane, which is unpredictable
-    // for an agent). Still available via the command bar / keyboard.
     #[mcp(skip)]
     InPane {
         #[mcp(description = "Which side of the current pane to act on.", enum_values = ["top", "right", "bottom", "left"])]
@@ -89,7 +86,6 @@ pub enum OpenCommand {
 }
 
 impl OpenCommand {
-    /// The URL this command carries. Every variant has one, and it is optional in all of them.
     pub fn url(&self) -> Option<&str> {
         match self {
             OpenCommand::InPlace { url }
@@ -101,21 +97,14 @@ impl OpenCommand {
     }
 }
 
-/// The URL an open command opens.
-///
-/// The command's own URL wins. When it has none — or an empty one, which the command bar and the
-/// MCP surface both produce for "just open something" — the configured startup URL stands in, and
-/// when neither is set there is nothing to open.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpenUrl(String);
 
 impl OpenUrl {
-    /// The URL `command` opens, given the configured startup URL.
     pub fn of(command: &OpenCommand, startup_url: Option<&str>) -> Self {
         Self::resolve(command.url(), startup_url)
     }
 
-    /// The URL to open, choosing between a command's own URL and the configured startup URL.
     pub fn resolve(cmd_url: Option<&str>, startup_url: Option<&str>) -> Self {
         for candidate in [cmd_url, startup_url] {
             let Some(url) = candidate else {
@@ -128,7 +117,6 @@ impl OpenUrl {
         Self::default()
     }
 
-    /// Whether there is nothing to open.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -144,7 +132,6 @@ impl OpenUrl {
 
 pub use crate::open_target::*;
 
-/// [`OpenUrl::resolve`] as a bare `String`, for callers that predate [`OpenUrl`].
 pub fn resolve_url(cmd_url: Option<&str>, startup_url: Option<&str>) -> String {
     OpenUrl::resolve(cmd_url, startup_url).into_string()
 }

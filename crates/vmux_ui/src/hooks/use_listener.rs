@@ -1,5 +1,3 @@
-//! Subscribing a page to one typed host event.
-
 use crate::listener_guard::GuardedListener;
 use crate::transport::Host;
 use crate::transport::event_listener::{try_cef_bin_listen, try_emit_page_ready};

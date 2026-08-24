@@ -831,8 +831,6 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     tool_definitions_filtered(false, false)
 }
 
-/// Build the MCP tool list. ACP sessions omit the CLI-only runtime switch. When
-/// `acp_terminals` is set, `run` + `read_terminal` are also omitted; `terminal_send` stays.
 pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = vmux_command_mcp::tool_entries()
         .into_iter()
@@ -2516,7 +2514,6 @@ mod tests {
         let anchor = vmux_client::protocol::ProcessId::new();
         let beside = vmux_client::protocol::ProcessId::new();
 
-        // beside=<id> + mode=stack carries through.
         let target = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "ls", "beside": beside.to_string(), "mode": "stack"}),
@@ -2535,7 +2532,6 @@ mod tests {
             other => panic!("expected RunWithPlacementOverride with beside+stack, got {other:?}"),
         }
 
-        // beside="self" => None; mode defaults to Auto (reuse the region).
         let target = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "ls", "beside": "self"}),
@@ -2551,7 +2547,6 @@ mod tests {
             other => panic!("expected RunWithPlacementOverride with self+auto, got {other:?}"),
         }
 
-        // explicit mode=split is honored.
         let target = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "ls", "mode": "split"}),
@@ -2565,7 +2560,6 @@ mod tests {
             other => panic!("expected RunWithPlacementOverride with split, got {other:?}"),
         }
 
-        // unknown mode errors.
         assert!(
             dispatch_with_anchor(
                 "run",

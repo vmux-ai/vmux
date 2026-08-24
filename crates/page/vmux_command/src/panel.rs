@@ -1,9 +1,3 @@
-//! The command bar as a floating panel inside another page.
-//!
-//! The same palette as `vmux://command-bar/`, rendered in the host page's own DOM rather than in a
-//! webview of its own. It lived in `vmux_layout::page` for as long as that was the only page
-//! hosting it, which made the window shell the implementer of a surface it merely makes room for.
-
 use crate::event::{
     CommandBarOpenEvent, CommandBarPanelActiveEvent, CommandBarPanelCloseEvent,
     LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT, PanelPlacement,
@@ -14,15 +8,6 @@ use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_listener};
 
-/// Tell the host the panel holds a focused DOM field, so the layout shell takes
-/// `KeyboardOwner`.
-///
-/// A missed clear strands the keyboard on the layout shell and no pane can ever reclaim it, so
-/// every route in and out goes through `set_open` and this rides along with it.
-///
-/// It used to hang off `use_drop`, which worked only while the host page mounted the panel
-/// conditionally. The component stays mounted now and renders nothing when closed, so unmount no
-/// longer coincides with closing; `use_drop` remains only to catch the page going away.
 fn set_command_bar_panel_active(active: bool) {
     let _ = send(&CommandBarPanelActiveEvent { active });
 }
@@ -33,7 +18,6 @@ enum PanelDragMode {
     Resize,
 }
 
-/// Where a drag started from, held for as long as it runs.
 #[derive(Clone, Copy)]
 struct DragOrigin {
     mode: PanelDragMode,
@@ -42,16 +26,9 @@ struct DragOrigin {
     start: PanelPlacement,
 }
 
-/// The panel's drag state, and the rectangle it produces.
-///
-/// A hook rather than a pair of signals the component wires together: the order the legs run in —
-/// begin, advance, finish — is the whole of the behaviour, and leaving it to the caller is what
-/// made a missed `finish` possible.
 #[derive(Clone, Copy)]
 struct PanelDrag {
     origin: Signal<Option<DragOrigin>>,
-    /// Outlives each drag, and each open: a closed bar does not forget where it was put. Survives
-    /// reopen but not an app restart; that would need the host store.
     placement: Signal<Option<PanelPlacement>>,
 }
 
@@ -63,12 +40,10 @@ fn use_panel_drag() -> PanelDrag {
 }
 
 impl PanelDrag {
-    /// Where the bar sits, or `None` while it is still where it opened.
     fn placement(&self) -> Option<PanelPlacement> {
         (self.placement)()
     }
 
-    /// Take the pointer that pressed a handle, and start moving or resizing from it.
     fn begin(&mut self, event: Event<PointerData>, mode: PanelDragMode) {
         event.stop_propagation();
         let Some(start) = panel_card_rect(&event) else {
@@ -85,16 +60,7 @@ impl PanelDrag {
         self.placement.set(Some(start));
     }
 
-    /// The move and end legs, mounted on the backdrop only while a drag is under way.
-    ///
-    /// The backdrop covers the viewport, so a drag that leaves the small grab handle keeps being
-    /// tracked without capturing the pointer. That is also why these cannot simply stay written on
-    /// it: the interpreter registers every bubbling listener on the page root, so a declared
-    /// `pointermove` makes *every* pointer move over the window dispatch — and with the page hosted
-    /// natively each one is a synchronous XHR the web content blocks on until a frame ends.
     fn listeners(&self) -> Vec<Attribute> {
-        // A read, not a `peek`: the backdrop has to re-render when `begin` sets the origin, or the
-        // legs never mount and the bar cannot be moved.
         if self.origin.read().is_none() {
             return Vec::new();
         }
@@ -149,48 +115,25 @@ impl DragOrigin {
     }
 }
 
-/// Where the pointer is, in client coordinates.
-///
-/// Reads Dioxus's own `PointerData` rather than downcasting to a `web_sys::PointerEvent`, which
-/// answers `None` off the web and would take the drag with it.
 fn panel_pointer_at(event: &Event<PointerData>) -> (f64, f64) {
     let point = event.data().client_coordinates();
     (point.x, point.y)
 }
 
-/// The card's rectangle when a drag starts, or `None` when it cannot be measured.
-///
-/// `web` only. Reading it needs `closest()` and `getBoundingClientRect` on the event target, and
-/// natively there is no element to ask — `MountedData` answers `NotSupported` until a
-/// `RenderedElementBacking` exists. `None` leaves the panel undraggable rather than draggable to
-/// the wrong place; everything else about the bar works.
 fn panel_card_rect(_event: &Event<PointerData>) -> Option<PanelPlacement> {
     None
 }
 
-/// The viewport, or `None` when it cannot be read.
-///
-/// Never substitute a sentinel: `clamp_panel_placement` would then bound the panel against it and
-/// happily let a drag carry the bar off screen, which is the one thing the clamp exists to stop.
 fn panel_viewport() -> Option<(f64, f64)> {
     None
 }
 
-/// The floating command bar.
-///
-/// Drag and resize never leave the page: they move a DOM node, so routing them through the ECS
-/// would put an IPC round trip and a Bevy frame between the pointer and the pixels. Only the
-/// settled rectangle is worth telling the host about.
 #[component]
 pub fn CommandBarPanel() -> Element {
-    // No open/ready/rendered handshake: the host pushes a payload and the panel renders. `open` is
-    // the entire lifecycle.
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut open = use_signal(|| false);
     let mut drag = use_panel_drag();
 
-    // Every route in and out of the panel goes through here, so the host's view of whether the
-    // panel holds the keyboard cannot drift from the panel's own.
     let mut set_open = move |showing: bool| {
         open.set(showing);
         set_command_bar_panel_active(showing);

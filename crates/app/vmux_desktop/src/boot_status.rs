@@ -6,8 +6,6 @@ use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
 
-/// Tracks how far the app has got through boot, for the splash to display. Reads the focus
-/// set for the frame, so it runs after that has settled.
 pub(crate) struct BootStatusPlugin;
 
 impl Plugin for BootStatusPlugin {
@@ -74,8 +72,6 @@ impl Default for SplashStatus {
     }
 }
 
-/// Set once the saved space has been restored (or immediately when there is no
-/// saved space). Owned here, written by the persistence plugin.
 #[derive(Resource, Default)]
 pub struct RestoreComplete(pub bool);
 

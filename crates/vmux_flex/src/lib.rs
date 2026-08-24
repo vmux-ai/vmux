@@ -1,13 +1,3 @@
-//! Flexbox layout for the desktop shell.
-//!
-//! The shell draws nothing through Bevy: every surface is a native view that AppKit composites.
-//! What it needs from a layout engine is rectangles — where each pane, header and side sheet ends
-//! up — so this crate mirrors the ECS hierarchy into a [`taffy`] tree, computes it against the
-//! window, and writes the result back as [`ComputedNode`].
-//!
-//! Lengths go in as logical pixels and come out physical: [`Val::Px`] is multiplied by the render
-//! target's scale factor before taffy sees it, so every computed rectangle is already in the space
-//! the pointer, the framebuffer and `setFrame:` all use.
 #![allow(clippy::too_many_arguments)]
 
 pub mod computed;
@@ -23,8 +13,6 @@ pub use node::{
 pub use tree::{FlexTree, LayoutContext};
 pub use visibility::Visibility;
 
-/// The names a crate laying nodes out needs, to be glob-imported the way `bevy::prelude` used to
-/// supply them.
 pub mod prelude {
     pub use crate::computed::{ComputedNode, Insets};
     pub use crate::node::{
@@ -39,10 +27,6 @@ use bevy::window::PrimaryWindow;
 
 use write::GeometryWalk;
 
-/// Computes [`ComputedNode`] from [`Node`] every frame, in `PostUpdate`.
-///
-/// Anything that writes a [`Node`] belongs before [`LayoutSystems::Layout`]; anything that reads a
-/// [`ComputedNode`] belongs after it.
 pub struct FlexPlugin;
 
 impl Plugin for FlexPlugin {
@@ -58,9 +42,7 @@ impl Plugin for FlexPlugin {
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LayoutSystems {
-    /// Styles are read and geometry is produced. Mutating a [`Node`] here is too late.
     Layout,
-    /// Geometry is settled and can be read.
     PostLayout,
 }
 
@@ -85,9 +67,6 @@ fn compute_layout(
     if context.physical_size.x <= 0.0 || context.physical_size.y <= 0.0 {
         return;
     }
-    // A scale-factor change restyles everything, because `Val::Px` is baked into taffy at the
-    // factor that was current when it was written. Without this a Retina move leaves every
-    // pixel length at the old scale, which is invisible at a factor of 1.
     let context_changed = tree.context() != Some(context);
     tree.set_context(context);
 
@@ -100,8 +79,6 @@ fn compute_layout(
     for entity in removed_children.read() {
         tree.set_children(entity, &[]);
     }
-    // A `Node` removed and re-inserted in the same frame still emits a removal, so a live entity
-    // has to survive it.
     for entity in removed_nodes.read() {
         if !nodes.contains(entity) {
             tree.remove(entity);
@@ -119,11 +96,6 @@ fn compute_layout(
     }
 }
 
-/// Re-parent in taffy wherever a `Children` list changed or a child gained a `Node`.
-///
-/// Recursion does not stop at an entity without a `Node`: a `Node` nested under a plain entity is
-/// still reached, matching how the hierarchy is built when a whole subtree is spawned at once and
-/// the intermediate entities gain their components in the same command buffer.
 fn sync_children_recursively(
     tree: &mut FlexTree,
     entity: Entity,
@@ -139,7 +111,6 @@ fn sync_children_recursively(
         if added.contains(entity) || changed_children.contains(entity) || gained_a_child {
             let owned: Vec<Entity> = children.iter().collect();
             tree.set_children(entity, &owned);
-            // Anything now parented is no longer a root, so its viewport wrapper would leak.
             for child in &owned {
                 if tree.has_viewport(*child) {
                     tree.detach_viewport(*child);
@@ -181,8 +152,6 @@ mod tests {
         }
     }
 
-    /// Every root carries an implicit viewport node. The pane tree reparents on every split, close
-    /// and archive restore, so a viewport that outlives its root grows the taffy tree without bound.
     #[test]
     fn a_root_that_becomes_a_child_gives_up_its_viewport() {
         let mut app = app();

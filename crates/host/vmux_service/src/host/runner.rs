@@ -1,14 +1,3 @@
-//! The daemon's headless Bevy app and the runner that drives it.
-//!
-//! Bevy is frame-driven and a daemon has no vsync, so a fixed tick is wrong at both ends: a fast
-//! one burns CPU on a box billed by the second, a slow one adds latency to every streamed frame.
-//! The runner instead parks on the wake channel the PTY readers already send to, and treats its
-//! timeout as a floor for housekeeping rather than as the pacing mechanism.
-//!
-//! This mirrors the rule the desktop follows for the same reason. `UpdateMode::Continuous` is
-//! banned there because it costs 100-200% idle CPU; in a container the same mistake is a bill,
-//! and it defeats the idle detection that suspend and scale-to-zero depend on.
-
 use std::time::Duration;
 
 use bevy_app::prelude::*;
@@ -18,19 +7,11 @@ use tokio::sync::mpsc;
 
 use crate::protocol::ProcessId;
 
-/// How long the runner sleeps when nothing wakes it.
-///
-/// A floor for housekeeping, not a frame rate. Work arrives through the wake channel; anything
-/// that needs this to be short is queued on the wrong edge.
 const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
 
-/// The Tokio runtime the daemon's async work runs on. Process-wide with no per-entity identity,
-/// which is what a resource is for.
 #[derive(Resource, Clone)]
 pub struct ServiceRuntime(pub Handle);
 
-/// Wires the daemon's headless app. Only the runtime handle so far — session, ACP and process
-/// state move onto entities in later stages.
 pub struct ServiceHostPlugin {
     pub runtime: Handle,
 }
@@ -41,20 +22,13 @@ impl Plugin for ServiceHostPlugin {
     }
 }
 
-/// Why the runner stopped parking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParkOutcome {
     Woken,
     TimedOut,
-    /// A signal handler asked the process to stop, or every wake sender was dropped because the
-    /// IPC server finished.
     Shutdown,
 }
 
-/// Block until something needs doing.
-///
-/// Coalesces on purpose: a burst of wakes costs one update rather than one per message, which is
-/// what stops a chatty PTY from driving the schedule once per read.
 pub fn park_for_wake(
     runtime: &Handle,
     wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>,
@@ -78,7 +52,6 @@ pub fn park_for_wake(
     outcome
 }
 
-/// The `App::set_runner` body: update once per wake, then park.
 pub fn wake_driven_runner(
     runtime: Handle,
     mut wake_rx: mpsc::UnboundedReceiver<ProcessId>,
@@ -103,9 +76,6 @@ pub fn wake_driven_runner(
 mod tests {
     use super::*;
 
-    /// Multi-threaded to match the daemon. On a current-thread runtime the timer is only
-    /// advanced from inside `Runtime::block_on`, so the `Handle::block_on` the runner uses would
-    /// park on a `sleep` that never fires.
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -170,9 +140,6 @@ mod tests {
         assert_eq!(outcome, ParkOutcome::Shutdown);
     }
 
-    /// The IPC server owns the only wake senders, so its exit has to end the app too. Without
-    /// this the daemon would park on a channel nobody can send to until the floor elapsed,
-    /// forever.
     #[test]
     fn the_server_dropping_its_wake_sender_stops_the_runner() {
         let rt = runtime();

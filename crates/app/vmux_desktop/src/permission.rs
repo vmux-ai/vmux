@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Resolves permission requests: per-origin camera, microphone, and screen capture for
-/// embedded pages.
 pub struct PermissionsPlugin;
 
 impl Plugin for PermissionsPlugin {

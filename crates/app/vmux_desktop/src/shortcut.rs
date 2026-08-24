@@ -5,8 +5,6 @@ use vmux_command::WriteAppCommands;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
 use vmux_setting::{AppSettings, load_settings};
 
-/// Turns key input into app commands: builds the keymap from settings, then matches
-/// combos and chords against it.
 pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
@@ -547,8 +545,6 @@ mod tests {
     }
 
     #[test]
-    /// The compiled-in default binds this chord to closing the whole stack and the settings file
-    /// rebinds it to closing one pane, so it is the only test here where the two disagree.
     fn configured_leader_x_overrides_the_default_stack_close() {
         use vmux_command::PaneCommand;
         let mut app = test_app_with_settings(current_settings_with_leader("b"));

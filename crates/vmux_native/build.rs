@@ -1,5 +1,3 @@
-//! Emits the platform cfg aliases this crate splits on.
-
 #[path = "../build_platform_cfg.rs"]
 mod build_platform_cfg;
 

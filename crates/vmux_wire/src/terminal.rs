@@ -18,7 +18,6 @@ pub enum TermColor {
     Rgb(u8, u8, u8),
 }
 
-/// Range of selected cells in viewport coordinates (0-based row/col).
 #[derive(
     Debug,
     Clone,
@@ -52,8 +51,6 @@ pub struct TermSelectionRange {
 )]
 pub struct TermLine {
     pub spans: Vec<TermSpan>,
-    /// Clickable URL/path ranges in this row, in column coordinates.
-    /// Computed by the host; the service always leaves this empty.
     #[serde(default)]
     pub links: Vec<LinkRange>,
 }
@@ -70,11 +67,8 @@ pub struct TermLine {
     rkyv::Deserialize,
 )]
 pub struct LinkRange {
-    /// First column of the link (0-based, inclusive).
     pub start_col: u16,
-    /// Last column of the link (0-based, inclusive).
     pub end_col: u16,
-    /// Ready-to-open target: `http(s)://…`, `data:…`, or `file://…`.
     pub url: String,
 }
 
@@ -94,11 +88,8 @@ pub struct TermSpan {
     pub fg: TermColor,
     pub bg: TermColor,
     pub flags: u16,
-    /// Starting column index of this span in the row (0-based).
     #[serde(default)]
     pub col: u16,
-    /// Number of grid columns this span covers (accounts for wide characters
-    /// taking 2 columns). When 0 (legacy), falls back to `text.chars().count()`.
     #[serde(default)]
     pub grid_cols: u16,
 }
@@ -125,7 +116,6 @@ pub struct TermCursor {
     pub row: u32,
     pub shape: CursorShape,
     pub visible: bool,
-    /// The character under the cursor (for block-cursor rendering).
     #[serde(default)]
     pub ch: String,
 }

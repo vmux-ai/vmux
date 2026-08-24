@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 
 use crate::i18n::translate;
 
-/// One selectable Mac file or directory in the prompt media menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptMediaOption {
     pub key: String,
@@ -14,7 +13,6 @@ pub struct PromptMediaOption {
 }
 
 #[component]
-/// Shared media selector shown for an open `@` token.
 pub fn PromptMediaOptions(
     items: Vec<PromptMediaOption>,
     selected: usize,

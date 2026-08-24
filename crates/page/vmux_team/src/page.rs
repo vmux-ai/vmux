@@ -76,8 +76,6 @@ pub fn Page() -> Element {
 
 #[component]
 fn TeamRow(member: TeamMemberRow) -> Element {
-    // Secondary line: a real page title (skip the default "Kind (sid)" one,
-    // since the session id is shown on its own line), else a role label.
     let default_title = format!("{} (", member.name);
     let subtitle = if member.is_user {
         Some(translate("team-you"))

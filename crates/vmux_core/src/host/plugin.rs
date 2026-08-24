@@ -1,5 +1,3 @@
-//! Reflection registration for the shared component vocabulary.
-
 use bevy::prelude::*;
 
 use crate::PageMetadata;
@@ -10,7 +8,6 @@ use crate::component::{
 };
 use crate::icon::{BuiltinIcon, PageIcon};
 
-/// Registers reflection for the shared component types so they can be saved and loaded.
 pub struct CorePlugin;
 
 impl Plugin for CorePlugin {

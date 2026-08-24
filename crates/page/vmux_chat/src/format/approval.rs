@@ -1,8 +1,3 @@
-//! Tool-call arguments flattened into rows a person can read.
-//!
-//! Shared rather than desktop-only: the page renders these, and nothing in the plugin does.
-
-/// One `label: value` line under an approval prompt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalDetail {
     pub label: String,
@@ -10,10 +5,6 @@ pub struct ApprovalDetail {
 }
 
 impl ApprovalDetail {
-    /// Flatten a tool call's arguments into rows.
-    ///
-    /// Arguments that are not JSON at all still get a row: an agent asking to run something
-    /// unparseable is exactly when the user most needs to see the raw text.
     pub fn rows(args_json: &str) -> Vec<Self> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(args_json) else {
             if args_json.trim().is_empty() {
@@ -51,7 +42,6 @@ impl ApprovalDetail {
         });
     }
 
-    /// Turn a dotted JSON path into something readable: `arguments.file_path` to `File path`.
     fn label(path: &str) -> String {
         let path = path.strip_prefix("arguments.").unwrap_or(path);
         let label = if path.is_empty() { "details" } else { path };

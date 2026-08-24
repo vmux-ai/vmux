@@ -5,12 +5,6 @@ use tracing_subscriber::{EnvFilter, fmt};
 use crate::runner::{ServiceHostPlugin, wake_driven_runner};
 use crate::{DaemonBinary, ServicePaths};
 
-/// Daemon entry point. Initializes logging, writes pid/identity, binds the socket, installs
-/// SIGTERM/SIGINT handlers, and drives the headless app until shutdown.
-///
-/// The Bevy runner owns the main thread and the IPC server runs as a Tokio task, rather than the
-/// other way round: a runner is a loop that must be free to park, and `run_server` awaits until
-/// the daemon is done.
 pub fn run() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -32,7 +26,6 @@ pub fn run() {
         .run();
 }
 
-/// Everything that has to happen before the app can run, and the listener it produces.
 async fn bootstrap(signal_tx: mpsc::Sender<()>) -> tokio::net::UnixListener {
     let paths = ServicePaths::current();
     let dir = ServicePaths::dir();
@@ -71,8 +64,6 @@ async fn bootstrap(signal_tx: mpsc::Sender<()>) -> tokio::net::UnixListener {
         let _ = std::fs::remove_file(&sock_cleanup);
         let _ = std::fs::remove_file(paths.pid());
         let _ = std::fs::remove_file(paths.identity());
-        // Ask the app to stop rather than calling process::exit, which would leave AppExit
-        // unobserved and give later stages nowhere to hang shutdown work.
         let _ = signal_tx.send(()).await;
     });
 

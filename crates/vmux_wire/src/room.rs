@@ -1,8 +1,3 @@
-//! Rooms, transcripts and the session views a client renders.
-//!
-//! Lives here rather than in `vmux_remote` so that crate stays transport-only: the relay links it
-//! to move bytes, and a relay that cannot name a `Message` cannot decode one.
-
 use serde::{Deserialize, Serialize};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -13,8 +8,6 @@ use crate::protocol::AgentRunStatus;
 pub const CONVERSATION_TITLE_MAX_GRAPHEMES: usize = 64;
 use vmux_macro::string_id;
 
-/// Identifies one conversation. Derived from a session id, so a client can address a room
-/// without having seen it before.
 #[string_id]
 pub struct RoomId(pub String);
 
@@ -24,27 +17,22 @@ impl RoomId {
     }
 }
 
-/// Identifies one participant in a room — the user, or an agent.
 #[string_id]
 pub struct MemberId(pub String);
 
 impl MemberId {
-    /// The human on this desktop.
     pub fn local(room_id: &RoomId) -> Self {
         Self::new(format!("{}:member:local", room_id.as_str()))
     }
 
-    /// The agent answering in this room.
     pub fn agent(room_id: &RoomId) -> Self {
         Self::new(format!("{}:member:agent", room_id.as_str()))
     }
 }
 
-/// Identifies one event in a room's append-only log.
 #[string_id]
 pub struct EventId(pub String);
 
-/// Idempotency key for an operation a client may retry after a dropped connection.
 #[string_id]
 pub struct ClientOpId(pub String);
 #[derive(
@@ -152,11 +140,6 @@ pub struct RoomEvent {
 }
 
 impl RoomEvent {
-    /// Project a transcript into the append-only log a client replays.
-    ///
-    /// Sequence numbers and event ids come from the position in `messages`, so the same transcript
-    /// always projects to the same log — a client that reconnects sees the ids it already has.
-    /// Each assistant event points back at the user message it answers.
     pub fn from_messages(sid: &str, created_at_ms: u64, messages: &[Message]) -> Vec<Self> {
         let room_id = RoomId::for_session(sid);
         let local_member = MemberId::local(&room_id);
@@ -207,7 +190,6 @@ impl Message {
         }
     }
 
-    /// Name a conversation after its first user prompt, or `fallback` when it has none.
     pub fn conversation_title(messages: &[Self], fallback: &str) -> String {
         for message in messages {
             let Self::User { text, .. } = message else {
@@ -222,11 +204,6 @@ impl Message {
     }
 }
 
-/// Trim a prompt to a title: collapse whitespace, drop anything invisible, cap the length.
-///
-/// The character filter is a spoofing defence, not tidiness. Titles are rendered next to names the
-/// user trusts, and a bidi override smuggled into a prompt would let a title reorder what it sits
-/// beside.
 fn normalize_conversation_title(value: &str) -> String {
     let mut title = String::new();
     let mut graphemes_written = 0;
@@ -302,7 +279,6 @@ fn is_disallowed_title_char(character: char) -> bool {
 )]
 pub enum AssistantBlock {
     Text(String),
-    /// The agent's streamed internal reasoning.
     Thinking(String),
     ToolUse {
         call_id: String,
@@ -312,20 +288,17 @@ pub enum AssistantBlock {
         parent_call_id: Option<String>,
     },
     Subagent(Box<SubagentBlock>),
-    /// A proposed file edit rendered as an inline diff.
     Diff {
         call_id: String,
         path: String,
         old_text: Option<String>,
         new_text: String,
     },
-    /// The agent's execution plan.
     Plan {
         steps: Vec<PlanStep>,
     },
 }
 
-/// A delegated agent operation surfaced by an ACP adapter.
 #[derive(
     Clone,
     Debug,
@@ -353,7 +326,6 @@ pub struct SubagentBlock {
     pub raw_input: String,
 }
 
-/// One entry in an agent [`AssistantBlock::Plan`].
 #[derive(
     Clone,
     Debug,
@@ -435,9 +407,6 @@ pub struct RemoteMediaEntry {
 }
 
 impl RemoteMediaEntry {
-    /// How this entry is written into a prompt after an `@`.
-    ///
-    /// Percent-encoded, because a space would otherwise end the token the composer is matching.
     pub fn reference(&self) -> String {
         let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
         if self.parent == "~" {
@@ -451,7 +420,6 @@ impl RemoteMediaEntry {
         }
     }
 
-    /// How this entry is shown to a reader — the same path, unencoded.
     pub fn display_path(&self) -> String {
         if self.parent == "~" {
             format!("~/{}", self.name)
@@ -509,10 +477,6 @@ pub enum RemoteEvent {
 }
 
 impl RemoteEvent {
-    /// Which kind this is, for a log line that must not carry a transcript.
-    ///
-    /// `Debug` would print the payload, and a replayed room is every message a conversation has
-    /// ever held, so the variant is named on its own.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Session { .. } => "session",
@@ -524,10 +488,6 @@ impl RemoteEvent {
     }
 }
 
-/// One row in the `/model` picker, and one model a session can be switched to.
-///
-/// The page and the phone pick from the same list through the same component, so they read the
-/// same type; splitting it was what let the remote view quietly drop `description`.
 #[derive(
     Clone,
     Debug,
@@ -546,19 +506,11 @@ pub struct ModelOptionEntry {
     pub description: String,
 }
 
-/// The models a session can run and how hard its agent is asked to think.
-///
-/// Both live in the GUI's ECS rather than the daemon, so this crosses the wire as JSON in answer
-/// to [`ListModels`](crate::protocol::SharedAgentCommand::ListModels) rather than as a typed
-/// response.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct RemoteModelState {
     pub models: Vec<ModelOptionEntry>,
-    /// The model in effect, including one selected but not yet acknowledged by the agent.
     pub selected_id: String,
-    /// Empty for agents that have no effort setting, which is most of them.
     pub effort_levels: Vec<String>,
-    /// Empty when the agent is left at its own default.
     pub effort: String,
 }
 
@@ -574,12 +526,10 @@ pub struct PromptRequest {
 pub struct NewChatRequest {
     pub client_op_id: ClientOpId,
     pub text: String,
-    /// Launch URL of the agent to start; omitted means the desktop default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_url: Option<String>,
 }
 
-/// An installed agent the phone can start a chat with.
 #[derive(
     Clone,
     Debug,

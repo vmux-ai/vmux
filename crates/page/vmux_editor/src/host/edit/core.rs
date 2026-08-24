@@ -45,9 +45,6 @@ fn translated_caret_after_replace(old: &str, new: &str, caret: usize) -> usize {
     .min(new.len())
 }
 
-/// What an operator acts on, resolved to concrete char ranges.
-///
-/// Charwise and linewise targets produce one range; a blockwise target produces one per row.
 struct OperatorSpan {
     ranges: Vec<std::ops::Range<usize>>,
     kind: RegisterKind,
@@ -131,7 +128,6 @@ impl EditCore {
         }
     }
 
-    /// Insert text and slide any marks sitting after the insertion point.
     fn buf_insert(&mut self, at: usize, text: &str) {
         self.buffer.insert(at, text);
         let n = text.chars().count();
@@ -142,7 +138,6 @@ impl EditCore {
         }
     }
 
-    /// Remove a range, pulling marks inside it back to its start.
     fn buf_remove(&mut self, range: std::ops::Range<usize>) {
         self.buffer.remove(range.clone());
         let n = range.end - range.start;
@@ -155,7 +150,6 @@ impl EditCore {
         }
     }
 
-    /// Record the current position on the jump list so `Ctrl-o` can come back to it.
     fn push_jump(&mut self) {
         let at = self.primary().head;
         self.jumps.truncate(self.jump_index);
@@ -239,11 +233,6 @@ impl EditCore {
         }
     }
 
-    /// The primary selection as an operator would see it.
-    ///
-    /// Vim's charwise visual selection covers the character under the cursor, and linewise visual
-    /// covers whole lines; the underlying anchor/head pair is exclusive, so widen it here and keep
-    /// rendering and effect in agreement.
     pub fn visual_range(&self) -> std::ops::Range<usize> {
         let sel = self.primary();
         let r = sel.range();
@@ -405,14 +394,11 @@ impl EditCore {
         }
     }
 
-    /// Char positions of every match of the active search, in buffer order.
     pub fn search_matches(&self) -> Vec<std::ops::Range<usize>> {
         let Some(search) = self.search.as_ref() else {
             return Vec::new();
         };
         let text = self.buffer.text();
-        // Walk the byte offsets once, carrying the running char count. Counting `text[..r.start]`
-        // per match is O(buffer) each time, and `emit_cursor` calls this on every cursor move.
         let mut out = Vec::new();
         let mut byte = 0usize;
         let mut chars = 0usize;
@@ -432,7 +418,6 @@ impl EditCore {
         crate::edit::search::step(&matches, from, forward)
     }
 
-    /// Highlight spans for the active search, in the same shape the selection uses.
     pub fn search_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
         if !self.search_highlight || rows == 0 {
             return Vec::new();
@@ -464,9 +449,6 @@ impl EditCore {
         out
     }
 
-    /// The decimal number at or after the caret on this line, with its char span.
-    ///
-    /// A `-` immediately before the digits is part of the number, matching `Ctrl-a` on `-3`.
     fn number_at_caret(&self) -> Option<(std::ops::Range<usize>, i64)> {
         let (line, col) = self.buffer.char_to_coords(self.primary().head);
         let base = self.buffer.line_to_char(line);
@@ -493,7 +475,6 @@ impl EditCore {
         Some((base + span_start..base + end, value))
     }
 
-    /// The keyword under the cursor, used by `*` and `#`.
     fn word_under_cursor(&self) -> Option<String> {
         let len = self.buffer.len_chars();
         if len == 0 {
@@ -517,7 +498,6 @@ impl EditCore {
         Some(self.buffer.rope.slice(start..end).chars().collect())
     }
 
-    /// The first non-blank of the buffer line displayed `offset` rows below the viewport top.
     fn screen_line(&self, offset: u16) -> usize {
         let line = self.fold_view.step_rows(self.top_row, offset as i64);
         self.first_non_blank(self.buffer.line_to_char(line as usize))
@@ -538,7 +518,6 @@ impl EditCore {
         base
     }
 
-    /// Vim's `%`: from the first bracket at or after the cursor on this line, jump to its partner.
     fn match_pair(&self, from: usize) -> Option<usize> {
         const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
         let (line, _) = self.buffer.char_to_coords(from);
@@ -579,7 +558,6 @@ impl EditCore {
         }
     }
 
-    /// Vim's `f`/`F`/`t`/`T`: search the cursor's line only.
     fn find_char(&self, from: usize, ch: char, forward: bool, till: bool) -> Option<usize> {
         let (line, _) = self.buffer.char_to_coords(from);
         let base = self.buffer.line_to_char(line);
@@ -709,7 +687,6 @@ impl EditCore {
         base
     }
 
-    /// Word classes, or the coarser WORD split that only separates on whitespace.
     fn cls(&self, i: usize, big: bool) -> u8 {
         let c = self.buffer.rope.char(i);
         if big {
@@ -766,7 +743,6 @@ impl EditCore {
         i
     }
 
-    /// Vim's `ge`: the end of the word before the cursor.
     fn word_end_prev(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
         if from == 0 || len == 0 {
@@ -881,10 +857,6 @@ impl EditCore {
         at
     }
 
-    /// The rows of the current blockwise selection, as one char range per line.
-    ///
-    /// The rectangle spans the columns the anchor and head sit in; lines shorter than the left
-    /// edge contribute an empty range so the row count still lines up with the block's height.
     pub fn block_rows(&self) -> Vec<std::ops::Range<usize>> {
         let sel = self.primary();
         let (l0, c0) = self.buffer.char_to_coords(sel.anchor);
@@ -988,7 +960,6 @@ impl EditCore {
         }
     }
 
-    /// Resolve an ex range to whole lines, including each line's newline.
     fn ex_range(&self, range: crate::edit::ex::ExRange) -> std::ops::Range<usize> {
         use crate::edit::ex::ExRange;
         match range {
@@ -1029,7 +1000,6 @@ impl EditCore {
         let out = if all {
             re.replace_all(&source, replacement.as_str()).into_owned()
         } else {
-            // Vim substitutes the first match on each line unless the `g` flag is given.
             source
                 .split_inclusive('\n')
                 .map(|line| re.replace(line, replacement.as_str()).into_owned())
@@ -1046,7 +1016,6 @@ impl EditCore {
         true
     }
 
-    /// Shift every line touched by `range` one indent level in or out.
     fn apply_line_shift(
         &mut self,
         operator: Operator,
@@ -1077,9 +1046,6 @@ impl EditCore {
         (true, None)
     }
 
-    /// Apply an operator to a rectangle, row by row from the bottom so earlier rows keep their
-    /// indices. Only the operators that make sense on a block are handled; the rest fall through
-    /// to the enclosing charwise path.
     fn apply_block_operator(
         &mut self,
         operator: Operator,
@@ -1286,7 +1252,6 @@ impl EditCore {
                     }
                     let base = self.buffer.line_to_char(target);
                     let len = self.buffer.line_len_chars(target);
-                    // Pad short lines out to the block's column before inserting.
                     let pad = col.saturating_sub(len);
                     if pad > 0 {
                         self.buf_insert(base + len, &" ".repeat(pad));
@@ -1682,7 +1647,6 @@ impl EditCore {
                     && !text.is_empty()
                 {
                     self.checkpoint(Group::Other);
-                    // The first row already received the text as it was typed.
                     for line in lines.into_iter().skip(1).rev() {
                         if line >= self.buffer.len_lines() {
                             continue;
@@ -2579,8 +2543,6 @@ mod tests {
         assert_eq!(text_of(&c), "hello");
     }
 
-    /// `D` clears to the end of the line without joining the next one. A single-line fixture hides
-    /// this: the range gets clamped to the buffer length, so the extra step past `\n` is invisible.
     #[test]
     fn line_end_operator_stops_before_the_newline() {
         let mut c = core("abc\ndef\n");

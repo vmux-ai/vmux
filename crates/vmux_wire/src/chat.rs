@@ -1,11 +1,5 @@
-//! The rendered chat transcript model, shared by every host that draws a conversation.
-//!
-//! Grouping happens once on the daemon side; hosts receive `Vec<ChatItem>` and render it.
-
 use crate::prompt_media::ChatSubmitAttachment;
 
-/// The page's block type inside a [`ChatTurn`]. Mirrors `vmux_service::message::AssistantBlock`
-/// plus folded tool results and reconnect progress.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatBlock {
     Text(String),
@@ -37,7 +31,6 @@ pub enum ChatBlock {
     },
 }
 
-/// Page representation of `vmux_service::message::SubagentBlock`.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatSubagent {
     pub call_id: String,
@@ -56,15 +49,12 @@ pub struct ChatSubagent {
     pub raw_input: String,
 }
 
-/// Mirror of `vmux_service::message::PlanStep`.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatPlanStep {
     pub content: String,
     pub status: String,
 }
 
-/// A rendered conversation entry: a user bubble or a grouped assistant turn. Built backend by
-/// `group_turns`, carried as JSON in `ChatSnapshot::messages_json`.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatItem {
     User {
@@ -87,26 +77,18 @@ impl ChatItem {
     }
 }
 
-/// One assistant turn: its ordered prose/activity timeline and run-state.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatTurn {
-    /// Prose, thinking, tools, reconnects, plans, and diffs in transcript order.
     pub blocks: Vec<ChatBlock>,
-    /// True only for the live (tail) turn while the run is active.
     pub running: bool,
-    /// Final wall-clock seconds for a turn that finished this process; `None` otherwise.
     pub duration_secs: Option<u32>,
-    /// Number of non-prose activity blocks.
     pub step_count: u32,
 }
 
-/// The name of a tool an agent called.
 #[derive(Clone, Copy, Debug)]
 pub struct ToolName<'a>(pub &'a str);
 
 impl ToolName<'_> {
-    /// Whether this is a review or approval tool, which the transcript renders differently
-    /// because its output is a verdict on other work rather than work of its own.
     pub fn is_guardian(&self) -> bool {
         let lower = self.0.to_ascii_lowercase();
         lower.contains("guardian")
@@ -187,10 +169,6 @@ impl ChatTurn {
     }
 }
 
-/// How much the agent still has in flight: sub-agents running, and plan steps not yet done.
-///
-/// Derived from the transcript rather than reported, so any surface holding the transcript can
-/// show it without the host sending a count.
 pub fn activity_counts(items: &[ChatItem]) -> (usize, usize) {
     let mut subagents = 0usize;
     let mut tasks = 0usize;
@@ -229,8 +207,6 @@ pub fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)> {
         })
 }
 
-/// The curated verbs the running-turn header cycles through (owned by the shared contract, not
-/// the view). The page picks one at random every few seconds while streaming.
 pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-working",
     "agent-working-thinking",
@@ -254,19 +230,8 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-spelunking",
 ];
 
-/// The event id [`ChatKey`] is pushed under.
 pub const CHAT_KEY_EVENT: &str = "chat-key";
 
-/// What the keymap made of a key the chat page handed over, sent back to the page that sent it.
-///
-/// The page keeps the doing; only the deciding moved. Which list a [`ChatKey::ListChoose`] lands
-/// in, and which row of it, is derived from the draft text — which lives in the browser's own
-/// `<textarea>` and changes on every keystroke. Shipping that to the host and back would make the
-/// answer one character stale, so the verb travels instead, in the direction that already holds
-/// the state.
-///
-/// This is why the page no longer names a key anywhere: `Enter` is four lines in the keymap, each
-/// carrying the context it applies in, rather than four branches in a `keydown`.
 #[derive(
     Clone,
     Copy,
@@ -280,20 +245,14 @@ pub const CHAT_KEY_EVENT: &str = "chat-key";
     rkyv::Deserialize,
 )]
 pub enum ChatKey {
-    /// Highlight the next row of whichever list is open.
     ListNext,
     ListPrevious,
-    /// Commit the highlighted row: answer the approval, answer the question, or take the match.
     ListChoose,
-    /// Recall an earlier prompt into the draft.
     HistoryOlder,
     HistoryNewer,
     Submit,
-    /// Close the open picker, dropping the `@`-mention or the draft that opened it.
     DismissSelector,
-    /// Send everything queued, and clear a draft nothing is waiting on.
     Interrupt,
-    /// Stop the running turn.
     Cancel,
 }
 
@@ -329,8 +288,6 @@ mod activity_counts_tests {
         })
     }
 
-    /// The composer shows these as "still working" counts, so anything already finished has to
-    /// drop out — a completed sub-agent or plan step reads as outstanding work otherwise.
     #[test]
     fn only_unfinished_work_counts() {
         let items = vec![

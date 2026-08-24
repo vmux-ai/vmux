@@ -1,16 +1,9 @@
-//! What the agent is blocked on: permission to run a tool, or an answer to a question it asked.
-//!
-//! The two arrive on different signals and dock in different places, but they are one thing to
-//! the reader — a numbered list the conversation cannot move past — and they share the option
-//! styling and the keyboard help line that says how to pick from it.
-
 use super::state::Chat;
 use crate::event::ApprovalDecision;
 use crate::format::approval::ApprovalDetail;
 use dioxus::prelude::*;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-/// The pending approval on this page, docked under the transcript.
 #[component]
 pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     if chat.installing() {
@@ -29,18 +22,11 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     }
 }
 
-/// The tool the agent is asking permission to run, and the three answers to it.
-///
-/// Takes the request rather than the [`Chat`] holding it, so the phone — which learns of the same
-/// approval over QUIC and answers it the same three ways — renders this instead of its own.
 #[component]
 pub fn ApprovalPanel(
     tool: String,
     args_json: String,
-    /// Which answer the keyboard is on, or `None` where there is no keyboard to be on one. Also
-    /// drops the "press 1–3" line, which is noise on a device that can only tap.
-    #[props(default)]
-    selected: Option<usize>,
+    #[props(default)] selected: Option<usize>,
     on_answer: EventHandler<ApprovalDecision>,
 ) -> Element {
     let details = ApprovalDetail::rows(&args_json);
@@ -104,7 +90,6 @@ fn approval_detail_label(label: &str) -> String {
     }
 }
 
-/// A question the agent asked, with its numbered answers.
 #[component]
 pub(super) fn ChoiceList(chat: Chat) -> Element {
     let options = (chat.run.choice_options)();

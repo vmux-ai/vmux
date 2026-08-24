@@ -1,9 +1,3 @@
-//! The `vmux://command-bar/` page: the Cmd+K modal shell and the launcher it holds.
-//!
-//! [`Page`] is the modal; [`CommandPalette`] is what it renders, and what `vmux://start/` and the
-//! layout page render too. The palette lists rows and reports which was chosen — it never learns
-//! what any of them are for.
-
 #![allow(non_snake_case)]
 
 use crate::event::{
@@ -49,9 +43,6 @@ use vmux_ui::launcher::style::{
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 
-/// The shared command-bar body: input, live-filtered results, file-path completion,
-/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
-/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
@@ -296,9 +287,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     });
 
-    // `Rc` because `use_hook` clones its value out on every render and a listener must have one
-    // owner — two would each try to remove it, and the second removal is the one that silently
-    // does nothing.
     use_effect(move || {
         let _ = query();
         let _ = selected();
@@ -1191,7 +1179,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
 const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
 
-/// Whether the search currently waiting to fire has been superseded.
 type HostSearchTimer = Rc<RefCell<Option<Rc<Cell<bool>>>>>;
 
 fn cancel_host_search(timer: &HostSearchTimer) {
@@ -1200,7 +1187,6 @@ fn cancel_host_search(timer: &HostSearchTimer) {
     }
 }
 
-/// Ask the host for results once the user stops typing, replacing whatever was already waiting.
 fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
     cancel_host_search(&timer);
     let cancelled = Rc::new(Cell::new(false));
@@ -1215,12 +1201,9 @@ fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'stati
     });
 }
 
-/// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
 #[derive(Clone, Copy, PartialEq)]
 pub enum PaletteVariant {
-    /// The Cmd+K command-bar modal overlay.
     Modal,
-    /// The `vmux://start/` launcher page.
     Start,
 }
 
@@ -1231,35 +1214,22 @@ pub struct StartInlineTransition {
     pub attachments: Vec<crate::prompt_media::ChatAttachment>,
 }
 
-/// Props for [`CommandPalette`].
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
-    /// Launcher payload (entries + open target); the input resets when its `open_id` changes.
     pub state: ReadSignal<CommandBarOpenEvent>,
-    /// Presentation context (placeholder text and host expectations).
     pub variant: PaletteVariant,
-    /// Called after an entry executes (the modal host closes it; home is a no-op).
     pub on_close: EventHandler<()>,
-    /// Called when the user cancels (Esc / Ctrl-C).
     pub on_dismiss: EventHandler<()>,
-    /// Called on query/selection change (the modal re-emits its size).
     pub on_activity: EventHandler<()>,
     #[props(default)]
     pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
 }
 
-/// Everything a palette shows, derived from what the host sent and what the user has typed.
-///
-/// Held as a memo rather than rebuilt inline because the keyboard now reaches this list from two
-/// places: the render, and the host's answer to a key the page handed over. That answer arrives in
-/// a listener registered once, which can read a signal but cannot see a render's locals — so the
-/// list has to be somewhere both can look, or there would be two copies of it to disagree.
 #[derive(Clone, PartialEq)]
 struct PaletteRows {
     items: Vec<ResultItem>,
     prompt_targets: Vec<ResultItem>,
     default_target: Option<ResultItem>,
-    /// The greyed-out remainder the first path completion would add to what has been typed.
     ghost: String,
 }
 
@@ -1373,18 +1343,14 @@ impl PaletteRows {
         full[typed.len()..].to_string()
     }
 
-    /// What the input holds once the greyed-out remainder is accepted.
     fn completed(&self, query: &str) -> String {
         format!("{query}{}", self.ghost)
     }
 
-    /// The highlighted row, clamped to what is actually on screen.
     fn selected(&self, stored: usize) -> usize {
         stored.min(self.items.len().saturating_sub(1))
     }
 
-    /// Where a move of one row lands. Clamped at both ends rather than wrapping, which is what the
-    /// command bar has always done and what distinguishes it from a popup menu.
     fn step(&self, from: usize, direction: MenuDirection) -> usize {
         match direction {
             MenuDirection::Next => (from + 1).min(self.items.len().saturating_sub(1)),
@@ -1393,15 +1359,6 @@ impl PaletteRows {
     }
 }
 
-/// The palette's keyboard, on the far side of the keymap.
-///
-/// Nothing here names a key. The page hands the stroke over, the core decides, and this performs
-/// the verb it came back as — which is the only reason `Ctrl+n` can be rebound in `settings.json`
-/// without the palette knowing it moved.
-///
-/// Every field is a signal or a handler rather than a value, because the answer arrives in a
-/// listener registered on first render: a captured result list would be one keystroke stale by the
-/// time the first key was pressed.
 #[derive(Clone, Copy)]
 struct PaletteKeys {
     rows: Memo<PaletteRows>,
@@ -1429,10 +1386,6 @@ impl PaletteKeys {
         self.nav_mode.set(true);
     }
 
-    /// Accept the greyed-out remainder, and put the caret after it.
-    ///
-    /// The input's value is written directly as well as through the signal: Chromium does not
-    /// scroll to a caret it did not move itself, so a long path would complete off-screen.
     fn accept_completion(&mut self) {
         let rows = self.rows.read();
         if rows.ghost.is_empty() {
@@ -1446,15 +1399,11 @@ impl PaletteKeys {
     }
 }
 
-/// What the user has typed, and which row is selected.
 struct PaletteInput {
     query: Signal<String>,
     selected: Signal<usize>,
     nav_mode: Signal<bool>,
-    /// The open this input was last cleared for, so a re-render does not wipe what is being typed.
     last_open_id: Signal<OpenId>,
-    /// The open this input was last focused for, tracked apart from the reset because the two do
-    /// not always happen in the same render.
     last_focus_open_id: Signal<OpenId>,
 }
 
@@ -1468,10 +1417,6 @@ fn use_palette_input() -> PaletteInput {
     }
 }
 
-/// Path rows the host answered with, and the request they belong to.
-///
-/// The id is what makes a late answer harmless: the host replies out of order under load, and a
-/// reply carrying anything but the current id is dropped rather than rendered over newer results.
 struct PathCompletions {
     entries: Signal<Vec<PathEntry>>,
     request_id: Signal<u64>,
@@ -1486,7 +1431,6 @@ fn use_path_completions() -> PathCompletions {
     }
 }
 
-/// History rows the host answered with, and the request they belong to.
 struct HistorySuggestions {
     entries: Signal<Vec<HistoryEntry>>,
     request_id: Signal<u64>,
@@ -1501,16 +1445,11 @@ fn use_history_suggestions() -> HistorySuggestions {
     }
 }
 
-/// What the composer has attached, and the media picker's own browsing state.
-///
-/// `attachments` is what a prompt would carry; everything else exists only while the picker is
-/// open. They are held together because closing the picker has to leave the attachments alone.
 struct PromptMedia {
     attachments: Signal<Vec<ChatAttachment>>,
     previews: Signal<HashMap<String, ChatAttachment>>,
     entries: Signal<Vec<ChatMediaEntry>>,
     request_id: Signal<u64>,
-    /// The query the open request was made for, so an answer to a stale one is ignored.
     requested_query: Signal<Option<String>>,
     timer: HostSearchTimer,
     loading: Signal<bool>,
@@ -1530,7 +1469,6 @@ fn use_prompt_media() -> PromptMedia {
     }
 }
 
-/// Which page a prompt would go to, and whether the picker for it is showing.
 struct PromptTarget {
     url: Signal<String>,
     menu_open: Signal<bool>,
@@ -1554,9 +1492,6 @@ fn looks_like_path(s: &str) -> bool {
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
 }
 
-/// The filesystem query to complete from the command-bar input, if any.
-/// `file://…` completes the path after the scheme (empty → local dir); bare paths
-/// (`/…`, `~/…`, `./…`) complete as typed.
 fn completion_query(input: &str) -> Option<String> {
     let t = input.trim();
     if let Some(rest) = t.strip_prefix("file://") {
@@ -1610,31 +1545,15 @@ fn select_start_media_entry(
 
 const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
-/// Claim focus for the query field and offer its contents for overtyping.
-///
-/// The Ctrl chords this used to install as a capture-phase DOM listener are now part of the
-/// field's own `onkeydown` — see [`handle_readline_chord`].
 fn focus_command_bar_input() {
     FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
 }
 
-/// Put the caret in the launcher's prompt field.
-///
-/// The launcher owns the gesture and this crate owns the field, so the id stays here rather than
-/// being spelled out by every caller that wants the composer focused.
 pub fn focus_prompt_input() {
     focus_prompt_end(PROMPT_INPUT_ID);
 }
 
-/// Cmd+A and the Ctrl readline chords, offered the key before the field's own handling.
-///
-/// Returns whether the key was consumed.
-///
-/// This was a capture-phase listener on the input element, installed once behind a `_ctrlBound`
-/// latch, because Chromium's macOS readline emulation acts on Ctrl+A/E and the handler had to run
-/// first to preempt it. Dioxus dispatches on the bubble phase, so whether `prevent_default` still
-/// wins that race is the one thing here no test settles — it needs a keyboard.
 fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost: &str) -> bool {
     if handle_plain_meta_a(event) {
         return true;
@@ -1645,7 +1564,6 @@ fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost
 
     let action = match ctrl_key_capture_for_code(&event.code().to_string()) {
         CtrlKeyCapture::Ignore => return false,
-        // Preempt the browser, then let the field's own handler read the same key.
         CtrlKeyCapture::PassToDioxus => {
             event.prevent_default();
             return false;
@@ -1664,14 +1582,6 @@ fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost
     true
 }
 
-/// Run a readline edit against the query, then put the caret where it landed.
-///
-/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is the one the key arrived with,
-/// which is why it is a parameter: it can only be read while a handler is running, so a function
-/// that fetched it for itself would be right only for the callers that happen to be in one. The
-/// value goes through the signal the field is bound to, so there is nothing to tell Dioxus
-/// afterwards — the element write and the synthetic `input` event that used to follow it existed
-/// only because the field was uncontrolled.
 fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str, caret: usize) {
     let value = query.peek().clone();
     let ghost = match action {
@@ -1686,7 +1596,6 @@ fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &s
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(edited.caret);
 }
 
-/// Cmd+A with no other modifier selects the query rather than the page.
 fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
     let modifiers = event.modifiers();
     let plain_meta = modifiers.contains(Modifiers::META)

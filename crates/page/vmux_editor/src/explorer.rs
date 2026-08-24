@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-//! Explorer panel rendering, motion, context menus, and user intents.
-
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -129,8 +127,6 @@ fn schedule_tree_focus(path: String, mut generation: Signal<u32>) {
     let id = generation().wrapping_add(1);
     generation.set(id);
     spawn(async move {
-        // Past the end of the motion, because a row revealed while it is still sliding is scrolled
-        // to where it was rather than to where it is going.
         sleep_ms(TREE_MOTION_MS + 20).await;
         if generation() != id {
             return;
@@ -165,8 +161,6 @@ fn reconcile_rows(
         .collect();
     rows.set(merged);
     spawn(async move {
-        // A turn before anything is opened, so the new rows reach the document closed: one that
-        // appears already visible has no transition left to run.
         sleep_ms(0).await;
         if generation() != id {
             return;
@@ -222,7 +216,6 @@ fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) 
     prompt.set(None);
 }
 
-/// The twisty on a tree row, replaced by a spinner while its children load.
 #[component]
 fn Chevron(expanded: bool, loading: bool) -> Element {
     if loading {
@@ -240,7 +233,6 @@ fn Chevron(expanded: bool, loading: bool) -> Element {
     }
 }
 
-/// A collapsible section title in the explorer sidebar.
 #[component]
 fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
     rsx! {
@@ -733,7 +725,6 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     }
 }
 
-/// The symbol glyph for an outline entry's kind.
 #[component]
 fn OutlineGlyph(kind: u8) -> Element {
     let label = match kind {

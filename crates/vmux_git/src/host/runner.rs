@@ -11,9 +11,6 @@ use crate::host::parse;
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
-/// Repository-local `GIT_*` variables used when `git rev-parse --local-env-vars`
-/// cannot be queried. Mirrors Git's own list (git 2.54); the live query in
-/// [`local_env_vars`] supersedes it whenever git is runnable.
 const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_COMMON_DIR",
@@ -32,16 +29,6 @@ const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
     "GIT_WORK_TREE",
 ];
 
-/// Every repository-local `GIT_*` variable Git recognizes, queried once from the
-/// authoritative `git rev-parse --local-env-vars` and cached (falling back to
-/// [`FALLBACK_LOCAL_ENV_VARS`] if git cannot be run).
-///
-/// The runner always targets an explicit repository via [`Command::current_dir`],
-/// so these ambient variables — which a parent process such as a `git push`
-/// pre-push hook exports — must be stripped; otherwise `GIT_DIR`, `GIT_INDEX_FILE`,
-/// `GIT_OBJECT_DIRECTORY`, `GIT_CONFIG` and friends override the explicit target and
-/// the call silently reads or writes the wrong repository. Listing the names is a
-/// static print, so it is safe to run under any ambient environment.
 fn local_env_vars() -> &'static [String] {
     static VARS: OnceLock<Vec<String>> = OnceLock::new();
     VARS.get_or_init(|| {
@@ -68,10 +55,6 @@ fn local_env_vars() -> &'static [String] {
     })
 }
 
-/// Build a `git` [`Command`] rooted at `root` with a scrubbed environment.
-///
-/// Clears every repository-local `GIT_*` variable (see [`local_env_vars`]) so an
-/// ambient environment cannot redirect the call away from its `current_dir` target.
 fn git_command(root: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
@@ -228,8 +211,6 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
         .collect())
 }
 
-/// Repo root plus the set of repo-relative paths `git status --porcelain=v2`
-/// reports as changed (modified/staged/untracked/renamed/deleted/conflicted).
 pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
     let root = repo_root(file)?;
     let (stdout, stderr, ok) = git_read(
@@ -867,7 +848,6 @@ mod tests {
         let file = test_repo::write(repo.path(), "a.txt", "l1\nl2\nl3\nl4\nl5\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        // change line 1 and line 3 — only 2 lines apart (would merge under -U3)
         test_repo::write(repo.path(), "a.txt", "X1\nl2\nX3\nl4\nl5\n");
 
         let hunks: std::collections::HashSet<u32> = diff_lines(&file)
@@ -877,7 +857,6 @@ mod tests {
             .collect();
         assert_eq!(hunks.len(), 2, "expected 2 separate hunks, got {hunks:?}");
 
-        // accepting hunk 0 (line 1) must not touch line 3
         apply_hunk(&file, 0, true).unwrap();
         let removes: Vec<_> = diff_lines(&file)
             .unwrap()

@@ -1,9 +1,3 @@
-//! The desktop half of agent setup: detecting prerequisites, running an installer in a pane, and
-//! redirecting once it lands.
-//!
-//! Gated as a whole rather than item by item, so the file reads as structure instead of a column
-//! of attributes. The frontend counterpart is the sibling `page` module.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
@@ -48,8 +42,6 @@ fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest
     });
 }
 
-/// Homebrew is needed first only on macOS, only for cask agents, and only when
-/// `brew` is not already resolvable.
 fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
     cfg!(target_os = "macos") && vmux_core::agent_setup::requires_homebrew(segment) && !brew_present
 }
@@ -72,11 +64,6 @@ fn on_agent_setup_prereq_request(
     }
 }
 
-/// Decide an install pane's outcome from a completed command.
-///
-/// `None` while not yet `armed` (ignores the shell's spurious pre-command
-/// completion). Once armed: `Some(true)` when the agent binary is present
-/// (success), `Some(false)` when still absent (failure → Retry).
 fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
     if !armed {
         return None;
@@ -243,7 +230,6 @@ fn auto_redirect_agent_setup_when_installed(
         commands.spawn(vmux_core::PageOpenTask {
             id: vmux_core::PageOpenId::new(),
             stack: setup_stack,
-            // Open the freshly-installed CLI agent (bare `<kind>` is now ACP).
             url: format!("{}cli", kind.cli_url_prefix()),
             request_id: None,
         });

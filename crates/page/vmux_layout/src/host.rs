@@ -1,10 +1,3 @@
-//! Everything that only exists on a desktop: the window, the CEF webviews, and the Bevy
-//! plugin that composes spaces, tabs, panes and stacks into them.
-//!
-//! One gate for the lot, rather than an attribute on each declaration. The crate's public paths
-//! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_layout::pane` still
-//! resolves from outside and `crate::pane` still resolves from within.
-
 use bevy::prelude::*;
 
 pub mod active;
@@ -120,7 +113,6 @@ pub enum TabLayoutSpawnContent {
     StartupUrlOrPrompt,
     Url {
         url: String,
-        /// Left on the new stack as a [`vmux_core::PendingPrompt`] for the page to claim.
         pending_prompt: Option<String>,
     },
 }
@@ -136,11 +128,6 @@ pub struct TabLayoutSpawnRequest {
     pub focus: bool,
 }
 
-/// Open `url` in a new focused tab in the active space.
-///
-/// Layout picks the space, the tab name and the working directory; the sender only says what to
-/// show. `pending_prompt` rides along as a [`vmux_core::PendingPrompt`] on the new stack, for
-/// whatever the URL opens to claim once it is ready.
 #[derive(Message, Clone, Debug)]
 pub struct NewTabRequest {
     pub url: String,

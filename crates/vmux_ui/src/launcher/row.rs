@@ -1,8 +1,3 @@
-//! One launcher result row.
-//!
-//! Both the desktop launcher and the phone render results through this, so a session looks the
-//! same wherever you see it. The row owns its chrome; hosts supply the item and the callbacks.
-
 use crate::components::icon::Icon;
 use crate::favicon::Favicon;
 use crate::file_icon::FilePath;
@@ -25,12 +20,8 @@ pub fn ResultRow(
     index: usize,
     item: ResultItem,
     selected: bool,
-    /// Numbered rows: the space switcher labels each entry with its ordinal.
-    #[props(default)]
-    space_switch: bool,
-    /// Prompt mode reframes an agent row as "Ask <agent>" rather than a plain launch.
-    #[props(default)]
-    start_prompt_mode: bool,
+    #[props(default)] space_switch: bool,
+    #[props(default)] start_prompt_mode: bool,
     #[props(default)] query: String,
     on_activate: EventHandler<()>,
     on_hover: EventHandler<()>,

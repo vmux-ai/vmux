@@ -1,9 +1,3 @@
-//! Everything that only exists on a desktop.
-//!
-//! One gate for the lot, rather than an attribute on each declaration. Named for the `host` cfg
-//! that gates it, as in `vmux_core`, `vmux_layout` and `vmux_terminal`. `lib.rs` re-exports the
-//! contents, so the flat `vmux_agent::` paths resolve as well as `vmux_agent::host::`.
-
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 

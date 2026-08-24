@@ -1,10 +1,3 @@
-//! Everything that only exists on a desktop: the filesystem, the language servers, and the
-//! Bevy plugin that drives them.
-//!
-//! One gate for the lot, rather than an attribute on each declaration. The crate's public paths
-//! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_editor::EditorPlugin`
-//! still resolves from outside and `crate::edit` still resolves from within.
-
 pub mod contract;
 pub mod edit;
 pub mod explorer_model;

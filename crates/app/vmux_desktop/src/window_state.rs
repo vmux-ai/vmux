@@ -29,28 +29,17 @@ impl Plugin for WindowStatePlugin {
     }
 }
 
-/// Captures below this logical size are treated as transient and ignored.
 const MIN_WINDOW_SIZE: f32 = 100.0;
 
-/// Live fullscreen signal. macOS writes it from `glass.rs` (NSWindow styleMask);
-/// other platforms derive it from `window.mode`.
 #[derive(Resource, Default, Debug)]
 pub struct WindowFullscreen(pub bool);
 
-/// Loaded fullscreen intent awaiting application. Inserted by
-/// `apply_geometry_on_load`, consumed by the platform fullscreen-restore system
-/// (post-reveal on macOS), which then sets [`WindowRestoreComplete`].
 #[derive(Resource, Debug)]
 pub struct PendingFullscreenRestore(pub bool);
 
-/// Set once startup geometry restore is finished. Capture is gated on this so
-/// the transient windowed startup state can't overwrite a saved `fullscreen`.
 #[derive(Resource, Default, Debug)]
 pub struct WindowRestoreComplete;
 
-/// Spawn the persisted geometry singleton if none was loaded from `store.ron`
-/// (first run, or an older store predating this feature). Gated on restore
-/// completion so it never races the scene load into a duplicate.
 fn ensure_geometry_singleton(
     restore: Res<crate::boot_status::RestoreComplete>,
     existing: Query<(), With<WindowGeometry>>,
@@ -62,10 +51,6 @@ fn ensure_geometry_singleton(
     commands.spawn(WindowGeometry::default());
 }
 
-/// Apply a freshly loaded (or spawned) `WindowGeometry` to the primary window
-/// once. Windowed frame is applied immediately (window is hidden until reveal on
-/// macOS, so flicker-free); fullscreen intent is deferred via
-/// [`PendingFullscreenRestore`].
 fn apply_geometry_on_load(
     geometry: Query<&WindowGeometry, Added<WindowGeometry>>,
     mut window: Query<&mut Window, With<PrimaryWindow>>,
@@ -89,10 +74,6 @@ fn apply_geometry_on_load(
     }
 }
 
-/// Sync the live window frame into the persisted `WindowGeometry`, marking the
-/// scene dirty (via `Changed<WindowGeometry>`) for the debounced auto-save.
-/// Position/size track the windowed frame only; while fullscreen they are left
-/// untouched so exiting fullscreen lands on the prior frame.
 fn capture_window_geometry(
     fullscreen: Res<WindowFullscreen>,
     window: Query<&Window, With<PrimaryWindow>>,

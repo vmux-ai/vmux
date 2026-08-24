@@ -1,10 +1,3 @@
-//! The payload both launcher surfaces send.
-//!
-//! The Cmd+K bar and the home launcher show the same thing — pages, commands, spaces, tabs — so
-//! they assemble it the same way. None of it needs the layout: the only workspace-shaped input is
-//! a `Vec<CommandBarTab>`, which the layout hands over already in wire shape. Keeping it here is
-//! what lets both callers stay downstream of this crate instead of reaching across to each other.
-
 use crate::command::AppCommand;
 use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
@@ -21,8 +14,6 @@ pub struct CommandBarEntry {
     pub shortcut: String,
 }
 
-/// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
-/// bar and the home launcher, from the current snapshots and gathered tabs.
 #[allow(clippy::too_many_arguments)]
 pub fn build_command_bar_open_payload(
     open_id: OpenId,
@@ -109,9 +100,6 @@ pub fn build_command_bar_open_payload(
     )
 }
 
-/// Built-in command rows plus whatever other crates contributed, already named.
-///
-/// `superseded` names commands a registered page stands in for, whose rows the page entry replaces.
 pub fn command_list(
     locale: &Locale,
     contributed: Vec<CommandBarEntry>,
@@ -132,10 +120,6 @@ pub fn command_list(
     entries
 }
 
-/// Resolve a command-bar menu path for the requested locale.
-///
-/// Takes a raw tag rather than a [`Locale`] because the macOS menu bar in `vmux_desktop` calls it
-/// with the tag it already threads through its own menu state.
 pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> String {
     let locale = Locale::from(locale);
     let message_id = format!("command-{}", id.replace('_', "-"));
@@ -162,9 +146,6 @@ pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> Strin
     segments.join(" > ")
 }
 
-/// Display string for a command's shortcut, looked up by menu id. Used to show
-/// a page's keybinding (e.g. History) on its page entry after the command itself
-/// is hidden from the command list.
 pub(crate) fn command_shortcut(id: &str) -> String {
     AppCommand::command_bar_entries()
         .into_iter()

@@ -60,7 +60,6 @@ pub(crate) fn update_agents_snapshot(
         .map(|(kind, name)| AgentProviderSummary {
             id: kind.0.as_url_segment().to_string(),
             name: name.as_str().to_string(),
-            // CLI agents live at `<kind>/cli` under the new grammar (bare `<kind>` is ACP).
             url: format!("{}cli", kind.0.cli_url_prefix()),
             icon: String::new(),
         })

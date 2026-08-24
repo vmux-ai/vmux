@@ -1,10 +1,5 @@
 use std::ops::Range;
 
-/// Translate a vim pattern into the `regex` crate's syntax.
-///
-/// Vim's default "magic" level makes `.`, `*`, `[`, `^`, and `$` special while requiring a
-/// backslash for `+`, `?`, `(`, `)`, `{`, `}`, and `|` — the opposite of `regex`. `\v` (very
-/// magic) is already close to `regex`, and `\V` (very nomagic) is a literal string.
 pub fn translate(pattern: &str) -> String {
     if let Some(rest) = pattern.strip_prefix("\\V") {
         return regex::escape(rest);
@@ -17,7 +12,6 @@ pub fn translate(pattern: &str) -> String {
     let mut chars = pattern.chars().peekable();
     while let Some(c) = chars.next() {
         if c != '\\' {
-            // Magic mode treats these as literals; regex treats them as operators.
             if matches!(c, '+' | '?' | '(' | ')' | '{' | '}' | '|') {
                 out.push('\\');
             }
@@ -26,13 +20,9 @@ pub fn translate(pattern: &str) -> String {
         }
         match chars.next() {
             Some('<') | Some('>') => out.push_str("\\b"),
-            // Backslashed in vim means "operator"; regex wants them bare.
             Some(esc @ ('+' | '?' | '(' | ')' | '{' | '}' | '|')) => out.push(esc),
             Some('c') => out.insert_str(0, "(?i)"),
             Some('C') => {}
-            // Vim character-class aliases. Passing these through would silently mean something
-            // else: `\a` is alphabetic in vim but BEL in `regex`, while `\l`, `\u` and `\x` are
-            // not valid `regex` escapes at all, so the whole pattern would be dropped.
             Some('a') => out.push_str("[A-Za-z]"),
             Some('A') => out.push_str("[^A-Za-z]"),
             Some('l') => out.push_str("[a-z]"),
@@ -73,13 +63,11 @@ impl Search {
         })
     }
 
-    /// Every match in `text`, as byte ranges.
     pub fn matches(&self, text: &str) -> Vec<Range<usize>> {
         self.regex.find_iter(text).map(|m| m.range()).collect()
     }
 }
 
-/// The match to land on when stepping from `from`, wrapping around the ends of the buffer.
 pub fn step(matches: &[Range<usize>], from: usize, forward: bool) -> Option<usize> {
     if matches.is_empty() {
         return None;
@@ -132,8 +120,6 @@ mod tests {
         assert_eq!(translate("foo\\c"), "(?i)foo");
     }
 
-    /// `\a` used to reach `regex` as BEL and match the wrong thing; `\l`, `\u` and `\x` are not
-    /// `regex` escapes at all, so `Search::new` dropped the pattern entirely.
     #[test]
     fn character_class_aliases_translate_rather_than_leak() {
         assert_eq!(translate("\\a"), "[A-Za-z]");

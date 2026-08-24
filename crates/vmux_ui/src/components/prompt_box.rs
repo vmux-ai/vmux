@@ -7,7 +7,6 @@ const PROMPT_BOX_ROOT: &str = "vmux-prompt-box relative flex items-center overfl
 const PROMPT_POPUP_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-/// Placement of a prompt-related popup relative to its composer.
 pub enum PromptPopupPlacement {
     #[default]
     Upward,
@@ -16,7 +15,6 @@ pub enum PromptPopupPlacement {
 }
 
 #[component]
-/// Shared glass prompt surface used by desktop and mobile composers.
 pub fn PromptBox(
     #[props(default = true)] glass: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
@@ -40,11 +38,6 @@ pub fn PromptBox(
 }
 
 #[component]
-/// Shared popup surface for prompt suggestions and selectors.
-///
-/// A popup opened by what was typed is closed by Escape, which a software keyboard does not have.
-/// Passing `on_dismiss` adds the only other way out that does not involve deleting the draft a
-/// character at a time; it is a plain button, so it serves a mouse as readily as a thumb.
 pub fn PromptPopup(
     #[props(default)] placement: PromptPopupPlacement,
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
@@ -69,15 +62,11 @@ pub fn PromptPopup(
     rsx! {
         div { ..merged,
             if let Some(on_dismiss) = on_dismiss {
-                // Sticky rather than floating: the list scrolls under it, so it cannot be scrolled
-                // out of reach in a menu long enough to need scrolling in the first place.
                 div { class: "pointer-events-none sticky top-0 z-10 flex justify-end",
                     IconButton {
                         class: "pointer-events-auto m-1 bg-background/80 backdrop-blur",
                         label: crate::i18n::translate("common-close"),
                         paths: vec!["M18 6 6 18".to_string(), "m6 6 12 12".to_string()],
-                        // The prompt keeps focus, so the menu does not reopen from a refocus and
-                        // the keyboard does not drop on the way out.
                         onmousedown: move |event: MouseEvent| event.prevent_default(),
                         onclick: move |_| on_dismiss.call(()),
                     }

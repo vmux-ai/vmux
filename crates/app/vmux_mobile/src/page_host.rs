@@ -1,22 +1,3 @@
-//! Serving desktop pages from the phone.
-//!
-//! A shared page speaks one language: it emits typed payloads under an event id and subscribes to
-//! ids it wants pushed back. On the desktop those ids cross a process boundary into Bevy. Here they
-//! cross the QUIC link instead, and the page cannot tell.
-//!
-//! So this file is the join: [`send`](PageHost::send) turns a page's intent into a call on the
-//! link, and [`listen`](PageHost::listen) says where what comes back is to be delivered.
-//!
-//! Where a payload is *built* has moved out. An id served by the world registers a listener and
-//! nothing else, because a plugin in the page's own crate keeps it current — how a conversation
-//! folds is the chat page's knowledge, not this app's. What is left is the ids that cannot be
-//! answered without asking the Mac first, and they still run a loop of their own.
-//!
-//! Ids with no route are refused rather than silently accepted, so a half-served page reports as
-//! much instead of rendering empty and looking broken. That refusal is quiet by design: a page
-//! whose listener is turned down leaves the feature it drives unrendered, which is why mounting
-//! the desktop's chat page against a link that carries no slash commands costs nothing.
-
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -53,25 +34,13 @@ use crate::remote::next_client_op_id;
 use crate::session::Session;
 use crate::{Api, ApiError};
 
-/// How often the team roster re-reads the desktop.
-///
-/// It only moves when an agent starts or finishes, so staleness costs little and a push route has
-/// not been worth adding. Everything else here is driven by state the phone already holds, so it
-/// needs no interval at all.
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 
-/// How long to keep asking for a session's models before giving up on it.
-///
-/// A conversation the phone itself started is asked about before the Mac has finished registering
-/// it, so the first answer is a refusal that resolves on its own within a second or so. Anything
-/// still refusing after this many tries is refusing for a reason retrying will not fix.
 const MODEL_FETCH_ATTEMPTS: u8 = 5;
 
 const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
 
 pub(crate) struct MobileHost {
-    /// Which installation this host is. A watcher compares it against [`EPOCH`] to find out that
-    /// it is serving a page on behalf of a link nobody holds any more.
     epoch: u64,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
@@ -80,20 +49,9 @@ pub(crate) struct MobileHost {
 }
 
 thread_local! {
-    /// Bumped by every [`install`].
-    ///
-    /// `install_host` replaces the thread-local host but hands back nothing, so a host being
-    /// superseded is never told and cannot stop the tasks it started. Those tasks hold a clone of
-    /// an `Api` that has since been closed, and the team watcher retries a non-terminal failure
-    /// forever — so a re-pair would leave a loop dialling an endpoint nobody is listening on.
-    ///
-    /// In practice every re-pair passes through `AuthState::Unpaired`, which unmounts the pages
-    /// and takes their scope-bound tasks with them. That is a property of how the shell happens to
-    /// branch, though, not of anything here, and it is not what a watcher should be relying on.
     static EPOCH: Cell<u64> = const { Cell::new(0) };
 }
 
-/// Route shared pages through `api`, and retire whatever was routing them before.
 pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
@@ -114,23 +72,13 @@ pub(crate) fn install(
     }));
 }
 
-/// Whether a later [`install`] has replaced the host a watcher was started by.
 fn superseded(epoch: u64) -> bool {
     EPOCH.with(|current| current.get()) != epoch
 }
 
-/// The two exchanges the composer opens that are answered by pushing an event back.
-///
-/// Everything else a page subscribes to is a view of state the phone already holds, so a listener
-/// can just watch it. These two are questions: the page asks in `send` and waits for an answer at
-/// a listener, and these signals are the join between the two halves.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct ComposerExchange {
     media_request: Signal<Option<ChatMediaListRequest>>,
-    /// What the last `@`-mention answer offered, so an attach naming a path can describe it.
-    ///
-    /// The desktop reads the file to answer; the phone never had it, and asking the Mac a second
-    /// time for what it just sent would be a round trip to learn nothing.
     offered: Signal<Vec<RemoteMediaEntry>>,
 }
 
@@ -147,8 +95,6 @@ impl PageHost for MobileHost {
             return self.submit(decode(bytes)?);
         }
         if names::<ChatCancel>(id) || names::<ChatEscape>(id) {
-            // Nothing queues behind a turn on the phone, so there is no queue for escape to flush
-            // and the two mean the same thing.
             return self.cancel();
         }
         if names::<ChatApproval>(id) {
@@ -178,8 +124,6 @@ impl PageHost for MobileHost {
             return self.act(decode(bytes)?);
         }
         if names::<StartDataRequest>(id) {
-            // The launcher's listener already watches the session and agent lists, so it is
-            // current before the page can ask. Accepting says so; refusing would only log.
             return Ok(());
         }
         Err(EventListenerError::Unsupported)
@@ -193,8 +137,6 @@ impl PageHost for MobileHost {
                     world.refresh::<Snapshot>();
                 });
             }
-            // Refreshed on mount, not only listened for: the last change may be long past, and a
-            // page that arrives after it would otherwise wait for the next one.
             START_COMMAND_BAR_OPEN_EVENT => {
                 World::with(|world| {
                     world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);
@@ -218,8 +160,6 @@ impl PageHost for MobileHost {
                 self.poll_media();
                 World::with(|world| world.listen(CHAT_MEDIA_ENTRIES_EVENT, on_bytes));
             }
-            // Served by the world, like the launcher: the poll keeps `Members` current and
-            // `TeamRosterPlugin` emits from it. Registering here only says where that lands.
             TEAM_EVENT => {
                 self.poll_team();
                 World::with(|world| {
@@ -233,11 +173,8 @@ impl PageHost for MobileHost {
     }
 }
 
-/// What a page asks the phone to do.
 impl MobileHost {
     fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
-        // Ahead of saying anything: what the world is about to be told is only honest if the call
-        // it anticipates is actually going to be made.
         if self.session.sid().is_empty() {
             return Err(EventListenerError::Unsupported);
         }
@@ -250,9 +187,6 @@ impl MobileHost {
                 size: attachment.size,
             });
         }
-        // What submitting *means* — the run goes optimistically to streaming, the pills are spent
-        // — is the conversation's to decide, and `vmux_chat` decides it. This half only reports
-        // that it happened and then reaches the agent, which is the part no page crate can do.
         World::with(|world| world.send(Submitted));
         self.agent_call(move |api, sid| async move {
             let request = PromptRequest {
@@ -266,7 +200,6 @@ impl MobileHost {
         })
     }
 
-    /// Tell the world where the run has got to, ahead of the relay saying so.
     fn report(status: RemoteStatus) {
         World::with(|world| world.send(Reported(RemoteEvent::Status { status })));
     }
@@ -278,7 +211,6 @@ impl MobileHost {
     }
 
     fn approve(&self, payload: ChatApproval) -> Result<(), EventListenerError> {
-        // The prompt goes away as the decision is made, not a round trip later.
         World::with(|world| world.send(Reported(RemoteEvent::Approval { approval: None })));
         self.agent_call(move |api, sid| async move {
             let request = ApprovalRequest {
@@ -289,10 +221,6 @@ impl MobileHost {
         })
     }
 
-    /// Turn `@`-mention paths into the attachments the composer shows as pills.
-    ///
-    /// The page hands back paths it was offered, so the entries behind them are still here and no
-    /// second round trip is needed to describe them.
     fn attach(&self, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
         let offered = self.composer.offered.read();
         let mut resolved = Vec::with_capacity(payload.paths.len());
@@ -315,7 +243,6 @@ impl MobileHost {
         Ok(())
     }
 
-    /// Take what the launcher was activated on.
     fn act(&self, action: CommandBarActionEvent) -> Result<(), EventListenerError> {
         match action {
             CommandBarActionEvent::Prompt {
@@ -332,11 +259,7 @@ impl MobileHost {
                 self.session.open(session);
                 Ok(())
             }
-            // Nothing was opened, so there is nothing to dismiss — but the launcher is entitled to
-            // say the user backed out of it.
             CommandBarActionEvent::Dismiss => Ok(()),
-            // A browser, a terminal, a command registry and a space switcher are all things the
-            // desktop has and the phone does not.
             CommandBarActionEvent::Open { .. }
             | CommandBarActionEvent::Terminal { .. }
             | CommandBarActionEvent::Command { .. }
@@ -344,7 +267,6 @@ impl MobileHost {
         }
     }
 
-    /// Run `call` against the open session, refusing when there is none.
     fn agent_call<F, Fut>(&self, call: F) -> Result<(), EventListenerError>
     where
         F: FnOnce(Api, String) -> Fut + 'static,
@@ -360,19 +282,7 @@ impl MobileHost {
     }
 }
 
-/// What the phone pushes back at a page.
 impl MobileHost {
-    /// Ask the Mac what the open session can run on, and hand the answer to the world.
-    ///
-    /// Only the asking is here. What the picker is told is [`vmux_chat::model`]'s to decide — this
-    /// is the half that can reach the link, which is the one thing a page crate must not do.
-    ///
-    /// A refusal is retried rather than dropped. Waiting on the session to *change* is right for a
-    /// conversation the phone opened — there is nothing else to wait for — but wrong for one it
-    /// just created: the Mac is still registering the session when the page mounts and asks, so the
-    /// first answer is `no such session` for a session that exists a moment later. The sid never
-    /// changes after that, so a dropped first answer left the composer with no models for the life
-    /// of the conversation.
     fn poll_models(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let epoch = self.epoch;
@@ -387,8 +297,6 @@ impl MobileHost {
                 while !sid.is_empty() && attempts > 0 {
                     attempts -= 1;
                     let fetched = api.models(&sid).await;
-                    // The link can be replaced while a request is in flight, and an answer that
-                    // arrives after that belongs to a page nobody is looking at any more.
                     if superseded(epoch) {
                         return;
                     }
@@ -397,7 +305,6 @@ impl MobileHost {
                             World::with(|world| world.insert(Models(state)));
                             break;
                         }
-                        // Pairing is gone, or the session is. Neither is fixed by asking again.
                         Err(ApiError::Unauthorized | ApiError::NotFound) => return,
                         Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
                     }
@@ -409,11 +316,6 @@ impl MobileHost {
         });
     }
 
-    /// Answer the composer's `@`-mentions by asking the Mac, and hand what came back to the world.
-    ///
-    /// Only the asking is here, as with [`Self::poll_models`]. The entries are also kept in
-    /// `offered` because [`Self::attach`] resolves a path against the last answer rather than
-    /// asking the Mac a second time for what it just sent.
     fn poll_media(&self) {
         let (api, session) = (self.api.clone(), self.session);
         let composer = self.composer;
@@ -452,11 +354,6 @@ impl MobileHost {
         });
     }
 
-    /// Keep the world's roster current, and let `TeamPagePlugin` decide what reaches the page.
-    ///
-    /// The dedupe this used to keep in a `last` local is gone: [`World::insert`] already refuses a
-    /// value equal to the one it holds, so an unchanged poll marks nothing changed and the emit
-    /// system does not run.
     fn poll_team(&self) {
         let (api, epoch) = (self.api.clone(), self.epoch);
         spawn(async move {
@@ -472,10 +369,7 @@ impl MobileHost {
                     Ok(members) => {
                         World::with(|world| world.insert(Members(members)));
                     }
-                    // Pairing is gone, or there is no such session. Neither is fixed by asking
-                    // again every few seconds.
                     Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                    // Anything else is likely the network, which does heal.
                     Err(ApiError::Message(_)) => {}
                 }
                 sleep_ms(TEAM_POLL_INTERVAL_MS).await;
@@ -484,11 +378,6 @@ impl MobileHost {
     }
 }
 
-/// Whether `id` names `T`, as [`vmux_ui::hooks::send`] writes it.
-///
-/// A page emits under `std::any::type_name`, not under the `&str` constants a listener subscribes
-/// by. Asking the same expression rather than comparing a copied literal is what keeps moving a
-/// payload type a compile error instead of a silently dead arm.
 fn names<T: ?Sized>(id: &str) -> bool {
     id == std::any::type_name::<T>()
 }

@@ -1,9 +1,6 @@
-//! The latest host event, as a signal.
-
 use crate::hooks::use_listener::use_listener;
 use dioxus::prelude::*;
 
-/// Maps the latest binary host event into a Dioxus signal.
 pub fn use_event<T>(name: &'static str, init: impl FnOnce() -> T) -> Signal<T>
 where
     T: rkyv::Archive + 'static,

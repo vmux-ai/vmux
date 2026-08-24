@@ -1,6 +1,3 @@
-//! Verify cargo-packager metadata embeds vmux_service in the bundle and that
-//! the main executable name does not case-collide with the vmux CLI.
-
 #[test]
 fn packager_binaries_avoid_case_insensitive_collision() {
     let toml = include_str!("../Cargo.toml");

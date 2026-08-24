@@ -1,10 +1,3 @@
-//! Getting the window's pointer and keyboard into the right webview.
-//!
-//! Bevy sees the events first, so everything here runs after `InputSystems` and decides who the
-//! event was meant for before forwarding it. The chain matters: the pointer target is resolved
-//! before any click is delivered against it, and a click that lands outside the command bar has
-//! to dismiss it rather than reach the page underneath.
-
 use bevy::{
     ecs::relationship::Relationship,
     input::{
@@ -60,14 +53,6 @@ fn log_command_bar_keyboard_input(
     }
 }
 
-/// Publish whether the pointer is inside one of the layout's interactive regions.
-///
-/// The atomic is the whole output, and it is read off the Bevy thread: the AppKit monitor asks it
-/// whether a scroll should wake the loop, and `sync_winit_power_mode` how hard to idle.
-///
-/// This used to also put a `CefPointerTarget` on the layout, from the days when the layout was an
-/// offscreen browser and the marker told CEF where to forward a wheel event. Nothing forwarded
-/// one by the end, and nothing but this function ever read the marker back.
 fn publish_layout_pointer_inside(
     windows: Query<&Window, With<PrimaryWindow>>,
     layout_q: Query<(), With<LayoutCef>>,

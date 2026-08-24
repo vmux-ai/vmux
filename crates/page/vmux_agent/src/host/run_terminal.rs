@@ -1,9 +1,3 @@
-//! The terminal an agent runs commands in, and where it goes on screen.
-//!
-//! An agent reuses its own run terminal while one is live, so a session's output stays in one
-//! place instead of spraying new panes. [`AgentTerminalRegions`] caches that choice; the candidate
-//! search rebuilds it when the cache is cold or the terminal has since exited.
-
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -25,14 +19,6 @@ pub struct AgentTerminalRegions {
 }
 
 impl AgentTerminalRegions {
-    /// The run terminal a follow-up `run` from `anchor` belongs in.
-    ///
-    /// The cached terminal wins for as long as it is still a candidate, so an agent's output
-    /// stays in the one place the user has already put on screen. Once that process exits the
-    /// cached *pane* is the next best answer — the user moved a terminal there, and a
-    /// replacement should land in the same spot. Only with neither does the newest pane other
-    /// than the agent's own win, because splitting output into the agent's pane would bury the
-    /// conversation.
     pub(crate) fn choose_reusable_terminal(
         &self,
         anchor: ProcessId,
@@ -59,10 +45,6 @@ impl AgentTerminalRegions {
             .copied()
     }
 
-    /// The pane a split `run` should stack into rather than split again.
-    ///
-    /// Falls back to the cached pane on its own so that a `run` after the terminal exited still
-    /// stacks where the previous one was, instead of carving a new pane out of the layout.
     pub(crate) fn choose_bucket_pane(
         &self,
         anchor: ProcessId,
@@ -90,12 +72,6 @@ pub(crate) struct RunTerminalCandidate {
 }
 
 impl RunTerminalCandidate {
-    /// Every terminal a `run` from `agent_pane` may reuse.
-    ///
-    /// Reuse is confined to the agent's own tab and to terminals it started itself, so a `run`
-    /// never types into a shell the user owns. A candidate also has to still be sitting in
-    /// `desired_cwd`: rebinding a tab to a worktree changes where commands must execute, and a
-    /// terminal left in the old directory would silently run them in the wrong repository.
     pub(crate) fn collect(
         agent_pane: Entity,
         terminals: &Query<
@@ -146,9 +122,6 @@ impl RunTerminalCandidate {
             .collect()
     }
 
-    /// Reusing a terminal has to look like opening one, or the output lands in a pane the user
-    /// cannot see. Stack, pane and tab are all marked as just-activated so every level of the
-    /// layout brings it forward.
     pub(crate) fn focus(
         &self,
         commands: &mut Commands,
@@ -179,11 +152,6 @@ impl RunTerminalCandidate {
     }
 }
 
-/// A pane an agent command targets, and the layout moves it is allowed to make there.
-///
-/// The layout crate works in bare entities; naming the pane here is what keeps the rules an
-/// agent's `run` and `open` obey — which tab owns it, how a split batches, how it is ordered
-/// against its siblings — in one place instead of spread across the command handler.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AgentPane(Entity);
 
@@ -208,8 +176,6 @@ impl AgentPane {
         None
     }
 
-    /// Split this pane and return the new leaf pane. Batches several splits of the same
-    /// pane in one tick (extend an existing split instead of re-splitting the leaf).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn split_off(
         &self,
@@ -237,8 +203,6 @@ impl AgentPane {
         )
     }
 
-    /// Make this pane the newest one, so the next `run` that spirals off the newest leaf
-    /// continues in the pane the last one used instead of walking away from it.
     pub(crate) fn touch_spawn_seq(
         &self,
         commands: &mut Commands,
@@ -255,8 +219,6 @@ impl AgentPane {
             .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
     }
 
-    /// The protocol and the layout crate each spell a direction in their own enum; the
-    /// translation lives here so a command handler never has to.
     pub(crate) fn direction(
         d: &vmux_service::protocol::AgentPaneDirection,
     ) -> vmux_command::open::PaneDirection {
@@ -277,15 +239,9 @@ pub(crate) struct RunTerminalBucketPaneCandidate {
     pane_spawn_seq: u64,
 }
 
-/// The panes in the agent's tab that hold terminals and nothing else.
-///
-/// A split `run` stacks into one of these instead of carving out a new pane, which keeps a
-/// session's terminals gathered in one bucket. A pane showing a browser or a file is excluded:
-/// stacking a terminal on top of it would hide what the user is reading.
 pub(crate) struct RunTerminalBucketPanes(Vec<RunTerminalBucketPaneCandidate>);
 
 impl RunTerminalBucketPanes {
-    /// Every leaf pane in the agent's own tab whose stacks are all terminal pages.
     pub(crate) fn collect(
         agent_pane: Entity,
         child_of_q: &Query<&ChildOf>,
@@ -329,8 +285,6 @@ impl RunTerminalBucketPanes {
         )
     }
 
-    /// The bucket a `run` with no remembered pane should use — the most recently spawned one,
-    /// which is the terminal group the user last worked in.
     pub(crate) fn newest(&self, agent_pane: Entity) -> Option<Entity> {
         self.0
             .iter()
@@ -339,8 +293,6 @@ impl RunTerminalBucketPanes {
             .map(|c| c.pane)
     }
 
-    /// Whether a remembered pane is still a terminal bucket. A pane that has since gained a
-    /// browser or file page is no longer safe to stack into.
     pub(crate) fn contains(&self, pane: Entity) -> bool {
         self.0.iter().any(|c| c.pane == pane)
     }
@@ -353,27 +305,16 @@ pub(crate) struct PendingRunTerminalSpawn {
     pub(crate) shell: String,
 }
 
-/// Run terminals asked for earlier in this tick that no process exists for yet.
-///
-/// Several `run`s can arrive in one frame before any of their terminals have spawned. Without
-/// this the second one would find no candidate to reuse and split another pane, so a burst of
-/// commands would shatter the layout.
 #[derive(Default)]
 pub(crate) struct PendingRunTerminalSpawns(
     std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
 );
 
 impl PendingRunTerminalSpawns {
-    /// Remember the terminal `anchor` just asked for, so the rest of this tick can queue into it.
     pub(crate) fn insert(&mut self, anchor: ProcessId, spawn: PendingRunTerminalSpawn) {
         self.0.insert(anchor, spawn);
     }
 
-    /// Append a command to the terminal `anchor` is already waiting on, and answer with the
-    /// process id the caller should report.
-    ///
-    /// The queued spawn only counts when it starts in the same directory: a tab rebound between
-    /// the two commands must not run the second one in the previous worktree.
     pub(crate) fn append_input(
         &self,
         anchor: ProcessId,
@@ -397,11 +338,6 @@ impl PendingRunTerminalSpawns {
     }
 }
 
-/// A terminal that already exists, addressed the way an agent addresses it: by process id.
-///
-/// An agent names a terminal in `run.terminal` and `run.beside` long after it has forgotten the
-/// entity behind it, so both lookups start from the id and have to fail with a message the agent
-/// can act on rather than silently doing something else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RunTerminal(ProcessId);
 
@@ -410,8 +346,6 @@ impl RunTerminal {
         Self(process_id)
     }
 
-    /// The pane containing this terminal (its stack's parent pane). Used to anchor a `run`
-    /// next to an existing terminal page.
     pub(crate) fn pane(
         &self,
         term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
@@ -424,9 +358,6 @@ impl RunTerminal {
         Some(pane)
     }
 
-    /// How this terminal was started, which is also which shell any further input has to be
-    /// written for. A missing page and a missing launch are different mistakes, so they are
-    /// reported differently.
     pub(crate) fn launch(
         &self,
         terminals: &Query<(Entity, &ProcessId), With<Terminal>>,
@@ -446,12 +377,6 @@ impl RunTerminal {
     }
 }
 
-/// A command an agent asked to run, with the token that reports its exit code.
-///
-/// The command text and its token travel together everywhere — into a fresh shell, into a
-/// terminal that already exists, into a spawn that has not happened yet — and every one of those
-/// has to wrap them the same way or the run never completes. Keeping them one value is what
-/// stops a caller from wrapping only sometimes.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RunCommand<'a> {
     command: &'a str,
@@ -480,9 +405,6 @@ impl<'a> RunCommand<'a> {
         self.input(&launch.command)
     }
 
-    /// Type this command into a terminal that is already running. The launch decides the shell —
-    /// the marker syntax differs per shell, and the running process is not the configured one if
-    /// the setting changed since it started.
     pub(crate) fn queue(
         &self,
         writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
@@ -495,8 +417,6 @@ impl<'a> RunCommand<'a> {
         });
     }
 
-    /// The shell to start and the first thing to type into it, for a run that has no terminal
-    /// yet. Both come back together because the input is only valid for that shell.
     pub(crate) fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
         let shell = AgentTerminalShell::configured(settings);
         let input = self.input(shell.as_str());
@@ -504,22 +424,6 @@ impl<'a> RunCommand<'a> {
     }
 }
 
-/// Wrap a `run` command so the shell emits an invisible OSC completion escape
-/// carrying the exit code once the command finishes (success OR failure).
-/// `token` is a unique per-run id; the escape is
-/// `ESC ] <VMUX_RUN_OSC> ; <token> ; <exit_code> BEL` (see
-/// [`vmux_service::run_marker`]). Because it is an OSC sequence the terminal
-/// parser consumes it — it never renders as text, unlike the old
-/// `__VMUX_DONE_…__` printf markers.
-///
-/// The command is prefixed with [`pager_env_prefix`] so an interactive command that would
-/// normally open a pager (e.g. `git log` → `less`) prints straight to the terminal instead of
-/// blocking the marker forever.
-///
-/// posix/fish chain with `;` (which continues after a non-zero command). nushell
-/// aborts the rest of a `;` line when an external command fails, so it needs a
-/// `try`/`catch` wrapper to always emit the escape and recover the exit code
-/// from the caught error.
 fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
     let base = std::path::Path::new(shell)
         .file_name()
@@ -540,9 +444,6 @@ fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
     }
 }
 
-/// Shell-specific prelude that neutralizes pagers for a `run`, so an interactive command can't
-/// stall the completion marker waiting on `less` (`git log`, `man`, `git diff`, …). Set as
-/// session-exported env so follow-up runs in the same shell stay covered.
 fn pager_env_prefix(base: &str) -> &'static str {
     match base {
         "nu" | "nushell" => "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; ",
@@ -551,17 +452,10 @@ fn pager_env_prefix(base: &str) -> &'static str {
     }
 }
 
-/// The shell a run terminal starts in, and whether the machine can actually start it.
-///
-/// A theme names the shell, so it can be anything the user typed — a path that has since been
-/// uninstalled included. Spawning that shell fails somewhere deep in the terminal host with
-/// nothing an agent can read, so the check happens here, before a pane is ever split for it.
 #[derive(Clone, Debug)]
 pub(crate) struct AgentTerminalShell(String);
 
 impl AgentTerminalShell {
-    /// The shell of the active terminal theme, falling back to the environment's `SHELL` and
-    /// finally to zsh, so a run still starts on a machine with no terminal settings at all.
     pub(crate) fn configured(settings: &AppSettings) -> Self {
         Self(
             settings
@@ -578,13 +472,10 @@ impl AgentTerminalShell {
         &self.0
     }
 
-    /// The path the terminal host is asked to launch.
     pub(crate) fn into_string(self) -> String {
         self.0
     }
 
-    /// Refuse a run whose shell is missing or not executable, so the agent is told what is wrong
-    /// instead of watching an empty pane appear.
     pub(crate) fn validate(&self) -> Result<(), String> {
         let shell = &self.0;
         if crate::exec::find_executable(shell).is_some() {
@@ -597,23 +488,15 @@ impl AgentTerminalShell {
     }
 }
 
-/// ACP install resolves the same shell to read a login environment out of it, and reaches it
-/// through `crate::plugin`; it wants the bare path rather than the type.
 pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
     AgentTerminalShell::configured(settings).into_string()
 }
 
-/// Whether a `run` asked to place its own terminal, and whether it is allowed to.
-///
-/// Left to itself an agent splits a pane for every command and takes the window apart. Placement
-/// is therefore the user's to give: the default refuses an override and says how to retry
-/// without one, rather than quietly ignoring the arguments it was handed.
 pub(crate) struct RunPlacementPolicy {
     placement_override: bool,
 }
 
 impl RunPlacementPolicy {
-    /// What an agent is told when it asks for placement the user has not opted into.
     pub(crate) const OVERRIDE_DISABLED: &'static str =
         "run placement overrides are disabled; omit mode, direction, and beside and retry";
 
@@ -630,12 +513,6 @@ impl RunPlacementPolicy {
     }
 }
 
-/// The directory an agent-owned page or run terminal starts in.
-///
-/// A tab's stored directory is the answer whenever it survives validation: it is what the user
-/// picked, and what a worktree rebind updates. The rest of the type is the fallback order for
-/// when it does not, which every caller has to agree on — a page opened in one directory while
-/// its commands run in another is the bug this prevents.
 pub(crate) struct AgentCwd<'a> {
     tab_cwd: Option<&'a str>,
 }
@@ -645,8 +522,6 @@ impl<'a> AgentCwd<'a> {
         Self { tab_cwd }
     }
 
-    /// The tab's directory, or `None` when the tab has none. A stored path that no longer exists
-    /// is an error rather than a `None`, because falling back would hide a deleted worktree.
     pub(crate) fn stored(&self) -> Result<Option<PathBuf>, String> {
         let Some(tab_cwd) = self.tab_cwd else {
             return Ok(None);
@@ -654,8 +529,6 @@ impl<'a> AgentCwd<'a> {
         vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
     }
 
-    /// The tab's directory, or the one the agent itself was launched in. A run with neither is
-    /// refused: guessing a directory would run the command against the wrong repository.
     pub(crate) fn or_agent_launch(
         &self,
         agent_launch_cwd: Option<&str>,
@@ -669,8 +542,6 @@ impl<'a> AgentCwd<'a> {
         Err("tab and agent project directories are missing".to_string())
     }
 
-    /// Where a page with no tab directory at all opens: the user's home, then the process's own
-    /// directory, then the root — the last of which always exists, so a page always opens.
     pub(crate) fn process() -> PathBuf {
         std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -757,10 +628,6 @@ mod tests {
 
     #[test]
     pub(crate) fn command_with_marker_is_shell_aware() {
-        // The completion marker is an invisible OSC escape
-        // (ESC ] 6973 ; token ; exit BEL), consumed by the terminal parser so it
-        // never renders. nushell aborts `;` on failure, so it wraps in try/catch
-        // and reads the exit code from the caught error.
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
             "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; try { ls; print -rn $\"\\u{1b}]6973;abc;($env.LAST_EXIT_CODE)\\u{7}\" } catch { |e| print -rn $\"\\u{1b}]6973;abc;($e.exit_code? | default 1)\\u{7}\" }"
@@ -773,7 +640,6 @@ mod tests {
             command_with_marker("/bin/zsh", "ls", "abc"),
             "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""
         );
-        // Unknown shells fall back to posix syntax.
         assert_eq!(
             command_with_marker("/usr/bin/xonsh", "ls", "abc"),
             "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""

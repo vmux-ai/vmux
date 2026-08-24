@@ -11,8 +11,6 @@ use vmux_layout::event::{
 };
 use vmux_service::RemotePaths;
 
-/// Turning phone pairing on and off: owns the desktop's remote-control state, drives the worker
-/// thread that mints the pairing link, and pushes the result to the layout page.
 pub(crate) struct RemotePlugin;
 
 impl Plugin for RemotePlugin {
@@ -46,16 +44,8 @@ struct RemotePairingInfo {
 }
 
 impl RemotePairingInfo {
-    /// How long the daemon is given to register with the relay before enabling is called a
-    /// failure. Matches what `vmux remote` waits, because it is the same registration.
     const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(20);
 
-    /// Block until the daemon has registered, then build the link a phone can follow.
-    ///
-    /// Registration is asynchronous — the daemon dials out and the relay allocates it a port — and
-    /// the port file is cleared on deregistration, so between a daemon starting and its first
-    /// registration neither the port nor the identity is on disk. Reporting that as an error made
-    /// a normal few seconds look like a broken setup.
     fn wait(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Self, String> {
         let deadline = Instant::now() + Self::REGISTRATION_TIMEOUT;
         loop {
@@ -72,11 +62,6 @@ impl RemotePairingInfo {
         }
     }
 
-    /// The link, or `None` while the relay has yet to register this desktop or the identity to be
-    /// written.
-    ///
-    /// There is no loopback fallback: a desktop behind NAT is only reachable through the relay, so
-    /// a link naming anything else would pair a phone that can never connect.
     fn ready(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Option<Self>, String> {
         let (Some(base_url), Some(device), Some(fingerprint)) = (
             relay.base_url()?,
@@ -268,11 +253,9 @@ fn disable_remote() -> Result<(), String> {
     Ok(())
 }
 
-/// The relay this desktop pairs through, recorded so the daemon dials the same one.
 fn configured_relay() -> Result<vmux_service::pairing::Relay, String> {
     let relay = vmux_service::pairing::Relay::from_env();
     relay.persist().map_err(|error| error.to_string())?;
-    // Minted here as well as in the daemon so both agree before the first registration.
     let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
     Ok(relay)
 }

@@ -1,6 +1,3 @@
-//! Projects ACP `session/update` notifications into the vmux [`Message`] transcript that
-//! the chat UI already renders (the same shape the provider-direct path produces).
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
@@ -11,22 +8,16 @@ use agent_client_protocol::schema::v1::{
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 
-/// A side effect the driver performs after feeding a `SessionUpdate` to the projector.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
-    /// Incremental assistant text → `ServiceMessage::Shared(SharedEvent::AgentDelta)`.
     Delta(String),
-    /// The transcript changed structurally → `ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot)`.
     Snapshot,
-    /// A tool call carries a proposed edit → `ServiceMessage::AcpProposedDiff`.
     ProposedDiff {
         call_id: String,
         path: String,
         old_text: Option<String>,
         new_text: String,
     },
-    /// A tool call read or edited a file (from its ACP `locations`) → open that file in the
-    /// agent's `file://` follow-pane, mirroring the vibe CLI `vmux-file-follow` hook.
     FileTouched {
         path: String,
         line: Option<u32>,
@@ -78,8 +69,6 @@ fn workspace_changed_intent(
     }]
 }
 
-/// Map an ACP `ToolKind` to a follow-pane touch kind. Only file-affecting kinds open a
-/// preview; search/execute/think/etc. are ignored.
 fn file_touch_kind(kind: ToolKind) -> Option<crate::protocol::FileTouchKind> {
     use crate::protocol::FileTouchKind;
     match kind {
@@ -89,7 +78,6 @@ fn file_touch_kind(kind: ToolKind) -> Option<crate::protocol::FileTouchKind> {
     }
 }
 
-/// Build `FileTouched` intents for each file location of a file-affecting tool call.
 fn file_touch_intents(kind: ToolKind, locations: &[ToolCallLocation]) -> Vec<Intent> {
     let Some(kind) = file_touch_kind(kind) else {
         return Vec::new();
@@ -173,8 +161,6 @@ fn project_file_touches(
     }
 }
 
-/// Accumulates ACP updates into a `Vec<Message>`. Pure and synchronous so it is fully
-/// unit-testable without an ACP connection.
 #[derive(Default)]
 pub struct AcpProjector {
     messages: Vec<Message>,
@@ -191,12 +177,10 @@ impl AcpProjector {
         Self::default()
     }
 
-    /// The current transcript, serialized into `AgentMessagesSnapshot` by the driver.
     pub fn messages(&self) -> &[Message] {
         &self.messages
     }
 
-    /// Returns the projected title and raw input for a tool call.
     pub fn tool_call_details(&self, call_id: &str) -> Option<(String, String)> {
         if let Some(details) = self.hidden_tool_details.get(call_id) {
             return Some(details.clone());
@@ -224,20 +208,14 @@ impl AcpProjector {
         })
     }
 
-    /// Record the user's prompt as its own turn. ACP never echoes the prompt back as a
-    /// `session/update`, so without this the transcript the chat renders would omit it and
-    /// the optimistic user bubble would vanish on the next snapshot.
     pub fn push_user(&mut self, text: String, attachments: Vec<AgentAttachment>) {
         self.messages
             .push(Message::user_with_attachments(text, attachments));
     }
 
-    /// Feed one update; returns the side effects the driver should emit.
     pub fn apply(&mut self, update: SessionUpdate) -> Vec<Intent> {
         match update {
             SessionUpdate::AgentMessageChunk(chunk) => self.append_assistant_text(chunk.content),
-            // Replayed during `session/load`: the agent re-emits prior user turns (live prompting
-            // never echoes them — those go through `push_user`).
             SessionUpdate::UserMessageChunk(chunk) => self.append_user_chunk(chunk.content),
             SessionUpdate::AgentThoughtChunk(chunk) => self.append_thinking(chunk.content),
             SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
@@ -325,8 +303,6 @@ impl AcpProjector {
                 blocks: vec![AssistantBlock::Text(text.clone())],
             }),
         }
-        // `Delta` is the incremental hint; `Snapshot` keeps `AgentMessages` (what the chat page
-        // renders) in sync, since nothing applies `AgentDelta` to it.
         vec![Intent::Delta(text), Intent::Snapshot]
     }
 
@@ -563,9 +539,6 @@ impl AcpProjector {
         intents
     }
 
-    /// Fold a tool call's content into the transcript: proposed diffs become inline diff blocks
-    /// (and a `ProposedDiff` intent), textual output becomes a `ToolResult` message. Returns the
-    /// `ProposedDiff` intents to emit.
     fn record_tool_content(
         &mut self,
         call_id: &str,
@@ -586,8 +559,6 @@ impl AcpProjector {
                         new_text: diff.new_text.clone(),
                     });
                 }
-                // An embedded ACP terminal renders as a live pane; point the transcript card at it.
-                // Real captured text (if the agent also sends `Content`) overwrites this below.
                 ToolCallContent::Terminal(_) => has_terminal = true,
                 _ => {}
             }
@@ -1011,7 +982,6 @@ fn raw_input_json(raw: Option<&serde_json::Value>) -> String {
         .unwrap_or_else(|| "{}".to_string())
 }
 
-/// Concatenate the textual (non-diff) content of a tool call into a single output string.
 fn tool_output_text(content: &[ToolCallContent]) -> String {
     let mut out = String::new();
     for item in content {

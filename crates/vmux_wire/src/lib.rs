@@ -1,5 +1,3 @@
-//! Lightweight types serialized between vmux processes and pages.
-
 pub mod agent;
 pub mod avatar;
 pub mod chat;

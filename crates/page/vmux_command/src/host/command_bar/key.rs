@@ -1,13 +1,3 @@
-//! Handing a resolved command-bar key back to the page that pressed it.
-//!
-//! The command bar decides nothing about its own keyboard any more: it publishes the context key
-//! `command-bar`, hands over whatever the core claimed, and waits to be told what the press meant.
-//! This is the return leg — the only part of a command bar shortcut that lives on the host.
-//!
-//! It reads [`CommandIssued`] rather than [`crate::AppCommand`] because it has to answer
-//! *that* page. A broadcast command names no webview, and with two palettes on screen the wrong
-//! one would move its selection.
-
 use crate::event::{COMMAND_BAR_KEY_EVENT, CommandBarKey};
 use crate::{AppCommand, CommandIssued, ReadAppCommands};
 use bevy::prelude::*;
@@ -39,7 +29,6 @@ mod tests {
     use super::*;
     use crate::CommandBarKeyCommand;
 
-    /// What the plugin pushed back to a page, which is its only observable.
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
 
@@ -75,8 +64,6 @@ mod tests {
         }
     }
 
-    /// A command-bar key goes back to the palette that pressed it and to no other, which is the
-    /// whole reason this reads the caller-stamped bus instead of the broadcast one.
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
@@ -102,8 +89,6 @@ mod tests {
         );
     }
 
-    /// Every other command on the bus belongs to someone else. Echoing one would push a payload no
-    /// palette can decode.
     #[test]
     fn a_command_that_is_not_a_command_bar_key_is_left_alone() {
         let mut app = Echo::app();

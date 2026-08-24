@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
-/// Seeds the OS light/dark appearance once at startup, before anything resolves Device mode.
 pub(crate) struct DesktopAppearancePlugin;
 
 impl Plugin for DesktopAppearancePlugin {
@@ -29,11 +28,6 @@ fn read_system_appearance() -> Option<ResolvedScheme> {
     None
 }
 
-/// Seed [`SystemAppearance`] once at startup so Device mode resolves correctly on
-/// the first frame; winit only reports theme *changes* afterward.
-///
-/// Takes [`NonSendMarker`] so Bevy pins it to the main thread — `read_system_appearance`
-/// needs `MainThreadMarker`, which is `None` on a worker thread.
 fn seed_system_appearance(
     _non_send: bevy::ecs::system::NonSendMarker,
     mut system: ResMut<SystemAppearance>,

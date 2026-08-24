@@ -96,7 +96,6 @@ pub fn space_of(
     }
 }
 
-/// Resolve the ancestor space ID for an entity.
 pub fn space_id_of(
     entity: Entity,
     child_of: &Query<&ChildOf>,

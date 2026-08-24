@@ -234,11 +234,6 @@ fn consume_page_agent_stream(
         }
     }
     for status in statuses.read() {
-        // The run state lives on the stack entity, so a status whose sid no stack claims is not
-        // one that arrives late — it is one the conversation never receives, leaving the pane on
-        // whatever it was last set to. During startup that is "Preparing agent…", which then never
-        // clears however cleanly the agent came up. Silence here is what made that
-        // indistinguishable from a daemon that never answered.
         if !by_sid.contains_key(&status.sid) {
             warn!(sid = %status.sid, "dropping a run status no stack claims");
         }
@@ -271,10 +266,6 @@ fn consume_page_agent_stream(
                     }
                 }
             }
-            // A run settling from Streaming back to Idle means the agent finished its turn.
-            // Raise attention so the done-dot + OS notification fire (mark_agent_done gates on
-            // whether the pane is viewed). Covers ACP and Page agents; an Interrupt (a distinct
-            // status) is not completion, so it does not raise attention.
             if was_streaming && matches!(status.status, AgentRunStatus::Idle) {
                 attention.write(vmux_core::notify::AgentAttention {
                     entity,

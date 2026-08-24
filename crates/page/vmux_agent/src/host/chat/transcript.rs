@@ -1,11 +1,3 @@
-//! Getting the conversation to the page, and keeping it there.
-//!
-//! Only a tail is sent with each snapshot — a long conversation would otherwise be reserialised
-//! every frame — so the page asks for what came before it as the reader scrolls up. Streaming
-//! snapshots are additionally held to one per frame interval, because a token at a time would
-//! push far more often than a display can show. A webview that has just become ready is pushed to
-//! separately, since a change-detection push never fires for a session that has not changed.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
@@ -25,7 +17,6 @@ use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_coun
 use vmux_session::AcpSession;
 use vmux_session::{AgentConversationTitle, AgentMessages, PromptQueue};
 
-/// The transcript as the page sees it: the live snapshot, and the history behind it.
 pub(super) struct ChatTranscriptPlugin;
 
 impl Plugin for ChatTranscriptPlugin {
@@ -45,9 +36,6 @@ impl Plugin for ChatTranscriptPlugin {
     }
 }
 
-/// Record per-turn wall-clock from `AgentRunState` edges (covers page + ACP mutation sites
-/// uniformly). Idempotent: the `turn_start` guard tolerates repeated same-state sets and does
-/// not reset across a mid-turn `AwaitingApproval`.
 fn track_turn_duration(
     time: Res<Time>,
     mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
@@ -70,19 +58,6 @@ fn track_turn_duration(
     }
 }
 
-/// Push each changed session's conversation + run-state to its pane webview (the child
-/// `Browser` of the session entity).
-///
-/// A skipped push is remembered rather than dropped, which is why the change filter is read from
-/// [`Ref`] here instead of being a `Changed<..>` on the query. A change ticks once: if the webview
-/// is absent or not yet ready on the frame it lands, filtering on `Changed` retires the entity from
-/// the query and nothing brings it back, because the next thing to move the session may be minutes
-/// away or never. [`sync_chat_to_ready_views`] is not the backstop it looks like — `ChatSynced`
-/// makes it fire once per mount, so a change arriving after that first push is simply lost.
-///
-/// That is how a conversation strands on "Preparing agent…": the agent comes up, the daemon reports
-/// `Idle` a few hundred milliseconds later while the pane is still opening, and the pane keeps the
-/// installing snapshot for the life of the session.
 fn push_chat_to_page(
     sessions: Query<(
         Entity,
@@ -124,12 +99,6 @@ fn push_chat_to_page(
             owed.insert(stack);
             continue;
         };
-        // The chat view, not merely the first `Browser` child. A stack collects webviews — an
-        // agent that opens a terminal gets a pane, and a pane is a webview like any other — so
-        // "the first browser under this stack" is whichever the children happen to be ordered by,
-        // and a snapshot aimed at a terminal is a snapshot the conversation never receives.
-        // `AgentChatView` is how the rest of the crate finds this view; this was the one place
-        // that guessed.
         let Some(webview) = kids.iter().find(|&e| chat_views.contains(e)) else {
             owed.insert(stack);
             continue;
@@ -147,20 +116,11 @@ fn push_chat_to_page(
         let elapsed = last_push
             .get(&stack)
             .map(|last| now.saturating_duration_since(*last));
-        // Urgency stays tied to a real change rather than to being owed, because all it does is
-        // skip the streaming throttle. An owed push that inherited it would push every frame for
-        // as long as the turn ran; retried without it, it lands within the interval anyway.
         if !chat_snapshot_due(matches!(*state, AgentRunState::Streaming), moved, elapsed) {
             owed.insert(stack);
             continue;
         }
         owed.remove(&stack);
-        // The last hop with nothing to show for itself. Everything upstream now accounts for
-        // itself — the daemon reports the agent up, the status reaches the GUI, the run state
-        // takes it — and a pane still showing "Preparing agent…" means either this never runs
-        // again after the installing snapshot, or it runs and the page does not act on it.
-        // Streaming is left out: it pushes every 50ms for the length of a turn and says nothing
-        // this does not.
         let snapshot = snapshot_of(
             &messages,
             &state,
@@ -290,11 +250,6 @@ fn snapshot_of(
     }
 }
 
-/// Push the current transcript + slash commands to any chat webview that is ready but not yet
-/// synced. Runs every frame and retries until the webview's emit channel is ready, so the very
-/// first snapshot always lands. Re-runs after a reload because [`reset_chat_synced_on_page_ready`]
-/// clears `ChatSynced` when the page re-signals ready — without this, Cmd+R blanked the chat
-/// (the `Changed`/`Added` pushes never re-fire for an unchanged, already-added session).
 fn sync_chat_to_ready_views(
     pending: Query<
         Entity,
@@ -374,8 +329,6 @@ fn sync_chat_to_ready_views(
     }
 }
 
-/// A chat webview re-signals `PageReady` on every (re)mount, including a Cmd+R reload. Clear its
-/// `ChatSynced` marker so [`sync_chat_to_ready_views`] re-pushes the full transcript.
 fn reset_chat_synced_on_page_ready(
     trigger: On<BinReceive<vmux_core::page::PageReady>>,
     chat_views: Query<(), With<AgentChatView>>,

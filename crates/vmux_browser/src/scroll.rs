@@ -9,9 +9,6 @@ use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::{Stack, active_stack_in_pane};
 use vmux_layout::target::active_webview_for_tab;
 
-/// Scrolls the page an agent asks about before it is snapshotted, so the two land in one
-/// frame. Sits between [`crate::snapshot::drive_pending_nav_snapshots`] and the capture
-/// [`crate::snapshot::SnapshotPlugin`] orders after it.
 pub(crate) struct ScrollPlugin;
 
 impl Plugin for ScrollPlugin {

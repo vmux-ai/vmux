@@ -1,19 +1,8 @@
-//! The team roster on a phone: who the paired Mac reports, and the payload the page reads.
-//!
-//! The desktop builds the same payload from its own world — profiles, agents, run state — in
-//! [`host`](crate::host). None of that exists over a relay, so the two share their *output* and
-//! nothing else, which is [`TeamEvent`] and already lives in `vmux_wire`.
-//!
-//! Unlike the desktop's, this projection is an identity: the relay answers in the shape the page
-//! wants. What the plugin is for is the two things around it — noticing that a poll returned the
-//! same roster as last time, and letting a host emit only when it did not.
-
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_wire::page::PageEmit;
 use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 
-/// Keeps [`Team`] current with whatever the app last heard from the Mac, and hands it to the page.
 pub struct TeamRosterPlugin;
 
 impl Plugin for TeamRosterPlugin {
@@ -35,16 +24,12 @@ impl Plugin for TeamRosterPlugin {
     }
 }
 
-/// When [`Team`] is rebuilt, so the emit ordered after it carries what this turn produced rather
-/// than what the last one did.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TeamProjection;
 
-/// Who the paired Mac last said was on the team. Written by the app, read by nothing else.
 #[derive(Resource, Default, PartialEq)]
 pub struct Members(pub Vec<TeamMemberRow>);
 
-/// The roster payload, as the page expects to be told it.
 #[derive(Resource, Default)]
 pub struct Team(pub TeamEvent);
 
@@ -55,7 +40,6 @@ impl Team {
         };
     }
 
-    /// Hand the rebuilt roster to whichever page is listening for it.
     fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
         let Some(emit) = PageEmit::of(TEAM_EVENT, &team.0) else {
             return;
@@ -68,7 +52,6 @@ impl Team {
 mod tests {
     use super::*;
 
-    /// A world running the plugin, so what is asserted is what the schedule produced.
     struct Started(App);
 
     impl Started {

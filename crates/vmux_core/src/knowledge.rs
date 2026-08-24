@@ -1,5 +1,3 @@
-//! User-owned Knowledge Base conventions shared by agent launchers.
-
 pub const KNOWLEDGE_TREE_EVENT: &str = "knowledge-tree";
 pub const KNOWLEDGE_SEARCH_EVENT: &str = "knowledge-search";
 pub const KNOWLEDGE_CREATE_RESULT_EVENT: &str = "knowledge-create-result";

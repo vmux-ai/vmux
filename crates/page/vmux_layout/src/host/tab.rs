@@ -70,8 +70,6 @@ pub struct Tab {
     pub startup_dir: Option<String>,
 }
 
-/// Stable project directory for a tab. Unlike [`Tab::startup_dir`], this does not change when
-/// the tab is rebound to a managed worktree.
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
@@ -80,7 +78,6 @@ pub struct TabWorkspace {
     pub project_dir: String,
 }
 
-/// Present iff a tab's `startup_dir` points at a vmux-managed git worktree.
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
@@ -93,24 +90,17 @@ pub struct TabWorktree {
     pub base_ref: String,
 }
 
-/// Runtime failure state for a persisted managed worktree. Ownership metadata remains attached.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct TabWorktreeUnavailable {
     pub message: String,
 }
 
-/// Marks that the worktree/work-here decision has been made for a tab, so the isolate offer
-/// never fires again for it.
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
 #[require(Save)]
 pub struct TabDirDecided;
 
-/// Walk up from `entity` to its ancestor [`Tab`] and return that tab's `startup_dir` override.
-///
-/// Everything spawned inside a tab (the ACP agent session and the user's terminals) shares the
-/// tab's working directory; this resolves that override for a given stack/pane entity.
 pub fn ancestor_tab_startup_dir(
     entity: Entity,
     child_of: &Query<&ChildOf>,
@@ -753,8 +743,6 @@ mod tests {
         assert_eq!(tab_count, 2, "expected two tabs after InNewTab");
     }
 
-    /// The prompt has to be on the stack before the page opens, or whatever opens there has
-    /// nothing to answer and the request is silently dropped.
     #[test]
     fn a_new_tab_carries_its_pending_prompt_onto_the_stack() {
         let mut app = build_app();

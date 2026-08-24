@@ -2,13 +2,9 @@ use dioxus::prelude::*;
 
 use crate::i18n::translate;
 
-/// Radial wash painted behind a launcher surface. Apply to the page root alongside
-/// [`StartBackdrop`], which supplies the ambient orbs.
 pub const START_BACKDROP_STYLE: &str = "background-image:radial-gradient(140% 100% at 50% -12%, rgba(129,140,248,0.05), transparent 55%);";
 
 #[component]
-/// Ambient orbs behind a launcher surface. Hidden below `md` — the blurs span hundreds of
-/// pixels, so in a narrow pane they read as flat tint while still costing a composite.
 pub fn StartBackdrop() -> Element {
     rsx! {
         div { class: "pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden md:block",
@@ -21,12 +17,6 @@ pub fn StartBackdrop() -> Element {
 }
 
 #[component]
-/// Launcher identity block — optional mark, the `vmux` wordmark, the tagline, then `children`.
-///
-/// Callers own the page root and its scrolling behaviour; this owns only the centered column,
-/// so the desktop launcher and the mobile start page can share it despite different shells.
-/// `revealed` drives the entrance transition; hosts that gate reveal on their own readiness
-/// signal pass it through, and everything else takes the default.
 pub fn StartHero(
     #[props(default = true)] revealed: bool,
     #[props(default)] mark: Option<Element>,

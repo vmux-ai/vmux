@@ -35,7 +35,6 @@ pub fn Page() -> Element {
 
     rsx! {
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
-            // Header
             div { class: "mb-3 flex items-center justify-between",
                 div { class: "flex items-center gap-3",
                     div { class: "flex items-center gap-2 text-foreground",
@@ -81,7 +80,6 @@ pub fn Page() -> Element {
                     p { class: "text-sm text-muted-foreground", {translate("services-empty")} }
                 }
             } else {
-                // Search filter
                 div { class: "mb-3",
                     input {
                         class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-cyan-400/50",
@@ -110,7 +108,6 @@ pub fn Page() -> Element {
 
 #[component]
 fn ServiceIcon() -> Element {
-    // lucide `server` icon — https://lucide.dev/icons/server
     rsx! {
         svg {
             width: "20",
@@ -184,7 +181,6 @@ fn ProcessCard(process: ProcessEntry) -> Element {
             class: "rounded-lg border border-border bg-card p-3 cursor-pointer hover:border-foreground/30 transition-colors",
             onclick,
 
-            // Row 1: ID + badges + uptime + kill
             div { class: "mb-2 flex items-center justify-between",
                 div { class: "flex items-center gap-2",
                     code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground",
@@ -209,7 +205,6 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                 }
             }
 
-            // Row 2: metadata grid
             div { class: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
                 MetaRow { label: "PID", value: process.pid.to_string() }
                 MetaRow { label: "CPU", value: format!("{:.0}%", process.cpu_percent) }
@@ -221,7 +216,6 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                 MetaRow { label: translate("services-shell"), value: process.shell.clone() }
             }
 
-            // Terminal preview
             if !process.preview_lines.is_empty() {
                 div { class: "mt-2 rounded bg-muted/50 p-2 font-mono text-xs leading-tight text-muted-foreground",
                     for line in process.preview_lines.iter() {

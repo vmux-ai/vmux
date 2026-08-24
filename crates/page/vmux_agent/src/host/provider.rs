@@ -1,9 +1,3 @@
-//! Which agent CLIs this machine actually has.
-//!
-//! One provider entity per built-in [`AgentKind`], marked [`Ready`] when its executable resolves
-//! on `PATH`. [`AgentExecutableOverride`] lets a test pin that answer rather than depend on what
-//! happens to be installed.
-
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -28,9 +22,6 @@ impl Plugin for ProviderPlugin {
 pub(crate) const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 
-/// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
-/// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
-/// without depending on which CLIs are installed on the host.
 #[derive(Resource, Clone, Default)]
 pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
 

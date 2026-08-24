@@ -1,26 +1,15 @@
-//! Detects clickable URLs and file paths in terminal lines and annotates
-//! [`TermLine`]s with column-ranged [`LinkRange`]s for the page to render.
-
 use std::path::Path;
 
 use unicode_width::UnicodeWidthChar;
 use vmux_command::event::{is_data_uri, looks_like_path};
 use vmux_core::event::{LinkRange, TermLine};
 
-/// Punctuation trimmed from the end of a detected token (trailing characters
-/// that are almost never part of the link).
 const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
 
-/// Punctuation trimmed from the start of a detected token.
 const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
 
 const MAX_LINKS_PER_LINE: usize = 16;
 
-/// Annotate `line` with the links found in its visible text.
-///
-/// `cwd` is the terminal's working directory, used to resolve relative file
-/// paths. When `None`, relative paths are skipped (URLs and absolute paths are
-/// still detected).
 pub fn annotate_links(line: &mut TermLine, cwd: Option<&Path>) {
     line.links.clear();
 
@@ -62,8 +51,6 @@ pub fn annotate_links(line: &mut TermLine, cwd: Option<&Path>) {
     }
 }
 
-/// Find link tokens in `text`. Returns `(char_start, char_end_exclusive, url)`
-/// in char-index coordinates.
 pub fn detect_links_in_text(text: &str, cwd: Option<&Path>) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     if !may_hold_link(text) {
@@ -98,12 +85,6 @@ pub fn detect_links_in_text(text: &str, cwd: Option<&Path>) -> Vec<(usize, usize
     out
 }
 
-/// Whether `text` is worth splitting into tokens.
-///
-/// Every link [`resolve_target`] accepts contains a `/` — `scheme://` and every shape
-/// `looks_like_path` recognises — or begins `data:`. Most terminal output has neither, and
-/// scanning twice for that is far cheaper than the char vector and per-token string the
-/// tokeniser allocates for every line of a scrolling screen.
 fn may_hold_link(text: &str) -> bool {
     text.contains('/')
         || text
@@ -112,11 +93,6 @@ fn may_hold_link(text: &str) -> bool {
             .any(|window| window.eq_ignore_ascii_case(b"data:"))
 }
 
-/// Resolve a token to a ready-to-open URL, or `None` if it is not a link.
-///
-/// URLs require an explicit scheme (`://`) or a `data:` URI — this avoids
-/// misreading bare filenames like `foo.txt` as `https://foo.txt`. Everything
-/// else is tested as a file path.
 fn resolve_target(token: &str, cwd: Option<&Path>) -> Option<String> {
     if is_data_uri(token) || token.contains("://") {
         return Some(token.to_string());
@@ -134,9 +110,6 @@ fn path_token_has_name(token: &str) -> bool {
             .any(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
-/// Resolve a file path token to a `file://` URL, expanding `~/` and resolving
-/// relative paths against `cwd`. Returns `None` for a relative path when `cwd`
-/// is unknown.
 fn resolve_path(token: &str, cwd: Option<&Path>) -> Option<String> {
     let expanded = if let Some(rest) = token.strip_prefix("~/") {
         let home = std::env::var_os("HOME")?;
@@ -179,8 +152,6 @@ mod tests {
         assert_eq!(l.links[0].end_col, 23);
     }
 
-    /// The only link that carries no slash, and `is_data_uri` matches its scheme without regard
-    /// to case — so the cheap pre-scan that skips tokenising a line has to do the same.
     #[test]
     fn detects_a_slashless_data_uri_whatever_its_case() {
         let mut l = line_of("payload Data:,hello here");
@@ -260,7 +231,6 @@ mod tests {
 
     #[test]
     fn wide_chars_shift_columns() {
-        // 'あ' is width 2; the URL starts at col 0 + 2 + 1(space) = 3.
         let mut l = line_of("あ https://x.io");
         annotate_links(&mut l, None);
         assert_eq!(l.links.len(), 1);

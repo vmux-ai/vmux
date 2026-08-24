@@ -1,10 +1,3 @@
-//! What the composer sends, and the queue it lands in.
-//!
-//! A prompt is never dispatched from here: it is enqueued, and the runtime drains the queue. That
-//! is what lets a second prompt arrive mid-turn, and it is why interrupting and "send everything
-//! now" are both edits to the queue rather than special cases at the send site. Approvals and
-//! choices share this module because they are the other two things the page answers with.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
@@ -21,8 +14,6 @@ use vmux_session::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
 };
 
-/// Submitting a prompt, everything that acts on the queue behind it, and the two answers the page
-/// can give a running turn.
 pub(super) struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {

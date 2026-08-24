@@ -6,8 +6,6 @@ use crate::toast::{AgentToast, ToastLevel};
 use vmux_session::AcpSession;
 use vmux_session::AgentSession;
 
-/// On a transition into `Errored`, fire a toast. The chat page renders the errored run-state as a
-/// styled inline card, so the error is not also pushed into the transcript (which duplicated it).
 pub fn surface_errors(
     mut writer: MessageWriter<AgentToast>,
     mut q: Query<(
@@ -18,7 +16,6 @@ pub fn surface_errors(
     )>,
 ) {
     for (state, mut last, page, acp) in &mut q {
-        // Resolve the session id from either a Page/CLI session or an ACP session.
         let Some(sid) = page
             .map(|s| s.sid.clone())
             .or_else(|| acp.map(|s| s.sid.clone()))

@@ -266,8 +266,6 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            // Last child: stacking here is DOM order, so the panel floats above the header and
-            // side sheet without a z-index.
             CommandBarPanel {}
         }
     }
@@ -842,10 +840,6 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         }
                     }
                     div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
-                        // The renderer sizes the QR in whole modules, so its intrinsic width has
-                        // nothing to do with the panel's. The viewBox is what scales; the width
-                        // and height attributes it also emits are what would not, so both are
-                        // overridden here and the square is held by aspect-ratio.
                         div {
                             class: "w-full rounded-sm [&>svg]:block [&>svg]:aspect-square [&>svg]:h-auto [&>svg]:w-full",
                             dangerous_inner_html: "{svg}",
@@ -1546,18 +1540,7 @@ struct BookmarkDragState {
 }
 
 impl BookmarkDragState {
-    /// The legs of the drag that only mean anything once one has begun.
-    ///
-    /// They are spread onto the container rather than written on it, because a declared
-    /// `pointermove` is not free: the interpreter registers every bubbling listener on the page
-    /// root, so one anywhere in the tree makes *every* pointer move on the page dispatch. On the
-    /// wasm path that is a call; with the page hosted natively it is a synchronous XHR the web
-    /// content blocks on until the host answers, which it can only do between frames. Left
-    /// mounted, it starves the very thing it sits on — scrolling and clicking included.
     fn listeners(state: Signal<Option<Self>>) -> Vec<Attribute> {
-        // A read, not a `peek`: the container has to re-render when a drag begins, or the legs
-        // never mount. `update_bookmark_drag` writes only when the drop target changes, so this
-        // costs a render per target, not per move.
         if state.read().is_none() {
             return Vec::new();
         }
@@ -1893,7 +1876,6 @@ fn NavButton(
     }
 }
 
-/// The coloured dot marking a knowledge file's git state.
 #[component]
 fn KnowledgeGitIndicator(status: KnowledgeGitStatus) -> Element {
     let (class, title) = match status {
@@ -2079,9 +2061,6 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
     }
 }
 
-/// The active tab's working directory + live git status, rendered inside the space card. Shows the
-/// dir always; when it's a git repo, adds an auto-detected git row (branch, worktree, dirty/ahead).
-/// Read-only — worktree lifecycle is agent-driven (no UI actions).
 #[component]
 fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
     let b = boundary;
@@ -2370,21 +2349,10 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
     }
 }
 
-/// Clear the drag one turn late, so the click this pointer-up produces still sees it.
-/// Whether the pointer landed on the element carrying the handler rather than on a descendant.
-///
-/// `web` only: comparing `target` against `currentTarget` needs the platform event, and Dioxus
-/// exposes neither. Answering `false` natively means a right-click on the card does not open its
-/// menu, which is a missing action rather than one fired on the wrong element.
 fn pointer_landed_on_self(_data: &MouseData) -> bool {
     false
 }
 
-/// Publish the corner radius the shell was told to use, as a CSS variable on the document root.
-///
-/// `web` only: the root element belongs to the document, which native page code cannot reach.
-/// `use_theme` writes the same variable through `Host::set_root_radius`, whose native half is
-/// also a no-op, so nothing here is lost that is not already absent.
 fn set_root_radius_px(_radius: f32) {}
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
@@ -2427,17 +2395,6 @@ fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
     state.set(None);
 }
 
-// The drag ghost, and the hit-testing that places it.
-//
-// `web` only, as a unit. Every one of these reaches the document directly — cloning the dragged
-// row into a floating copy, writing inline styles to follow the pointer, capturing the pointer,
-// and asking `elementFromPoint` what is underneath — and none of it has a portable Dioxus form.
-// A native `MountedData` answers `NotSupported`, so there is nothing to measure or move.
-//
-// Natively `bookmark_drag_source` answers `None`, which stops a drag before it starts: bookmarks
-// cannot be reordered by dragging, and everything else about them works. Rendering the ghost as
-// an ordinary element positioned from a signal, with drop targets resolved by `onpointerenter`
-// rather than by hit-testing, is what retires this — it needs a `RenderedElementBacking` first.
 mod bookmark_drag_dom {
     use super::*;
 
@@ -2539,7 +2496,6 @@ fn BookmarkNameInput(
     }
 }
 
-/// Show the rename field one turn after seeding it, so it mounts with the draft already set.
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
     draft.set(name);
     spawn(async move {
@@ -2548,10 +2504,6 @@ fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, nam
     });
 }
 
-/// Focus the rename field and offer its text for overtyping.
-///
-/// `web` only: a native `MountedData` answers `NotSupported`, so the downcast already returned
-/// `None` there. Until a `RenderedElementBacking` exists the field mounts unfocused.
 fn focus_and_select_inline_rename(_event: Event<MountedData>) {}
 
 #[component]

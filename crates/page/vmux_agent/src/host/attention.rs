@@ -1,9 +1,3 @@
-//! Turn-end: how an agent says it is done, and what the app does about it.
-//!
-//! A CLI agent rings the terminal bell or fires its stop hook; both resolve to
-//! [`AgentAttention`](vmux_core::notify::AgentAttention). If the agent is off screen when that
-//! lands it gets a done marker and an OS notification, cleared when the user looks at its stack.
-
 use bevy::prelude::*;
 use vmux_service::protocol::AgentCommand as ServiceAgentCommand;
 
@@ -176,10 +170,6 @@ fn clear_agent_done(
     }
 }
 
-/// CLI agents fire this from their `Stop` hook at turn-end: resolve the agent terminal by its
-/// `anchor` `ProcessId` and raise `AgentAttention`, which drives the follow-pane auto-tidy
-/// (`tidy_on_agent_attention`) and the done-dot. The terminal bell only fires on
-/// idle/permission, so it is not a reliable turn-end signal.
 pub(super) fn handle_agent_turn_ended(
     mut reader: MessageReader<AgentCommandRequest>,
     agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,

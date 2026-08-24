@@ -1,6 +1,3 @@
-//! Where the Vault encryption key comes from: this device's OS key storage,
-//! fronted by an in-process session cache so a run prompts at most once.
-
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(any(target_os = "macos", test))]
@@ -20,21 +17,16 @@ const LOCKED: &str = "This Vault is locked on this device. Unlock it with a pass
 static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
 static SESSION_KEY_LOAD: OnceLock<Mutex<()>> = OnceLock::new();
 
-/// This device's own key storage. Every operation is implemented once per platform
-/// in a sibling module — exactly one of which is compiled.
 struct DeviceKeys;
 
-/// How a Vault obtains, mints and persists its encryption key.
 pub(super) trait KeyStore {
     fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
     fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
     fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String>;
 }
 
-/// Key storage that may prompt the user, for the paths a user asked for.
 pub(super) struct SystemKeyStore;
 
-/// Key storage that never prompts, for background status polling.
 pub(super) struct SilentSystemKeyStore;
 
 impl KeyStore for SystemKeyStore {

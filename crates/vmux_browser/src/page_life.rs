@@ -1,8 +1,3 @@
-//! What happens to a page between opening and settling.
-//!
-//! The icon and loading state arrive from CEF after the navigation is applied, which is why these
-//! run after `apply_cef_state_from_webview`; a popup asks for a stack of its own.
-
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;

@@ -1,11 +1,3 @@
-//! How a participant is drawn when there is no picture of them: initials and a colour.
-//!
-//! Lives here rather than in `vmux_core` because the phone has to reach the same colour the
-//! desktop does, and `vmux_core` pulls in bevy and CEF off wasm. The palette is keyed by URL
-//! segment rather than [`crate::agent::AgentKind`] because a registry-driven ACP agent has no
-//! kind at all — the segment is the one name every agent has.
-
-/// Initials and colour for a participant with no avatar image.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarSpec {
     pub initials: String,
@@ -27,8 +19,6 @@ impl AvatarSpec {
         }
     }
 
-    /// Avatar for a registry-driven ACP agent: initials from the display name, a stable
-    /// brand color hashed from the registry id (so each agent reads distinctly).
     pub fn for_registry(name: &str, seed: &str) -> Self {
         Self {
             initials: initials_of(name),
@@ -39,8 +29,6 @@ impl AvatarSpec {
 
 const USER_COLOR: &str = "#3b82f6";
 
-/// The brand colour of a built-in CLI agent, by its URL segment. `None` for anything else,
-/// which is the registry case and gets [`hash_color`] instead.
 pub fn agent_segment_color(segment: &str) -> Option<&'static str> {
     match segment {
         "claude" => Some("#d97757"),
@@ -50,8 +38,6 @@ pub fn agent_segment_color(segment: &str) -> Option<&'static str> {
     }
 }
 
-/// The colour an agent is drawn in, whichever kind it is. This is the whole rule, so the
-/// desktop and the phone cannot drift.
 pub fn agent_color(segment: &str) -> String {
     match agent_segment_color(segment) {
         Some(color) => color.to_string(),
@@ -59,7 +45,6 @@ pub fn agent_color(segment: &str) -> String {
     }
 }
 
-/// Up to two uppercase initials from a display name ("Junichi Sugiura" -> "JS").
 pub fn initials_of(name: &str) -> String {
     let initials: String = name
         .split(|c: char| !c.is_alphanumeric())
@@ -91,9 +76,6 @@ pub fn hash_color(seed: &str) -> String {
 mod tests {
     use super::*;
 
-    /// The phone derives an agent's colour from its URL segment alone. If a built-in stopped
-    /// being recognised it would silently fall through to a hashed palette colour and simply
-    /// look wrong, so the segments are pinned rather than the hexes alone.
     #[test]
     fn built_in_agents_keep_their_brand_colours() {
         assert_eq!(agent_color("claude"), "#d97757");

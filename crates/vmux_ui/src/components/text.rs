@@ -1,23 +1,18 @@
-//! Text span with tone/size defaults (vmux CEF shell; not part of upstream gallery).
-
 use crate::util::merge_class;
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum UiTextTone {
-    /// No extra color class (inherit from parent / strip).
     #[default]
     Inherit,
     Default,
     Muted,
     Dim,
-    /// Sky accent (aligned with primary CEF shell).
     Accent,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum UiTextSize {
-    /// No extra font-size class (inherit).
     #[default]
     Inherit,
     Sm,

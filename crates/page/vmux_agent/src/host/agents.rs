@@ -1,8 +1,3 @@
-//! The desktop half of the agents page: reading the registry, installing, and pushing the
-//! catalog into the webview.
-//!
-//! Gated as a whole rather than item by item. The rendered counterpart is the sibling `page`.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
@@ -28,8 +23,6 @@ impl Plugin for AgentsManagerPlugin {
                 title: "Agents",
             },
         ));
-        // This page has no marker of its own, so it declares itself rather than going through
-        // `HostedPagePlugin`, and nothing else would register the host for it.
         vmux_core::register_host_spawn(app, "agents");
         app.init_resource::<AgentsPageWebviews>()
             .init_resource::<AgentsStatus>()
@@ -72,11 +65,9 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 #[derive(Resource, Default)]
 struct AgentsPageWebviews(HashSet<Entity>);
 
-/// Session install status per agent id (`status`, `detail`), overlaid on the disk-derived state.
 #[derive(Resource, Default)]
 struct AgentsStatus(HashMap<String, (String, String)>);
 
-/// Background install progress/result for the manager page.
 enum AgentMsg {
     Progress {
         id: String,
@@ -105,8 +96,6 @@ impl Default for AgentsInstallChannel {
     }
 }
 
-/// Published-version lists per agent id, fetched lazily in the background so the version selector
-/// can offer a dropdown. `requested` guards against re-fetching an agent every catalog push.
 #[derive(Resource, Default)]
 struct AgentVersions {
     fetched: HashMap<String, Vec<String>>,
@@ -218,7 +207,6 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
         .collect()
 }
 
-/// Remember which webview asked for the catalog; the push system delivers it.
 fn on_catalog_request(
     trigger: On<BinReceive<AgentsCatalogRequest>>,
     mut webviews: ResMut<AgentsPageWebviews>,
@@ -226,8 +214,6 @@ fn on_catalog_request(
     webviews.0.insert(trigger.event().webview);
 }
 
-/// Upsert the per-agent version pin into the settings ACP list: update a matching entry, or append
-/// a version-only entry (empty command) for a registry agent the user has not otherwise configured.
 fn upsert_acp_version(
     acp: &mut Vec<vmux_setting::AcpAgentConfig>,
     catalog_id: &str,
@@ -252,7 +238,6 @@ fn upsert_acp_version(
     }
 }
 
-/// Kick a background install (or update) for the requested agent, persisting its version pin first.
 fn on_install_request(
     trigger: On<BinReceive<AgentsInstall>>,
     catalog: Res<AcpCatalog>,
@@ -306,7 +291,6 @@ fn on_install_request(
     });
 }
 
-/// Remove an installed agent, then let its status re-derive from disk.
 fn on_uninstall_request(
     trigger: On<BinReceive<AgentsUninstall>>,
     mut status: ResMut<AgentsStatus>,
@@ -318,7 +302,6 @@ fn on_uninstall_request(
     install_generation.bump();
 }
 
-/// Fold background-install updates into the session status map.
 fn drain_agent_installs(
     installs: Res<AgentsInstallChannel>,
     mut status: ResMut<AgentsStatus>,
@@ -344,8 +327,6 @@ fn drain_agent_installs(
     }
 }
 
-/// For each npx registry agent not yet queried, spawn a background `npm view` to populate its
-/// version list. Runs when the catalog (re)loads; `requested` guards one fetch per agent.
 fn kick_off_version_fetches(
     catalog: Res<AcpCatalog>,
     channel: Res<AgentVersionsChannel>,
@@ -370,16 +351,12 @@ fn kick_off_version_fetches(
     }
 }
 
-/// Fold completed version fetches into the cache; the resulting change re-pushes the catalog so
-/// the selector becomes a dropdown.
 fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMut<AgentVersions>) {
     while let Ok((id, list)) = channel.rx.try_recv() {
         versions.fetched.insert(id, list);
     }
 }
 
-/// Push the catalog (with per-agent status) whenever it (re)loads, status changes, or a page
-/// requests it.
 fn push_agents(
     catalog: Res<AcpCatalog>,
     status: Res<AgentsStatus>,

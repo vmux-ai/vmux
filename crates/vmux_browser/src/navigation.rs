@@ -1,9 +1,3 @@
-//! Navigating a browser pane, and what follows once a navigation commits.
-//!
-//! The request handlers are the whole of the entry side: a URL, a back or forward step, or a
-//! history entry. Everything after `drain_committed_navigation` is the consequence — the tab
-//! takes the page's title, and the visit is recorded.
-
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, BrowserBarCommand, BrowserCommand, ReadAppCommands};
@@ -121,8 +115,6 @@ pub(crate) fn sync_page_metadata_to_tab(
         }
         if let Ok(mut ecmds) = commands.get_entity(parent) {
             ecmds.insert(meta.clone());
-            // The tab renders from its own copy, so the reported name has to travel with the
-            // metadata or the tab silently falls back to the host-given one.
             match identity {
                 Some(identity) => ecmds.insert(identity.clone()),
                 None => ecmds.remove::<vmux_core::PageIdentity>(),

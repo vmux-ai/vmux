@@ -63,9 +63,7 @@ mod tests {
     fn registry_avatar_derives_initials_and_stable_color() {
         let a = AvatarSpec::for_registry("Mistral Vibe", "mistral-vibe");
         assert_eq!(a.initials, "MV");
-        // Deterministic: same seed -> same color.
         assert_eq!(a.color, AvatarSpec::for_registry("X", "mistral-vibe").color);
-        // Valid 7-char hex.
         assert!(a.color.starts_with('#') && a.color.len() == 7);
     }
 

@@ -31,17 +31,12 @@ pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
-/// Backend → page: a media file (image/video/audio/pdf) is ready to render.
 pub const FILE_MEDIA_EVENT: &str = "file_media";
-/// Page → backend: open a media file in the system default application.
 pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
-/// Page → backend: the on-screen rect (CSS px, viewport-relative) of the native
-/// video host element, so the backend can position the `AVPlayer` overlay over it.
 pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
-/// Host → file page: the event id [`FileKey`] is pushed under.
 pub const FILE_KEY_EVENT: &str = "file_key";
 pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
@@ -51,9 +46,7 @@ pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
 pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
 pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
-/// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
-/// File page → host: the user's choice on the tidy prompt banner.
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
@@ -584,10 +577,7 @@ pub enum PreviewKind {
     },
     Video {
         url: String,
-        /// Absolute path, so the page can key the native-overlay rect report to it.
         path: String,
-        /// `true` when the backend will play this via a native overlay (macOS,
-        /// proprietary codec); the page then reports a rect instead of `<video>`.
         native: bool,
     },
     Info {
@@ -640,19 +630,13 @@ pub struct FileOpenEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-/// Tells the page how to render an opened media file and where to fetch its bytes.
 pub struct FileMediaEvent {
-    /// Which media element to render.
     pub kind: crate::media::MediaKind,
-    /// MIME type of the file.
     pub mime: String,
-    /// Raw-media URL (`file://…?vmux-raw=1`) for the media element `src`.
     pub url: String,
-    /// Absolute filesystem path, for the PDF "open externally" intent.
     pub abs_path: String,
 }
 
-/// Page → backend request to open a media file in the system default app.
 #[derive(
     Debug,
     Clone,
@@ -665,7 +649,6 @@ pub struct FileMediaEvent {
     rkyv::Deserialize,
 )]
 pub struct FileOpenExternalRequest {
-    /// Absolute path of the file to open.
     pub path: String,
 }
 
@@ -826,10 +809,6 @@ pub struct LspCatalogRequest {
 }
 
 impl LspCatalogRequest {
-    /// Ask for the whole catalogue, narrowed by a search string.
-    ///
-    /// The page has no use for the language, category or installed-only filters, so it would
-    /// otherwise spell four empty defaults at every call.
     pub fn for_query(query: impl Into<String>, refresh: bool) -> Self {
         Self {
             query: query.into(),
@@ -1608,10 +1587,6 @@ pub struct TermLoadingEvent {
     pub segment: String,
 }
 
-/// Host → page: the prompt the user is typing on an agent's boot screen, mirrored
-/// from the backend capture buffer so the terminal overlay can render it. `draft`
-/// is the current text; `skipped` is true after the user pressed Esc to dismiss
-/// the prompt (overlay shows plain "booting" until they type again).
 #[derive(
     Debug,
     Clone,
@@ -1641,14 +1616,10 @@ pub struct TermViewportEvent {
     pub selection: Option<TermSelectionRange>,
 }
 
-/// Incremental viewport update. Contains only changed lines plus cursor/selection.
-/// When `full` is true, `changed_lines` contains ALL lines (used on resize/spawn).
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct TermViewportPatch {
-    /// (document_row, line) pairs for rows that changed since last sync.
-    /// Document row 0 = oldest retained scrollback line.
     pub changed_lines: Vec<(u32, TermLine)>,
     pub cursor: TermCursor,
     pub cols: u16,
@@ -1656,21 +1627,15 @@ pub struct TermViewportPatch {
     pub selection: Option<TermSelectionRange>,
     #[serde(default)]
     pub copy_mode: bool,
-    /// When true, changed_lines is a full window rebuild (spawn/resize/scroll jump).
     pub full: bool,
-    /// Document row of the first line of the served window.
     #[serde(default)]
     pub first_row: u32,
-    /// Total document rows (history + screen) → spacer height.
     #[serde(default)]
     pub total_rows: u32,
-    /// Alt-screen active → frontend uses passthrough (non-native) scroll.
     #[serde(default)]
     pub alt: bool,
-    /// App has mouse tracking enabled → passthrough (wheel forwarded, not native).
     #[serde(default)]
     pub mouse: bool,
-    /// RESERVED: lines permanently evicted off the top. Always 0 in v1.
     #[serde(default)]
     pub evicted_total: u64,
 }
@@ -1685,9 +1650,6 @@ impl TermViewportPatch {
     }
 }
 
-/// Frontend → Bevy scroll intent for the terminal (CEF IPC). `follow = true`
-/// means the frontend is pinned to the bottom; the service then streams the
-/// bottom window autonomously (no per-tick round-trip).
 #[derive(
     Debug,
     Clone,
@@ -1737,14 +1699,11 @@ pub const MOD_SUPER: u8 = 8;
     rkyv::Deserialize,
 )]
 pub struct TermMouseEvent {
-    /// 0=left, 1=middle, 2=right, 3=none (release/motion), 64=scroll_up, 65=scroll_down
     pub button: u8,
     pub col: u16,
     pub row: u16,
     pub modifiers: u8,
-    /// true for press, false for release
     pub pressed: bool,
-    /// true when this is a motion event (drag if button<3, move if button==3)
     #[serde(default)]
     pub moving: bool,
 }
@@ -1762,7 +1721,6 @@ pub struct TermMouseEvent {
     rkyv::Deserialize,
 )]
 pub struct TermLinkOpenRequest {
-    /// Ready-to-open target resolved by the host (http(s)://, data:, file://).
     pub url: String,
 }
 
@@ -1852,7 +1810,6 @@ pub struct FileCursorEvent {
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
-    /// The `:`, `/`, or `?` prompt being typed, or empty when no prompt is open.
     pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
 }
@@ -1873,7 +1830,6 @@ pub struct FileDirtyEvent {
     pub dirty: bool,
 }
 
-/// Shared rendering mode for all open file editors.
 #[derive(
     Debug,
     Clone,
@@ -1894,7 +1850,6 @@ pub enum FileViewMode {
     Diff,
 }
 
-/// Host → file page: update the shared rendering mode.
 #[derive(
     Debug,
     Clone,
@@ -1911,7 +1866,6 @@ pub struct FileViewModeEvent {
     pub mode: FileViewMode,
 }
 
-/// File page → host: set the shared rendering mode.
 #[derive(
     Debug,
     Clone,
@@ -1928,7 +1882,6 @@ pub struct FileViewModeSet {
     pub mode: FileViewMode,
 }
 
-/// Host → file page: update the active editor keymap.
 #[derive(
     Debug,
     Clone,
@@ -1945,7 +1898,6 @@ pub struct FileKeymapEvent {
     pub keymap: crate::editor::KeymapKind,
 }
 
-/// File page → host: persist a new editor keymap.
 #[derive(
     Debug,
     Clone,
@@ -1962,15 +1914,6 @@ pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
 }
 
-/// What the app keymap made of a key the file page handed over, sent back to the page that sent it.
-///
-/// The page keeps the doing; only the deciding moved. Which completion row `Accept` commits, and
-/// where in the buffer it lands, is derived from the caret and from a list filtered by the prefix
-/// under it — state that changes on a keystroke the host has not seen yet. So the verb travels, in
-/// the direction that already holds the state.
-///
-/// Nothing here is a text-editing verb. Those belong to the modal keymap the page also forwards to,
-/// which resolves the same keystroke into an `EditCommand` on the host and never comes back.
 #[derive(
     Clone,
     Copy,
@@ -1984,20 +1927,14 @@ pub struct FileKeymapSet {
     rkyv::Deserialize,
 )]
 pub enum FileKey {
-    /// Show or hide the explorer sidebar.
     ToggleExplorer,
-    /// Open the explorer on the file being edited.
     RevealInExplorer,
-    /// Highlight the next row of whichever panel is open.
     PanelNext,
     PanelPrevious,
-    /// Commit the highlighted row: insert the completion, or jump to the reference.
     PanelChoose,
-    /// Close the open panel, leaving the buffer as it was.
     PanelDismiss,
 }
 
-/// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.
 #[derive(
     Debug,
     Clone,
@@ -2014,7 +1951,6 @@ pub struct FileTidyPromptEvent {
     pub count: u32,
 }
 
-/// The user's choice on the tidy prompt banner.
 #[derive(
     Debug,
     Clone,
@@ -2028,15 +1964,11 @@ pub struct FileTidyPromptEvent {
     rkyv::Deserialize,
 )]
 pub enum TidyChoice {
-    /// Close the clean previews now.
     Tidy,
-    /// Close now and stop asking (persist `agent.tidy_files_auto`).
     Always,
-    /// Leave everything open.
     Dismiss,
 }
 
-/// File page → host: the user clicked a button on the tidy prompt banner.
 #[derive(
     Debug,
     Clone,
@@ -2271,11 +2203,6 @@ pub struct FileCompletionCommit {
     pub text: String,
 }
 
-/// Request to record a page/file visit into browser history (the `Visit`/`Url`
-/// ECS store). Sent by the editor when a `file://` view opens so file opens are
-/// persisted like any browser navigation; consumed by `vmux_history`. Native-only
-/// (Bevy message); `event` is also compiled for the wasm pages, where `bevy` is
-/// not linked.
 #[cfg(host)]
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
 pub struct RecordVisitRequest {
@@ -2479,7 +2406,6 @@ mod tests {
         assert_eq!(original, recovered);
     }
 }
-// Extension install and status events, shared by the manager page and the installer.
 pub const EXTENSIONS_LIST_EVENT: &str = "extensions_list";
 pub const EXT_INSTALL_PROGRESS_EVENT: &str = "ext_install_progress";
 pub const EXT_STATUS_EVENT: &str = "ext_status";

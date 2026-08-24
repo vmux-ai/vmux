@@ -1,5 +1,3 @@
-//! The `VirtualDom`, driven by hand.
-
 use std::rc::Rc;
 
 use dioxus_core::{Element, Event, VirtualDom};
@@ -8,13 +6,8 @@ use dioxus_interpreter_js::MutationState;
 
 use crate::event_request::EventOutcome;
 
-/// A page's root component.
-///
-/// Named rather than spelled `fn() -> Element` inline so a reader of [`PageDom::mount`] sees what
-/// is being asked for, and so the signature does not read as a component itself.
 pub type PageComponent = fn() -> Element;
 
-/// A page whose components run here, rendering into a document owned by something else.
 pub struct PageDom {
     dom: VirtualDom,
     mutations: MutationState,
@@ -22,10 +15,6 @@ pub struct PageDom {
 }
 
 impl PageDom {
-    /// Mount `app` without rendering it. Call [`PageDom::rebuild`] for the first batch.
-    ///
-    /// `instance` is provided before the first render rather than after, so a page that differs
-    /// per view reads its difference on the render that produces the document.
     pub fn mount(app: PageComponent, instance: crate::Instance) -> Self {
         Self::install_event_converter();
 
@@ -39,11 +28,6 @@ impl PageDom {
         }
     }
 
-    /// Teach `dioxus_html` how to turn a serialized event back into typed data.
-    ///
-    /// The converter is a process-wide slot that starts empty, and every downcast in a handler
-    /// unwraps it — so without this the first event panics inside `dioxus_html` rather than
-    /// failing anywhere a caller could see.
     fn install_event_converter() {
         static ONCE: std::sync::Once = std::sync::Once::new();
 
@@ -52,21 +36,12 @@ impl PageDom {
         });
     }
 
-    /// The first render, which always produces a batch: the document starts empty.
     pub fn rebuild(&mut self) -> Vec<u8> {
         self.dom.rebuild(&mut self.mutations);
         self.unflushed = true;
         self.mutations.export_memory()
     }
 
-    /// Every render after the first.
-    ///
-    /// `None` means there is nothing to send — either nothing changed, or the last batch has not
-    /// been acknowledged yet. A caller that gets `None` must ask again after [`PageDom::flushed`],
-    /// or the page stops updating.
-    ///
-    /// Rendering is withheld while a batch is in flight because an effect may read the document,
-    /// and the document does not yet reflect the render that scheduled the effect.
     pub fn render(&mut self) -> Option<Vec<u8>> {
         if self.unflushed || !self.has_work() {
             return None;
@@ -78,16 +53,6 @@ impl PageDom {
         Some(self.mutations.export_memory())
     }
 
-    /// Whether a render would change anything, asked without blocking.
-    ///
-    /// An empty batch cannot answer this: `export_memory` always emits the channel's header, so a
-    /// render with no work still yields bytes — 36 of them, whose contents move with channel state
-    /// and so cannot be compared against a fixed baseline either.
-    ///
-    /// `wait_for_work` is `process_events` followed by a dirty-scope check, and awaits only once
-    /// both say there is nothing to do. Polling it against a no-op waker runs exactly that check.
-    /// Dropping the future afterwards discards nothing: the receiver it polls takes a message only
-    /// when one is already waiting, and in that case the future resolved rather than pending.
     fn has_work(&mut self) -> bool {
         use std::future::Future;
         use std::task::{Context, Poll, Waker};
@@ -100,24 +65,14 @@ impl PageDom {
         )
     }
 
-    /// The document applied the batch it was last given.
     pub fn flushed(&mut self) {
         self.unflushed = false;
     }
 
-    /// Whether a batch is still waiting to be applied.
     pub fn awaiting_flush(&self) -> bool {
         self.unflushed
     }
 
-    /// Run one event through the page, and say whether the browser should still act on it.
-    ///
-    /// The answer is the caller's to return to a blocked page, so this must not defer any part of
-    /// the work: the handlers run here, on this thread, before it returns.
-    ///
-    /// `backing` is what a mounted component will hold, and only a renderer can supply it: the
-    /// element is named by the node it assigned. One that has nothing to offer passes `()`, which
-    /// is what dioxus substitutes anyway.
     pub fn handle(
         &mut self,
         event: HtmlEvent,
@@ -130,9 +85,6 @@ impl PageDom {
             data,
         } = event;
 
-        // Dioxus hardcodes `MountedData::new(())` for a mounted event, whose every method answers
-        // `NotSupported`, so this is the one point at which a renderer can put its own in reach of
-        // the component about to look for it.
         let data = match data {
             EventData::Mounted => {
                 Rc::new(PlatformEventData::new(Box::new(MountedData::new(backing))))
@@ -148,14 +100,12 @@ impl PageDom {
         EventOutcome::new(!event.default_action_enabled())
     }
 
-    /// Wait until the page has work to do.
     pub async fn wait_for_work(&mut self) {
         self.dom.wait_for_work().await;
     }
 }
 
 #[cfg(test)]
-// The fixtures below are components, and a component is PascalCase.
 #[allow(non_snake_case)]
 mod tests {
     use dioxus::prelude::*;

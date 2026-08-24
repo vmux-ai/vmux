@@ -124,7 +124,6 @@ impl Default for SysinfoState {
     }
 }
 
-/// Periodically send ListProcesses to the service.
 fn request_process_list(
     time: Res<Time>,
     mut timer: ResMut<ProcessesPollTimer>,
@@ -212,7 +211,6 @@ fn build_process_entries(
         .collect()
 }
 
-/// Broadcast the cached process list to all process monitor webviews.
 fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     usage: Res<ProcessUsage>,
@@ -231,7 +229,6 @@ fn broadcast_to_monitors(
 
     let connected = service.is_some();
 
-    // Build attached set from local terminal handles
     let attached_ids: std::collections::HashSet<String> =
         terminal_pids.iter().map(|pid| pid.to_string()).collect();
 
@@ -253,7 +250,6 @@ fn broadcast_to_monitors(
     }
 }
 
-/// Navigate to the terminal tab for the clicked process, or open a new one.
 fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
@@ -268,7 +264,6 @@ fn on_process_navigate(
 ) {
     let pid = &trigger.event().payload.process_id;
 
-    // If a tab already has this process attached, activate it
     for (_, process_id, content_child_of) in &terminals {
         if process_id.to_string() == *pid {
             let tab = content_child_of.get();
@@ -282,7 +277,6 @@ fn on_process_navigate(
         }
     }
 
-    // No existing tab — open a new one with reattach
     let Ok(process_id) = pid.parse::<ProcessId>() else {
         warn!("Invalid process ID from navigate event: {pid}");
         return;
@@ -303,7 +297,6 @@ fn on_process_navigate(
     commands.spawn((reattach_terminal_bundle(process_id), ChildOf(tab)));
 }
 
-/// Kill a single service-managed process and close the associated terminal tab if any.
 fn on_process_kill(
     trigger: On<BinReceive<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
@@ -323,7 +316,6 @@ fn on_process_kill(
         for (_, terminal_pid, content_child_of) in &terminals {
             if *terminal_pid == process_id {
                 let tab = content_child_of.get();
-                // Only despawn if it's actually a tab
                 if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
                     commands.entity(tab).despawn();
                 }
@@ -333,7 +325,6 @@ fn on_process_kill(
     }
 }
 
-/// Kill all service-managed processes and close their terminal tabs.
 fn on_process_kill_all(
     _trigger: On<BinReceive<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,

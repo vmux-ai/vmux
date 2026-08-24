@@ -293,9 +293,6 @@ fn collect_skill_files(root: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// `-c` override registering a PostToolUse hook that pings vmux on file edits.
-/// Codex has no structured read tool (reads go via shell), so this is edits
-/// only (`apply_patch`/`Edit`/`Write`). Inline TOML array-of-tables.
 fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
     let mut hook_args = vec![quote_toml("notify-file-touch")];
     if let Some(i) = mcp.args.iter().position(|a| a == "--anchor")
@@ -313,9 +310,6 @@ fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
     )
 }
 
-/// `-c` override registering a Stop hook that pings vmux at turn-end (drives
-/// follow-pane auto-tidy + the done-dot). Codex's `Stop` fires when the agent
-/// finishes a turn; it takes no tool matcher. Inline TOML array-of-tables.
 fn build_turn_end_hook_override(mcp: &McpServerConfig) -> String {
     let mut hook_args = vec![quote_toml("notify-turn-end")];
     if let Some(i) = mcp.args.iter().position(|a| a == "--anchor")

@@ -1,10 +1,3 @@
-//! The pairing a phone holds for one desktop, the links it is written as, and the one screen that
-//! asks for one.
-//!
-//! [`PairCard`] is the app's only component. Everything the phone draws after pairing is a page
-//! the desktop draws too; scanning a QR code to find a Mac in the first place has no desktop
-//! counterpart, so it has no shared page to come from.
-
 use crate::qr_scanner;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -15,28 +8,13 @@ use vmux_ui::i18n::translate;
 pub(crate) struct Credentials {
     pub(crate) base_url: String,
     pub(crate) token: String,
-    /// SHA-256 of the desktop's QUIC certificate, pinned when dialling it.
-    ///
-    /// Defaulted rather than required so a pairing written by an older build still deserialises.
-    /// It is refused on use instead, which tells the phone to scan again rather than silently
-    /// forgetting the Mac.
     #[serde(default)]
     pub(crate) fingerprint: String,
-    /// Which desktop to ask the relay for.
-    ///
-    /// Every desktop is reached at the same relay address, so the link has to name one. Defaulted
-    /// for the same reason as the fingerprint: a pairing written before the relay routed by
-    /// identity still deserialises, and is refused on use rather than forgotten silently.
     #[serde(default)]
     pub(crate) device: String,
 }
 
 impl Credentials {
-    /// Build the QUIC endpoint from a pairing, when it carried both a fingerprint and a device.
-    ///
-    /// A pairing missing either cannot reach anything: the fingerprint is what the inner session
-    /// pins, and the device is what the relay routes on. Returning `None` sends the phone back to
-    /// the scanner rather than into a dial that would be refused.
     pub(crate) fn endpoint(&self) -> Option<crate::quic::Endpoint> {
         if self.fingerprint.is_empty() || self.device.is_empty() {
             return None;
@@ -52,8 +30,6 @@ impl Credentials {
         })
     }
 
-    /// Read a pairing out of either link the desktop hands out: a pasted `https://` address with
-    /// the secrets in its fragment, or a `vmux://pair` deep link with them in its query.
     pub(crate) fn parse(input: &str) -> Result<Credentials, String> {
         let input = input.trim();
         if input.starts_with("vmux://") {
@@ -77,8 +53,6 @@ impl Credentials {
             if !matches!(base.scheme(), "http" | "https") {
                 return Err(translate("mobile-url-scheme"));
             }
-            // Absent when the desktop has no QUIC listener yet, which leaves the phone on HTTP
-            // rather than failing to pair.
             let fingerprint = params
                 .get("fp")
                 .map(|value| value.to_string())
@@ -144,12 +118,6 @@ impl Credentials {
         })
     }
 
-    /// The pasteable form of this pairing.
-    ///
-    /// Carries the fingerprint and the device because this is what the app puts back in the link
-    /// field, and pressing Connect on it re-parses it. Writing only the token round-tripped a
-    /// working pairing into one [`Credentials::endpoint`] refuses, so re-submitting the prefilled
-    /// link broke the very pairing it came from.
     pub(crate) fn pairing_url(&self) -> String {
         let fragment = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("token", &self.token)
@@ -267,9 +235,6 @@ mod tests {
     use super::*;
     use crate::remote::Api;
 
-    /// The fingerprint is the whole basis for trusting the desktop's certificate. If it were
-    /// dropped while parsing, the phone would silently fall back to an unpinned connection —
-    /// a downgrade with no visible symptom, so both pairing shapes are covered.
     #[test]
     fn a_pairing_link_carries_the_certificate_fingerprint() {
         let expected = "c620a502885ddf230420184cc3a1b190792c14c1049ab76a6a63596054a1025e";
@@ -291,9 +256,6 @@ mod tests {
         );
     }
 
-    /// A link with no fingerprint parses but cannot be used: there is no unpinned transport left
-    /// to fall back to. It has to fail here, at the point of use, rather than at parse time —
-    /// that is what lets the phone say "scan again" instead of "malformed link".
     #[test]
     fn a_link_without_a_fingerprint_parses_but_cannot_be_dialled() {
         let credentials = Credentials::parse("https://mac.example.ts.net/#token=secret").unwrap();
@@ -306,9 +268,6 @@ mod tests {
         );
     }
 
-    /// The app prefills the link field with this and pressing Connect re-parses it, so anything
-    /// the round trip drops is a working pairing turned into one that cannot dial — and it fails
-    /// at `Api::new`, well away from the writing that lost it.
     #[test]
     fn a_written_pairing_can_be_read_back() {
         let original = Credentials {

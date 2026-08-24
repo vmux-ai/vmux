@@ -1,11 +1,5 @@
 use vmux_wire::command_bar::OpenId;
 
-/// The command bar's measured geometry, as the page last saw it.
-///
-/// One value rather than six arguments: every caller of
-/// [`CommandBarSizeEmissionState::should_emit`] passes the same six to
-/// [`CommandBarSizeEmissionState::mark_emitted`] straight after, and getting one of them out of
-/// order between the two calls would suppress an emission that should have happened.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarSize {
     pub width: u32,

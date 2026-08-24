@@ -11,8 +11,6 @@ pub struct ServiceClient(pub ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
-/// Non-async handle for Bevy systems to communicate with the service.
-/// Uses a background tokio task and std mpsc channels.
 pub struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
@@ -46,19 +44,16 @@ fn clean_service_files(sock: &std::path::Path) {
 }
 
 impl ServiceHandle {
-    /// Check if the service process is actually alive.
     pub fn service_running() -> bool {
         let paths = ServicePaths::current();
         let sock = paths.socket();
         if !sock.exists() {
             return false;
         }
-        // Check if the PID file references a live process
         let pid_file = paths.pid();
         let pid_str = match std::fs::read_to_string(&pid_file) {
             Ok(s) => s,
             Err(_) => {
-                // Socket exists but no PID file — stale state, clean up
                 tracing::warn!("socket exists but no PID file, cleaning up");
                 clean_service_files(&sock);
                 return false;
@@ -67,15 +62,12 @@ impl ServiceHandle {
         let pid: i32 = match pid_str.trim().parse() {
             Ok(p) => p,
             Err(_) => {
-                // Invalid PID file content — clean up
                 tracing::warn!(pid_file = ?pid_str.trim(), "invalid PID file content");
                 clean_service_files(&sock);
                 return false;
             }
         };
-        // kill(pid, 0) checks if process exists without sending a signal
         if unsafe { libc::kill(pid, 0) } != 0 {
-            // Process is dead — clean up stale files
             tracing::warn!(pid, "stale service — cleaning up");
             clean_service_files(&sock);
             return false;
@@ -115,13 +107,10 @@ impl ServiceHandle {
         true
     }
 
-    /// Connect to the service synchronously.
-    /// Returns `None` if the service is not running or connection fails.
     pub fn connect() -> Option<Self> {
         Self::connect_with_wake(None)
     }
 
-    /// Connect to the service synchronously, waking the owner when service messages arrive.
     pub fn connect_with_wake(wake: Option<ServiceWake>) -> Option<Self> {
         if !Self::service_running() {
             return None;
@@ -134,7 +123,6 @@ impl ServiceHandle {
             .ok()?;
         let rt = Arc::new(rt);
 
-        // Verify connection synchronously before returning
         let conn = {
             let rt2 = Arc::clone(&rt);
             let (tx, rx) = std::sync::mpsc::channel();
@@ -145,7 +133,6 @@ impl ServiceHandle {
                     let _ = tx.send(result);
                 })
                 .ok()?;
-            // Wait up to 2s for connection
             match rx.recv_timeout(std::time::Duration::from_secs(2)) {
                 Ok(Ok(c)) => Arc::new(c),
                 Ok(Err(e)) => {
@@ -163,7 +150,6 @@ impl ServiceHandle {
         let (msg_tx, msg_rx) = std::sync::mpsc::channel::<ServiceMessage>();
         let wake_pending = Arc::new(AtomicBool::new(false));
 
-        // Reader task: service -> msg_tx
         let conn_r = Arc::clone(&conn);
         let rt2 = Arc::clone(&rt);
         let reader_wake_pending = Arc::clone(&wake_pending);
@@ -193,7 +179,6 @@ impl ServiceHandle {
             })
             .ok()?;
 
-        // Writer task: cmd_rx -> service
         let rt3 = Arc::clone(&rt);
         std::thread::Builder::new()
             .name("service-writer".into())
@@ -216,22 +201,14 @@ impl ServiceHandle {
         })
     }
 
-    /// Send a command to the service (non-blocking).
     pub fn send(&self, msg: ClientMessage) {
         let _ = self.cmd_tx.send(msg);
     }
 
-    /// Drain a bounded batch of service messages (non-blocking).
     pub fn drain(&self) -> Vec<ServiceMessage> {
         self.drain_with_status().0
     }
 
-    /// Drain a bounded batch, also reporting whether the per-frame cap was hit.
-    ///
-    /// When the returned flag is `true` the channel filled the whole batch and
-    /// more messages likely remain; the caller must wake the event loop again so
-    /// the tail is processed on the next frame instead of stalling until the
-    /// reactive timeout.
     pub fn drain_with_status(&self) -> (Vec<ServiceMessage>, bool) {
         self.wake_pending.store(false, Ordering::Release);
         let rx = self.msg_rx.lock().unwrap();

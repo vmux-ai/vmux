@@ -1,8 +1,3 @@
-//! GUI-side ACP agent integration: the [`AcpSession`] component identifies an ACP agent
-//! pane, and [`AcpAgentPlugin`] forwards spawn/input/close to the daemon's
-//! `AcpSessionManager`. The streamed updates are consumed by the shared
-//! `consume_page_agent_stream` system (ACP reuses the Page stream messages).
-
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::{LastActivatedAt, event::InstallPhase};
@@ -141,9 +136,6 @@ impl AcpModelState {
     }
 }
 
-/// Progress, resolved launch spec, or terminal failure of a background agent install, keyed by
-/// session id. The resolved spec is turned into `SpawnAcpAgent` on the ECS side (which owns the
-/// non-clonable `ServiceClient`).
 enum InstallMsg {
     Progress {
         sid: String,
@@ -162,7 +154,6 @@ enum InstallMsg {
     },
 }
 
-/// Carries background-install updates from install threads back onto the Bevy schedule.
 #[derive(Resource)]
 struct AcpInstallChannel {
     tx: Sender<InstallMsg>,
@@ -196,8 +187,6 @@ impl Default for AcpInstallChannel {
     }
 }
 
-/// The ACP registry catalog, fetched once at startup and read by the launcher snapshot to show
-/// each agent's registry name + icon.
 #[derive(Resource, Default)]
 pub struct AcpCatalog {
     pub agents: Vec<crate::acp_registry::RegistryAgent>,
@@ -212,13 +201,11 @@ impl AcpInstallGeneration {
     }
 }
 
-/// One-shot receiver for the startup catalog fetch.
 #[derive(Resource)]
 struct AcpCatalogChannel {
     rx: Receiver<Vec<crate::acp_registry::RegistryAgent>>,
 }
 
-/// Kick a background thread that refreshes the registry (network, else cache) at startup.
 fn start_catalog_fetch(mut commands: Commands) {
     let (tx, rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
@@ -232,7 +219,6 @@ fn start_catalog_fetch(mut commands: Commands) {
     commands.insert_resource(AcpCatalogChannel { rx });
 }
 
-/// Move fetched catalog agents into the [`AcpCatalog`] resource when they arrive.
 fn receive_catalog(channel: Option<Res<AcpCatalogChannel>>, mut catalog: ResMut<AcpCatalog>) {
     let Some(channel) = channel else {
         return;
@@ -408,9 +394,6 @@ fn apply_acp_model_selection_result(
     }
 }
 
-/// ACP agents re-request permission every time, so "allow always" must be answered by the host:
-/// if the tool name is already in this session's auto-policy, reply `AllowAlways` without
-/// prompting.
 fn acp_auto_approval_message(
     session: &AcpSession,
     policy: &AgentApprovalPolicy,
@@ -446,14 +429,9 @@ fn auto_allow_acp_approval(
     service.0.send(message);
 }
 
-/// Marks an `AcpSession` whose install has already been kicked off, so
-/// [`install_acp_session_when_focused`] starts it exactly once.
 #[derive(Component)]
 pub(crate) struct AcpInstallStarted;
 
-/// Install (and spawn) an ACP agent only once its stack is actually focused — i.e. the user
-/// opened it. Background or restored agent tabs stay idle until visited, so vmux never installs
-/// an agent the user hasn't looked at.
 fn install_acp_session_when_focused(
     mut commands: Commands,
     mut q: Query<(Entity, &AcpSession, &mut AgentRunState), Without<AcpInstallStarted>>,
@@ -473,8 +451,6 @@ fn install_acp_session_when_focused(
             continue;
         }
         commands.entity(entity).insert(AcpInstallStarted);
-        // `settings.agent.acp` is the override / escape hatch: a matching entry runs as-is if the
-        // agent is absent from the registry (or unresolvable).
         let fallback = settings
             .agent
             .acp
@@ -538,9 +514,6 @@ fn install_acp_session_when_focused(
     }
 }
 
-/// Prepend a managed runtime `bin/` to the child's `PATH` (so e.g. `npx` finds its `node`). Prefers
-/// the `PATH` already assembled in `env` (the login-shell `PATH` merged by [`build_agent_env`]),
-/// falling back to this process's `PATH` only when `env` has none.
 fn apply_path_prepend(
     mut env: Vec<(String, String)>,
     prepend: Option<String>,
@@ -562,8 +535,6 @@ fn apply_path_prepend(
     env
 }
 
-/// Keep only the last occurrence of each key, preserving order — so the login-shell env (appended
-/// last) wins over the registry/config base for any shared key.
 fn dedup_env_keep_last(env: &mut Vec<(String, String)>) {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(env.len());
@@ -576,13 +547,6 @@ fn dedup_env_keep_last(env: &mut Vec<(String, String)>) {
     *env = out;
 }
 
-/// Assemble an ACP agent's spawn environment. The registry/config `base` is the floor; the captured
-/// login-shell env is layered on top so the user's exported API keys and real `PATH` reach the
-/// agent even when vmux was launched from Finder/launchd (which hands the daemon a minimal
-/// environment) rather than from a shell; finally the managed runtime `bin/` is prepended to the
-/// resulting `PATH`. Without this an ACP agent authenticating via an env-var API key reports
-/// "Authentication required" in release builds while working under `make` (where the daemon
-/// inherits the launching shell's environment). Mirrors the terminal's agent-spawn merge.
 fn build_agent_env(
     mut base: Vec<(String, String)>,
     login_env: &[(String, String)],
@@ -856,8 +820,6 @@ fn parse_codex_config(
     }
 }
 
-/// Drain background-install updates: reflect progress/failure onto the session run-state, and on
-/// a resolved spec send `SpawnAcpAgent` (success run-state is then driven by the daemon stream).
 fn drain_acp_installs(
     installs: Res<AcpInstallChannel>,
     service: Option<Res<ServiceClient>>,
@@ -933,9 +895,6 @@ fn drain_acp_installs(
     }
 }
 
-/// When the daemon reports the agent-assigned ACP session id, redirect the pane url to
-/// `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle) and record it on the session
-/// so a later reopen resumes via `session/load`.
 #[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentSessionCreated>,
@@ -965,11 +924,9 @@ fn apply_acp_session_created(
                 bevy::log::warn!("acp: failed to persist handoff metadata: {err}");
             }
             let url = format!("vmux://agent/{}/{}", session.agent_id, ev.acp_session_id);
-            // The stack's PageMetadata is what persists (space.ron) so a restart can resume.
             if stack_meta.url != url {
                 stack_meta.url = url.clone();
             }
-            // The child Browser's PageMetadata is what the tab strip + address bar read.
             if let Ok(kids) = children.get(stack) {
                 for kid in kids.iter() {
                     if let Ok(mut meta) = browser_meta.get_mut(kid)
@@ -983,10 +940,6 @@ fn apply_acp_session_created(
     }
 }
 
-/// An ACP agent created a terminal (`terminal/create`): the daemon already spawned the PTY, so open
-/// a visible pane beside the agent and **attach** it to `process_id` (never create a second PTY).
-/// Reuses an existing terminal region when present (stacks over splits) and keeps keyboard focus on
-/// the agent.
 #[allow(clippy::too_many_arguments)]
 fn apply_acp_terminal_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentAcpTerminalCreated>,

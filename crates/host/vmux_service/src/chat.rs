@@ -1,17 +1,7 @@
-//! Transcript grouping shared by every surface that renders a conversation.
-//!
-//! Folds a flat agent transcript ([`crate::message::Message`]) into rendered `ChatItem`s: user
-//! bubbles and grouped assistant turns. Pure and unit-tested — the brain for the dumb chat page
-//! (see the context-collapse design).
-
 use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_wire::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
 use vmux_wire::prompt_media::ChatSubmitAttachment;
 
-/// Group `messages` into `ChatItem`s: one `ChatItem::User` per user message, followed by one
-/// `ChatItem::Turn` per started turn. `durations[i]` is the finished seconds of the `i`-th
-/// emitted turn (by ordinal); out-of-range → `None`. When `running`, the last turn is marked
-/// live and forced to `duration_secs = None`.
 #[cfg(test)]
 pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Vec<ChatItem> {
     group_turns_page(&[], messages, durations, running, 0, usize::MAX).items

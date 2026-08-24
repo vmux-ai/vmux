@@ -22,9 +22,6 @@ fn window_off_all_monitors(window: IRect, monitors: &[IRect]) -> bool {
     monitors.iter().all(|m| m.intersect(window).is_empty())
 }
 
-/// When the monitor set changes (sleep/wake, unplug), recenter the primary window on the primary
-/// display if its frame no longer intersects any live monitor. With zero monitors (mid-sleep) there
-/// is nothing to place onto, so we wait for a monitor to reappear.
 fn relocate_window_to_live_display(
     monitors_added: Query<(), Added<Monitor>>,
     monitors_removed: RemovedComponents<Monitor>,

@@ -1,5 +1,3 @@
-//! Non-Unix filesystems, which carry neither POSIX mode bits nor symlinks.
-
 use std::path::Path;
 
 impl super::FileAttributes {

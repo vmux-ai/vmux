@@ -5,11 +5,6 @@ use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 use vmux_wire::error::ErrorPageData;
 
-/// What is shown where a page failed to open.
-///
-/// The failure arrives as a root context rather than over IPC: the host builds this page's
-/// `VirtualDom` and already knows what went wrong, so there is nothing to ask for and no first
-/// render with nothing to show.
 #[component]
 pub fn Page() -> Element {
     use_theme();

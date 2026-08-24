@@ -1,9 +1,3 @@
-//! Which project a conversation runs in, and what the composer says about it.
-//!
-//! The composer's context strip is pushed rather than polled, and the repository half of it comes
-//! from a cache another system fills — so this runs every frame but only emits when the answer
-//! actually changed, or when the page has just (re)mounted and has nothing yet.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
@@ -16,7 +10,6 @@ use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 
-/// The composer's project context, and the two controls that change it.
 pub(super) struct ChatWorkspacePlugin;
 
 impl Plugin for ChatWorkspacePlugin {
@@ -31,7 +24,6 @@ impl Plugin for ChatWorkspacePlugin {
     }
 }
 
-/// Everything the context strip is derived from, so an unchanged input can skip the derivation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ComposerContextInput {
     cwd: std::path::PathBuf,

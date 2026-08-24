@@ -1,8 +1,3 @@
-//! Serving history queries to the webview.
-//!
-//! Gated as a whole rather than item by item. The ranking above it is pure arithmetic and
-//! compiles everywhere.
-
 use crate::ranking::score;
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
@@ -16,8 +11,6 @@ use crate::event::{
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
-/// Answers the history page's queries, deletions and opens, and pushes the command bar its
-/// suggestions.
 pub struct HistoryQueryPlugin;
 
 impl Plugin for HistoryQueryPlugin {
@@ -186,11 +179,6 @@ fn on_history_open_request(
     });
 }
 
-/// Tell every open history page that what it is showing has changed.
-///
-/// Found by `PageMetadata` rather than `WebviewSource`: the page runs in this process now and has
-/// no source, so the old query matched nothing and the page rendered once and never again.
-/// `can_emit_to` for the same reason — a page with no CEF browser can still be emitted to.
 fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
     pages: Query<(Entity, &vmux_core::PageMetadata)>,

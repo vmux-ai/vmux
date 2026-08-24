@@ -1,4 +1,3 @@
-/// A `:` command line, parsed into a range and an action.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExCommand {
     Write,
@@ -18,7 +17,6 @@ pub enum ExCommand {
     },
 }
 
-/// The line span a command applies to, resolved against the buffer later.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ExRange {
     #[default]
@@ -32,7 +30,6 @@ fn parse_address(text: &str) -> Option<usize> {
     text.parse::<usize>().ok().map(|n| n.saturating_sub(1))
 }
 
-/// Split a leading range off the command line, returning it with the rest.
 fn split_range(input: &str) -> (Option<ExRange>, &str) {
     if let Some(rest) = input.strip_prefix('%') {
         return (Some(ExRange::WholeFile), rest);
@@ -57,7 +54,6 @@ fn split_range(input: &str) -> (Option<ExRange>, &str) {
     (Some(ExRange::Lines(first, first)), rest)
 }
 
-/// Split `s/pat/rep/flags` on its delimiter, honouring backslash escapes.
 fn split_substitute(body: &str) -> Option<(String, String, String)> {
     let mut chars = body.chars();
     let delim = chars.next()?;

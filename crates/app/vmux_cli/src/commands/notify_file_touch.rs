@@ -6,9 +6,6 @@ use vmux_client::protocol::{
     ServiceMessage,
 };
 
-/// Parse a tool-hook JSON payload (Claude PostToolUse / Vibe after_tool / Codex
-/// PostToolUse) into a file touch. `None` if it is not a file read/edit or
-/// carries no absolute path.
 pub fn parse_touch(v: &serde_json::Value) -> Option<(String, Option<u32>, FileTouchKind)> {
     let tool = v.get("tool_name").and_then(|t| t.as_str()).unwrap_or("");
     let input = v.get("tool_input")?;

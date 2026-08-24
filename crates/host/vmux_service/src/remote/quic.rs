@@ -1,16 +1,3 @@
-//! The only way a phone reaches this Mac.
-//!
-//! Two controls that came free from HTTP middleware had to be rebuilt, because a QUIC connection
-//! is long-lived where a request is not:
-//!
-//! - **The Remote kill switch.** Re-reading the state file per request meant turning Remote off
-//!   took effect immediately. A connection that authenticated once would outlive the switch, so a
-//!   single watcher closes every live peer instead. That same watcher is what [`Supervisor`] runs
-//!   the dialer from, so the switch decides whether this desktop is reachable at all rather than
-//!   only who is let in once it is.
-//! - **Request limits.** `receive_window` bounds what a peer can buffer before the dispatcher's own
-//!   size check runs — the job a request body limit used to do.
-
 pub mod dispatch;
 
 pub(crate) mod dialer;
@@ -29,17 +16,10 @@ use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 use vmux_remote::framing::{Frame, FrameError, FrameStream};
 use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType};
 
-/// How often the kill switch is re-read. Matches the HTTP path's in-stream recheck.
 const REMOTE_STATE_POLL: Duration = Duration::from_secs(1);
 
-/// Cap on a hello frame, so a peer cannot make the daemon buffer indefinitely before it has
-/// authenticated. Far above any legitimate hello.
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 
-/// Load the persisted identity, generating one on first use.
-///
-/// Reused across launches because the pairing link records the fingerprint; minting per start
-/// would unpair every phone on restart.
 pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     let remote = crate::RemotePaths::current();
     let cert_path = remote.certificate();
@@ -68,7 +48,6 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     Ok(identity)
 }
 
-/// Record the fingerprint beside the certificate, for readers that cannot hash a PEM.
 fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
     let path = crate::RemotePaths::current().fingerprint();
     if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
@@ -80,31 +59,20 @@ fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
     std::fs::write(&path, fingerprint)
 }
 
-/// The fingerprint of the certificate this desktop presents, for the pairing link.
-///
-/// Reads the persisted identity rather than the live listener, so the GUI can build a pairing
-/// link without reaching into the daemon's process.
 pub fn identity_fingerprint() -> Option<String> {
     let pem = std::fs::read_to_string(crate::RemotePaths::current().certificate()).ok()?;
     SelfSignedIdentity::fingerprint_of_pem(&pem).ok()
 }
 
-/// The names a phone might dial this desktop by. The certificate is pinned by fingerprint, so
-/// these are belt-and-braces rather than the trust decision.
 fn subject_alt_names() -> Vec<String> {
     vec!["localhost".to_string(), "127.0.0.1".to_string()]
 }
 
-/// Why a connection was turned away, so the peer is told rather than merely dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Rejection {
     Unauthorized,
     RemoteDisabled,
     Malformed,
-    /// The peer frames its streams in a layout this build cannot read.
-    ///
-    /// Distinct from [`Rejection::Malformed`] because it names a build that is merely old rather
-    /// than one sending rubbish, and only one of those is worth a bug report.
     UnsupportedFraming,
 }
 
@@ -127,11 +95,6 @@ impl From<FrameError> for Rejection {
     }
 }
 
-/// Decide whether a hello is acceptable, given the token and the current kill-switch state.
-///
-/// Separated from the I/O so the decision is testable without a socket, and so the order of the
-/// checks is visible: the kill switch first, then the secret. A peer learns nothing about the
-/// token from a `RemoteDisabled` answer.
 pub fn admit(
     presented_token: &str,
     expected_token: &str,
@@ -146,14 +109,6 @@ pub fn admit(
     Ok(Accepted {})
 }
 
-/// Watches the Remote kill switch, for everything whose lifetime it decides.
-///
-/// [`Supervisor`] starts and stops the relay dialer from this, and every live connection closes
-/// itself when it goes off. One task and one file read per second for the whole daemon, against
-/// the HTTP path's read per request plus a per-stream ticker.
-///
-/// Polling also settles the order the daemon and the desktop start in: whichever writes the switch
-/// second, the next tick reconciles to it.
 pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
     let (tx, rx) = watch::channel(super::server::remote_enabled());
     tokio::spawn(async move {
@@ -173,16 +128,10 @@ pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
     rx
 }
 
-/// Frames on the setup exchange, bounded so an unauthenticated peer cannot buffer without limit.
 const SETUP: FrameStream = FrameStream::new(MAX_HELLO_BYTES);
 
-/// Frames on a control or subscription stream, once the peer has authenticated.
 const CONTROL: FrameStream = FrameStream::new(MAX_REQUEST_BYTES);
 
-/// Read one setup frame, refusing anything that is not one.
-///
-/// A frame addressed to another leg is turned away here rather than decoded: a relay setup
-/// satisfies this message field for field, so the type has to be what decides.
 pub async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
     match SETUP.accept(stream).await {
         Ok(frame) => frame
@@ -192,7 +141,6 @@ pub async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, R
     }
 }
 
-/// Serve one accepted connection: exchange hellos, then dispatch its streams.
 async fn serve(
     connection: quinn::Connection,
     state: super::server::RemoteState,
@@ -246,26 +194,8 @@ async fn serve(
     }
 }
 
-/// Largest request frame accepted on a control stream.
-///
-/// Above the prompt cap so an oversized prompt is refused by the dispatcher with a reason rather
-/// than looking to the client like a broken connection — and well below the connection's window,
-/// because nothing a request carries is large. Attachments travel as paths validated against
-/// `$HOME`, never as bytes, so the biggest legitimate request is one full prompt and a handful of
-/// file names.
-///
-/// Derived rather than written out, because the invariant is the *relationship*: this used to be
-/// exactly [`RECEIVE_WINDOW`], so one max-size request could take the whole connection's
-/// allowance and stall the other sixty-three streams behind it.
 const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
 
-/// One request in, one response out, then the stream closes.
-///
-/// Every way this can fail resets the stream with a reason rather than dropping it. A dropped
-/// stream finishes clean and empty, which is exactly what a subscription to a session that does
-/// not exist looks like — so a peer could not tell "no such session" from "I could not read what
-/// you sent". Resetting is also per-stream: one bad request must not take the connection, which
-/// is what `connection.close` would do.
 async fn dispatch_control(
     state: super::server::RemoteState,
     mut send: quinn::SendStream,
@@ -278,8 +208,6 @@ async fn dispatch_control(
             return;
         }
     };
-    // Must stay ahead of the decode below: rejecting a foreign type afterwards would mean the
-    // decoder had already run on bytes this handler was never addressed by.
     match frame.message_type {
         MessageType::CONTROL_REQUEST | MessageType::SESSION_EVENTS => {}
         unserved => {
@@ -313,22 +241,12 @@ async fn dispatch_control(
     }
 }
 
-/// Turn one stream away with a reason, leaving the connection alone.
-///
-/// `stop` as well as `reset` so the peer stops writing a request nothing will read, rather than
-/// filling its send window against a stream that has already been answered.
 fn refuse(send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, rejection: Rejection) {
     let code = quinn::VarInt::from(rejection.close_code().as_u32());
     let _ = send.reset(code);
     let _ = recv.stop(code);
 }
 
-/// Push a session's events until the client goes away.
-///
-/// The client opens this stream and writes once; everything after flows the other way. That shape
-/// is deliberate: the relay only routes streams the *client* opens, so a desktop-initiated stream
-/// would work on a direct connection and vanish through the relay — a difference that would not
-/// show up until someone tested off their own network.
 async fn stream_session_events(
     state: &super::server::RemoteState,
     mut send: quinn::SendStream,
@@ -342,15 +260,11 @@ async fn stream_session_events(
         return;
     };
     let Some(mut events) = subscribe(state, &sid).await else {
-        // No such session. Closing empty says so without inventing an error frame.
         let _ = send.finish();
         return;
     };
-    // The stream announces its version once, on whichever event goes out first.
     let mut opened = false;
 
-    // Snapshot first, so a client that attaches mid-conversation renders the transcript it
-    // missed rather than only what happens next.
     if let Some(snapshot) = session_snapshot(state, &sid).await
         && write_event(&mut send, &snapshot, &mut opened)
             .await
@@ -362,8 +276,6 @@ async fn stream_session_events(
     loop {
         match events.recv().await {
             Ok(message) => {
-                // Only the shared half leaves the machine. Everything else a session emits —
-                // terminal output, proposed diffs, process lifecycle — is dropped here.
                 let ServiceMessage::Shared(event) = message else {
                     continue;
                 };
@@ -375,8 +287,6 @@ async fn stream_session_events(
                     return;
                 }
             }
-            // Lagged means the client fell behind and frames were dropped. Resending a snapshot
-            // is what the HTTP path did, and it beats a gap the client cannot detect.
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                 let Some(snapshot) = session_snapshot(state, &sid).await else {
                     return;
@@ -396,11 +306,6 @@ async fn stream_session_events(
     }
 }
 
-/// Replace the ACP status events with the session they imply.
-///
-/// A client renders a session's name, model and workspace from daemon state it has no other way
-/// to read, so forwarding the raw event would leave the card stale. The HTTP path resolved these
-/// the same way before serialising.
 async fn resolve(
     state: &super::server::RemoteState,
     sid: &str,
@@ -418,10 +323,6 @@ async fn resolve(
     }
 }
 
-/// One event, framed like everything else.
-///
-/// `opened` says whether this half of the stream has announced its version yet: a subscription
-/// sends many of these, and the version belongs to the stream rather than to each message.
 async fn write_event(
     send: &mut quinn::SendStream,
     event: &vmux_wire::protocol::SharedEvent,
@@ -463,11 +364,6 @@ async fn session_snapshot(
     }
 }
 
-/// An endpoint that terminates phone sessions arriving through the relay tunnel.
-///
-/// Same certificate and same server config a direct listener would have used — from the phone's
-/// side nothing about the TLS session differs, which is the point: the relay is carrying packets,
-/// not participating in them.
 pub(crate) fn inner_endpoint(
     socket: std::sync::Arc<vmux_remote::quic::tunnel::TunnelSocket>,
     identity: &SelfSignedIdentity,
@@ -482,7 +378,6 @@ pub(crate) fn inner_endpoint(
     .map_err(|error| format!("tunnel endpoint failed: {error}"))
 }
 
-/// Serve tunnelled connections until the control connection underneath them drops.
 pub(crate) async fn accept_loop(
     endpoint: quinn::Endpoint,
     state: super::server::RemoteState,
@@ -507,11 +402,6 @@ pub(crate) async fn accept_loop(
     }
 }
 
-/// Bind a real listener for a caller-supplied identity.
-///
-/// Test-only since the cutover: production is reached through the relay tunnel, never by being
-/// dialled. The tests keep binding a socket because driving `serve` over one is what proves the
-/// hello exchange and dispatch still work.
 #[cfg(test)]
 pub(crate) fn spawn_with_identity(
     state: super::server::RemoteState,
@@ -542,12 +432,6 @@ pub(crate) fn spawn_with_identity(
     Ok((handle, bound))
 }
 
-/// Drives the real listener over a real QUIC connection.
-///
-/// The tests above cover admission as a pure function and the dispatcher against a bare state.
-/// Neither would catch the failures that only appear once bytes move: a hello the server writes
-/// and a client cannot parse, a stream-kind byte that puts the frame off by one, or an rkyv buffer
-/// that arrives unaligned. This exercises handshake, hello, request and typed response.
 #[cfg(test)]
 mod live {
     use super::*;
@@ -579,11 +463,8 @@ mod live {
             ),
             client_ops: Arc::new(Mutex::new(Default::default())),
         };
-        // A throwaway certificate, so the test never writes into the user's profile directory.
         let identity = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
         let fingerprint = identity.fingerprint.clone();
-        // Liveness is injected rather than read from disk: a test must not be able to flip the
-        // user's real Remote setting, and leaking that write would do exactly that.
         let (_liveness_tx, liveness_rx) = tokio::sync::watch::channel(true);
         std::mem::forget(_liveness_tx);
         let (handle, address) = spawn_with_identity(
@@ -593,7 +474,6 @@ mod live {
             liveness_rx,
         )
         .expect("listener");
-        // Kept alive for the process; each test binds its own ephemeral port.
         std::mem::forget(handle);
         Harness {
             address,
@@ -654,17 +534,12 @@ mod live {
         rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(body).expect("decode")
     }
 
-    /// Read the first event off a subscription stream, version byte and all.
     async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_wire::protocol::SharedEvent> {
         let frame = CONTROL.accept(recv).await.ok()?;
         let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
         rkyv::from_bytes::<vmux_wire::protocol::SharedEvent, rkyv::rancor::Error>(body).ok()
     }
 
-    /// Subscribing to a session that does not exist must close the stream rather than hang.
-    ///
-    /// A client waiting forever on a dead subscription is the failure mode that looks like a
-    /// network problem and is not, so it is worth pinning down.
     #[tokio::test]
     async fn subscribing_to_an_unknown_session_closes_rather_than_hangs() {
         let harness = start("correct-token");
@@ -696,11 +571,6 @@ mod live {
         );
     }
 
-    /// A well-formed frame carrying a type this handler does not serve must not be answered as if
-    /// it were a control request. The message type is the only thing separating a request from a
-    /// subscription, or from another leg's traffic entirely — which is why it is on the wire.
-    ///
-    /// The body is a perfectly good `ListSessions`, so nothing but the type can refuse it.
     #[tokio::test]
     async fn a_frame_of_a_foreign_type_is_not_answered_as_a_control_request() {
         let harness = start("correct-token");
@@ -743,16 +613,12 @@ mod live {
             .expect("handshake should succeed");
         let response = request(&connection, SharedMessage::ListSessions).await;
 
-        // No sessions running, so the list is empty — but it is a *typed* empty list, which is
-        // the point: the frame round-tripped through rkyv in both directions.
         assert!(
             matches!(response, SharedResponse::Sessions(ref sessions) if sessions.is_empty()),
             "expected a typed session list, got {response:?}"
         );
     }
 
-    /// The token is the whole access control, so a wrong one must not merely fail — it must close
-    /// with a code the client can act on.
     #[tokio::test]
     async fn a_wrong_token_is_closed_with_unauthorized() {
         let harness = start("correct-token");
@@ -767,8 +633,6 @@ mod live {
         }
     }
 
-    /// Requests are independent streams on one connection, so a second costs no handshake. Were
-    /// they ever serialised onto a single stream this would hang rather than merely slow down.
     #[tokio::test]
     async fn one_connection_serves_repeated_requests() {
         let harness = start("correct-token");
@@ -796,8 +660,6 @@ mod tests {
         assert_eq!(admit("guess", "secret", true), Err(Rejection::Unauthorized));
     }
 
-    /// The kill switch outranks the secret, so flipping Remote off refuses even a correctly
-    /// paired phone.
     #[test]
     fn remote_switched_off_outranks_a_valid_token() {
         assert_eq!(

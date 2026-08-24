@@ -26,7 +26,6 @@ pub struct ArchivedPagePosition {
     pub pane_path: Vec<PaneStep>,
 }
 
-/// Membership and tab metadata for a page archived by a whole-tab close.
 #[derive(Component, Clone, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[require(Save)]

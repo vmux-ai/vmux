@@ -115,8 +115,6 @@ pub fn application_data_dir() -> PathBuf {
     }
 }
 
-/// User config directory: `~/.vmux`. Holds `settings.ron` (and per-build
-/// overrides), separate from the profile-isolated [`shared_data_dir`].
 pub fn config_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -124,14 +122,10 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
-/// Default root for repositories and local projects managed through vmux.
 pub fn workspace_dir() -> PathBuf {
     config_dir().join("workspace")
 }
 
-/// Default output directory for screenshots and screen recordings below the
-/// active runtime profile. Overridable via the
-/// `recording.output_dir` setting.
 fn recording_dir_for(data: &std::path::Path, profile: &str) -> PathBuf {
     data.join("profiles").join(profile).join("recording")
 }
@@ -140,7 +134,6 @@ pub fn recording_dir() -> PathBuf {
     recording_dir_for(&shared_data_dir(), &active_profile_name())
 }
 
-/// Per-build config subdir, or `None` for the shared (release) settings.
 fn config_suffix() -> Option<&'static str> {
     match build_profile() {
         "release" | "local" => None,
@@ -157,14 +150,10 @@ fn settings_candidates_in(base: &std::path::Path, suffix: Option<&str>) -> Vec<P
     candidates
 }
 
-/// Settings files in priority order: the per-build override first (e.g.
-/// `~/.vmux/dev/settings.ron`), then the shared `~/.vmux/settings.ron`.
 pub fn settings_path_candidates() -> Vec<PathBuf> {
     settings_candidates_in(&config_dir(), config_suffix())
 }
 
-/// The settings file to read/write: the first candidate that exists, falling
-/// back to the shared `~/.vmux/settings.ron` when none exist yet.
 pub fn settings_path() -> PathBuf {
     let candidates = settings_path_candidates();
     candidates
@@ -193,25 +182,6 @@ pub fn cef_cache_path() -> Option<String> {
     profile_dir().to_str().map(|s| s.to_owned())
 }
 
-/// CEF command-line switches selecting how cookies and passwords are encrypted
-/// at rest.
-///
-/// On macOS the encryption key lives in the login Keychain under the shared,
-/// framework-default `Chromium Safe Storage` item (CEF exposes no way to rename
-/// it), and access is gated by the requesting binary's code-signing identity.
-/// All interactive builds — `dev`, `local`, and `release` — use the real
-/// Keychain (no switches) so saved credentials stay securely encrypted.
-/// Persistence across updates relies on a stable signing identity: Developer-ID
-/// for `release`/`local`, and the reused self-signed `Vmux Dev` certificate that
-/// `make dev` applies. Both yield a designated requirement that survives
-/// rebuilds, so access sticks after a one-time "Always Allow" per identity.
-///
-/// Automated test sessions (`VMUX_TEST`) instead pass `use-mock-keychain`, which
-/// derives the key from a constant. Those runs are often headless (no one to
-/// approve the Keychain prompt) and use throwaway, frequently ad-hoc-signed
-/// profiles whose changing identity would otherwise churn the ACL of the shared
-/// item real logins depend on. Weak at-rest encryption is irrelevant for
-/// disposable test data.
 pub fn cef_keychain_switches() -> &'static [&'static str] {
     cef_keychain_switches_for(is_test_session())
 }
@@ -365,9 +335,6 @@ fn migrate_legacy_personal_layout_in(
     let _ = std::fs::remove_dir(config.join("profiles"));
 }
 
-/// Relocate generated profile and managed-package data out of the Vault and
-/// remove empty directories from the retired filesystem-backed spaces layout.
-/// Skipped for test sessions.
 pub fn migrate_legacy_personal_layout() {
     if is_test_session() {
         return;

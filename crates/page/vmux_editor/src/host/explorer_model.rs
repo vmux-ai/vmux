@@ -1,15 +1,8 @@
-//! Pure, host-testable builders for the Explorer panel view-models: file-tree
-//! flattening, open-editors list ops, markdown outline, and LSP symbol
-//! flattening. State lives in the native plugin; these functions turn it into
-//! the render-ready rows pushed to the dumb Dioxus page.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use vmux_core::event::{FileDirEntry, OutlineRow, TreeRow};
 
-/// Depth-first flatten of the cached directory tree into the visible rows.
-/// Only directories present in `expanded` have their (cached) children inlined.
 pub fn flatten_tree(
     root: &Path,
     expanded: &HashSet<PathBuf>,
@@ -49,30 +42,22 @@ fn walk(
     }
 }
 
-/// Append `path` to the session open-editors list if not already present,
-/// preserving open order (matches VS Code's behaviour).
 pub fn note_open(list: &mut Vec<PathBuf>, path: &Path) {
     if !list.iter().any(|p| p.as_path() == path) {
         list.push(path.to_path_buf());
     }
 }
 
-/// Remove `path` from the open-editors list; a no-op if absent.
 pub fn close(list: &mut Vec<PathBuf>, path: &Path) {
     list.retain(|p| p.as_path() != path);
 }
 
-/// Whether `path` is a markdown file (outline comes from the heading scanner
-/// rather than LSP `documentSymbol`).
 pub fn is_markdown(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
-/// Parse markdown ATX headings (`#`..`######`) into outline rows, ignoring
-/// headings inside fenced code blocks. `kind = 15` is the LSP `String` symbol
-/// kind (the `abc` glyph); `depth = heading level - 1`.
 pub fn markdown_outline(text: &str) -> Vec<OutlineRow> {
     let mut out = Vec::new();
     let mut in_fence = false;
@@ -98,9 +83,6 @@ pub fn markdown_outline(text: &str) -> Vec<OutlineRow> {
     out
 }
 
-/// Flatten an LSP `textDocument/documentSymbol` response into outline rows.
-/// Handles both the hierarchical `DocumentSymbol[]` shape (recursing
-/// `children`) and the flat `SymbolInformation[]` shape (`location`).
 pub fn flatten_symbols(value: &serde_json::Value) -> Vec<OutlineRow> {
     let mut out = Vec::new();
     if let Some(arr) = value.as_array() {

@@ -1,7 +1,3 @@
-//! Hex decoding for keys handed between the app and the macOS key broker over a
-//! pipe. Only the macOS path uses it, but it is compiled under `test` on every
-//! platform so CI exercises the encoding away from the Keychain.
-
 use crate::vault::{KEY_LEN, validate_key};
 
 pub(super) fn decode_key_hex(value: &str) -> Result<Vec<u8>, String> {

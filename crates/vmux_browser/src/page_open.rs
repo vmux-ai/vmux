@@ -1,9 +1,3 @@
-//! Resolving a page-open request to the thing that should answer it.
-//!
-//! A request arrives naming a URL, passes through whoever claims to own that host, and falls
-//! back to a CEF webview when nobody does. The stages are ordered by [`PageOpenSet`], so a
-//! handler that claims a page always runs before the fallback that would open it blindly.
-
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use vmux_wire::error::ErrorPageData;
 

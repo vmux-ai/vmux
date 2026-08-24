@@ -1,8 +1,3 @@
-//! What a page shows in a tab strip or a bookmark: its title, URL, icon and background colour.
-//!
-//! Portable, so the web bundle can render it; the `Component` and `Reflect` derives are the only
-//! part that needs a host.
-
 #[cfg(host)]
 use bevy::prelude::*;
 

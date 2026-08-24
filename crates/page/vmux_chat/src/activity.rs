@@ -1,9 +1,3 @@
-//! Tool classification and the activity iconography every transcript row shares.
-//!
-//! Desktop and mobile previously each had their own `tool_presentation`, which is why the same
-//! `mcp__vmux__run` call rendered as "Ran commands" in one client and "mcp vmux run" in the
-//! other. This is the single implementation.
-
 use crate::event::{ChatBlock, ChatItem};
 use dioxus::prelude::*;
 use vmux_ui::file_icon::{FileIcon, FilePath, TypeIcon};
@@ -11,7 +5,6 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_wire::chat::ToolName;
 
-/// The glyph standing in for a kind of agent activity.
 #[component]
 pub fn ActivityIconView(kind: ActivityIcon) -> Element {
     if kind == ActivityIcon::Thinking {
@@ -95,7 +88,6 @@ pub fn ActivityIconView(kind: ActivityIcon) -> Element {
     }
 }
 
-/// A file's own icon, tinted by whether the agent read it or wrote it.
 #[component]
 pub fn FileActivityIcon(path: String, write: bool) -> Element {
     let tone = if write {
@@ -110,7 +102,6 @@ pub fn FileActivityIcon(path: String, write: bool) -> Element {
     }
 }
 
-/// A tool call's icon: the file it touches when it names one, else the activity glyph.
 #[component]
 pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> Element {
     let activity = ToolActivity::of(&name);
@@ -128,7 +119,6 @@ pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> E
     rsx! { ActivityIconView { kind: fallback } }
 }
 
-/// How a tool call announces itself in the transcript.
 pub struct ToolPresentation {
     pub icon: ActivityIcon,
     pub label: String,
@@ -159,7 +149,6 @@ impl ToolPresentation {
     }
 }
 
-/// What kind of work a tool call represents, before any glyph is chosen for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolActivity {
     Guardian,
@@ -177,7 +166,6 @@ pub enum ToolActivity {
 }
 
 impl ToolActivity {
-    /// Classify by name, since that is all every agent reliably gives us.
     pub fn of(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         if ToolName(name).is_guardian() {
@@ -234,7 +222,6 @@ impl ToolActivity {
         }
     }
 
-    /// The glyph for this activity, ignoring anything the arguments might say.
     pub fn icon(self) -> ActivityIcon {
         match self {
             Self::Guardian => ActivityIcon::Guardian,
@@ -287,7 +274,6 @@ fn tool_args_read_skill(args: &str) -> bool {
     skill_path(&value)
 }
 
-/// The glyph standing in for a kind of agent activity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActivityIcon {
     Thinking,
@@ -316,9 +302,6 @@ pub enum ActivityIcon {
 }
 
 impl ActivityIcon {
-    /// The glyph for a tool call, preferring what the arguments say over what the name does.
-    ///
-    /// A `run` that executes Python is a Python call first and a command second.
     pub fn for_tool(name: &str, args: &str) -> Self {
         if let Some(icon) = Self::for_language(args) {
             return icon;
@@ -329,15 +312,11 @@ impl ActivityIcon {
         ToolActivity::of(name).icon()
     }
 
-    /// The glyph for a language named anywhere in `value`, if it is one we draw.
     pub fn for_language(value: &str) -> Option<Self> {
         let lower = value.to_ascii_lowercase();
         (lower.contains(".py") || lower == "py" || lower.contains("python")).then_some(Self::Python)
     }
 
-    /// The shared outline this activity draws, when it is one of the generic glyphs.
-    ///
-    /// `Python` has none: it is a two-tone brand mark drawn by [`ActivityIconView`] itself.
     pub fn line_icon(self) -> Option<LineIcon> {
         let icon = match self {
             Self::Python => return None,
@@ -366,7 +345,6 @@ impl ActivityIcon {
         Some(icon)
     }
 
-    /// The SVG path data drawn inside the glyph's box.
     pub fn current(items: &[ChatItem], status: &str) -> Option<Self> {
         match status {
             "installing" => Some(Self::Installing),
@@ -436,7 +414,6 @@ impl ActivityIcon {
     }
 }
 
-/// The file a tool call names, from its arguments as JSON or as raw text.
 fn tool_file_path(args: &str) -> Option<String> {
     if let Ok(value) = serde_json::from_str(args)
         && let Some(path) = file_path_from_value(&value)
@@ -508,7 +485,6 @@ mod tests {
         assert_eq!(ToolActivity::of("custom_tool"), ToolActivity::Other);
     }
 
-    /// The arguments outrank the name: a `run` that executes Python is a Python call.
     #[test]
     fn a_tool_icon_prefers_the_language_in_its_arguments() {
         assert_eq!(

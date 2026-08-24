@@ -1,15 +1,11 @@
 use bevy::prelude::*;
 use std::path::PathBuf;
 
-/// Marker on a follow-pane: the clean previews awaiting the user's answer to the in-UI
-/// tidy banner (`FileTidyPromptEvent` shown, `FileTidyActionEvent` pending).
 #[derive(Component)]
 pub(crate) struct PendingTidy {
     pub closable: Vec<Entity>,
 }
 
-/// Absolute filesystem path from a `file://` URL: strips the scheme and any
-/// `#fragment`, then percent-decodes. `None` for non-`file:` or empty paths.
 pub(crate) fn path_from_file_url(url: &str) -> Option<PathBuf> {
     let rest = url
         .strip_prefix("file://")
@@ -50,9 +46,6 @@ fn hex(b: u8) -> Option<u8> {
     }
 }
 
-/// Given `(stack, last_activated, changed)` for every file preview in a pane and
-/// the tidy threshold, the stacks to close: clean, not the active (max
-/// last_activated) one. Empty if at/below threshold or nothing is closable.
 pub(crate) fn decide_closable(stacks: &[(Entity, i64, bool)], max: usize) -> Vec<Entity> {
     if stacks.len() <= max {
         return Vec::new();
@@ -68,8 +61,6 @@ pub(crate) fn decide_closable(stacks: &[(Entity, i64, bool)], max: usize) -> Vec
         .collect()
 }
 
-/// Whether `abs` is git-changed. Memoizes `(repo_root, changed_set)` per repo in
-/// `repos`. Files outside any repo (or that error) are treated as clean.
 pub(crate) fn is_changed(
     abs: &std::path::Path,
     repos: &mut Vec<(PathBuf, std::collections::HashSet<String>)>,
@@ -132,7 +123,6 @@ mod tests {
     fn decide_closable_keeps_changed_and_active() {
         let mut w = World::new();
         let ids: Vec<Entity> = (0..6).map(|_| w.spawn_empty().id()).collect();
-        // active = ids[5] (max ts); changed = ids[1], ids[3]; keep those, close the rest.
         let stacks = vec![
             (ids[0], 10, false),
             (ids[1], 20, true),

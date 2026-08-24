@@ -5,92 +5,12 @@ pub struct Doc {
     pub content: &'static str,
 }
 
-pub const DOCS: &[Doc] = &[
-    Doc {
-        slug: "experience",
-        title: "UX Philosophy",
-        group: "Overview",
-        content: include_str!("../../docs/experience.md"),
-    },
-    Doc {
-        slug: "architecture",
-        title: "Architecture",
-        group: "Overview",
-        content: include_str!("../../docs/architecture.md"),
-    },
-    Doc {
-        slug: "why-rust-cef",
-        title: "Why Rust + CEF",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/why-rust-cef.md"),
-    },
-    Doc {
-        slug: "rust-without-the-headaches",
-        title: "Rust for React JS developers",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/rust-without-the-headaches.md"),
-    },
-    Doc {
-        slug: "built-to-scale",
-        title: "ECS, explained",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/built-to-scale.md"),
-    },
-    Doc {
-        slug: "plugins",
-        title: "Plugins",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/plugins.md"),
-    },
-    Doc {
-        slug: "agent-first",
-        title: "MCP Integration",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/agent-first.md"),
-    },
-    Doc {
-        slug: "background-service",
-        title: "Background Service",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/background-service.md"),
-    },
-    Doc {
-        slug: "layout-model",
-        title: "Layout",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/layout-model.md"),
-    },
-    Doc {
-        slug: "render-stack",
-        title: "2D / 3D renderer",
-        group: "Architecture",
-        content: include_str!("../../docs/architecture/render-stack.md"),
-    },
-    Doc {
-        slug: "pages",
-        title: "Pages",
-        group: "Pages",
-        content: include_str!("../../docs/architecture/pages.md"),
-    },
-    Doc {
-        slug: "browser",
-        title: "Browser",
-        group: "Pages",
-        content: include_str!("../../docs/architecture/browser.md"),
-    },
-    Doc {
-        slug: "terminal",
-        title: "Terminal",
-        group: "Pages",
-        content: include_str!("../../docs/architecture/terminal.md"),
-    },
-    Doc {
-        slug: "editor",
-        title: "Editor",
-        group: "Pages",
-        content: include_str!("../../docs/architecture/editor.md"),
-    },
-];
+pub const DOCS: &[Doc] = &[Doc {
+    slug: "architecture",
+    title: "Architecture",
+    group: "Overview",
+    content: include_str!("../../docs/architecture.md"),
+}];
 
 pub fn find(slug: &str) -> Option<&'static Doc> {
     DOCS.iter().find(|d| d.slug == slug)

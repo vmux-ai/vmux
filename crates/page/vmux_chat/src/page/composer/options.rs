@@ -1,10 +1,3 @@
-//! What the turn will run as: which model, how hard it is asked to think, and what it may do
-//! without asking.
-//!
-//! A pill and the menu it opens are one control, so they are described together — the model pill
-//! opens `/model` over the prompt and the effort pill opens its own popover, but either way the
-//! reader is choosing one setting.
-
 use crate::event::{ModelOptionEntry, SetAgentEffort};
 use crate::page::state::Chat;
 use dioxus::prelude::*;
@@ -13,7 +6,6 @@ use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-/// The model in use on this page.
 #[component]
 pub(super) fn ChatModelPill(chat: Chat) -> Element {
     let mut draft = chat.composer.draft;
@@ -30,11 +22,6 @@ pub(super) fn ChatModelPill(chat: Chat) -> Element {
     }
 }
 
-/// The model in use, which clicking swaps by opening `/model`.
-///
-/// Opening the picker is a draft edit, not a menu the button owns, so the caller decides what
-/// `/model ` means to it. Both clients type into a composer and filter a popup off the draft, so
-/// both get here the same way.
 #[component]
 pub fn ModelPill(name: String, on_open: EventHandler<()>) -> Element {
     if name.is_empty() {
@@ -70,7 +57,6 @@ pub fn ModelPill(name: String, on_open: EventHandler<()>) -> Element {
     }
 }
 
-/// The models this page offers, narrowed by what follows `/model` in its draft.
 #[component]
 pub(super) fn ChatModelMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
@@ -86,10 +72,6 @@ pub(super) fn ChatModelMenu(chat: Chat) -> Element {
     }
 }
 
-/// A filtered list of models to pick from, over the prompt.
-///
-/// Already-filtered rather than filtering here, because what narrows the list is the draft, and
-/// the draft belongs to whoever owns the composer.
 #[component]
 pub fn ModelMenu(
     models: Vec<ModelOptionEntry>,
@@ -130,7 +112,6 @@ pub fn ModelMenu(
     }
 }
 
-/// How hard this page's agent is asked to think.
 #[component]
 pub(super) fn ChatEffortMenu(chat: Chat) -> Element {
     let mut current = chat.effort.current;
@@ -148,10 +129,6 @@ pub(super) fn ChatEffortMenu(chat: Chat) -> Element {
     }
 }
 
-/// How hard the agent is asked to think, for the agents that expose the choice.
-///
-/// Owns whether its popover is open, which is nobody else's business — the caller only says what
-/// the levels are and what picking one means.
 #[component]
 pub fn EffortMenu(
     levels: Vec<String>,
@@ -225,11 +202,8 @@ pub fn EffortMenu(
     }
 }
 
-/// One effort level, or `None` for letting the agent decide.
 #[component]
 fn EffortOption(level: Option<String>, selected: bool, on_pick: EventHandler<String>) -> Element {
-    // A level is a lowercase id from the agent, so it is title-cased for display; the default
-    // label is already prose in whichever locale it was translated into.
     let (label, label_class) = match &level {
         Some(level) => (level.clone(), "min-w-0 flex-1 truncate capitalize"),
         None => (translate("agent-effort-default"), "min-w-0 flex-1 truncate"),
@@ -250,7 +224,6 @@ fn EffortOption(level: Option<String>, selected: bool, on_pick: EventHandler<Str
     }
 }
 
-/// How many tools this session may run without asking.
 #[component]
 pub(super) fn AccessPill(chat: Chat) -> Element {
     let auto_allow_count = chat.slash.composer_context.read().auto_allow_count;

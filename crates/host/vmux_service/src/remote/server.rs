@@ -1,13 +1,3 @@
-//! What Remote is made of, minus the transport.
-//!
-//! There is no server here any more — the axum listener this file was named for is gone, and a
-//! desktop behind NAT could never have been reached by one. [`spawn`] mints the token, builds the
-//! state, and hands it to `quic`, whose supervisor dials the relay whenever Remote is switched on.
-//!
-//! What remains is everything that is true regardless of transport: the shared [`RemoteState`],
-//! replay dedup, the limits on prompts and attachments, and the `$HOME`-confined media walk.
-//! `quic/dispatch.rs` is the only caller.
-
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,11 +60,6 @@ impl ClientOpDeduper {
     }
 }
 
-/// Mint the token, build the shared state, and hand it to the supervisor that watches the switch.
-///
-/// This runs with the daemon rather than with Remote: the token has to exist before the desktop
-/// can offer to pair, and the switch has to be watched before it can be flipped. Nothing dials
-/// out until it is on.
 pub fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
@@ -110,13 +95,6 @@ fn remote_enabled_at(path: &std::path::Path) -> bool {
     std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled")
 }
 
-/// Ask the GUI for something only it holds, keeping the shape of its answer.
-///
-/// The daemon and the ECS are separate processes, so anything derived from ECS state costs a
-/// round-trip rather than a read.
-///
-/// `None` means no GUI answered. That is distinct from a GUI that answered `Ok` with no payload,
-/// and collapsing the two once reported a created chat as a missing desktop.
 pub(crate) async fn broker_result(
     state: &RemoteState,
     command: crate::protocol::AgentCommand,
@@ -166,10 +144,6 @@ pub(crate) fn secure_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
-/// A replay key the deduper is willing to hold.
-///
-/// It is remembered until 4096 newer ones push it out, so an unbounded one is retained memory the
-/// sender chooses the size of. The prompt cap does not cover this — it measures the text.
 pub(crate) fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
     let value = client_op_id.as_str();
     !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES

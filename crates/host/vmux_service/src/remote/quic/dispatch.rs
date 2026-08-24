@@ -1,10 +1,3 @@
-//! The single place a remote request turns into an action.
-//!
-//! The HTTP path spread this across nine handlers, each resolving `sid` and pushing into a
-//! registry itself. That was six separate calls into `AcpInput`/`SessionInput`, so every limit —
-//! prompt size, replay dedup, attachment confinement — had to be remembered at each one. Here
-//! there is one entry point, so a control that is applied once is applied everywhere.
-
 use vmux_wire::protocol::{
     AgentAction, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
 };
@@ -14,10 +7,6 @@ use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
 use crate::acp::AcpInput;
 use crate::agent::SessionInput;
 
-/// Turn one request into one response.
-///
-/// Every branch that mutates a session funnels through [`push_input`], and every branch that
-/// needs the GUI funnels through the broker, so there is no path that skips a check.
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
     match request {
         SharedMessage::ListSessions => SharedResponse::Sessions(sessions(state).await),
@@ -25,7 +14,6 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
         SharedMessage::Agent { sid, action } => agent(state, &sid, action).await,
 
         SharedMessage::AgentCommand(command) => {
-            // Only the chat-creating command is not idempotent, so only it needs a claim.
             let Some(client_op_id) = new_chat_op_id(&command) else {
                 return broker(state, command).await;
             };
@@ -37,8 +25,6 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             }
             let response = broker(state, command).await;
             if matches!(response, SharedResponse::Failed(_)) {
-                // Released so a genuine failure stays retryable; without this a dropped GUI would
-                // burn the id and the client could never try again.
                 release(state, &client_op_id).await;
             }
             response
@@ -46,12 +32,6 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     }
 }
 
-/// Everything addressed to one session, after its id has been split off.
-///
-/// Deliberately does *not* look the session up before dispatching. A prompt is size-checked
-/// first, so an oversized one is refused without touching a registry — otherwise the cheap
-/// rejection would sit behind two mutex acquisitions, and a peer could probe which session ids
-/// exist by watching which oversized prompts answer `NotFound` instead of `Invalid`.
 async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedResponse {
     match action {
         AgentAction::Attach => {
@@ -90,7 +70,6 @@ async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedRes
             if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
                 return SharedResponse::Failed(SharedFailure::Invalid);
             }
-            // The filesystem walk confines itself to $HOME; blocking, so off the reactor.
             match tokio::task::spawn_blocking(move || {
                 super::super::server::remote_media_entries(&query)
             })
@@ -103,7 +82,6 @@ async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedRes
     }
 }
 
-/// Sessions from both registries, titled from their transcripts, newest first.
 async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
     let mut sessions = state.agents.lock().await.remote_sessions();
     sessions.extend(state.acp.lock().await.remote_sessions());
@@ -120,8 +98,6 @@ async fn session_exists(state: &RemoteState, sid: &str) -> bool {
     state.acp.lock().await.contains(sid) || state.agents.lock().await.remote_session(sid).is_some()
 }
 
-/// ACP first, then page agents — the same order the HTTP handlers resolved in, so a session id
-/// that lives in both keeps resolving to the same one.
 async fn push_input(
     state: &RemoteState,
     sid: &str,
@@ -177,13 +153,10 @@ fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
     }
 }
 
-/// Ask the GUI. `NoDesktop` rather than a generic error, because that one resolves on its own as
-/// soon as a window is open and a client should retry rather than surface it as broken.
 async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedResponse {
     use crate::protocol::AgentCommandResult;
     match super::super::server::broker_result(state, command.into()).await {
         Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
-        // A command the GUI carries out without answering, such as opening a new chat. It ran.
         Some(AgentCommandResult::Ok) | Some(AgentCommandResult::Layout(_)) => SharedResponse::Ok,
         Some(AgentCommandResult::Error(message)) => {
             tracing::warn!(%message, "remote quic: the GUI refused a brokered command");
@@ -193,8 +166,6 @@ async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedRespo
     }
 }
 
-/// Claim a `client_op_id`, so a retry after a dropped connection does not run the operation
-/// twice. Released on every failure path, or a failed op could never be retried.
 async fn claim_once(state: &RemoteState, client_op_id: &ClientOpId) -> bool {
     state.client_ops.lock().await.claim(client_op_id.clone())
 }
@@ -210,8 +181,6 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use tokio::sync::{Mutex, broadcast};
 
-    /// No sessions and no GUI attached — enough to exercise every check that runs before a
-    /// registry lookup, which is where the limits live.
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);
         RemoteState {
@@ -240,8 +209,6 @@ mod tests {
         )
     }
 
-    /// The cap has to be enforced here rather than at the transport, because `receive_window`
-    /// bounds buffering but says nothing about a single legitimate-looking frame.
     #[tokio::test]
     async fn an_oversized_prompt_is_refused_before_any_session_lookup() {
         let state = empty_state();
@@ -253,8 +220,6 @@ mod tests {
             over,
             SharedResponse::Failed(SharedFailure::Invalid)
         ));
-        // No such session, so this gets as far as the lookup and fails differently — which is the
-        // point: the size check is not what rejected it.
         assert!(matches!(
             under,
             SharedResponse::Failed(SharedFailure::NotFound)
@@ -284,7 +249,6 @@ mod tests {
         ));
     }
 
-    /// A client needs to tell "this will never work" from "try again once a window is open".
     #[tokio::test]
     async fn a_broker_request_with_no_desktop_attached_says_so() {
         let state = empty_state();
@@ -325,9 +289,6 @@ mod tests {
         }
     }
 
-    /// A claimed id is retained until 4096 newer ones evict it, so its length is memory the
-    /// sender chooses. The HTTP handlers used to bound it; deleting them moved the check here,
-    /// and the second assertion is the point — refusing after the claim would still retain it.
     #[tokio::test]
     async fn an_unbounded_client_op_id_is_refused_before_it_is_claimed() {
         let state = empty_state();
@@ -353,7 +314,6 @@ mod tests {
         );
     }
 
-    /// Replay protection is what makes a retry after a dropped connection safe.
     #[tokio::test]
     async fn a_client_op_id_can_only_be_claimed_once_but_is_reusable_after_release() {
         let state = empty_state();

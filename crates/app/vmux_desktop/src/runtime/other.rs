@@ -1,10 +1,5 @@
-//! Non-macOS runtime. There is no AppKit event monitor to install and nothing owns the
-//! pointer behind winit's back, so activation and wake systems are no-ops and every frame
-//! is rendered.
-
 use bevy::prelude::*;
 
-/// The non-macOS half of [`super::RuntimePlugin`]: every system it registers is a no-op except render demand, which is always on.
 pub(super) struct RuntimePlatformPlugin;
 
 impl Plugin for RuntimePlatformPlugin {

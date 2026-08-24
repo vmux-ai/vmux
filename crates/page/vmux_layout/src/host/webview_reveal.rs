@@ -1,10 +1,3 @@
-//! Generic anti-flash reveal for newly-spawned webviews.
-//!
-//! When a `WebviewSource` is added to an entity, hide it via
-//! `Visibility::Hidden` and start a frame counter. After a few frames
-//! Bevy's UI layout has run and bevy_cef has resized the underlying CEF
-//! webview.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::WebviewSource;
 
@@ -20,13 +13,9 @@ impl Plugin for WebviewRevealPlugin {
 
 pub struct WebviewRevealPlugin;
 
-/// Frame counter for a hidden webview waiting to be revealed.
 #[derive(Component)]
 pub struct PendingWebviewReveal(u8);
 
-/// Number of frames to wait before revealing a freshly spawned webview.
-/// 2 frames lets Bevy UI layout + bevy_cef resize the CEF surface so the
-/// first visible paint is at the correct size.
 const REVEAL_FRAMES: u8 = 2;
 
 fn on_webview_added(
@@ -35,7 +24,6 @@ fn on_webview_added(
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    // Don't hide the root window's own webview surface.
     if root.contains(entity) {
         return;
     }

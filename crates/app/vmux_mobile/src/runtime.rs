@@ -1,27 +1,3 @@
-//! The phone's ECS host, ticked by the event loop that already owns the app.
-//!
-//! The desktop runs Bevy on the main thread and hands the webview a corner of its window. Dioxus
-//! is the other way round here — `LaunchBuilder::mobile()` owns the loop and never returns — but
-//! that loop hands out a `FnMut` on every event, which is a place to put a world. So the world
-//! lives on the same thread as the pages it answers, and neither a channel nor a pump stands
-//! between them: a page's send is a borrow, and what the world produces is delivered by the call
-//! that produced it.
-//!
-//! Two event loops was never an option. `UIApplicationMain` may be called once per process and
-//! both tao and winit assert on it, so whichever ran second would panic.
-//!
-//! **This is reactive, not a frame loop, and that is load-bearing.** The turn boundary is tao's
-//! `MainEventsCleared`, which on iOS is emitted from a CFRunLoop observer at
-//! `kCFRunLoopBeforeWaiting` (`tao/src/platform_impl/ios/event_loop.rs:281`) — the instant the run
-//! loop is about to go to sleep because it has nothing left to do. An idle phone never reaches it,
-//! so an idle world costs nothing. Dioxus asks for `ControlFlow::Wait` and resets it on every
-//! event, so the loop blocks rather than spins.
-//!
-//! What it means is that the world advances once per batch of real work, never on a timer. That is
-//! the same bargain the desktop makes with `UpdateMode::Reactive`, and the reason neither is
-//! allowed to be `Continuous`. Anything needing a turn without an event — a QUIC reply landing on
-//! a tokio task — pokes the loop through Dioxus's own proxy rather than by polling for it.
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -34,33 +10,20 @@ use bevy_window::AppLifecycle;
 use vmux_ui::hooks::transport::BytesListener;
 use vmux_wire::page::PageEmit;
 
-// Lifecycle reported by UIKit, held until the world's next turn.
-//
-// A thread local rather than a handle the observer keeps: both run on the main thread, and this
-// way the observer needs to know nothing about the world's borrow state. Draining happens at a
-// point `World::tick` chooses, which is what stops a notification arriving mid-turn from
-// re-entering the schedule.
 thread_local! {
     static REPORTED: RefCell<Vec<AppLifecycle>> = const { RefCell::new(Vec::new()) };
 
-    /// The world the app is running, reachable from the page host without threading a handle
-    /// through Dioxus's context. One per thread, and only the main thread ever installs one.
     static INSTALLED: RefCell<Option<World>> = const { RefCell::new(None) };
 }
 
-/// One Bevy world, advanced a turn at a time.
 pub struct World {
     app: App,
     lifecycle: AppLifecycle,
-    /// Where a [`PageEmit`] goes, by id. Not `Send`, and it does not need to be: a listener closes
-    /// over Dioxus signals and is called on the thread that owns them, which is this one.
     listeners: HashMap<&'static str, BytesListener>,
-    /// Set once the app has exited, so a loop that keeps delivering events stops running systems.
     finished: bool,
 }
 
 impl World {
-    /// Build the world and run its plugins to completion, ready to tick.
     pub fn new(plugins: impl FnOnce(&mut App)) -> Self {
         let mut app = App::new();
         app.add_message::<AppLifecycle>().add_message::<PageEmit>();
@@ -78,16 +41,10 @@ impl World {
         }
     }
 
-    /// Put the world where the page host can reach it.
     pub fn install(self) {
         INSTALLED.with_borrow_mut(|slot| *slot = Some(self));
     }
 
-    /// Do something with the installed world, if there is one.
-    ///
-    /// Refuses rather than panics when the world is already borrowed. That can only happen by
-    /// re-entering from a listener the world itself is calling, which is a bug — but one that
-    /// should show up as a line in the log rather than as a crash on someone's phone.
     pub fn with<R>(act: impl FnOnce(&mut World) -> R) -> Option<R> {
         INSTALLED
             .try_with(|slot| match slot.try_borrow_mut() {
@@ -101,12 +58,6 @@ impl World {
             .flatten()
     }
 
-    /// Hand the world something a plugin reads, unless it already has exactly that.
-    ///
-    /// The equality check is not an optimisation. `insert_resource` marks the resource changed
-    /// whatever it is handed, and the app writes from a Dioxus effect that re-runs whenever any
-    /// signal it read moves — including a 3-second poll that usually reports no difference. Writing
-    /// unconditionally turned that poll into a permanent reproject-and-re-emit heartbeat.
     pub fn insert<R: Resource + PartialEq>(&mut self, resource: R) {
         if self.app.world().get_resource::<R>() == Some(&resource) {
             return;
@@ -114,43 +65,24 @@ impl World {
         self.app.insert_resource(resource);
     }
 
-    /// Tell the world something happened, for a plugin to fold on its next turn.
-    ///
-    /// Queued rather than applied: the sender is a QUIC task or a page's `send`, neither of which
-    /// is a point in the schedule, and a plugin reading a batch is what lets it deref only the
-    /// resources the batch actually touched.
     pub fn send<M: Message>(&mut self, message: M) {
         self.app.world_mut().write_message(message);
     }
 
-    /// Mark a resource changed without changing it, so whatever emits from it emits again.
-    ///
-    /// For a page that has just registered: the world pushes on change, and a page mounting after
-    /// the last change would otherwise wait for the next one — which on a phone may never come.
     pub fn refresh<R: Resource<Mutability = Mutable>>(&mut self) {
         if let Some(mut resource) = self.app.world_mut().get_resource_mut::<R>() {
             resource.set_changed();
         }
     }
 
-    /// Say where emissions under `id` should go.
-    ///
-    /// One listener per id, replacing whatever was there: a page that remounts registers again,
-    /// and the previous closure is over signals belonging to a scope that has gone.
     pub fn listen(&mut self, id: &'static str, on_bytes: BytesListener) {
         self.listeners.insert(id, on_bytes);
     }
 
-    /// Report what UIKit just said about the app. Called from the lifecycle observer.
     pub fn report(lifecycle: AppLifecycle) {
         REPORTED.with_borrow_mut(|reported| reported.push(lifecycle));
     }
 
-    /// Advance the world one turn, unless the app is in the background.
-    ///
-    /// `WillSuspend` is owed exactly one more turn, which is Bevy's own contract and the only
-    /// place a plugin has to save from — `bevy_winit` reads it the same way, refusing to update
-    /// once `Suspended` (`state.rs:726`).
     pub fn tick(&mut self) {
         if self.finished {
             return;
@@ -169,10 +101,6 @@ impl World {
         }
     }
 
-    /// Hand this turn's emissions to whoever registered for them.
-    ///
-    /// Drained rather than read, so a page that registers later does not receive a payload built
-    /// before it existed — it asks for the current one on mount instead.
     fn deliver(&mut self) {
         let emitted = self
             .app
@@ -182,11 +110,6 @@ impl World {
             .collect::<Vec<_>>();
         for emit in emitted {
             let Some(listener) = self.listeners.get_mut(emit.id) else {
-                // Not an error on its own — a page that is not mounted has no listener, and a
-                // plugin keeps its resource current regardless. It is worth saying, though: a
-                // payload built for a page nobody registered for is the difference between "the
-                // world never produced it" and "the world produced it and it went nowhere", and
-                // from outside those look identical.
                 tracing::debug!(id = emit.id, "page emit had no listener");
                 continue;
             };
@@ -194,7 +117,6 @@ impl World {
         }
     }
 
-    /// Whether the world is owed a turn: running, or owed the one frame `WillSuspend` promises.
     fn is_active(&self) -> bool {
         matches!(
             self.lifecycle,
@@ -222,7 +144,6 @@ mod tests {
     struct Turns(usize);
 
     impl World {
-        /// A world that counts the turns it is given, with nothing else in it.
         fn counting() -> Self {
             REPORTED.with_borrow_mut(Vec::clear);
             Self::new(|app| {

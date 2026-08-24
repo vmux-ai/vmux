@@ -1,5 +1,3 @@
-//! Application settings: a typed schema (appearance, editor, browser, agent, lsp,
-//! shortcuts, spaces), RON load/save with debounce, theme definitions, and the settings webview.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,

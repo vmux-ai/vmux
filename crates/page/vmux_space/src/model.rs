@@ -3,8 +3,6 @@ pub fn bootstrap_profile_name() -> String {
     {
         vmux_core::profile::display_name()
     }
-    // `not(host)`, not `ui`: the desktop is both at once, and the question here is whether there
-    // is a machine to read a profile off — not whether this code renders a page.
     #[cfg(not(host))]
     {
         "Personal".to_string()
@@ -52,8 +50,6 @@ fn slug_segment(input: &str) -> String {
     out
 }
 
-/// Slugs a space name into a filesystem-relative id, preserving `/` as a
-/// nested-directory separator (each segment is slugged independently).
 pub fn normalize_space_id(input: &str) -> String {
     let segments: Vec<String> = input
         .split('/')

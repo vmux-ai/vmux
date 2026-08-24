@@ -1,10 +1,3 @@
-//! Keeping the loop awake while the bar opens.
-//!
-//! Opening spans several reactive frames, and the desktop app used to own this because it
-//! owns the event loop proxy. But nothing here is about the app: the condition is entirely the
-//! bar's own — a deferred open and a reveal waiting on its ack — so it belongs with the bar,
-//! and the proxy is reachable from any crate that links `bevy_winit`.
-
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
@@ -25,13 +18,6 @@ fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
     needs_open || has_active_reveal
 }
 
-/// The bar opens across several reactive frames: the first shortcut may defer
-/// (`PendingLaunch::needs_open`) until the webview is ready, then a reveal
-/// (`PendingCommandBarReveal`) waits for the rendered/sized ack. Without an explicit wake the loop
-/// idles after the keystroke and the open stalls until the next input — the user has to press
-/// Cmd+K/Cmd+L twice. Runs after `ReadAppCommands` so a `needs_open` set this frame is observed.
-/// Self-terminating: once revealed, `needs_open` clears and the placeholder reveal is
-/// `open_id == 0` (inactive), so we stop waking.
 fn keep_awake_while_command_bar_opening(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending_launch: Option<Res<vmux_core::launcher::PendingLaunch>>,

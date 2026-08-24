@@ -12,9 +12,6 @@ use vmux_layout::stack::{Stack, active_stack_in_pane};
 use vmux_layout::target::active_webview_for_tab;
 use vmux_layout::{Browser, Loading};
 
-/// Takes DOM snapshots of pages for agents: drives the ones a navigation is waiting on, then
-/// captures and shapes the rest. Capture runs after [`crate::scroll::run_scrolls`] so a scroll
-/// requested in the same frame lands before the page is captured.
 pub(crate) struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
@@ -108,10 +105,6 @@ pub(crate) fn start_snapshots(
     }
 }
 
-/// The browser webview whose stack was activated most recently — a fallback when the requested
-/// pane is missing/stale or holds no browser (e.g. an ACP agent passed a bogus pane id, or its own
-/// anchor pane is a chat/terminal). Keeps `browser_snapshot` from hard-failing while a browser the
-/// user can see is open somewhere.
 pub(crate) fn most_recent_browser(
     browsers: &Query<(Entity, &ChildOf), With<Browser>>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,

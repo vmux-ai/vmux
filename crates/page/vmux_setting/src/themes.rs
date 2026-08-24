@@ -327,11 +327,9 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
 }
 
 pub fn resolve_theme(name: &str, custom_themes: &[TerminalColorScheme]) -> TerminalColorScheme {
-    // Check custom themes first
     if let Some(t) = custom_themes.iter().find(|t| t.name == name) {
         return t.clone();
     }
-    // Check builtins
     if let Some(t) = get_builtin_themes().into_iter().find(|t| t.name == name) {
         return t;
     }

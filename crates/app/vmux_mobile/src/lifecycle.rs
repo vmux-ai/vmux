@@ -1,11 +1,3 @@
-//! Telling the world when iOS puts the app away.
-//!
-//! On the desktop this arrives from winit, which owns the application object and turns its
-//! callbacks into `AppLifecycle`. Here tao owns it, and what tao reports is too coarse to park a
-//! world on: it maps `applicationWillResignActive` to `Suspended`, which also fires for a
-//! pulled-down notification shade or an incoming call. So the states come from `UIApplication`'s
-//! own notifications instead, picked to mean what Bevy means.
-
 #[cfg(target_os = "ios")]
 mod platform {
     use objc2::rc::Retained;
@@ -21,10 +13,6 @@ mod platform {
 
     use crate::runtime::World;
 
-    /// Start reporting the app's lifecycle.
-    ///
-    /// The observer is leaked on purpose: it lives as long as the process, and there is nowhere to
-    /// hold it that a `LaunchBuilder` which never returns would not outlive anyway.
     pub fn install() {
         let Some(mtm) = MainThreadMarker::new() else {
             tracing::error!("world: the lifecycle observer must be installed on the main thread");
@@ -32,7 +20,6 @@ mod platform {
         };
         let observer = LifecycleObserver::new(mtm);
         let center = NSNotificationCenter::defaultCenter();
-        // Safety: the names are UIKit's own statics, and the observer outlives the process.
         unsafe {
             center.addObserver_selector_name_object(
                 &observer,
@@ -65,18 +52,11 @@ mod platform {
         struct LifecycleObserver;
 
         impl LifecycleObserver {
-            /// The app is going away. Owed one frame, then the world parks.
-            ///
-            /// `UIApplicationWillResignActive` is deliberately not observed: it also fires for a
-            /// pulled-down notification shade or an incoming call, where the app is still on
-            /// screen and stopping the world would strand whatever the user was looking at.
             #[unsafe(method(didEnterBackground:))]
             fn did_enter_background(&self, _notification: &NSNotification) {
                 World::report(AppLifecycle::WillSuspend);
             }
 
-            /// Coming back. Bevy gives this a state of its own before `Running`, so a plugin can
-            /// re-establish whatever it let go of on the way down.
             #[unsafe(method(willEnterForeground:))]
             fn will_enter_foreground(&self, _notification: &NSNotification) {
                 World::report(AppLifecycle::WillResume);
@@ -99,10 +79,6 @@ mod platform {
     }
 }
 
-/// Off the phone nothing suspends the app, so it is running and stays running.
-///
-/// Said once rather than not at all: a world that waits for its first lifecycle before running
-/// anything would otherwise wait forever on a platform with no `UIApplication` to ask.
 #[cfg(not(target_os = "ios"))]
 mod platform {
     use bevy_window::AppLifecycle;

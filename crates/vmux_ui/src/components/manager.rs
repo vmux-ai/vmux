@@ -15,7 +15,6 @@ pub enum ManagerTone {
 }
 
 impl ManagerTone {
-    /// The badge colour for a runtime name, so every manager page tones them alike.
     pub fn for_runtime(runtime: &str) -> Self {
         match runtime {
             "native" => Self::Green,

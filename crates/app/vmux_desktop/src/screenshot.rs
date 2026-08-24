@@ -9,8 +9,6 @@ use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
 use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 
-/// Captures still screenshots for the agent, off the command flush so a screenshot request
-/// issued this frame is served this frame.
 pub(crate) struct ScreenshotPlugin;
 
 impl Plugin for ScreenshotPlugin {

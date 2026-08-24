@@ -110,7 +110,6 @@ pub struct VaultActionRequest {
     pub action: VaultAction,
     pub repository: String,
     pub private: bool,
-    /// The folder to create under `repository`, for `CreateCloudFolder`.
     pub folder_name: String,
     pub recovery_key: String,
 }

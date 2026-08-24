@@ -1,5 +1,3 @@
-//! Browser and page-open orchestration on top of `bevy_cef`: page resolution, CEF
-//! backend management, and input forwarding between the native layout and embedded pages.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 mod appearance;
@@ -26,7 +24,6 @@ mod snapshot;
 pub use host_focus::HostFocusIntent;
 
 pub use native_bridge::NativeBridge;
-/// Entry points for the AppKit monitors. Nothing in Rust calls them.
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
@@ -63,8 +60,6 @@ use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
 
-/// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
-/// the CEF backend, and forwards pointer and cursor input between the layout and pages.
 pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
@@ -135,7 +130,6 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
                 .takes::<vmux_wire::error::ErrorPageData>(),
         ))
-        // A second call because `Plugins` is implemented up to a 16-tuple.
         .add_plugins((
             native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
                 .takes::<vmux_core::PageMetadata>(),
@@ -323,8 +317,6 @@ struct CefPointerHitRect {
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
-    /// A region only takes the pointer while it is a header or sheet that is open, laid out and
-    /// visible — anything else is a rectangle the cursor should fall straight through.
     fn of(row: CefPointerRegionRow<'_>) -> Self {
         let (header, side_sheet, node, &rect, visibility, open) = row;
         let interactive = (header.is_some() || side_sheet.is_some())
@@ -361,12 +353,6 @@ fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton
     }
 }
 
-/// Layout-page surfaces that float free of the laid-out regions and must own the whole window's
-/// pointer input while they are up.
-///
-/// A context menu or the command bar panel can extend past any published hit rect, and both
-/// dismiss on an outside click, so the layout webview has to see every move and click. A focused
-/// bookmark field does not qualify — it stays inside the side sheet's own region.
 pub(crate) type LayoutPointerCapture =
     Or<(With<BookmarkContextMenuActive>, With<CommandBarPanelActive>)>;
 
@@ -387,13 +373,6 @@ fn tab_of(
     }
 }
 
-/// Every CEF browser is windowed, and the native overlay markers belong to nobody.
-///
-/// Both used to vary. The layout was the one offscreen surface — it carried the overlay markers and
-/// was excluded from `windowed` — and a camera whose transform drifted from the window's would drop
-/// *everything* back to offscreen rendering as a safety net. The layout is served by wry now and
-/// holds no `Browser` at all, so the exception has no subject, and the safety net leads nowhere:
-/// there is no offscreen path left to fall back to.
 fn sync_cef_backend(world: &mut World) {
     let mut query = world.query_filtered::<(
         Entity,
@@ -441,7 +420,6 @@ fn sync_cef_backend(world: &mut World) {
     }
 }
 
-/// Deterministic, distinct ring color per agent (so multiple agents read apart).
 fn agent_ring_rgb(key: &str) -> [f32; 3] {
     let mut h: u64 = 1469598103934665603;
     for b in key.bytes() {
@@ -471,7 +449,6 @@ const CLAUDE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/claude.png"
 const CODEX_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/codex.png");
 const VIBE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/vibe.png");
 
-/// A decoded, premultiplied-RGBA agent logo, ready to hand to the native badge.
 struct LogoBitmap {
     rgba: Vec<u8>,
     width: u32,
@@ -547,17 +524,10 @@ struct LayoutFrameRateState {
     dragging_layout: bool,
 }
 
-/// One consistent view of the command bar for the AppKit event thread.
-///
-/// The `NSEvent` monitor samples this on every key and mouse event, at arbitrary points relative to
-/// the Bevy frame that wrote it. Publishing openness, hit frame, and scale as a single value stops
-/// it observing a combination no frame ever produced — a stored frame left behind by a closed bar
-/// used to turn clicks inside that rectangle into dismiss requests.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct CommandBarRoute {
     generation: u64,
     owns_input: bool,
-    /// Present only while the surface is on screen; a revealing bar has no clickable rectangle.
     frame: Option<CommandBarWindowedFrame>,
     scale: f32,
 }
@@ -567,9 +537,6 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
-/// The write side is ungated, but the only thing that reads this in production is the `NSEvent`
-/// monitor. `test` is in the gate because the rust jobs run on linux: gating on the target alone
-/// would take the atomicity test out of CI rather than move it to another job.
 #[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
@@ -581,12 +548,6 @@ pub(crate) fn set_native_page_owns_escape(owns: bool) {
     NATIVE_PAGE_OWNS_ESCAPE.store(owns, Ordering::Relaxed);
 }
 
-/// Whether a page surface will answer Escape itself, so the host must not read it as a request to
-/// leave fullscreen. True while a terminal holds the keyboard — it forwards Escape to the PTY —
-/// and while the command bar owns input.
-///
-/// Read from the `NSEvent` monitor, which runs on the AppKit thread ahead of the ECS, hence the
-/// static rather than a resource.
 pub fn native_page_owns_escape() -> bool {
     NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
 }
@@ -599,7 +560,6 @@ pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
 }
 
-/// Answers a cursor position for the AppKit event thread, and nothing else.
 #[cfg(target_os = "macos")]
 fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: Vec2) -> bool {
     cursor.x >= frame.left_px
@@ -794,11 +754,6 @@ fn normalize_vmux_url(url: &str) -> String {
     url.to_string()
 }
 
-/// Marks a `PageOpenTask` the fallback has seen pending once. A `vmux://` scheme
-/// owned by a `HandleKnownPages` handler can, under a rare command-visibility gap,
-/// reach this fallback still pending in its first frame; this grace marker defers
-/// the "unknown URL" verdict one run so the owning handler's mark becomes visible
-/// before we error-claim (and permanently win the race for) an owned task.
 #[derive(Component, Clone, Debug)]
 struct PageOpenFallbackDeferred;
 
@@ -848,11 +803,6 @@ fn attach_cef_page_to_stack(
     browser
 }
 
-/// Replace whatever is in a stack with the error page, and record on its view what to show.
-///
-/// The stack keeps the url that failed, because that is what the address bar is reporting; the
-/// view is the error page itself, so it is named `vmux://error/` — the url the native surface is
-/// claimed by — and carries the failure as a component for [`answer_error_data_request`] to read.
 fn attach_error_page_to_stack(
     stack: Entity,
     failure: vmux_wire::error::ErrorPageData,
@@ -880,10 +830,6 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
     }
 }
 
-/// A pending agent-initiated in-place navigation, keyed by the target webview.
-/// Populated by `handle_browser_navigate_requests`; drained in `vmux_desktop`
-/// (`drive_pending_nav_snapshots`) once the page settles, so the navigation's
-/// agent command returns the post-load snapshot inline.
 pub struct NavPending {
     pub request_id: [u8; 16],
     pub started: std::time::Duration,
@@ -1061,8 +1007,6 @@ mod tests {
         assert_eq!(stack_url, "vmux://agent/vibe/abc-123");
     }
 
-    /// A closed or hidden region must not swallow a pointer that is geometrically over it, and an
-    /// open one must still catch its own edges.
     #[test]
     fn a_pointer_hits_only_interactive_regions() {
         let rect = ComputedNode::from_origin(Vec2::new(100.0, 40.0));
@@ -1152,9 +1096,6 @@ mod tests {
         );
     }
 
-    /// Windowed is the only backend. The camera-mismatch fallback that used to drop everything
-    /// back to offscreen rendering is gone, so a browser that failed to be marked windowed would
-    /// render nowhere at all rather than degrading.
     #[test]
     fn every_cef_browser_is_windowed_with_no_overlay_markers() {
         let mut app = App::new();
@@ -1724,8 +1665,6 @@ mod tests {
                     },
                 });
 
-            // One extra update vs. the other navigate tests: the fallback now grants
-            // unknown `vmux://` URLs a one-frame grace before rendering the error page.
             app.update();
             app.update();
             app.update();

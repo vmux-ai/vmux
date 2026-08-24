@@ -1,19 +1,8 @@
-//! Who the conversation is with: the header strip, and the marks the agent is recognised by.
-//!
-//! The avatar, the status dot and the banner are worn at three sizes in three places — the
-//! header, the transcript's intro and the composer's status strip — so the agent's likeness is
-//! described once here rather than redrawn at each of them.
-
 use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::back::BackButton;
 use vmux_ui::favicon::favicon_src_for_url;
 
-/// Who the conversation is with, and what it is called.
-///
-/// The top inset resolves to zero wherever there is no notch, so the same padding serves a header
-/// under a status bar and one under a tab strip. [`BackButton`] renders only for a host that puts
-/// nothing of its own around the page, which on the desktop is no host at all.
 #[component]
 pub(super) fn ChatHeader(chat: Chat) -> Element {
     let name = chat.header_name();
@@ -35,7 +24,6 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
     }
 }
 
-/// The agent's face: its favicon when it has one, else an initial on its accent.
 #[component]
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
@@ -73,14 +61,12 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     }
 }
 
-/// The coloured dot that says at a glance what the agent is doing.
 #[component]
 pub fn StatusDot(status: String, size_class: String) -> Element {
     let tone = match status.as_str() {
         "streaming" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
         "awaiting" => "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
-        // A run the user stopped. Only remote clients surface it today.
         "interrupted" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
         _ => "bg-success shadow-[0_0_8px_rgba(16,185,129,0.65)]",
@@ -90,7 +76,6 @@ pub fn StatusDot(status: String, size_class: String) -> Element {
     }
 }
 
-/// The same face at full size, over the agent's name, for a transcript with nothing in it yet.
 #[component]
 pub(super) fn AgentBanner(chat: Chat) -> Element {
     let name = chat.header_name();

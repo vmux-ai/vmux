@@ -9,8 +9,6 @@ use vmux_flex::prelude::*;
 use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
 use super::load::PreparedExtensions;
 
-/// Keeps one hidden transport webview alive per loaded extension, so an extension's
-/// background work has a page to run in. Spawns before CEF creates and resizes webviews.
 pub(crate) struct ExtensionBridgePagePlugin;
 
 impl Plugin for ExtensionBridgePagePlugin {

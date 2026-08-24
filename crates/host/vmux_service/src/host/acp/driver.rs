@@ -1,6 +1,3 @@
-//! Per-session ACP driver: spawns the agent subprocess, runs the `Client` connection,
-//! and pumps prompts/approvals through it while projecting `session/update` to the UI.
-
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::Read;
@@ -42,16 +39,10 @@ const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
-/// Max wall-clock for the ACP handshake (`initialize`) before the agent is declared failed, so a
-/// stuck or slowly-failing spawn surfaces an error instead of an endless "Starting agent…".
-/// Generous enough for a first-run package install on a slow network.
 const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// How many recent agent-stderr lines to retain for diagnostics.
 const STDERR_TAIL_CAPACITY: usize = 50;
-/// How many recent agent-stderr lines to include in a surfaced error.
 const STDERR_TAIL_SHOWN: usize = 8;
 
-/// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
     User {
         text: String,
@@ -67,7 +58,6 @@ pub enum AcpInput {
         config_id: String,
         model_id: String,
     },
-    /// Interrupt the in-flight prompt (ACP `session/cancel`); keep the session alive.
     Cancel,
     Close,
 }
@@ -79,7 +69,6 @@ pub enum AcpTerminalExit {
     Removed,
 }
 
-/// A live ACP-native terminal and its process exit state.
 pub struct AcpTerminal {
     pub process_id: ProcessId,
     pub exit_rx: watch::Receiver<AcpTerminalExit>,
@@ -125,7 +114,6 @@ impl VibeTempRoot {
     }
 }
 
-/// State shared between the driver's request handlers and its prompt loop.
 pub struct AcpShared {
     pub sid: String,
     cwd: Mutex<PathBuf>,
@@ -134,13 +122,8 @@ pub struct AcpShared {
     pub projector: Mutex<AcpProjector>,
     projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
-    /// ACP-native terminals keyed by their ACP `terminalId` (the vmux `ProcessId` string).
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
-    /// Daemon process manager (shared with the IPC server) so terminal handlers spawn / read / kill
-    /// PTYs directly, without a GUI round-trip.
     pub manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-    /// PTY input writers (shared with the server) so the user can take over an ACP terminal by
-    /// typing into its pane.
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
@@ -148,15 +131,8 @@ pub struct AcpShared {
     approval: Mutex<Option<RemoteApproval>>,
     history_replay: AtomicBool,
     history_replay_updates: AtomicUsize,
-    /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
-    /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
-    /// Recent lines from the agent subprocess's stderr, surfaced in startup/connection errors so
-    /// the user sees the real cause (e.g. an npm registry failure) instead of a silent hang.
     stderr_tail: Mutex<VecDeque<String>>,
-    /// Set once the session is established (handshake + `session/new` done). Until then, the
-    /// subprocess dying is a startup failure to surface immediately rather than waiting out the
-    /// handshake timeout.
     startup_ready: AtomicBool,
 }
 
@@ -388,9 +364,6 @@ impl AcpShared {
     }
 
     fn emit_status(&self, status: AgentRunStatus) {
-        // A failure the user is shown is a failure the log should carry. Without this the only
-        // record of a refused or timed-out startup is a string in a pane that is closed with the
-        // conversation, so an agent that never starts leaves nothing behind to read afterwards.
         if let AgentRunStatus::Errored(message) = &status {
             tracing::warn!(target: "acp", sid = %self.sid, "{message}");
         }
@@ -412,15 +385,11 @@ impl AcpShared {
         tail.push_back(line);
     }
 
-    /// The most recent non-empty stderr lines, formatted for appending to an error message
-    /// (empty when the agent printed nothing).
     fn stderr_detail(&self) -> String {
         stderr_detail_from(&self.stderr_tail.lock().unwrap(), STDERR_TAIL_SHOWN)
     }
 }
 
-/// Format the last `shown` non-empty stderr lines as an error suffix (blank-line separated), or
-/// an empty string when there is nothing to show.
 fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
     let lines: Vec<&str> = tail
         .iter()
@@ -938,8 +907,6 @@ pub async fn run(
             let mut init = InitializeRequest::new(ProtocolVersion::V1);
             init.client_capabilities.fs.read_text_file = true;
             init.client_capabilities.fs.write_text_file = true;
-            // ACP-native terminals: the agent's shell/Bash execution flows through vmux's five
-            // terminal methods, backed by real visible panes (see `create_terminal` et al.).
             init.client_capabilities.terminal = true;
             let init_resp =
                 match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
@@ -962,10 +929,6 @@ pub async fn run(
                         return Ok(());
                     }
                 };
-            // The middle rung of the startup ladder. With "session established" below and the
-            // errored statuses now logged, where a stall happened is readable from the log alone:
-            // nothing at all means the transport never carried a request, this line alone means
-            // the agent answered the handshake and then stopped establishing the session.
             tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
@@ -984,10 +947,6 @@ pub async fn run(
                     load.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
-                    // Bounded like the `session/new` below it: a resume that hangs is
-                    // indistinguishable from one that failed, and a failed load already falls
-                    // through to a fresh session rather than stopping. Logged because
-                    // `load_requested_session` discards the error to make that fall-through.
                     async move {
                         let answered = tokio::time::timeout(
                             ACP_STARTUP_TIMEOUT,
@@ -1026,13 +985,6 @@ pub async fn run(
                     new_session.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
-                    // Bounded for the same reason `initialize` is, and likelier than `initialize`
-                    // to hang: this is where the agent dials its MCP servers, so one that never
-                    // answers holds the whole startup open. Neither existing net catches that —
-                    // the handshake timeout is already spent, and `drain_stderr` only surfaces a
-                    // subprocess that *died*, where this one stays alive and idle. Unbounded, the
-                    // status below is never emitted and the GUI shows "Preparing agent…" for as
-                    // long as the app is left running.
                     async move {
                         match tokio::time::timeout(
                             ACP_STARTUP_TIMEOUT,
@@ -1443,9 +1395,6 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
         tracing::warn!(target: "acp", "{line}");
         shared.push_stderr(line);
     }
-    // stderr closed = the subprocess exited. If that happens before the session is established
-    // (e.g. `npx` fails with a registry 403), surface it now instead of waiting out the handshake
-    // timeout so the GUI stops showing "Starting agent…" immediately.
     if !shared.startup_ready() {
         shared.emit_status(AgentRunStatus::Errored(format!(
             "agent exited during startup{}",
@@ -1454,14 +1403,9 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
     }
 }
 
-/// Default PTY geometry for an ACP-native terminal. ACP `terminal/create` is size-less; the GUI
-/// pane resizes the PTY (`ResizeProcess`) once it mounts.
 const ACP_TERMINAL_COLS: u16 = 80;
 const ACP_TERMINAL_ROWS: u16 = 24;
 
-/// `terminal/create`: spawn a real (visible) PTY on the daemon's process manager, register it as an
-/// ACP terminal, and tell the GUI to open a pane bound to it. Returns the ACP `terminalId` (the
-/// vmux `ProcessId` string).
 async fn create_terminal(
     shared: &AcpShared,
     req: CreateTerminalRequest,
@@ -1506,12 +1450,10 @@ async fn create_terminal(
         (exit_stream, mgr.input_writer(&id))
     };
 
-    // Let the user take over the pane by typing.
     if let Some(writer) = writer {
         shared.input_writers.lock().await.insert(id, writer);
     }
 
-    // Resolve the child's exit code once, off the process broadcast, for wait_for_exit / output.
     let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
     if let Some(mut exit_stream) = exit_stream {
         let manager = shared.manager.clone();
@@ -1564,7 +1506,6 @@ async fn create_terminal(
     Ok(CreateTerminalResponse::new(TerminalId::new(terminal_id)))
 }
 
-/// Look up the vmux `ProcessId` and last-known exit code for an ACP `terminalId`.
 fn lookup_terminal(
     shared: &AcpShared,
     terminal_id: &TerminalId,
@@ -1589,7 +1530,6 @@ fn terminal_exit_status(code: Option<i32>) -> TerminalExitStatus {
     }
 }
 
-/// `terminal/output`: current scrollback of the backing process plus its exit status (if it ended).
 async fn terminal_output(
     shared: &AcpShared,
     req: TerminalOutputRequest,
@@ -1615,15 +1555,6 @@ async fn terminal_output(
     Ok(resp)
 }
 
-/// `terminal/wait_for_exit`: block until the backing child exits, then report its status.
-/// What to publish after the process broadcast dropped messages.
-///
-/// `recorded` is the manager's view: `None` if it no longer holds the process at all, otherwise
-/// its exit code so far. `ProcessExited` is broadcast exactly once, so if it was among the dropped
-/// messages nothing will resend it and a waiter would block forever. The manager keeps the code
-/// for `terminal/output`, which makes it the authority here too.
-///
-/// Returning `None` means keep waiting — the child is still running, so its exit is still coming.
 fn exit_after_lag(recorded: Option<Option<i32>>) -> Option<AcpTerminalExit> {
     match recorded {
         None => Some(AcpTerminalExit::Removed),
@@ -1659,7 +1590,6 @@ async fn wait_for_terminal_exit(
     Ok(WaitForTerminalExitResponse::new(terminal_exit_status(code)))
 }
 
-/// `terminal/kill`: kill the child but keep the pane (its output stays readable).
 async fn kill_terminal(
     shared: &AcpShared,
     req: KillTerminalRequest,
@@ -1684,8 +1614,6 @@ fn truncate_terminal_output(output: String, output_byte_limit: Option<u64>) -> (
     (output[start..].to_string(), true)
 }
 
-/// `terminal/release`: stop tracking the terminal and kill the backing process. The visible pane is
-/// left in place; the GUI reaps it when the user closes it.
 async fn release_terminal(
     shared: &AcpShared,
     req: ReleaseTerminalRequest,
@@ -1704,9 +1632,6 @@ async fn release_terminal(
     Ok(ReleaseTerminalResponse::new())
 }
 
-/// Maps a host decision onto an ACP permission option while preserving one-shot versus remembered
-/// approval. Returns `None` (→ the request is cancelled) when the agent offers no option matching
-/// the decision — never falls back to an option that could approve a denied call.
 fn pick_permission_option(
     options: &[PermissionOption],
     decision: ApprovalDecision,
@@ -1775,8 +1700,6 @@ fn is_permissionless_host_tool(name: &str) -> bool {
     )
 }
 
-/// Resolve an ACP fs path against the session cwd, rejecting traversal and anything outside
-/// the session root (ACP sends absolute paths).
 fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
     if path
         .components()
@@ -1792,9 +1715,6 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
     if !abs.starts_with(cwd) {
         return None;
     }
-    // Lexical `starts_with` is not enough: a symlink inside cwd can point outside. When cwd is a
-    // real directory, require the deepest existing ancestor (canonicalized) to stay inside it. The
-    // target itself may not exist yet (writes), so we canonicalize the nearest existing ancestor.
     if let Ok(real_cwd) = cwd.canonicalize()
         && let Some(anchor) = abs.ancestors().find_map(|a| a.canonicalize().ok())
         && !anchor.starts_with(&real_cwd)
@@ -1880,8 +1800,6 @@ fn write_text_file(scope: &AcpFsScope, req: &WriteTextFileRequest) -> Result<(),
     std::fs::write(&path, &req.content).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
-/// Decide the run status to emit after a prompt future resolves. A cancel in flight wins over
-/// both success and error so the UI shows `Interrupted`.
 fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStatus {
     if cancelled {
         AgentRunStatus::Interrupted
@@ -2956,9 +2874,6 @@ mod tests {
         assert_eq!(shared.cwd(), worktree);
     }
 
-    /// A lagged broadcast drops messages, and ProcessExited is only ever sent once. Treating a lag
-    /// as "keep waiting" leaves terminal/wait_for_exit blocked forever on a command that already
-    /// finished, so the manager's recorded code has to win.
     #[test]
     fn a_dropped_exit_is_recovered_from_the_manager() {
         assert!(matches!(
@@ -2976,15 +2891,11 @@ mod tests {
         );
     }
 
-    /// End-to-end of the daemon terminal path: `terminal/create` spawns a real PTY + emits
-    /// `AcpTerminalCreated`; `wait_for_exit` resolves with the child's code; `output` reads the
-    /// completed command's text after exit (kept alive); `release` stops tracking it.
     #[tokio::test]
     async fn acp_terminal_create_wait_output_release() {
         let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
         let (shared, mut stream_rx) = test_shared(manager.clone());
 
-        // Drive PTY output + exit detection like the server poll loop (which keeps ACP terminals).
         let poll_mgr = manager.clone();
         let poll = tokio::spawn(async move {
             loop {

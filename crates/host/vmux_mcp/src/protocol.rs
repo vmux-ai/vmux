@@ -7,7 +7,6 @@ use vmux_client::protocol::{
 };
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
-/// Interval between terminal reads while waiting for the completion marker.
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
@@ -414,9 +413,6 @@ async fn grep_result(
     Ok(json!({ "content": [{"type": "text", "text": text}] }))
 }
 
-/// Parse an optional non-negative `u32` argument, erroring on present-but-invalid
-/// values (negative, fractional, or out of range) instead of silently ignoring
-/// or wrapping them.
 fn opt_u32(arguments: &Value, key: &str, tool: &str) -> Result<Option<u32>, String> {
     match arguments.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -428,7 +424,6 @@ fn opt_u32(arguments: &Value, key: &str, tool: &str) -> Result<Option<u32>, Stri
     }
 }
 
-/// Parse an optional non-negative `usize` argument, erroring on present-but-invalid values.
 fn opt_usize(arguments: &Value, key: &str, tool: &str) -> Result<Option<usize>, String> {
     match arguments.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -442,9 +437,6 @@ fn opt_usize(arguments: &Value, key: &str, tool: &str) -> Result<Option<usize>, 
 const READ_FILE_DEFAULT_LINES: usize = 2000;
 const READ_FILE_MAX_LINES: usize = 50_000;
 
-/// Read `path` line by line, skipping `offset-1` lines and taking at most `limit`
-/// (capped) lines — never loading the whole file. Caller must verify the path is
-/// a regular file first.
 fn read_lines_bounded(
     path: &str,
     offset: Option<u32>,
@@ -463,8 +455,6 @@ fn read_lines_bounded(
     Ok(out.join("\n"))
 }
 
-/// Count UTF-16 code units in `line` up to byte offset `byte` (snapping down to a
-/// char boundary). Converts ripgrep byte offsets to the editor's UTF-16 columns.
 fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     let mut idx = byte.min(line.len());
     while idx > 0 && !line.is_char_boundary(idx) {
@@ -473,9 +463,6 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     line[..idx].encode_utf16().count() as u32
 }
 
-/// The tail of `final_text` after the `baseline` prefix captured before the
-/// command ran. Falls back to the full text if the prefix shifted (e.g. the
-/// screen scrolled or was cleared).
 fn output_since(baseline: &str, final_text: &str) -> String {
     final_text
         .strip_prefix(baseline)
@@ -550,9 +537,6 @@ fn run_completion_exit(
     }
 }
 
-/// Send `run`, then block (polling `RunCompletion`) until the invisible OSC
-/// completion escape for this run's token is seen, returning the output + exit
-/// code in one response.
 async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<Value, String> {
     let connection = vmux_client::client::ServiceConnection::connect()
         .await
@@ -874,14 +858,13 @@ mod tests {
 
     #[test]
     fn byte_to_utf16_converts_multibyte_offsets() {
-        // 'a'=1B/1u, 'é'=2B/1u, '😀'=4B/2u, 'b'=1B/1u
         let line = "aé😀b";
         assert_eq!(byte_to_utf16(line, 0), 0);
         assert_eq!(byte_to_utf16(line, 1), 1);
-        assert_eq!(byte_to_utf16(line, 2), 1); // mid-'é' snaps down to a boundary
+        assert_eq!(byte_to_utf16(line, 2), 1);
         assert_eq!(byte_to_utf16(line, 3), 2);
         assert_eq!(byte_to_utf16(line, 7), 4);
-        assert_eq!(byte_to_utf16(line, 999), 5); // clamps to end
+        assert_eq!(byte_to_utf16(line, 999), 5);
     }
 
     #[test]

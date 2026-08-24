@@ -5,8 +5,6 @@ pub use vmux_core::EffectiveStartupUrl;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
-    /// Corner radius (px) applied across the design system: pane corner clip,
-    /// focus ring, and the CEF CSS `--radius` variable.
     #[serde(default = "default_radius")]
     pub radius: f32,
     #[serde(default)]

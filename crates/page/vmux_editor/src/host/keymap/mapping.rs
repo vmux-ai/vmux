@@ -1,7 +1,6 @@
 use crate::edit::command::EditMode;
 use crate::keymap::{KeyInput, Mods};
 
-/// Which modes a mapping applies to, from the leading letters of a `:map` command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapScope {
     pub normal: bool,
@@ -36,10 +35,6 @@ impl MapScope {
     }
 }
 
-/// Translate vim key notation into the key names the keymap dispatches on.
-///
-/// Understands `<leader>`, `<C-x>`, `<S-x>`, `<A-x>`, and the usual `<Esc>`/`<CR>`/`<Tab>`/
-/// `<Space>`/`<BS>` names. Anything else is taken one character at a time.
 pub fn parse_keys(notation: &str, leader: &str) -> Vec<KeyInput> {
     let mut out = Vec::new();
     let mut rest = notation;
@@ -124,13 +119,9 @@ pub struct Mapping {
     rhs: Vec<KeyInput>,
 }
 
-/// How a pending key sequence lines up with the configured mappings.
 pub enum MatchResult {
-    /// The sequence so far could still grow into a mapping.
     Pending,
-    /// The sequence expands to these keys.
     Expand(Vec<KeyInput>),
-    /// No mapping can match; dispatch the buffered keys as typed.
     Miss,
 }
 
@@ -162,10 +153,6 @@ impl Mappings {
         self.entries.is_empty()
     }
 
-    /// Match `pending` against the mappings active in `mode`.
-    ///
-    /// An exact match wins immediately even when a longer mapping shares the prefix. Vim would
-    /// wait out `timeoutlen` before committing; resolving now keeps the keymap free of timers.
     pub fn match_keys(&self, mode: EditMode, pending: &[KeyInput]) -> MatchResult {
         let active = self
             .entries

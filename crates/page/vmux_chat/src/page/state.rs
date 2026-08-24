@@ -1,11 +1,3 @@
-//! The chat page's state: the signals it holds, the host events that fill them, and everything
-//! the render derives from them.
-//!
-//! `Page` held forty-nine `use_signal` calls in one scope, which said nothing about which of them
-//! move together. Each cluster here owns one group, [`Chat`] gathers the clusters, and
-//! [`use_chat`] is the single hook `Page` calls — so the page reaches its `rsx!` in a few lines
-//! and every component below it takes the same `Chat` handle as a prop.
-
 use std::collections::{HashMap, HashSet};
 
 use super::scroll;
@@ -39,14 +31,8 @@ use vmux_wire::prompt_media::{
     inline_media_query, merge_chat_attachments, replace_inline_media_query,
 };
 
-/// One conversation, as the page sees it: every signal cluster behind it plus the two derived
-/// views the transcript is read through.
-///
-/// `Copy` and compared by signal identity, so passing it to a child component costs nothing and
-/// never defeats that component's memoization.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Chat {
-    /// The agent this page is for — from the URL, or from the caller on a host without one.
     pub agent: Signal<String>,
     pub transcript: Transcript,
     pub run: RunState,
@@ -59,13 +45,10 @@ pub struct Chat {
     pub effort: EffortPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
-    /// Running subagents and open plan steps, shown in the composer footer.
     pub activity_counts: Memo<(usize, usize)>,
-    /// Item and block index of the tool the transcript should keep expanded.
     pub latest_tool: Memo<Option<(usize, usize)>>,
 }
 
-/// Build the page's state, subscribe it to the host, and start the effects that keep it current.
 pub fn use_chat() -> Chat {
     use_theme();
     let transcript = use_transcript();
@@ -92,7 +75,6 @@ pub fn use_chat() -> Chat {
 }
 
 impl Chat {
-    /// Take every host event the page runs on.
     fn listen(&self) {
         let chat = *self;
         let _snapshot = use_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snapshot| {
@@ -165,14 +147,10 @@ impl Chat {
             });
     }
 
-    /// Keep the derived surfaces — focus, scroll pin, fetches and the tab — in step with the state.
     fn watch(&self) {
         let chat = *self;
         use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
         use_effect(move || {
-            // Subscribe to any transcript/status change (each snapshot is a fresh `set`). Only pin
-            // to the bottom when the user is already there — if they scrolled up to read, leave
-            // them.
             let _ = chat.transcript.items.read().len();
             let _ = chat.run.status.read();
             if !*chat.transcript.at_bottom.peek() {
@@ -286,7 +264,6 @@ impl Chat {
         }
     }
 
-    /// Ask the host for thumbnails of any image attachment we have not seen or asked about yet.
     fn request_attachment_previews(&self, items: &[ChatItem]) {
         let previews = self.composer.attachment_previews;
         let mut requests = self.composer.attachment_preview_requests;
@@ -312,7 +289,6 @@ impl Chat {
         }
     }
 
-    /// Fetch the resumable session list while `/resume` is open, and forget it once it closes.
     fn fetch_resume_sessions(&self) {
         let mut requested = self.resume.requested;
         let mut loading = self.resume.loading;
@@ -330,7 +306,6 @@ impl Chat {
         }
     }
 
-    /// Fetch matches for the `@`-mention in the draft, and clear them when it goes away.
     fn fetch_media_entries(&self) {
         let mut entries = self.media.entries;
         let mut request_id = self.media.request_id;
@@ -364,7 +339,6 @@ impl Chat {
         }
     }
 
-    /// Ask for the page of transcript before the one loaded, unless a request is already out.
     pub fn request_history(&self) {
         let mut loading = self.transcript.history_loading;
         let before = (self.transcript.loaded_start)();
@@ -382,19 +356,16 @@ impl Chat {
     }
 }
 
-/// What the page reads off the state to render itself.
 impl Chat {
     pub fn agent(&self) -> String {
         (self.agent)()
     }
 
-    /// The agent's display name, falling back to the id when the snapshot has not landed.
     pub fn header_name(&self) -> String {
         let name = (self.identity.agent_name)();
         if name.is_empty() { self.agent() } else { name }
     }
 
-    /// What the conversation is called, in the header and in the tab.
     pub fn title(&self) -> String {
         chat_page_title(&(self.identity.conversation_title)(), &self.header_name())
     }
@@ -414,12 +385,10 @@ impl Chat {
         self.status() == "installing"
     }
 
-    /// An install with nothing to show yet takes over the page.
     pub fn installing_splash(&self) -> bool {
         self.installing() && self.transcript.items.read().is_empty()
     }
 
-    /// What the install is doing, or a placeholder until it says.
     pub fn install_detail(&self) -> String {
         let detail = (self.run.error)();
         if detail.is_empty() {
@@ -429,7 +398,6 @@ impl Chat {
         }
     }
 
-    /// Nothing written or queued anywhere, so the composer can still suggest what to ask for.
     pub fn show_examples(&self) -> bool {
         self.transcript.items.read().is_empty()
             && self.queue.queued.read().is_empty()
@@ -441,7 +409,6 @@ impl Chat {
         (self.composer.draft)()
     }
 
-    /// The slash commands the draft narrows to — empty unless it has opened the command menu.
     pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
         let draft = self.draft();
         let SelectorMode::Commands(query) = selector_mode(&draft) else {
@@ -473,12 +440,10 @@ impl Chat {
         filter_models(&self.models.models.read(), query)
     }
 
-    /// The command menu is only worth opening when something matches what has been typed.
     pub fn command_menu_open(&self) -> bool {
         !self.filtered_commands().is_empty()
     }
 
-    /// The resume and model menus open on the bare prefix, because they explain an empty result.
     pub fn resume_menu_open(&self) -> bool {
         matches!(selector_mode(&self.draft()), SelectorMode::Resume(_))
     }
@@ -487,7 +452,6 @@ impl Chat {
         matches!(selector_mode(&self.draft()), SelectorMode::Models(_))
     }
 
-    /// Whether the resume menu should show its list, or say why it cannot.
     pub fn resume_state(&self) -> Option<ResumeMenuState> {
         if !self.resume_menu_open() {
             return None;
@@ -519,8 +483,6 @@ impl Chat {
         options
     }
 
-    /// The pills above the prompt: what came in from the launcher first, then what was attached
-    /// here — only the latter can be removed, so only it carries an index.
     pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
         let previews = self.composer.attachment_previews.read();
         let preview_of = |attachment: &ChatAttachment| {
@@ -558,7 +520,6 @@ impl Chat {
         matches!(self.status().as_str(), "streaming" | "awaiting")
     }
 
-    /// Stop while a turn is running with nothing behind it; otherwise send.
     pub fn prompt_action(&self) -> PromptComposerAction {
         if self.streaming() && self.queue.queued.read().is_empty() {
             PromptComposerAction::Stop
@@ -584,16 +545,12 @@ impl Chat {
                 || !self.composer.attachments.read().is_empty())
     }
 
-    /// The agent is waiting on an answer, so the composer must not send anything else.
     pub fn choice_pending(&self) -> bool {
         !self.run.choice_options.read().is_empty() || self.run.approval.read().is_some()
     }
 }
 
-/// What the page does to the state, or asks the host to do.
 impl Chat {
-    /// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed
-    /// emit never silently swallows the user's message. The queued/sent turn arrives via snapshot.
     pub fn submit(&self) {
         let mut draft = self.composer.draft;
         let mut attachments = self.composer.attachments;
@@ -629,7 +586,6 @@ impl Chat {
         history_scratch.set(String::new());
     }
 
-    /// Interrupt the running turn, or send everything queued when there is a queue behind it.
     pub fn stop_or_flush(&self) {
         if self.queue.queued.peek().is_empty() {
             let _ = send(&ChatCancel);
@@ -638,10 +594,6 @@ impl Chat {
         }
     }
 
-    /// Send everything queued now, and drop a draft nothing is waiting on.
-    ///
-    /// The draft only goes when the page is idle: clearing it mid-turn would throw away what was
-    /// typed while waiting, which is the whole reason for typing it there.
     pub fn interrupt(&self) {
         let _ = send(&ChatEscape);
         let mut draft = self.composer.draft;
@@ -654,14 +606,10 @@ impl Chat {
         }
     }
 
-    /// Stop the running turn, leaving the queue behind it alone.
     pub fn cancel(&self) {
         let _ = send(&ChatCancel);
     }
 
-    /// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
-    /// current session to the other runtime. Unknown names are ignored (the raw text still submits
-    /// via the normal Enter path).
     pub fn run_slash_command(&self, name: &str) {
         let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
@@ -708,7 +656,6 @@ impl Chat {
         draft.set(String::new());
     }
 
-    /// Take a `@`-mention match: a directory descends into it, a file becomes an attachment.
     pub fn select_media_entry(&self, entry: &ChatMediaEntry) {
         let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
@@ -734,7 +681,6 @@ impl Chat {
         focus_prompt_end(PROMPT_INPUT_ID);
     }
 
-    /// Answer the agent's multiple-choice question, clearing it only once the reply is away.
     pub fn answer_choice(&self, index: usize) {
         let mut question = self.run.choice_question;
         let mut options = self.run.choice_options;
@@ -750,7 +696,6 @@ impl Chat {
         }
     }
 
-    /// Answer a tool approval, clearing the prompt only once the reply is away.
     pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
         let mut approval = self.run.approval;
         let mut approval_sel = self.run.approval_sel;
@@ -760,7 +705,6 @@ impl Chat {
         }
     }
 
-    /// Drop the draft's `@`-mention, or the whole draft when there is none to drop.
     pub fn dismiss_selector(&self) {
         let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
@@ -774,7 +718,6 @@ impl Chat {
         menu_sel.set(0);
     }
 
-    /// Typing anywhere in the draft leaves prompt recall, so the next Up starts from the newest.
     pub fn edit_draft(&self, value: String) {
         let mut draft = self.composer.draft;
         let mut history_cursor = self.composer.history_cursor;
@@ -796,7 +739,6 @@ impl Chat {
     }
 }
 
-/// The rendered transcript, the window of it that is loaded, and where the reader is in it.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
     pub items: Signal<Vec<ChatItem>>,
@@ -817,7 +759,6 @@ pub fn use_transcript() -> Transcript {
         messages_total: use_signal(|| 0),
         history_loading: use_signal(|| false),
         recent_messages_json: use_signal(String::new),
-        // No window loaded yet, so every incoming index is older than this.
         recent_messages_start: use_signal(|| u32::MAX),
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
@@ -825,7 +766,6 @@ pub fn use_transcript() -> Transcript {
     }
 }
 
-/// What the agent is doing, and anything it is blocked on waiting for the user.
 #[derive(Clone, Copy, PartialEq)]
 pub struct RunState {
     pub status: Signal<String>,
@@ -847,7 +787,6 @@ pub fn use_run_state() -> RunState {
     }
 }
 
-/// How the agent presents itself in the header.
 #[derive(Clone, Copy, PartialEq)]
 pub struct AgentIdentity {
     pub agent_name: Signal<String>,
@@ -865,7 +804,6 @@ pub fn use_agent_identity() -> AgentIdentity {
     }
 }
 
-/// Where this conversation was picked up from, when it was handed over from another agent.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Handoff {
     pub source: Signal<String>,
@@ -881,28 +819,18 @@ pub fn use_handoff() -> Handoff {
     }
 }
 
-/// The prompt being written: its text, its attachments, and the recall of earlier prompts.
 #[derive(Clone, Copy, PartialEq)]
 pub struct ComposerDraft {
     pub draft: Signal<String>,
     pub attachments: Signal<Vec<ChatAttachment>>,
     pub attachment_previews: Signal<HashMap<String, ChatAttachment>>,
     pub attachment_preview_requests: Signal<HashSet<String>>,
-    /// Position in the prompt history while arrowing back through it.
     pub history_cursor: Signal<Option<usize>>,
-    /// The half-written prompt set aside when recall started, restored on arrowing past the end.
     pub history_scratch: Signal<String>,
-    /// Prompt carried in from the launcher, shown until the agent is ready to take it.
     pub transition_preview: Signal<String>,
     pub transition_attachments: Signal<Vec<ChatAttachment>>,
 }
 
-/// Both transition signals start empty.
-///
-/// They are what the launcher typed, shown greyed in the composer until the run picks it up. The
-/// launcher hands it over as a `PromptQueue` entry on the stack rather than as a prop, so the only
-/// caller that ever filled these was the web inline-transition wrapper — and it passed the prompt
-/// through `window.name`, which carries the target url and nothing else.
 pub fn use_composer_draft() -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
@@ -916,7 +844,6 @@ pub fn use_composer_draft() -> ComposerDraft {
     }
 }
 
-/// Prompts typed while the agent was busy, and whether the queue is holding them back.
 #[derive(Clone, Copy, PartialEq)]
 pub struct PromptQueue {
     pub queued: Signal<Vec<QueuedPromptSnapshot>>,
@@ -930,7 +857,6 @@ pub fn use_prompt_queue() -> PromptQueue {
     }
 }
 
-/// The `@`-mention file picker.
 #[derive(Clone, Copy, PartialEq)]
 pub struct MediaPicker {
     pub entries: Signal<Vec<ChatMediaEntry>>,
@@ -948,7 +874,6 @@ pub fn use_media_picker() -> MediaPicker {
     }
 }
 
-/// Which model the agent is running, and what else it offers.
 #[derive(Clone, Copy, PartialEq)]
 pub struct ModelPicker {
     pub models: Signal<Vec<ModelOptionEntry>>,
@@ -964,12 +889,10 @@ pub fn use_model_picker() -> ModelPicker {
     }
 }
 
-/// How hard the agent is asked to think, for the agents that expose the choice.
 #[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
     pub levels: Signal<Vec<String>>,
     pub current: Signal<String>,
-    /// Which agent the levels were fetched for, so a switch does not show the last one's.
     pub agent_key: Signal<String>,
 }
 
@@ -981,7 +904,6 @@ pub fn use_effort_picker() -> EffortPicker {
     }
 }
 
-/// The slash-command menu and the context it offers completions against.
 #[derive(Clone, Copy, PartialEq)]
 pub struct SlashCommands {
     pub commands: Signal<Vec<SlashCommandEntry>>,
@@ -997,7 +919,6 @@ pub fn use_slash_commands() -> SlashCommands {
     }
 }
 
-/// Earlier sessions this agent can be resumed into.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
     pub sessions: Signal<Vec<ResumableSessionEntry>>,
@@ -1013,16 +934,12 @@ pub fn use_resume() -> Resume {
     }
 }
 
-/// Writing a signal it already holds would wake every reader for nothing, and each snapshot
-/// rewrites every field.
 fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
     if signal.peek().ne(&value) {
         signal.set(value);
     }
 }
 
-/// Splice a fresh tail onto the loaded window, keeping the older messages already paged in when
-/// the two overlap and starting over when they do not.
 fn merge_transcript_page(
     current: &mut Vec<ChatItem>,
     current_start: u32,
@@ -1041,16 +958,7 @@ fn merge_transcript_page(
     incoming_start
 }
 
-/// The agent id this view is showing (`vmux://agent/<id>` → `<id>`); the chat UI is shared across
-/// agents and only the id differs.
-///
-/// A native host registers one page for the whole `vmux://agent/` subtree, so the document's own
-/// url names no conversation — the view's [`vmux_core::PageMetadata`] does, and the host puts it
-/// in the root scope before the first render. On the web the document *is* the conversation, so
-/// `location` answers instead.
 fn current_agent() -> String {
-    /// The first path segment, which is the provider — a resumed session adds a second segment
-    /// naming the session rather than the agent.
     fn provider(path: &str) -> Option<String> {
         Some(path.split('/').find(|part| !part.is_empty())?.to_string())
     }

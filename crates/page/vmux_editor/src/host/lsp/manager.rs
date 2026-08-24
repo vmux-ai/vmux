@@ -123,7 +123,6 @@ pub struct LspFolds {
     pub regions: Vec<crate::fold::FoldRegion>,
 }
 
-/// Parse an LSP `textDocument/foldingRange` response into fold regions.
 pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
     value
         .as_array()

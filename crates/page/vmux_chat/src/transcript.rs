@@ -1,8 +1,3 @@
-//! The rendered transcript: user bubbles, assistant turns, and every activity row inside them.
-//!
-//! This is the surface both clients draw. Hosts supply a `Vec<ChatItem>` and the attachment
-//! preview cache; everything below is pure view with no host events.
-
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
@@ -130,7 +125,6 @@ pub fn ChatItemRow(
     }
 }
 
-/// One file chip under a user message.
 #[component]
 fn UserAttachment(
     attachment: ChatSubmitAttachment,
@@ -167,7 +161,6 @@ fn UserAttachment(
     }
 }
 
-/// One assistant turn: its prose, activity blocks and run-state.
 #[component]
 pub fn TurnView(turn_index: usize, turn: ChatTurn, latest_tool_index: Option<usize>) -> Element {
     let key = turn_index;
@@ -265,7 +258,6 @@ pub fn TurnView(turn_index: usize, turn: ChatTurn, latest_tool_index: Option<usi
     }
 }
 
-/// The twisty on a collapsible activity row.
 #[component]
 fn DisclosureIcon() -> Element {
     rsx! {
@@ -339,7 +331,6 @@ fn tool_arg_is_path(key: &str, value: &str) -> bool {
     ) || value.starts_with('/')
 }
 
-/// One argument of a tool call, recursing through nested objects and arrays.
 #[component]
 fn ToolArg(name: String, value: serde_json::Value) -> Element {
     let key = name;
@@ -441,7 +432,6 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
     }
 }
 
-/// The argument list of a tool call, parsed out of its JSON.
 #[component]
 fn ToolArgs(args: String) -> Element {
     let args = args.as_str();
@@ -465,7 +455,6 @@ fn ToolArgs(args: String) -> Element {
     }
 }
 
-/// One block of an assistant turn: prose, thinking, a tool call and what it produced.
 #[component]
 pub fn TurnBlock(
     block_index: usize,
@@ -697,7 +686,6 @@ pub fn TurnBlock(
     }
 }
 
-/// A block nested under a tool call, which may itself hold more.
 #[component]
 fn ToolChild(child_key: usize, block: ChatBlock) -> Element {
     let key = child_key;
@@ -767,7 +755,6 @@ fn subagent_status_class(status: &str) -> &'static str {
     }
 }
 
-/// A tool result folded under the call that produced it.
 #[component]
 fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Element {
     let key = result_key;
@@ -798,7 +785,6 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
     }
 }
 
-/// A tool result with no matching call in view.
 #[component]
 fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> Element {
     let key = result_key;
@@ -874,12 +860,6 @@ fn plan_text_class(status: &str) -> &'static str {
     }
 }
 
-/// Typography for the HTML [`md_to_html`] generates, as descendant variants on its container.
-///
-/// The markup does not exist at build time, so the styling has to be attached to the one element
-/// that does. Every selector here is scoped so that no two rules touch the same property on the
-/// same element — `:not(pre) > code` against `pre code`, `:not(li) > ul` against `li > ul` — which
-/// keeps the result independent of the order Tailwind happens to emit the utilities in.
 const CHAT_MD_CLASS: &str = "chat-md px-0.5 text-sm text-foreground/95 leading-[1.6] break-words \
     [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 \
     [&_:is(h1,h2,h3,h4)]:font-semibold [&_:is(h1,h2,h3,h4)]:leading-[1.3] \
@@ -909,8 +889,6 @@ const CHAT_MD_CLASS: &str = "chat-md px-0.5 text-sm text-foreground/95 leading-[
     [&_:is(th,td)]:border [&_:is(th,td)]:border-[rgba(127,127,127,0.3)] \
     [&_:is(th,td)]:[padding:0.3em_0.6em] [&_:is(th,td)]:text-left";
 
-/// Render assistant markdown to HTML, dropping any raw HTML the agent emits (markdown only —
-/// never inject arbitrary markup into the page).
 fn md_to_html(src: &str) -> String {
     use pulldown_cmark::{Event, Options, Parser, html};
     let mut opts = Options::empty();
@@ -923,13 +901,6 @@ fn md_to_html(src: &str) -> String {
     out
 }
 
-/// The accent chrome that does not survive as utilities: `::before` layers, and the
-/// `color-mix(… var(--agent-accent) …)` gradients and shadows built on top of them.
-///
-/// Markdown typography moved to [`CHAT_MD_CLASS`] and containment to the utilities on
-/// [`UserBubble`] and [`AssistantTurn`], so what is left is only the pseudo-element work and the
-/// multi-stop gradients keyed off the runtime accent — each one a `background`/`box-shadow`
-/// value rather than anything a utility names. Theme-neutral rgba, so it works in light and dark.
 pub const MD_CSS: &str = r#"
 .agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);pointer-events:none}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}

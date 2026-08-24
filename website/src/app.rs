@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::toast::ToastProvider;
 
-use crate::api::{ApiCrate, ApiIndex, ApiItem};
 use crate::{docs, landing, markdown};
 
 const SEO_TITLE: &str = "Vmux — One prompt. Anything, done.";
@@ -20,12 +19,6 @@ pub enum Route {
     #[layout(DocsLayout)]
         #[route("/docs")]
         DocsIndex {},
-        #[route("/docs/api")]
-        ApiIndex {},
-        #[route("/docs/api/:crate_name")]
-        ApiCrate { crate_name: String },
-        #[route("/docs/api/:crate_name/:..path")]
-        ApiItem { crate_name: String, path: Vec<String> },
         #[route("/docs/:slug")]
         DocPage { slug: String },
 }
@@ -34,10 +27,6 @@ pub enum Route {
 async fn static_routes() -> Result<Vec<String>, ServerFnError> {
     let mut routes = vec!["/".to_string(), "/_home".to_string(), "/docs".to_string()];
     routes.extend(docs::DOCS.iter().map(|d| format!("/docs/{}", d.slug)));
-    routes.push("/docs/api".to_string());
-    if let Some(idx) = crate::api::data::index().await {
-        routes.extend(idx.crates.iter().map(|c| format!("/docs/api/{}", c.name)));
-    }
     Ok(routes)
 }
 
@@ -95,7 +84,7 @@ fn DocsLayout() -> Element {
     let route = use_route::<Route>();
     let active_slug = match route {
         Route::DocPage { slug } => slug,
-        Route::DocsIndex {} => "experience".to_string(),
+        Route::DocsIndex {} => "architecture".to_string(),
         _ => String::new(),
     };
     let active_heading = use_signal(String::new);
@@ -143,19 +132,10 @@ fn sidebar(active_slug: String, active_heading: Signal<String>) -> Element {
                         to: Route::DocPage { slug: docs::DOCS[i].slug.to_string() },
                         "{docs::DOCS[i].title}"
                     }
-                    if docs::DOCS[i].slug == active_slug && docs::DOCS[i].slug != "architecture" {
+                    if docs::DOCS[i].slug == active_slug {
                         {toc(docs::DOCS[i].content, active_heading)}
                     }
                 }
-            }
-        }
-        div { class: "mb-4",
-            div { class: "px-3 mb-1 text-xs uppercase tracking-wide text-text-muted", "Reference" }
-            Link {
-                class: "block px-3 py-1.5 rounded-md text-sm text-text no-underline hover:bg-surface",
-                active_class: "bg-surface text-accent",
-                to: Route::ApiIndex {},
-                "API Reference"
             }
         }
     }
@@ -264,7 +244,7 @@ fn DocsIndex() -> Element {
         #[cfg(target_arch = "wasm32")]
         scroll_doc_top();
     });
-    doc_body("experience")
+    doc_body("architecture")
 }
 
 #[component]

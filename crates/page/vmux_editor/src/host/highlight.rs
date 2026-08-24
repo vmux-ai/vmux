@@ -8,8 +8,6 @@ use vmux_core::event::{FileLine, StyledSpan};
 
 pub const FILE_VIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
-/// Broad language coverage (~200 syntaxes from the bat project) instead of
-/// syntect's small default set.
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(two_face::syntax::extra_newlines)
@@ -31,12 +29,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static DARK_THEME: AtomicBool = AtomicBool::new(true);
 
-/// Select the dark or light syntax-highlight theme. Returns true if it changed.
 pub fn set_dark_theme(dark: bool) -> bool {
     DARK_THEME.swap(dark, Ordering::Relaxed) != dark
 }
 
-/// Whether syntax highlighting currently uses the dark theme.
 pub fn is_dark_theme() -> bool {
     DARK_THEME.load(Ordering::Relaxed)
 }

@@ -2,11 +2,6 @@ pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const SPACES_LIST_EVENT: &str = "spaces_list";
 pub const SPACE_KEY_EVENT: &str = "space-key";
 
-/// What the keymap made of a key the spaces page handed over, sent back to the page that sent it.
-///
-/// The page keeps the doing; only the deciding moved. It is the only side that knows which row is
-/// highlighted and whether that row can be deleted, so what travels is the verb rather than an
-/// index the host would have to be told about first.
 #[derive(
     Clone,
     Copy,

@@ -1,10 +1,3 @@
-//! Describing the workspace in the shape the launcher asks for.
-//!
-//! Only the layout knows what tabs, stacks and panes exist, so the layout answers — in the shared
-//! `vmux_wire::command_bar` vocabulary, which is a wire contract rather than the launcher itself.
-//! Everything that assembles a payload *around* this lives with the launcher, downstream in
-//! `vmux_browser`, because it needs the command list and this does not.
-
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -18,7 +11,6 @@ use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, collect_leaf_panes, focused_stack};
 
 #[derive(SystemParam)]
-/// Bundled ECS queries for walking the active tab's panes/stacks into command-bar tab entries.
 pub struct TabGatherParams<'w, 's> {
     pub active_tab: ActiveTabParam<'w, 's>,
     pub all_children: Query<'w, 's, &'static Children>,
@@ -31,8 +23,6 @@ pub struct TabGatherParams<'w, 's> {
     pub child_of_q: Query<'w, 's, &'static ChildOf>,
 }
 
-/// Collect the active tab's open stacks as [`CommandBarTab`] entries, shared by the
-/// command-bar modal and the home launcher.
 #[allow(clippy::too_many_arguments)]
 pub fn gather_command_bar_tabs(
     active_tab: Option<Entity>,

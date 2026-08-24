@@ -1,9 +1,3 @@
-//! The chat page itself: one conversation's transcript, approvals and composer.
-//!
-//! Gated once here rather than per module, so what ships to a `ui` target is this file and the
-//! directory beside it. The desktop half that feeds it lives outside this crate, and speaks to
-//! it only through the bin-ipc payloads in [`crate::event`].
-
 #![allow(non_snake_case)]
 
 use self::agent::ChatHeader;
@@ -14,11 +8,6 @@ use self::state::use_chat;
 use self::transcript::ChatTranscript;
 use crate::transcript::MD_CSS;
 use dioxus::prelude::*;
-/// One agent conversation: its transcript, whatever it is waiting on, and the composer.
-///
-/// No props. Which conversation this is comes from the view's own metadata, so the page has the
-/// same shape whether a host built its `VirtualDom` or a bundle mounted it — and a native page is
-/// a `fn() -> Element`, with nowhere for a prop to come from.
 #[component]
 pub fn Page() -> Element {
     let chat = use_chat();
@@ -30,9 +19,6 @@ pub fn Page() -> Element {
         main {
             class: "agent-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
             style: "--agent-accent:{accent.css};",
-            // Focusable so a click on the transcript lands focus here rather than on the body,
-            // which would put keystrokes out of reach of the handler below. Deliberately not
-            // autofocused: `focus_prompt_end` already claims focus for the prompt on mount.
             tabindex: "-1",
             onkeydown: move |event| keys.on_root_keydown(event),
             style { dangerous_inner_html: MD_CSS }
@@ -47,13 +33,8 @@ pub fn Page() -> Element {
     }
 }
 
-/// The falling-glyphs backdrop shown while an agent installs.
-///
-/// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
-/// desktop act anyway, so a native host renders nothing rather than an approximation.
 #[component]
 fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
-    // The prop names have to match the CEF impl, since callers name them.
     let _ = (accent_rgb, title);
     rsx! {}
 }

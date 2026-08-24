@@ -1,13 +1,9 @@
-//! Linux clipboard: `wl-copy`/`wl-paste` under Wayland, falling back to `xclip`
-//! under X11. Image data is not read back on this platform.
-
 use tracing::warn;
 
 impl super::Clipboard {
     pub(super) fn write_blocking(text: &str) {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        // Try wl-copy first (Wayland), fall back to xclip (X11).
         let candidates: &[(&str, &[&str])] = &[
             ("/usr/bin/wl-copy", &[]),
             ("/usr/bin/xclip", &["-selection", "clipboard"]),

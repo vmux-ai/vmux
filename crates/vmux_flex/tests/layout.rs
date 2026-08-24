@@ -1,22 +1,9 @@
-//! The geometry this engine is required to produce, frozen while `bevy_ui` was here to vouch for
-//! it.
-//!
-//! Every number in `GOLDEN` and `MUTATION_GOLDEN` was asserted equal to `bevy_ui`'s own output
-//! before it was written down — exactly, not within an epsilon, because `bevy_ui` wraps the same
-//! `taffy` this crate uses. They came out of a different implementation, which is what makes them
-//! an independent oracle rather than a restatement of what this engine happens to do today.
-//!
-//! Regenerate only by putting the oracle back: re-add the `bevy_ui` feature, restore the
-//! differential harness, and run `emit_golden_tables`. A table edited to match new behaviour
-//! proves nothing.
-
 use bevy::prelude::*;
 use vmux_flex::{
     AlignItems, ComputedNode as FlexComputed, Display, FlexDirection, FlexPlugin, JustifyContent,
     Node as FlexNode, PositionType, UiRect, Val,
 };
 
-/// A tree authored in this crate's types, labelled so a mismatch names a path rather than an id.
 struct TreeSpec {
     label: String,
     node: FlexNode,
@@ -64,9 +51,6 @@ struct Harness {
 }
 
 impl Harness {
-    /// `WindowPlugin` spawns the primary window itself, so the resolution goes in through the
-    /// plugin — spawning a second one leaves two `PrimaryWindow`s and every `Single` over them
-    /// silently matches nothing.
     fn app(size: UVec2, scale_factor: f32) -> App {
         let mut resolution = bevy::window::WindowResolution::default();
         resolution.set_scale_factor_override(Some(scale_factor));
@@ -112,7 +96,6 @@ impl Harness {
         self.app.update();
     }
 
-    /// A layout that changes between two quiescent frames resizes a native view every frame.
     fn assert_stable(&mut self, case: &str) {
         let before: Vec<Option<FlexComputed>> = self
             .nodes
@@ -127,11 +110,6 @@ impl Harness {
     }
 }
 
-/// The window sizes and scale factors the frozen tables are required to span.
-///
-/// 1.25 and 1.5 are the load-bearing ones: at 1.0 and 2.0 a `Val::Px` scaled before layout and one
-/// scaled after are both integral, so those factors cannot tell a correct conversion from an
-/// inverted one.
 const TARGETS: &[(UVec2, f32)] = &[
     (UVec2::new(1280, 800), 1.0),
     (UVec2::new(1200, 800), 2.0),
@@ -173,8 +151,6 @@ fn leaf(grow: f32) -> FlexNode {
     }
 }
 
-/// The shell's own frame: window root, side sheets, the header/main column, then a space, a tab, a
-/// pane and a stack. This is the shape every other case is a variation on.
 fn production_frame() -> TreeSpec {
     TreeSpec::new(
         "window",
@@ -271,8 +247,6 @@ fn production_frame() -> TreeSpec {
     ))
 }
 
-/// Deterministic pane trees. Fractional flex division against taffy's rounding is where a
-/// hand-written case would not think to look.
 fn generated_pane_tree(seed: u64) -> TreeSpec {
     struct Rng(u64);
     impl Rng {
@@ -315,7 +289,6 @@ fn generated_pane_tree(seed: u64) -> TreeSpec {
     TreeSpec::new("root", fill()).with(build(&mut rng, depth, "p".to_string(), true))
 }
 
-/// Shapes the production frame does not contain but the shell can still produce.
 fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
     vec![
         (
@@ -399,19 +372,16 @@ fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
 }
 
 impl Harness {
-    /// Apply an edit, let layout settle, and record the result.
     fn mutate(&mut self, case: &str, edit: impl FnOnce(&mut World, &[Labelled])) -> Step {
         let nodes = std::mem::take(&mut self.nodes);
         edit(self.app.world_mut(), &nodes);
         self.nodes = nodes;
         self.settle();
-        // An entity the edit despawned is no longer ours to record.
         self.nodes
             .retain(|node| self.app.world().get_entity(node.entity).is_ok());
         self.step(case)
     }
 
-    /// Require the tree to have settled, then record what layout produced.
     fn step(&mut self, case: &str) -> Step {
         self.assert_stable(case);
         Step {
@@ -429,14 +399,12 @@ impl Harness {
     }
 }
 
-/// One step of [`Harness::mutation_script`]: what the tree looked like after that edit.
 struct Step {
     label: String,
     rows: Vec<(String, Vec2, Vec2)>,
 }
 
 impl Harness {
-    /// Geometry for every node this harness tracks, in spawn order.
     fn rows(&self) -> Vec<(String, Vec2, Vec2)> {
         let mut out = Vec::new();
         for node in &self.nodes {
@@ -450,12 +418,6 @@ impl Harness {
         out
     }
 
-    /// The edit script whose per-step geometry the golden tables freeze.
-    ///
-    /// The static corpus checks the style conversion; this checks the incremental tree sync —
-    /// adding, removing, reparenting and restyling after the tree already exists, which is where a
-    /// stale taffy node or a missed re-parent would show. The differential test and the golden one
-    /// replay it identically, so the frozen rows keep that coverage once the oracle is gone.
     fn mutation_script() -> Vec<Step> {
         let mut steps = Vec::new();
         let spec = TreeSpec::new(
@@ -497,8 +459,6 @@ impl Harness {
             world.spawn((leaf(1.0), ChildOf(root)));
         }));
 
-        // Removing and re-adding `Node` in one frame emits a removal for a live entity; deleting
-        // its taffy node on that signal would strand the entity with stale geometry.
         steps.push(
             harness.mutate("remove and reinsert Node in one frame", |world, _| {
                 world.entity_mut(a).remove::<FlexNode>();
@@ -511,19 +471,16 @@ impl Harness {
         }));
 
         steps.push(harness.resize(UVec2::new(1440, 900), 1.25));
-        // A scale-factor change has to restyle every `Val::Px`, not just re-run layout.
         steps.push(harness.resize(UVec2::new(1440, 900), 2.0));
 
         steps
     }
 }
 
-/// One frozen tree, laid out at one window size and scale factor.
 struct Golden {
     case: &'static str,
     size: UVec2,
     scale: f32,
-    /// (label, size x, size y, centre x, centre y)
     rows: &'static [(&'static str, f32, f32, f32, f32)],
 }
 
@@ -541,10 +498,8 @@ impl Golden {
     }
 }
 
-/// One frozen step of [`Harness::mutation_script`].
 struct MutationGolden {
     step: &'static str,
-    /// (label, size x, size y, centre x, centre y)
     rows: &'static [(&'static str, f32, f32, f32, f32)],
 }
 
@@ -1101,8 +1056,6 @@ const GOLDEN: &[Golden] = &[
     },
 ];
 
-/// Regenerating with a shortened target list would narrow the frozen coverage without failing
-/// anything else, because every table that survived would still match.
 #[test]
 fn the_frozen_tables_span_every_target() {
     for (size, scale) in TARGETS {

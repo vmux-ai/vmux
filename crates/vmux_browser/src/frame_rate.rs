@@ -1,9 +1,3 @@
-//! Refreshing what the pointer is over, and deciding how fast the layout webview redraws.
-//!
-//! Both run in `Last`, after everything that could have moved a pane or emitted to the page, so
-//! the hover state and the frame rate describe the frame that just happened rather than the one
-//! before it. The webview idles slowly and bursts back to full rate when the host emits to it.
-
 use bevy::{
     input::{
         keyboard::KeyboardInput,
@@ -55,13 +49,6 @@ impl Plugin for FrameRatePlugin {
     }
 }
 
-/// Asks for another frame while a page is still waiting for an asset.
-///
-/// A page's `vmux://` request is answered by a Bevy system, so the reply needs the schedule to
-/// run: once to pick the request up, and again to notice the load finished. Requesting the frame
-/// covers the first; nothing covered the second, so a stylesheet asked for from an idle app
-/// waited for whatever frame happened along next — measured between 170ms and 780ms, with both
-/// stylesheets released on the same one.
 fn keep_asset_replies_moving(
     pending: Query<(), With<CefResponseHandle>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -74,11 +61,6 @@ fn keep_asset_replies_moving(
     }
 }
 
-/// Lowers the hover flag for the frames where nothing can be hovered.
-///
-/// The AppKit monitor samples the pointer itself, so `sync_layout_cef_pointer_target` already
-/// answers the ordinary frame from that sample; what it does not know about is the host
-/// suppressing pointer input, which is why this still runs.
 #[cfg(target_os = "macos")]
 fn refresh_layout_cef_hover(
     windows: Query<&Window>,
@@ -304,8 +286,6 @@ fn sync_layout_cef_frame_rate(
     let pointer_moved = native_changed || cursor_events.read().count() > 0;
     let button_changed = button_events.read().count() > 0;
     let wheel_changed = wheel_events.read().count() > 0;
-    // Typing into the command bar panel or the bookmark field moves no pointer, so without this
-    // the layout webview paints those keystrokes at the idle rate and they look dropped.
     let key_changed = key_events.read().count() > 0;
     let input_changed = pointer_moved || button_changed || wheel_changed;
     let now = std::time::Instant::now();
@@ -405,8 +385,6 @@ mod tests {
             LAYOUT_ACTIVE_FRAME_RATE
         );
 
-        // The command bar panel animates open on the layout surface, so it has to burst too or
-        // the reveal plays at the idle rate.
         app.world_mut()
             .entity_mut(layout)
             .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));

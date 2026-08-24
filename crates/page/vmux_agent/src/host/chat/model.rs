@@ -1,10 +1,3 @@
-//! Which model a session runs, and how hard its agent is asked to think.
-//!
-//! The list comes from the agent over ACP, so a selection is optimistic: it is shown as current
-//! while the request is in flight and reconciled when the agent answers. The page and a remote
-//! peer both ask for the same two changes, so both write [`ModelSelectRequest`] and
-//! [`EffortSetRequest`] and one system applies each.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
@@ -20,7 +13,6 @@ use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, Sh
 use vmux_session::AcpSession;
 use vmux_wire::room::RemoteModelState;
 
-/// Model selection and effort, for the page and for a remote peer.
 pub(super) struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
@@ -54,25 +46,18 @@ impl Plugin for ChatModelPlugin {
     }
 }
 
-/// Switch a session to one of its models.
 #[derive(Message)]
 pub(super) struct ModelSelectRequest {
     pub sid: String,
     pub model_id: String,
 }
 
-/// Set an agent's effort level, or clear it when the level is empty.
 #[derive(Message)]
 pub(super) struct EffortSetRequest {
     pub agent_key: String,
     pub level: String,
 }
 
-/// Serve the model commands a remote peer may issue.
-///
-/// Read here rather than in `vmux_agent`'s central command handler for the same reason the team
-/// roster is: the state is local to this module, and that system is already at Bevy's parameter
-/// limit.
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     service: Option<Res<ServiceClient>>,
@@ -129,10 +114,6 @@ fn answer_remote_model_commands(
     }
 }
 
-/// The wire view of one session's models and effort, or `None` when no session has that id.
-///
-/// A free function because [`RemoteModelState`] belongs to `vmux_wire`, which cannot see a Bevy
-/// `Query`; it is private to the single caller above.
 fn remote_model_state(
     sid: &str,
     sessions: &Query<(&AcpSession, &AcpModelState)>,
@@ -164,7 +145,6 @@ fn remote_model_state(
     })
 }
 
-/// Record the choice and ask the agent for it, showing it as current in the meantime.
 fn apply_model_selection(
     mut reader: MessageReader<ModelSelectRequest>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
@@ -300,7 +280,6 @@ pub(super) fn emit_model_state(
     ));
 }
 
-/// The persisted launch-time effort for `agent_key`, or `""` (agent default).
 pub(super) fn effort_current_for<'a>(
     settings: Option<&'a Res<vmux_setting::AppSettings>>,
     agent_key: &str,
@@ -396,9 +375,6 @@ fn on_select_model(
     });
 }
 
-/// Persist the launch-time effort level for an agent. Blank `level` clears the override; only
-/// levels valid for the agent (see [`vmux_core::agent::effort_levels`]) are stored. Takes effect
-/// when the agent next launches a session/process.
 fn on_set_agent_effort(
     trigger: On<BinReceive<SetAgentEffort>>,
     mut efforts: MessageWriter<EffortSetRequest>,
@@ -410,7 +386,6 @@ fn on_set_agent_effort(
     });
 }
 
-/// Persist an effort level, or remove the override when the level is empty.
 fn apply_effort_setting(
     mut reader: MessageReader<EffortSetRequest>,
     mut settings: ResMut<vmux_setting::AppSettings>,
@@ -522,8 +497,6 @@ impl AcpModelRequestCounter {
 mod tests {
     use super::*;
 
-    /// The list a session offers depends on what its agent can do, and the page renders it
-    /// verbatim -- a command offered for an agent that cannot serve it fails on selection.
     #[test]
     fn slash_commands_include_cli_only_when_cross_runtime() {
         let names = |cross, models| {

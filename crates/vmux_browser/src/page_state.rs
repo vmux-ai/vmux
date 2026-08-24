@@ -1,9 +1,3 @@
-//! What the host pushes to the layout page.
-//!
-//! Each system serialises one slice of ECS state and emits it as the bin event the page
-//! listens for. They run as a group after the CEF state has been applied and focus recomputed,
-//! so every push in a frame describes the same layout.
-
 use bevy::{ecs::relationship::Relationship, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use vmux_core::{PageIdentity, PageMetadata, page::PageReady};
@@ -324,7 +318,6 @@ fn push_pane_tree_emit(
     *last = ron_body;
 }
 
-/// Emit the active tab's working-directory boundary from the shared event-driven Git cache.
 #[allow(clippy::too_many_arguments)]
 fn push_tab_boundary_emit(
     mut commands: Commands,

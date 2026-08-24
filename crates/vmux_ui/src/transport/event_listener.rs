@@ -1,6 +1,3 @@
-//! The host bridge: encoding a payload, handing it to whatever transport is installed, and
-//! naming every way that can fail.
-
 use std::fmt;
 
 use crate::transport::Host;
@@ -11,18 +8,13 @@ const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
     NoWindow,
-    /// No engine has injected its bridge yet. On wasm this is normal until the page finishes
-    /// loading, which is why [`crate::transport::Host::schedule_listener_retry`] exists.
     NoHostBridge,
     NoListenMethod,
     ListenNotCallable,
     NoEmitMethod,
     EmitNotCallable,
     SerializePayload,
-    /// No [`crate::transport::PageHost`] installed on a target with no default.
     NoHost,
-    /// The installed host has no route for that event id. Unlike the other variants this is not a
-    /// fault: a host that can only serve part of a page says so rather than silently succeeding.
     Unsupported,
 }
 
@@ -42,9 +34,6 @@ impl fmt::Display for EventListenerError {
     }
 }
 
-/// Send a typed payload to the host.
-///
-/// The event id is the payload's type name, which is what the Bevy side matches on.
 pub fn send<T>(payload: &T) -> Result<(), EventListenerError>
 where
     T: for<'a> rkyv::Serialize<

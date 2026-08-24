@@ -1,9 +1,3 @@
-//! Opening a `vmux://agent/...` URL: settling where it runs before anything is spawned.
-//!
-//! The URL alone does not say which directory the agent gets. That is resolved first — from the
-//! tab's bound workspace, its managed worktree, or the space's startup dir — because the answer
-//! decides whether the page attaches, shows a setup card, or waits for a worktree to be built.
-
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -381,11 +375,6 @@ fn handle_agent_page_open(
     }
 }
 
-/// Swap the agent session on a stack in place (see [`vmux_core::agent::SwapStackSession`]).
-/// Tears down the current session's stack-level components + panes, then re-attaches the
-/// target runtime with an explicit cwd — the shared path for `/resume` and the ACP↔CLI
-/// handoff. Unlike the page-open path this always re-attaches (no same-id no-op) and never
-/// falls back to `default_cwd`.
 fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
@@ -444,10 +433,6 @@ fn handle_swap_stack_session(
             None => None,
         };
 
-        // Removing AcpSession fires close_acp_session_on_remove → the daemon session is closed.
-        // Children (the Browser/terminal pane) are despawned; a CLI terminal despawn kills its
-        // PTY. Stack-level removes are no-ops for a CLI stack (its agent components live on the
-        // terminal child).
         commands
             .entity(ev.stack)
             .remove::<vmux_session::AcpSession>()
@@ -612,15 +597,10 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         Some(crate::AgentUrl::Acp { id, sid }) => {
-            // ACP agents own the canonical single-segment names (claude/codex/…) plus the
-            // two-segment `<id>/<acp-session-id>` session form.
             let cfg = acp_configs
                 .iter()
                 .find(|config| crate::acp_install::agent_ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
-                // Not an ACP agent. A bare `vmux://agent/<kind>` for a built-in CLI kind falls
-                // back to a fresh CLI session (CLI's own url is `<kind>/cli`); this keeps the
-                // legacy bare-url entry point (and the missing-binary setup flow) working.
                 if sid.is_none()
                     && let Some(kind) = AgentKind::from_url_segment(&id)
                 {
@@ -638,8 +618,6 @@ fn handle_agent_page_open_task(
                 }
                 return Err(format!("ACP agent unavailable for '{id}'"));
             }
-            // Already attached to this agent on this stack? A repeat open (or the post-spawn url
-            // redirect) is a no-op instead of re-spawning the session.
             if acp_sessions
                 .get(task.stack)
                 .is_ok_and(|session| crate::acp_install::agent_ids_match(&session.agent_id, &id))
@@ -649,8 +627,6 @@ fn handle_agent_page_open_task(
             if transition_webview.is_none() {
                 clear_stack_children(task.stack, children_q, commands);
             }
-            // `sid` (when present) is the agent-assigned ACP session id from a restored url — pass
-            // it as the resume target. Fresh opens mint a routing sid and load nothing.
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
             let name = acp_profile_name_for_id(&id, cfg, catalog);
@@ -1038,7 +1014,6 @@ mod tests {
     #[test]
     pub(crate) fn missing_claude_or_codex_cli_shows_setup_page() {
         for (kind, segment) in [(AgentKind::Claude, "claude"), (AgentKind::Codex, "codex")] {
-            // Isolate the legacy CLI path: ACP now shadows claude/codex single-segment URLs.
             let mut settings = test_settings();
             settings.agent.acp.clear();
             let mut app = App::new();
@@ -1522,17 +1497,6 @@ mod tests {
         );
     }
 
-    /// The launcher's view is replaced rather than relabelled, and the prompt the user typed into
-    /// it survives that.
-    ///
-    /// Reuse was the old shape: a CEF browser had the bundle loaded and a url swap kept it, so the
-    /// entity stayed and only its metadata changed. A native view is a `VirtualDom` built from the
-    /// launcher's component, which no url swap turns into chat — the surface would have stayed the
-    /// launcher's forever, showing a launcher in a pane the user had already left.
-    ///
-    /// The prompt is the part that must not regress either way: it is on its way from
-    /// `PendingPrompt` on the stack to the queue the run drains, and a despawn in the middle is
-    /// exactly where it could be dropped without anything noticing.
     #[test]
     pub(crate) fn inline_start_transition_replaces_the_launcher_view_and_keeps_the_prompt() {
         let mut app = App::new();
@@ -1688,7 +1652,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut settings = test_settings();
-        // Isolate the legacy CLI path: ACP now shadows the `claude` single-segment URL.
         settings.agent.acp.clear();
         settings.spaces.insert(
             "space-1".into(),
@@ -2058,7 +2021,6 @@ mod tests {
             .world_mut()
             .spawn(vmux_layout::stack::stack_bundle())
             .id();
-        // Stack already hosts a live vibe agent.
         app.world_mut().spawn((
             ChildOf(stack),
             vmux_core::agent::AgentSession {

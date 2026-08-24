@@ -1,5 +1,3 @@
-//! MCP schema for commands handled by the desktop application.
-
 #![allow(dead_code)]
 
 use vmux_macro::McpTool;

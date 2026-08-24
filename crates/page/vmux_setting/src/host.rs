@@ -1,6 +1,3 @@
-//! Settings on the desktop side: the RON runtime, the settings view, and appearance
-//! resolution.
-
 pub mod appearance;
 pub mod runtime;
 pub mod view;
@@ -24,8 +21,6 @@ pub use runtime::{
 pub use view::Settings;
 pub use vmux_command::event::SearchEngine;
 
-/// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
-/// settings webview.
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {

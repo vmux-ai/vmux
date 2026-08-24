@@ -1,6 +1,3 @@
-//! Host-side git engine: runs git operations on background threads and bridges results
-//! to the `files://` editor page.
-
 pub mod event;
 pub mod view;
 

@@ -5,7 +5,6 @@ use vmux_layout::event::TERMINAL_PAGE_URL;
 
 use crate::pid::{Pid, PidToEntity};
 
-/// Publishes the terminal entries the command bar searches over.
 pub struct TerminalSnapshotPlugin;
 
 impl Plugin for TerminalSnapshotPlugin {
@@ -53,9 +52,6 @@ mod tests {
         assert!(snap.running.is_empty());
     }
 
-    /// The key has to be the url the command bar hands back, spelt out here rather than built with
-    /// [`Pid::page_url`], because agreeing with the code under test proves nothing. A key that
-    /// drifts from the pane's own `PageMetadata` silently spawns a second terminal.
     #[test]
     fn running_terminals_are_keyed_by_the_url_the_row_carries() {
         let mut app = App::new();

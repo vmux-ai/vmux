@@ -1,14 +1,3 @@
-//! Handing a resolved app-level key back to the file page that pressed it.
-//!
-//! The return leg for the *app* keymap, and deliberately not the same thing as [`crate::keymap`],
-//! which is the modal text keymap this page also forwards to. Two keyboards read one page's
-//! keystrokes: `settings.json` owns the explorer toggle and the panel verbs, and the vim or vscode
-//! keymap owns everything that moves a caret or changes text. Which of them answers a press is
-//! decided by [`vmux_command::ScopedKeys`], on the host, once.
-//!
-//! It reads [`CommandIssued`] rather than [`AppCommand`] because it has to answer *that* page. A
-//! broadcast command names no webview, and two editor panes can be open on two different files.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_command::{AppCommand, CommandIssued, ReadAppCommands};
@@ -40,7 +29,6 @@ mod tests {
     use super::*;
     use vmux_command::FileKeyCommand;
 
-    /// What the plugin pushed back to a page, which is its only observable.
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
 
@@ -76,10 +64,6 @@ mod tests {
         }
     }
 
-    /// A file key goes back to the pane that pressed it and to no other, which is the whole reason
-    /// this reads the caller-stamped bus instead of the broadcast one. Two panes hold two different
-    /// buffers, and committing a completion into the wrong one would edit a file the user is not
-    /// looking at.
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
@@ -105,8 +89,6 @@ mod tests {
         );
     }
 
-    /// Every other command on the bus belongs to someone else. Echoing one would push a payload no
-    /// file page can decode.
     #[test]
     fn a_command_that_is_not_a_file_key_is_left_alone() {
         let mut app = Echo::app();

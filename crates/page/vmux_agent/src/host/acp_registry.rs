@@ -1,17 +1,10 @@
-//! The ACP agent registry: fetch, cache, and parse the standardized agent catalog published at
-//! <https://agentclientprotocol.com>. The catalog is the single source of truth for agent
-//! discovery, install specs (`distribution`), versions, and icons; vmux consumes it like any
-//! other ACP client rather than hardcoding agents.
-
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// Canonical registry endpoint. Clients fetch this one JSON document and filter locally.
 pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
-/// The registry document: `{ version, agents: [...] }`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Registry {
     pub version: String,
@@ -19,7 +12,6 @@ pub struct Registry {
     pub agents: Vec<RegistryAgent>,
 }
 
-/// One agent entry (an aggregated `<id>/agent.json`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistryAgent {
     pub id: String,
@@ -35,8 +27,6 @@ pub struct RegistryAgent {
     pub distribution: Distribution,
 }
 
-/// How an agent is delivered. A manifest may list several variants (e.g. `binary` + `npx`);
-/// vmux prefers `binary` (no runtime), then `npx` (managed Node), then `uvx` (managed uv).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Distribution {
     #[serde(default)]
@@ -47,7 +37,6 @@ pub struct Distribution {
     pub uvx: Option<PackageDist>,
 }
 
-/// A per-platform native binary archive, keyed by ACP platform target (`darwin-aarch64`, …).
 #[derive(Debug, Clone, Deserialize)]
 pub struct BinaryTarget {
     pub archive: String,
@@ -58,7 +47,6 @@ pub struct BinaryTarget {
     pub env: BTreeMap<String, String>,
 }
 
-/// An `npx` (Node) or `uvx` (Python-via-uv) package distribution.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PackageDist {
     pub package: String,
@@ -68,20 +56,14 @@ pub struct PackageDist {
     pub env: BTreeMap<String, String>,
 }
 
-/// The runtime an agent's chosen distribution needs before it can run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Runtime {
-    /// Native binary — no runtime.
     None,
-    /// `npx` — needs a (managed) Node.
     Node,
-    /// `uvx` — needs a (managed) uv/Python.
     Uv,
 }
 
 impl RegistryAgent {
-    /// The ACP platform target for the current host, matching the registry's `binary` keys.
-    /// `None` on unsupported host tuples.
     pub fn host_target() -> Option<&'static str> {
         match (std::env::consts::OS, std::env::consts::ARCH) {
             ("macos", "aarch64") => Some("darwin-aarch64"),
@@ -94,12 +76,10 @@ impl RegistryAgent {
         }
     }
 
-    /// The native binary target for the current host, if this agent ships one.
     pub fn binary_for_host(&self) -> Option<&BinaryTarget> {
         self.distribution.binary.as_ref()?.get(Self::host_target()?)
     }
 
-    /// The runtime vmux would use to run this agent, preferring a host-native binary.
     pub fn preferred_runtime(&self) -> Runtime {
         if self.binary_for_host().is_some() {
             Runtime::None
@@ -113,28 +93,22 @@ impl RegistryAgent {
     }
 }
 
-/// Runtime store for the cached registry and installed agents.
 pub fn agents_dir() -> PathBuf {
     vmux_core::profile::agents_dir()
 }
 
-/// Path of the cached registry document.
 fn cache_path() -> PathBuf {
     agents_dir().join("registry.json")
 }
 
-/// Parse a registry document from JSON.
 pub fn parse(json: &str) -> Result<Registry, String> {
     serde_json::from_str(json).map_err(|e| format!("acp registry: parse failed: {e}"))
 }
 
-/// Load the cached registry, if present and parseable.
 pub fn load_cached() -> Option<Registry> {
     parse(&std::fs::read_to_string(cache_path()).ok()?).ok()
 }
 
-/// Fetch the registry over the network (blocking) and write it to the cache. Run this on a
-/// background thread, not the Bevy schedule.
 pub fn fetch_blocking() -> Result<Registry, String> {
     let text = reqwest::blocking::get(REGISTRY_URL)
         .and_then(|r| r.error_for_status())
@@ -229,11 +203,8 @@ mod tests {
     #[test]
     fn preferred_runtime_prefers_binary_then_node_then_uv() {
         let reg = parse(SAMPLE).unwrap();
-        // claude: npx only -> Node.
         assert_eq!(reg.agents[0].preferred_runtime(), Runtime::Node);
-        // fast-agent: uvx only -> Uv.
         assert_eq!(reg.agents[2].preferred_runtime(), Runtime::Uv);
-        // vibe: binary — on a host the sample covers, no runtime.
         #[cfg(any(
             all(target_os = "macos", target_arch = "aarch64"),
             all(target_os = "linux", target_arch = "x86_64")

@@ -4,8 +4,6 @@ use vmux_core::{
     now_millis,
 };
 
-/// Records visits: browser navigations the webview commits, and `file://` opens other
-/// domains ask for.
 pub struct HistorySpawnPlugin;
 
 impl Plugin for HistorySpawnPlugin {
@@ -111,9 +109,6 @@ fn spawn_visits(
     }
 }
 
-/// Find-or-create the `Url` entity for `url` (bumping `VisitCount`/`LastVisitedAt`),
-/// then spawn a `Visit` unless this was a back/forward navigation. Sets the title on
-/// newly-created urls (browser visits pass ""); existing urls keep their title.
 pub(crate) fn record_visit(
     commands: &mut Commands,
     urls: &mut Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
@@ -154,8 +149,6 @@ pub(crate) fn record_visit(
     }
 }
 
-/// Record visits requested by other domains (the editor's `file://` opens) into the
-/// same history store, so file opens persist and rank like browser navigations.
 pub(crate) fn record_requested_visits(
     mut reader: bevy::ecs::message::MessageReader<vmux_core::event::RecordVisitRequest>,
     mut commands: Commands,

@@ -7,12 +7,6 @@ use crate::snapshot::{CommandBarSnapshotPlugin, WriteCommandBarSnapshots};
 use crate::surface::CommandBarSurfacePlugin;
 use vmux_core::team::{Profile, User};
 
-/// Wires the command protocol: the command messages, the command-bar snapshot resources,
-/// and the write -> snapshot -> read system ordering.
-///
-/// [`PageKeyPlugin`] rides here rather than with the keyboard, because what it produces is a
-/// command: a page hands a stroke over and a message goes on this bus, which is the same shape as
-/// every other way a command is issued.
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {

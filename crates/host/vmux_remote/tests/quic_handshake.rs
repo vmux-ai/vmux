@@ -1,10 +1,3 @@
-//! Proves the pinning actually holds over a real handshake.
-//!
-//! This is the control that replaces `danger_accept_invalid_certs(true)`, which accepted any
-//! certificate at all on a private address. A unit test on the comparison function would not
-//! catch the failure that matters — a verifier wired up so it never runs, or a rustls config that
-//! quietly falls back to the platform roots. So both directions go through a live QUIC endpoint.
-
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -20,7 +13,6 @@ fn desktop() -> (SelfSignedIdentity, SocketAddr, quinn::Endpoint) {
     (identity, address, endpoint)
 }
 
-/// Accept one connection and report whether the handshake completed.
 async fn accept_once(endpoint: quinn::Endpoint) -> bool {
     match tokio::time::timeout(Duration::from_secs(5), endpoint.accept()).await {
         Ok(Some(incoming)) => incoming.await.is_ok(),
@@ -48,8 +40,6 @@ async fn the_paired_fingerprint_connects() {
     connection.close(0u32.into(), b"done");
 }
 
-/// The one that matters: a desktop presenting a certificate the phone was not paired with is
-/// refused, even though it is a perfectly valid self-signed certificate on loopback.
 #[tokio::test]
 async fn a_different_certificate_is_refused() {
     let (_identity, address, server) = desktop();
@@ -76,16 +66,12 @@ async fn a_different_certificate_is_refused() {
     );
 }
 
-/// ALPN is the cheap gate: a peer speaking a different application protocol is rejected during
-/// the handshake, before any application byte is read.
 #[tokio::test]
 async fn a_peer_offering_another_alpn_is_rejected() {
     let (_identity, address, server) = desktop();
     let accepting = tokio::spawn(accept_once(server));
 
     let mut client = quinn::Endpoint::client((Ipv4Addr::UNSPECIFIED, 0).into()).expect("bind");
-    // Certificate verification is deliberately disabled here so the only thing left to reject the
-    // connection is the ALPN mismatch.
     let mut crypto = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -108,7 +94,6 @@ async fn a_peer_offering_another_alpn_is_rejected() {
     assert!(!accepting.await.expect("accept task"));
 }
 
-/// A probe is the deploy gate's only evidence, so it has to reach a listener that offers it.
 #[tokio::test]
 async fn a_probe_completes_against_a_listener_that_answers_them() {
     let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
@@ -133,8 +118,6 @@ async fn a_probe_completes_against_a_listener_that_answers_them() {
     assert!(accepting.await.expect("accept task"));
 }
 
-/// Only the relay opts in. A desktop offering the probe ALPN would let anyone who found the port
-/// confirm someone is home, without a pinned certificate or a pairing token.
 #[tokio::test]
 async fn an_ordinary_listener_refuses_a_probe() {
     let (identity, address, server) = desktop();
@@ -154,8 +137,6 @@ async fn an_ordinary_listener_refuses_a_probe() {
     assert!(!accepting.await.expect("accept task"));
 }
 
-/// Trusts everything, so the ALPN test above isolates protocol mismatch from certificate
-/// mismatch. Never used outside this file.
 #[derive(Debug)]
 struct AcceptAnything;
 
