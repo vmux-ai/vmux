@@ -5,6 +5,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::edit::buffer::TextBuffer;
 use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
+    VerticalDirection,
 };
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
@@ -270,6 +271,26 @@ impl EditCore {
         self.selections.push(Selection::caret(at));
         self.active = self.selections.len() - 1;
         self.merge_overlapping_carets();
+    }
+
+    /// Put a caret one row from the active one, in the column it sits in.
+    ///
+    /// The column comes from the caret itself rather than from
+    /// [`CaretMemory::preferred_vertical_col`]: growing the caret set is not a vertical run, and
+    /// homing on a column left over from one would put the new caret somewhere the user is not
+    /// looking. A row that is too short takes the caret at its end, which is what VS Code does.
+    pub fn add_caret_vertically(&mut self, direction: VerticalDirection) {
+        let delta = match direction {
+            VerticalDirection::Up => -1,
+            VerticalDirection::Down => 1,
+        };
+        let head = self.primary().head;
+        let (line, col) = self.buffer.char_to_coords(head);
+        let row = self.fold_view.step_rows(line as u32, delta) as usize;
+        if row == line {
+            return;
+        }
+        self.toggle_caret(self.buffer.coords_to_char(row, col));
     }
 
     /// Drop every caret but the one the user last placed.
@@ -1428,14 +1449,25 @@ impl EditCore {
     /// undo checkpoint is taken once for the whole sweep, so N carets typing is one undo step
     /// rather than N.
     pub fn apply(&mut self, cmd: EditCommand) -> EditOutcome {
-        if self.selections.len() == 1 || !cmd.is_per_caret() {
+        if self.selections.len() == 1 {
             self.active = 0;
+            return self.apply_at_active(cmd);
+        }
+        // A command with buffer-wide meaning runs against the active caret rather than the first.
+        // Normalising to zero here is how "add a caret below" used to grow the same caret twice
+        // and toggle its own second caret away, and how Escape kept whichever caret happened to
+        // sort first instead of the one the user placed last.
+        if !cmd.is_per_caret() {
             return self.apply_at_active(cmd);
         }
 
         let mut order: Vec<usize> = (0..self.selections.len()).collect();
         order.sort_by_key(|&i| std::cmp::Reverse(self.selections[i].range().start));
 
+        // Which caret is active has to survive the sweep, and it cannot survive as an index: the
+        // sweep visits them out of order and `merge_overlapping_carets` sorts. Follow it by
+        // value, the same way the merge does.
+        let was_active = self.active;
         let mut outcome = EditOutcome::default();
         self.in_sweep = true;
         self.sweep_snapshotted = false;
@@ -1451,7 +1483,7 @@ impl EditCore {
         }
         self.in_sweep = false;
         self.sweep_snapshotted = false;
-        self.active = 0;
+        self.active = was_active.min(self.selections.len().saturating_sub(1));
         self.merge_overlapping_carets();
         outcome
     }
@@ -1908,6 +1940,7 @@ impl EditCore {
             | EditCommand::FoldAll
             | EditCommand::UnfoldAll => {}
             EditCommand::CollapseCarets => self.collapse_carets(),
+            EditCommand::AddCaretVertically(direction) => self.add_caret_vertically(direction),
         }
 
         EditOutcome {
@@ -2028,6 +2061,43 @@ mod tests {
         let mut c = multi_caret("abcdef\n", &[4, 1]);
         c.collapse_carets();
         assert_eq!(heads(&c), vec![1]);
+    }
+
+    /// Growing the caret set downward and typing reaches every row, which is the whole gesture.
+    #[test]
+    fn adding_a_caret_below_twice_types_on_three_rows() {
+        let mut c = core("ab\ncd\nef\ngh\n");
+        c.set_caret(0);
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        assert_eq!(c.caret_count(), 3, "the second one grew from the new caret");
+        c.apply(EditCommand::InsertText(">".into()));
+        assert_eq!(text_of(&c), ">ab\n>cd\n>ef\ngh\n");
+    }
+
+    /// Which caret is active has to survive a sweep. It used to be reset to zero at the end of
+    /// each one, so typing at three carets and pressing Escape kept the first rather than the one
+    /// the gesture was built down to.
+    #[test]
+    fn a_sweep_leaves_the_active_caret_where_it_was() {
+        let mut c = core("ab\ncd\nef\n");
+        c.set_caret(0);
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::InsertText(">".into()));
+        c.apply(EditCommand::CollapseCarets);
+        let (line, _) = c.buffer.char_to_coords(c.primary().head);
+        assert_eq!(line, 2, "the caret the gesture ended on");
+    }
+
+    /// The last row has nothing under it, so the gesture stops rather than stacking a caret on
+    /// the row it is already on.
+    #[test]
+    fn adding_a_caret_past_the_last_row_adds_nothing() {
+        let mut c = core("ab\ncd\n");
+        c.set_caret(c.buffer.coords_to_char(2, 0));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        assert_eq!(c.caret_count(), 1);
     }
 
     /// Untoggling a caret *before* the active one slides every later caret down a slot, so an

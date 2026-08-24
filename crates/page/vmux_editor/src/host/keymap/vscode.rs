@@ -1,4 +1,4 @@
-use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target};
+use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target, VerticalDirection};
 use crate::keymap::{KeyInput, Keymap};
 
 #[derive(Default)]
@@ -54,6 +54,14 @@ impl Keymap for VscodeKeymap {
         let gui = m.meta;
         #[cfg(not(target_os = "macos"))]
         let gui = m.meta || m.ctrl;
+        // Before the `!m.alt` arms below, which would otherwise never see these.
+        if gui && m.alt && !m.shift {
+            match k.key.as_str() {
+                "ArrowUp" => return vec![AddCaretVertically(VerticalDirection::Up)],
+                "ArrowDown" => return vec![AddCaretVertically(VerticalDirection::Down)],
+                _ => {}
+            }
+        }
         if gui && m.shift && !m.alt {
             match k.key.as_str() {
                 "[" | "{" => return vec![FoldClose],
@@ -177,6 +185,30 @@ mod tests {
         assert_eq!(
             km.handle(&key("ArrowRight", shift)),
             vec![EditCommand::Select(Motion::Right)]
+        );
+    }
+
+    /// Alt-click was the only way to a second caret, so the feature could not be reached from the
+    /// keyboard at all. The plain arrow must still move rather than add.
+    #[test]
+    fn the_gui_alt_arrows_add_a_caret() {
+        let mut km = VscodeKeymap;
+        let gui_alt = Mods {
+            meta: true,
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("ArrowDown", gui_alt)),
+            vec![EditCommand::AddCaretVertically(VerticalDirection::Down)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowUp", gui_alt)),
+            vec![EditCommand::AddCaretVertically(VerticalDirection::Up)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowDown", Mods::default())),
+            vec![EditCommand::Move(Motion::Down)]
         );
     }
 

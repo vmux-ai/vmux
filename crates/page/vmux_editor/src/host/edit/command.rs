@@ -256,6 +256,18 @@ pub enum EditCommand {
     UnfoldAll,
     /// Put back every caret the user added, keeping the one they placed last.
     CollapseCarets,
+    /// Add a caret one row above or below the active one, in the same column.
+    ///
+    /// The keyboard's way into multi-caret editing. Alt-click was the only other, which left the
+    /// feature unreachable without a mouse.
+    AddCaretVertically(VerticalDirection),
+}
+
+/// Which way [`EditCommand::AddCaretVertically`] grows the caret set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerticalDirection {
+    Up,
+    Down,
 }
 
 impl EditCommand {
