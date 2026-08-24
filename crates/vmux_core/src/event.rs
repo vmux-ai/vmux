@@ -53,6 +53,7 @@ pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
 pub const FILE_RENAME_BEGIN_EVENT: &str = "file_rename_begin";
+pub const FILE_CODE_ACTIONS_EVENT: &str = "file_code_actions";
 pub const FILE_EDIT_FAILED_EVENT: &str = "file_edit_failed";
 pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
 pub const FILE_REFERENCES_EVENT: &str = "file_references";
@@ -2101,6 +2102,42 @@ pub struct FileRenameRequest {
     pub new_name: String,
 }
 
+/// Host → page: what the server offers doing to the selection, in the order it offered them.
+///
+/// Titles only. The actions themselves stay on the host, because each carries a whole
+/// `WorkspaceEdit` the page would only hand straight back.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCodeActionsEvent {
+    pub titles: Vec<String>,
+}
+
+/// Page → host: run the action at this index of the set last offered.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCodeActionPick {
+    pub index: u32,
+}
+
 /// What the editor's context menu can ask for.
 ///
 /// One event rather than one per row: every entry is the same shape — a position and a verb — and
@@ -2129,6 +2166,7 @@ pub enum EditorAction {
     Copy,
     Paste,
     ChangeAllOccurrences,
+    CodeAction,
 }
 
 #[derive(

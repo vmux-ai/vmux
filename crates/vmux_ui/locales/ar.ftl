@@ -607,6 +607,7 @@ editor-rename-symbol = إعادة تسمية الرمز
 editor-change-all-occurrences = تغيير جميع التطابقات
 editor-format-document = تنسيق المستند
 editor-format-selection = تنسيق التحديد
+editor-code-action = إعادة الهيكلة…
 editor-cut = قص
 editor-copy = نسخ
 editor-paste = لصق

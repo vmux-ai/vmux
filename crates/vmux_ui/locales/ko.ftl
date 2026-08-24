@@ -607,6 +607,7 @@ editor-rename-symbol = 기호 이름 바꾸기
 editor-change-all-occurrences = 모든 항목 변경
 editor-format-document = 문서 서식
 editor-format-selection = 선택 영역 서식
+editor-code-action = 리팩터링…
 editor-cut = 잘라내기
 editor-copy = 복사
 editor-paste = 붙여넣기

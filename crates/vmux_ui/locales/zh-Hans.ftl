@@ -607,6 +607,7 @@ editor-rename-symbol = 重命名符号
 editor-change-all-occurrences = 更改所有匹配项
 editor-format-document = 格式化文档
 editor-format-selection = 格式化选定内容
+editor-code-action = 重构…
 editor-cut = 剪切
 editor-copy = 复制
 editor-paste = 粘贴

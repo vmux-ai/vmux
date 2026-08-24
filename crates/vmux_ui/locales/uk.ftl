@@ -607,6 +607,7 @@ editor-rename-symbol = Перейменувати символ
 editor-change-all-occurrences = Змінити всі входження
 editor-format-document = Форматувати документ
 editor-format-selection = Форматувати виділення
+editor-code-action = Рефакторинг…
 editor-cut = Вирізати
 editor-copy = Копіювати
 editor-paste = Вставити

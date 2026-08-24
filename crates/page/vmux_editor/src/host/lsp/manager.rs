@@ -102,6 +102,7 @@ pub enum ReqKind {
     Definition,
     References,
     Rename,
+    CodeAction,
     Formatting { path: PathBuf },
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
@@ -158,6 +159,11 @@ pub struct LspManager {
     outbox: LspOutbox,
     events: crossbeam_channel::Sender<ServerEvent>,
     inflight: Vec<InFlight>,
+    /// The actions the last `textDocument/codeAction` offered, per pane.
+    ///
+    /// Held here rather than sent to the page because an action carries its whole `WorkspaceEdit`,
+    /// and the page has no use for one — it picks by index and the edit never leaves the host.
+    offered_actions: HashMap<Entity, Vec<lsp_types::CodeActionOrCommand>>,
 }
 
 fn uri_for(path: &Path) -> Option<String> {
@@ -199,6 +205,7 @@ impl LspManager {
             outbox,
             events,
             inflight: Vec::new(),
+            offered_actions: HashMap::new(),
         }
     }
 
@@ -240,6 +247,7 @@ impl LspManager {
                 EditorAction::FormatSelection,
                 "textDocument/rangeFormatting",
             ),
+            (EditorAction::CodeAction, "textDocument/codeAction"),
         ];
         let mut actions = Vec::new();
         for (action, method) in offered {
@@ -468,6 +476,110 @@ impl LspManager {
             serde_json::json!({ "context": { "includeDeclaration": true } }),
             ReqKind::References,
         );
+    }
+
+    /// Ask what can be done to the selected lines, given the diagnostics sitting on them.
+    ///
+    /// The diagnostics are the context a quick fix is matched against, so a request without them
+    /// comes back with refactorings only — which looks like a server that has no fixes rather than
+    /// a client that never asked for any.
+    pub fn code_actions(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        from_line: u32,
+        to_line: u32,
+        diagnostics: &[lsp_types::Diagnostic],
+    ) {
+        let overlapping: Vec<&lsp_types::Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| d.range.start.line <= to_line && d.range.end.line >= from_line)
+            .collect();
+        let end_col = self.line_len_utf16(path, to_line);
+        self.send_doc_request_at(
+            entity,
+            path,
+            "textDocument/codeAction",
+            serde_json::json!({
+                "range": {
+                    "start": { "line": from_line, "character": 0 },
+                    "end": { "line": to_line, "character": end_col },
+                },
+                "context": { "diagnostics": overlapping },
+            }),
+            ReqKind::CodeAction,
+        );
+    }
+
+    /// Run the action at `index` of the last set offered to this pane.
+    ///
+    /// Returns the edit to apply, if the action carries one. A `Command` is sent on its own and
+    /// answers by asking this client to apply an edit, which is a path that already exists.
+    pub fn run_code_action(
+        &mut self,
+        entity: Entity,
+        index: usize,
+        path: &Path,
+    ) -> Option<lsp_types::WorkspaceEdit> {
+        let chosen = self.offered_actions.get(&entity)?.get(index)?;
+        match chosen.clone() {
+            lsp_types::CodeActionOrCommand::Command(command) => {
+                self.execute_command(path, &command);
+                None
+            }
+            lsp_types::CodeActionOrCommand::CodeAction(action) => {
+                if let Some(command) = &action.command {
+                    self.execute_command(path, command);
+                }
+                action.edit
+            }
+        }
+    }
+
+    fn execute_command(&self, path: &Path, command: &lsp_types::Command) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        let (_, _rx) = client.send_request(
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": command.command,
+                "arguments": command.arguments.clone().unwrap_or_default(),
+            }),
+        );
+    }
+
+    fn send_doc_request_at(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        method: &str,
+        params_extra: serde_json::Value,
+        kind: ReqKind,
+    ) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        if !client.provides(method) {
+            return;
+        }
+        let mut params = serde_json::json!({ "textDocument": { "uri": uri } });
+        if let (Some(obj), Some(ex)) = (params.as_object_mut(), params_extra.as_object()) {
+            for (k, v) in ex {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let (_, rx) = client.send_request(method, params);
+        self.inflight.push(InFlight { entity, kind, rx });
     }
 
     pub fn format_document(&mut self, entity: Entity, path: &Path) {
@@ -927,6 +1039,38 @@ fn drain_lsp_requests(
                     result,
                 });
             }
+            ReqKind::CodeAction => {
+                let offered = serde_json::from_value::<Vec<lsp_types::CodeActionOrCommand>>(value)
+                    .unwrap_or_default();
+                let titles: Vec<String> = offered
+                    .iter()
+                    .map(|item| match item {
+                        lsp_types::CodeActionOrCommand::Command(c) => c.title.clone(),
+                        lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
+                    })
+                    .collect();
+                manager.offered_actions.insert(f.entity, offered);
+                if !ready {
+                    continue;
+                }
+                // Asking and being told nothing is still an answer. Left silent it reads as a menu
+                // row that does not work.
+                if titles.is_empty() {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        vmux_core::event::FILE_EDIT_FAILED_EVENT,
+                        &vmux_core::event::FileEditFailedEvent {
+                            reason: "no code actions here".to_string(),
+                        },
+                    ));
+                    continue;
+                }
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    f.entity,
+                    vmux_core::event::FILE_CODE_ACTIONS_EVENT,
+                    &vmux_core::event::FileCodeActionsEvent { titles },
+                ));
+            }
             ReqKind::Formatting { path } => {
                 // Formatting answers with edits to the one document, not a `WorkspaceEdit`. Giving
                 // it the envelope the apply path already knows costs a wrap and saves a
@@ -1080,6 +1224,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
         .add_message::<LspRequestedEdit>()
+        .add_message::<LspCodeActionRequest>()
         .add_systems(
             Update,
             (
@@ -1087,6 +1232,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
                 lint_on_open,
                 drain_lsp_diagnostics,
                 drain_lint,
+                request_code_actions,
                 drain_lsp_requests,
                 apply_semantic_tokens,
                 emit_diagnostics_system,
@@ -1109,6 +1255,10 @@ fn canon(p: &Path) -> PathBuf {
 struct DiagState {
     lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
     lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
+    /// The server's own diagnostics, kept beside the mapped ones because a code action is matched
+    /// against them: a quick fix carries the `code` and `data` of the diagnostic it repairs, and
+    /// the mapped form has dropped both.
+    raw: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
 }
 
 #[derive(Component, Default)]
@@ -1165,7 +1315,8 @@ fn drain_lsp_diagnostics(
             .find(|(_, fv, _)| canon(&fv.path) == target)
             .map(|(_, _, edit)| map_diags(&diags, |l| rope_line_text(&edit.core.buffer.rope, l)))
             .unwrap_or_default();
-        state.lsp.insert(target, mapped);
+        state.lsp.insert(target.clone(), mapped);
+        state.raw.insert(target, diags);
     }
 }
 
@@ -1176,6 +1327,40 @@ fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
     };
     for (path, diags) in drained {
         state.lint.insert(canon(&path), diags);
+    }
+}
+
+/// Ask for the code actions on a pane's selection.
+///
+/// A message rather than a direct call because the diagnostics that make up the request's context
+/// live in `DiagState`, which is private to this module — the observer that hears the menu row
+/// cannot reach them.
+#[derive(Message)]
+pub struct LspCodeActionRequest {
+    pub entity: Entity,
+    pub path: PathBuf,
+    pub from_line: u32,
+    pub to_line: u32,
+}
+
+fn request_code_actions(
+    mut reader: MessageReader<LspCodeActionRequest>,
+    state: Res<DiagState>,
+    mut manager: ResMut<LspManager>,
+) {
+    for request in reader.read() {
+        let diagnostics = state
+            .raw
+            .get(&canon(&request.path))
+            .cloned()
+            .unwrap_or_default();
+        manager.code_actions(
+            request.entity,
+            &request.path,
+            request.from_line,
+            request.to_line,
+            &diagnostics,
+        );
     }
 }
 

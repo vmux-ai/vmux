@@ -83,6 +83,7 @@ impl Plugin for EditorPlugin {
                 FileEditorAction,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
+                FileCodeActionPick,
                 FileCompletionRequest,
                 FileGotoRequest,
                 FileCompletionCommit,
@@ -187,6 +188,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_references_request)
             .add_observer(on_file_rename_request)
             .add_observer(on_file_editor_action)
+            .add_observer(on_file_code_action_pick)
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
@@ -3062,6 +3064,7 @@ fn on_file_editor_action(
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -3074,6 +3077,16 @@ fn on_file_editor_action(
     let path = edit.core.buffer.path.clone();
 
     let cmds = match action.action {
+        EditorAction::CodeAction => {
+            let (from_line, to_line) = edit.core.selected_lines();
+            code_actions.write(crate::lsp::manager::LspCodeActionRequest {
+                entity,
+                path,
+                from_line,
+                to_line,
+            });
+            return;
+        }
         EditorAction::GotoDeclaration => {
             manager.declaration(entity, &path, line, utf16);
             return;
@@ -3140,6 +3153,33 @@ fn on_file_editor_action(
         &browsers,
         &mut commands,
     );
+}
+
+/// Run the code action the user picked.
+///
+/// An action can carry an edit, a command, or both. The edit joins the same queue a rename's does;
+/// the command goes to the server, which typically answers by asking this client to apply an edit
+/// — the `workspace/applyEdit` path, already handled.
+fn on_file_code_action_pick(
+    trigger: On<BinReceive<FileCodeActionPick>>,
+    q: Query<&EditState>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
+) {
+    let entity = trigger.event().webview;
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let path = edit.core.buffer.path.clone();
+    let Some(workspace_edit) =
+        manager.run_code_action(entity, trigger.event().payload.index as usize, &path)
+    else {
+        return;
+    };
+    edits.write(crate::lsp::manager::LspRequestedEdit {
+        entity,
+        result: Ok(workspace_edit),
+    });
 }
 
 fn on_file_rename_request(

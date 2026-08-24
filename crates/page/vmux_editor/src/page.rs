@@ -51,6 +51,8 @@ pub fn Page() -> Element {
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
     let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
     let mut lsp_notice_generation = use_signal(|| 0u32);
+    let mut code_actions = use_signal(Vec::<String>::new);
+    let mut code_action_sel = use_signal(|| 0usize);
     let mut rename_box = use_signal(|| Option::<RenameBox>::None);
     let mut rename_failed = use_signal(String::new);
     let mut rename_failed_generation = use_signal(|| 0u32);
@@ -492,6 +494,12 @@ pub fn Page() -> Element {
     let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
     });
+
+    let _code_actions =
+        use_listener::<FileCodeActionsEvent, _>(FILE_CODE_ACTIONS_EVENT, move |e| {
+            code_action_sel.set(0);
+            code_actions.set(e.titles);
+        });
 
     let _rename_begin =
         use_listener::<FileRenameBeginEvent, _>(FILE_RENAME_BEGIN_EVENT, move |e| {
@@ -1740,6 +1748,64 @@ pub fn Page() -> Element {
                                         }
 
                                         {
+                                            (!code_actions().is_empty()).then(|| {
+                                                let titles = code_actions();
+                                                let chosen = code_action_sel().min(titles.len() - 1);
+                                                let top = cursor().row as f64 * ch + ch;
+                                                let left = gutter + cursor().col as f64 * cw;
+                                                rsx! {
+                                                    div {
+                                                        id: CODE_ACTION_ID,
+                                                        tabindex: 0,
+                                                        autofocus: true,
+                                                        class: "absolute z-50 max-h-56 min-w-64 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground outline-none ring-1 ring-inset ring-cyan-400/30 backdrop-blur-2xl shadow-lg",
+                                                        style: "left:{left}px;top:{top}px;",
+                                                        onkeydown: move |e| {
+                                                            e.stop_propagation();
+                                                            let len = code_actions().len();
+                                                            match e.key() {
+                                                                Key::ArrowDown => {
+                                                                    e.prevent_default();
+                                                                    code_action_sel.set((chosen + 1) % len);
+                                                                }
+                                                                Key::ArrowUp => {
+                                                                    e.prevent_default();
+                                                                    code_action_sel.set((chosen + len - 1) % len);
+                                                                }
+                                                                Key::Enter => {
+                                                                    e.prevent_default();
+                                                                    let _ = send(&FileCodeActionPick { index: chosen as u32 });
+                                                                    code_actions.set(Vec::new());
+                                                                    focus_file_input();
+                                                                }
+                                                                Key::Escape => {
+                                                                    e.prevent_default();
+                                                                    code_actions.set(Vec::new());
+                                                                    focus_file_input();
+                                                                }
+                                                                _ => {}
+                                                            }
+                                                        },
+                                                        onblur: move |_| code_actions.set(Vec::new()),
+                                                        for (i, title) in titles.iter().enumerate() {
+                                                            div {
+                                                                key: "{i}",
+                                                                class: if i == chosen { "cursor-default px-3 py-1 bg-cyan-400/15" } else { "cursor-default px-3 py-1" },
+                                                                onmousedown: move |e: Event<MouseData>| {
+                                                                    e.prevent_default();
+                                                                    let _ = send(&FileCodeActionPick { index: i as u32 });
+                                                                    code_actions.set(Vec::new());
+                                                                    focus_file_input();
+                                                                },
+                                                                "{title}"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            })
+                                        }
+
+                                        {
                                             rename_box().map(|box_| {
                                                 let top = box_.line as f64 * ch + ch;
                                                 let left = gutter + box_.col as f64 * cw;
@@ -2053,6 +2119,7 @@ const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const RENAME_ID: &str = "file-rename";
+const CODE_ACTION_ID: &str = "file-code-action";
 const RENAME_NOTICE_MS: u32 = 2400;
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
@@ -2175,6 +2242,14 @@ impl EditorMenu {
                 "editor-format-selection",
                 "",
                 EditorAction::FormatSelection,
+                false,
+            ));
+        }
+        if self.offered.contains(&EditorAction::CodeAction) {
+            modifying.push(lsp(
+                "editor-code-action",
+                "⌃⇧R",
+                EditorAction::CodeAction,
                 false,
             ));
         }

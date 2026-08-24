@@ -607,6 +607,7 @@ editor-rename-symbol = Symbool hernoemen
 editor-change-all-occurrences = Alle voorkomens wijzigen
 editor-format-document = Document opmaken
 editor-format-selection = Selectie opmaken
+editor-code-action = Herstructureren…
 editor-cut = Knippen
 editor-copy = Kopiëren
 editor-paste = Plakken

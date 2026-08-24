@@ -620,6 +620,7 @@ editor-rename-symbol = Rename Symbol
 editor-change-all-occurrences = Change All Occurrences
 editor-format-document = Format Document
 editor-format-selection = Format Selection
+editor-code-action = Refactor…
 editor-cut = Cut
 editor-copy = Copy
 editor-paste = Paste

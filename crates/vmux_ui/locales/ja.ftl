@@ -592,6 +592,7 @@ editor-rename-symbol = シンボルの名前を変更
 editor-change-all-occurrences = すべての出現箇所を変更
 editor-format-document = ドキュメントのフォーマット
 editor-format-selection = 選択範囲のフォーマット
+editor-code-action = リファクタリング…
 editor-cut = 切り取り
 editor-copy = コピー
 editor-paste = 貼り付け
