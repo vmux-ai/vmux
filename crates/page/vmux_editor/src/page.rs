@@ -88,7 +88,6 @@ pub fn Page() -> Element {
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
-    let git_display = use_signal(String::new);
     let git_branch = use_signal(String::new);
     let git_ahead = use_signal(|| 0u32);
     let git_behind = use_signal(|| 0u32);
@@ -654,11 +653,6 @@ pub fn Page() -> Element {
         .next()
         .unwrap_or_default()
         .to_string();
-    let header_path = {
-        let g = git_display();
-        if g.is_empty() { path() } else { g }
-    };
-
     let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
     let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
@@ -875,8 +869,8 @@ pub fn Page() -> Element {
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
                 ExplorerToggleButton { pane: explorer, mode }
-                {rsx! { TypeIcon { path: header_path.to_string(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
-                span { class: "truncate text-foreground/90", "{header_path}" }
+                {rsx! { TypeIcon { path: cur_basename.clone(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
+                span { class: "truncate text-foreground/90", "{cur_basename}" }
                 if dirty() {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
                 }
@@ -1025,7 +1019,6 @@ pub fn Page() -> Element {
                 path: git_path,
                 has_diff: git_has_diff,
                 nonce: git_nonce,
-                display_path: git_display,
                 branch: git_branch,
                 ahead: git_ahead,
                 behind: git_behind,

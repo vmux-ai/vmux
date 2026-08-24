@@ -424,15 +424,33 @@ pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepoInfo {
+    /// What the repository is called, which is not what its checkout directory is called.
+    ///
+    /// Taken from `origin` rather than from [`Self::repo_root`], because a checkout is routinely
+    /// named after something else: a linked worktree is named for its branch, and a submodule is
+    /// named for the slot it fills in its parent. Both would answer with a name that belongs to
+    /// this checkout rather than to the repository every checkout shares.
+    pub name: String,
     pub branch: String,
     pub is_worktree: bool,
     pub uncommitted: u32,
     pub ahead: u32,
-    pub(crate) repo_root: PathBuf,
+    pub repo_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
 }
 
+impl RepoInfo {
+    fn name_from_remote(url: &str) -> Option<String> {
+        let name = url
+            .trim()
+            .trim_end_matches('/')
+            .rsplit(['/', ':'])
+            .next()?
+            .trim_end_matches(".git");
+        (!name.is_empty()).then(|| name.to_string())
+    }
+}
 pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
     let (status, _, ok) = git_read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
     if !ok {
@@ -472,7 +490,21 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
     let repo_root = dirs.next()?;
     let git_dir = dirs.next()?;
     let common_dir = dirs.next()?;
+    let mut name = None;
+    if let Ok((remote, _, ok)) = git_read(dir, &["remote", "get-url", "origin"])
+        && ok
+    {
+        name = RepoInfo::name_from_remote(&remote);
+    }
+    let name = name.unwrap_or_else(|| {
+        repo_root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    });
     Some(RepoInfo {
+        name,
         branch,
         is_worktree: git_dir != common_dir,
         uncommitted,
@@ -540,6 +572,50 @@ mod tests {
         test_repo::write(repo, "seed.txt", "seed\n");
         test_repo::run(repo, &["add", "seed.txt"]);
         test_repo::run(repo, &["commit", "-qm", "init"]);
+    }
+
+    /// Every spelling `origin` can take has to answer with the same repository.
+    #[test]
+    fn a_remote_url_names_its_repository_however_it_is_spelled() {
+        for url in [
+            "https://github.com/vmux-ai/vmux.git",
+            "https://github.com/vmux-ai/vmux",
+            "git@github.com:vmux-ai/vmux.git",
+            "ssh://git@github.com/vmux-ai/vmux.git",
+            "/Users/me/checkouts/vmux",
+            "/Users/me/checkouts/vmux/",
+        ] {
+            assert_eq!(
+                RepoInfo::name_from_remote(url).as_deref(),
+                Some("vmux"),
+                "`{url}` should name `vmux`"
+            );
+        }
+    }
+
+    /// A checkout is routinely named after something other than its repository: a linked worktree
+    /// after its branch, a submodule after the slot it fills. The name has to come from `origin`.
+    #[test]
+    fn a_worktree_is_named_for_its_repository_not_its_directory() {
+        let origin = tempfile::tempdir().unwrap();
+        test_repo::run(origin.path(), &["init", "-q", "--bare"]);
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(
+            repo.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+
+        let checkout = repo.path().join("wt");
+        worktree_add(repo.path(), &checkout, "feature", "HEAD").unwrap();
+        let info = repo_info(&checkout).unwrap();
+
+        assert_eq!(info.branch, "feature");
+        assert_eq!(
+            info.name,
+            origin.path().file_name().unwrap().to_string_lossy(),
+            "the name must follow `origin`, not the `wt` directory the worktree sits in"
+        );
     }
 
     #[test]

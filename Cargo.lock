@@ -10293,6 +10293,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
+ "percent-encoding",
  "rkyv",
  "serde",
  "serde_json",

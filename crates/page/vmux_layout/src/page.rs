@@ -29,7 +29,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
+use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -384,20 +384,6 @@ fn layout_overlay_ready(
     layout_ready
         && (!state.header_visible() || (stacks_ready && tabs_ready))
         && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
-}
-
-fn format_address(stack: &StackRow) -> String {
-    if stack.url.starts_with("vmux://") || stack.url.starts_with("file:") {
-        return stack.url.clone();
-    }
-    let host = host_for_favicon_fallback(&stack.url);
-    let title = stack.title.trim();
-    match (host, title.is_empty()) {
-        (Some(h), false) => format!("{h} / {title}"),
-        (Some(h), true) => h.to_string(),
-        (None, false) => title.to_string(),
-        (None, true) => stack.url.clone(),
-    }
 }
 
 #[component]
@@ -1912,33 +1898,32 @@ fn open_vault(pane_id: u64) {
 
 #[component]
 fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
-    let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
-    let address_value = active_row.as_ref().map(format_address).unwrap_or_default();
-    let placeholder = if has_content {
-        String::new()
+    let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
+    let address = active_row.map(|row| row.address).unwrap_or_default();
+    let empty_class = if bg_color.is_some() {
+        "opacity-50"
     } else {
-        translate("layout-new-stack")
-    };
-    let placeholder_class = if bg_color.is_some() {
-        "placeholder:opacity-50"
-    } else {
-        "placeholder:text-muted-foreground"
+        "text-muted-foreground"
     };
 
     rsx! {
         div {
-            class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center",
+            class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
                 let _ = send(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
-            input {
-                r#type: "text",
-                readonly: true,
-                class: "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none {placeholder_class}",
-                value: "{address_value}",
-                placeholder: "{placeholder}",
+            if !has_content {
+                span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
+            } else {
+                if !address.origin.is_empty() {
+                    span {
+                        class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ui leading-tight",
+                        "{address.origin}"
+                    }
+                }
+                span { class: "min-w-0 truncate text-ui", "{address.rest}" }
             }
         }
     }

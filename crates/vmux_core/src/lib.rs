@@ -2,6 +2,7 @@ pub mod agent_setup;
 pub mod dom_snapshot;
 pub mod editor;
 pub mod event;
+pub mod file_url;
 pub mod icon;
 pub mod input;
 pub mod knowledge;

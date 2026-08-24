@@ -577,40 +577,6 @@ type ChromeUnsentReady = (
     With<vmux_core::page::PageReady>,
 );
 
-/// The path a `file://` url names.
-///
-/// Read off the raw string rather than through `Url`, because everything after the scheme is the
-/// path here and the parser does not treat it that way. `file://Users/me/a.rs` — two slashes
-/// instead of three, the usual typo — parses `Users` as a *host*, so reading `.path()` silently
-/// opens `/me/a.rs`: a different file, or more often a missing one blamed on a path nobody
-/// typed. A host is also case-folded, so `Users` cannot be put back afterwards. `localhost` is
-/// the one host that really does mean this machine, and it is the one that gets dropped.
-fn path_from_files_url(url: &str) -> Option<PathBuf> {
-    let rest = url
-        .strip_prefix("file://")
-        .or_else(|| url.strip_prefix("FILE://"))?;
-    // Only where the whole host is `localhost`. Without the boundary check the two-slash form
-    // turns `file://localhost-notes/a.rs` into `/-notes/a.rs`, which is the very failure this
-    // function exists to stop.
-    let rest = match rest.strip_prefix("localhost") {
-        Some(after) if after.is_empty() || after.starts_with('/') => after,
-        _ => rest,
-    };
-    let rest = rest.split(['?', '#']).next().unwrap_or_default();
-    if rest.is_empty() {
-        return None;
-    }
-    let raw = match rest.starts_with('/') {
-        true => rest.to_string(),
-        false => format!("/{rest}"),
-    };
-    let decoded = percent_encoding::percent_decode_str(&raw)
-        .decode_utf8()
-        .ok()?;
-    let path = PathBuf::from(decoded.as_ref());
-    path.is_absolute().then_some(path)
-}
-
 fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = path
         .file_name()
@@ -656,7 +622,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
 }
 
 pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
-    let path = path_from_files_url(url)?;
+    let path = vmux_core::file_url::FileUrl::parse(url)?.path()?;
     Some(new_file_view_bundle(url, path))
 }
 
@@ -678,7 +644,8 @@ pub fn handle_file_page_open(
         if !task.url.starts_with("file:") {
             continue;
         }
-        let Some(path) = path_from_files_url(&task.url) else {
+        let Some(path) = vmux_core::file_url::FileUrl::parse(&task.url).and_then(|u| u.path())
+        else {
             commands.entity(entity).insert(PageOpenError {
                 message: format!("malformed file URL '{}'", task.url),
             });
@@ -5258,65 +5225,6 @@ mod page_open_tests {
         let dir = app.world().get::<FileDir>(e).unwrap();
         assert!(dir.entries.iter().any(|x| x.name == "f2"));
         assert!(!dir.entries.iter().any(|x| x.name == "f1"));
-    }
-}
-
-#[cfg(test)]
-mod url_tests {
-    use super::*;
-
-    #[test]
-    fn parses_simple_path() {
-        assert_eq!(
-            path_from_files_url("file:///Users/me/src/main.rs"),
-            Some(PathBuf::from("/Users/me/src/main.rs"))
-        );
-    }
-
-    #[test]
-    fn decodes_percent_escapes() {
-        assert_eq!(
-            path_from_files_url("file:///Users/me/a%20b.rs"),
-            Some(PathBuf::from("/Users/me/a b.rs"))
-        );
-    }
-
-    #[test]
-    fn rejects_non_files_scheme() {
-        assert_eq!(path_from_files_url("vmux://terminal/"), None);
-    }
-
-    #[test]
-    fn empty_path_is_root() {
-        assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
-    }
-
-    /// Two slashes instead of three is the common typo. Reading only the path opens `/me/a.rs`
-    /// and then blames a path the user never typed.
-    #[test]
-    fn a_host_is_folded_back_onto_the_path() {
-        assert_eq!(
-            path_from_files_url("file://Users/me/a.rs"),
-            Some(PathBuf::from("/Users/me/a.rs"))
-        );
-    }
-
-    #[test]
-    fn localhost_really_does_mean_this_machine() {
-        assert_eq!(
-            path_from_files_url("file://localhost/Users/me/a.rs"),
-            Some(PathBuf::from("/Users/me/a.rs"))
-        );
-    }
-
-    /// Only the whole host. A directory that merely starts with those nine letters is a directory,
-    /// and dropping the prefix off it names a path that does not exist.
-    #[test]
-    fn a_directory_named_after_localhost_keeps_its_name() {
-        assert_eq!(
-            path_from_files_url("file://localhost-notes/a.rs"),
-            Some(PathBuf::from("/localhost-notes/a.rs"))
-        );
     }
 }
 

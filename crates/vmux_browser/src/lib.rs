@@ -1130,6 +1130,7 @@ mod tests {
             icon: vmux_core::PageIcon::None,
             is_active: true,
             bg_color: None,
+            address: Default::default(),
         }];
 
         assert!(!should_emit_new_stack_placeholder(

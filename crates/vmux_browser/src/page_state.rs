@@ -114,6 +114,48 @@ fn push_layout_state_emit(
     *last = body;
 }
 
+/// Works out which root each address in the header should be shown against.
+///
+/// A type rather than a function because the answer needs the git cache and the home directory,
+/// and the ladder it walks — checkout, then home, then the filesystem — is the same order for
+/// every row emitted in a frame.
+struct AddressRoots<'a> {
+    repos: Option<&'a mut vmux_git::RepoInfoCache>,
+    home: std::path::PathBuf,
+}
+
+impl AddressRoots<'_> {
+    fn of(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
+        let Some(path) = vmux_core::file_url::FileUrl::parse(url).and_then(|url| url.path()) else {
+            return match url.starts_with("vmux://") {
+                true => vmux_layout::event::AddressParts::internal(url),
+                false => vmux_layout::event::AddressParts::web(url, title),
+            };
+        };
+        if let Some(info) = self.checkout_of(&path) {
+            return vmux_layout::event::AddressParts::in_repo(
+                &path,
+                &info.repo_root,
+                &info.name,
+                &info.branch,
+            );
+        }
+        vmux_layout::event::AddressParts::on_disk(&path, &self.home)
+    }
+
+    /// The innermost checkout `path` sits in, which for a submodule is the submodule and not its
+    /// parent: the file belongs to that repository, and it is that repository's branch it is read
+    /// against.
+    fn checkout_of(&mut self, path: &std::path::Path) -> Option<vmux_git::worktree::RepoInfo> {
+        let dir = match path.is_dir() {
+            true => path,
+            false => path.parent()?,
+        };
+        self.repos.as_mut()?.get(dir)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -132,6 +174,7 @@ fn push_stacks_host_emit(
     pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -150,7 +193,14 @@ fn push_stacks_host_emit(
     let mut rows: Vec<StackRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
-    let _ = active_stack_opt.is_none();
+    let mut roots = AddressRoots {
+        repos: repo_info
+            .as_mut()
+            .map(|cache| cache.bypass_change_detection()),
+        home: std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default(),
+    };
     if let Some(active_stack_entity) = active_stack_opt {
         for (meta, child_of, nav_state, osc) in &browser_q {
             let stack_entity = child_of.get();
@@ -163,8 +213,10 @@ fn push_stacks_host_emit(
                 can_go_back = ns.can_go_back;
                 can_go_forward = ns.can_go_forward;
             }
+            let title = meta.title_with(osc).to_string();
             rows.push(StackRow {
-                title: meta.title_with(osc).to_string(),
+                address: roots.of(&meta.url, &title),
+                title,
                 url: meta.url.clone(),
                 icon: meta.icon.clone(),
                 is_active,
@@ -180,6 +232,7 @@ fn push_stacks_host_emit(
             icon: vmux_core::PageIcon::None,
             is_active: true,
             bg_color: None,
+            address: vmux_layout::event::AddressParts::default(),
         });
     }
     if active_stack_opt.is_some() && rows.is_empty() {
