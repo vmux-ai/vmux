@@ -62,7 +62,11 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 #[cfg(ui)]
 impl NativePage {
     pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
-        let html = crate::InterpreterShell::new(self.root_id, self.url)
+        // The document url rather than `url`: the interpreter appends `__events` and `__edits`
+        // to this base and fetches them, so a base the view is not actually on makes every one
+        // of those cross-origin — which surfaces as a bare "Script error." from a page that
+        // loaded its stylesheet and then never rendered anything.
+        let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(self.head)
             .with_html_attributes(self.html_attributes)
             .with_body_class(self.body_class)
@@ -73,6 +77,32 @@ impl NativePage {
             .header(wry::http::header::CONTENT_TYPE, "text/html")
             .body(html.into_bytes())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
+    }
+}
+
+#[cfg(all(test, ui))]
+mod shell_tests {
+    use super::*;
+
+    fn page() -> NativePage {
+        NativePage::pane("file://", || unreachable!()).served_from("vmux://files/")
+    }
+
+    /// The interpreter fetches `__events` and `__edits` against the base the shell hands it, so a
+    /// base that is not the document's own origin makes every one of those cross-origin. That
+    /// shows up as a bare `Script error.` and a page that paints its background and stops.
+    #[test]
+    fn the_interpreter_talks_to_the_origin_the_document_came_from() {
+        let html = String::from_utf8(page().shell().into_body()).unwrap();
+
+        assert!(
+            html.contains(r#"new NativeInterpreter("vmux://files", false)"#),
+            "the shell pointed the interpreter somewhere other than the document url"
+        );
+        assert!(
+            !html.contains(r#"NativeInterpreter("file:"#),
+            "no protocol handler answers `file://`, so nothing would reply to a fetch there"
+        );
     }
 }
 
