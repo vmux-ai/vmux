@@ -54,10 +54,12 @@ impl WebView {
             | CACornerMask::LayerMaxXMinYCorner
             | CACornerMask::LayerMinXMaxYCorner
             | CACornerMask::LayerMaxXMaxYCorner;
-        // Which pair is the bottom depends on which way the layer's y runs, and a `WKWebView`'s
-        // runs downward — so naming `MinY` here, as the same code does for a CEF view, rounds the
-        // top of the pane and leaves the edge at the window's bottom square.
-        let bottom = if layer.isGeometryFlipped() {
+        // Which pair is the bottom depends on which way y runs, and a `WKWebView` is a flipped
+        // view: y grows downward, so `MinY` is its top. Naming the pair CEF names — it draws into
+        // an unflipped view — rounds the edge tucked under the header and leaves the one at the
+        // window's bottom square. Asked of the view rather than the layer, which reports
+        // `isGeometryFlipped` false here and would send this the wrong way.
+        let bottom = if view.isFlipped() {
             CACornerMask::LayerMinXMaxYCorner | CACornerMask::LayerMaxXMaxYCorner
         } else {
             CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner
