@@ -59,7 +59,7 @@ impl WebView {
                 routes.serve(request, responder);
             })
             .with_ipc_handler(move |request| message.receive(request.body()))
-            .with_url(page.url)
+            .with_url(page.document_url())
             .with_bounds(bounds)
             .build_as_child(window)?;
 

@@ -1,5 +1,12 @@
 pub struct NativePage {
     pub url: &'static str,
+    /// The url the view is told to load, when that cannot be [`Self::url`].
+    ///
+    /// The two are the same for every page served from the `vmux` scheme, which is why one field
+    /// did for both jobs until the editor arrived. The editor answers for `file://`, and handing
+    /// that to the view sends it to the operating system's file loader rather than the custom
+    /// protocol: a blank document, with the page's component mounted into nothing.
+    pub document_url: Option<&'static str>,
     pub component: crate::PageComponent,
     pub root_id: &'static str,
     pub root_class: &'static str,
@@ -15,6 +22,16 @@ impl NativePage {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))
     }
 
+    pub fn document_url(&self) -> &'static str {
+        match self.document_url {
+            Some(url) => url,
+            None => self.url,
+        }
+    }
+    pub const fn served_from(mut self, url: &'static str) -> Self {
+        self.document_url = Some(url);
+        self
+    }
     pub const fn owning_subtree(mut self) -> Self {
         self.owns_subtree = true;
         self
@@ -37,6 +54,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
+            document_url: None,
         }
     }
 }
