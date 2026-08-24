@@ -36,3 +36,6 @@ path = "src/lib.rs"
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 vmux_core = { path = "../vmux_core" }
+
+[lints]
+workspace = true

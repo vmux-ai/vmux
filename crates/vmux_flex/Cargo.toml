@@ -19,3 +19,6 @@ taffy = { version = "0.10", default-features = false, features = [
     "content_size",
     "taffy_tree",
 ] }
+
+[lints]
+workspace = true

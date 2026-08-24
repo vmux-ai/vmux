@@ -30,3 +30,6 @@ toml = { workspace = true }
 url = { workspace = true }
 vmux_flex = { path = "../vmux_flex" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

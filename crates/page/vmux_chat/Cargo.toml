@@ -31,3 +31,6 @@ vmux_core = { path = "../../vmux_core" }
 vmux_service = { path = "../../host/vmux_service" }
 vmux_ui = { path = "../../vmux_ui" }
 vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
+
+[lints]
+workspace = true

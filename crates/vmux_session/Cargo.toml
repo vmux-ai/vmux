@@ -14,3 +14,6 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 serde = { workspace = true }
 vmux_wire = { path = "../vmux_wire", features = ["bevy"] }
+
+[lints]
+workspace = true

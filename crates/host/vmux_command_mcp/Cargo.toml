@@ -11,3 +11,6 @@ vmux_macro = { path = "../../vmux_macro" }
 
 [dev-dependencies]
 vmux_command = { path = "../../page/vmux_command" }
+
+[lints]
+workspace = true

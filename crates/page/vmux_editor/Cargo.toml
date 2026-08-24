@@ -65,3 +65,6 @@ vmux_ui = { path = "../../vmux_ui", default-features = false }
 [[bin]]
 name = "vmux_mock_lsp"
 path = "src/bin/vmux_mock_lsp.rs"
+
+[lints]
+workspace = true

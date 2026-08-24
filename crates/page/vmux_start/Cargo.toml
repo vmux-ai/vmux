@@ -38,3 +38,6 @@ vmux_flex = { path = "../../vmux_flex" }
 vmux_git = { path = "../../vmux_git" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_space = { path = "../vmux_space" }
+
+[lints]
+workspace = true

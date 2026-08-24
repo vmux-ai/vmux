@@ -72,3 +72,6 @@ wry = { version = "0.53", features = ["transparent"] }
 async-channel = "2"
 vmux_agent = { path = "../page/vmux_agent" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

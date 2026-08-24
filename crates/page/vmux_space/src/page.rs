@@ -46,7 +46,9 @@ pub fn Page() -> Element {
             tabindex: "0",
             class: "flex h-full min-h-0 flex-col bg-background text-foreground outline-none",
             onmounted: move |e| async move {
-                let _ = e.set_focus(true).await;
+                if let Err(error) = e.set_focus(true).await {
+                    dioxus::logger::tracing::warn!("focusing the space page failed: {error:?}");
+                }
             },
             onkeydown: move |e| keys.on_keydown(&e, |_| false),
             div { class: "flex items-center justify-between border-b border-border px-5 py-4",
