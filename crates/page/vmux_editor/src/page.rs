@@ -2261,6 +2261,12 @@ impl EditorMenu {
         rows.push(lsp("editor-cut", "⌘X", EditorAction::Cut, true));
         rows.push(lsp("editor-copy", "⌘C", EditorAction::Copy, false));
         rows.push(lsp("editor-paste", "⌘V", EditorAction::Paste, false));
+        rows.push(lsp(
+            "editor-command-palette",
+            "⇧⌘P",
+            EditorAction::CommandPalette,
+            true,
+        ));
         rows
     }
 }
@@ -4081,6 +4087,9 @@ mod menu_tests {
             .into_iter()
             .filter(|row| row.opens_group)
             .count();
-        assert_eq!(opens, 2, "modification and clipboard, navigation is first");
+        assert_eq!(
+            opens, 3,
+            "modification, clipboard and the palette; navigation is first so it opens nothing"
+        );
     }
 }

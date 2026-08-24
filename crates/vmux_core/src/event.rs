@@ -2167,6 +2167,7 @@ pub enum EditorAction {
     Paste,
     ChangeAllOccurrences,
     CodeAction,
+    CommandPalette,
 }
 
 #[derive(

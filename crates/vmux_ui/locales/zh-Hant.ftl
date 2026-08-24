@@ -611,6 +611,7 @@ editor-code-action = 重構…
 editor-cut = 剪下
 editor-copy = 複製
 editor-paste = 貼上
+editor-command-palette = 命令選擇區…
 editor-unsaved = 未儲存
 editor-rendered-markdown = 已轉譯的 Markdown，可即時編輯
 editor-note = 備註

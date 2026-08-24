@@ -611,6 +611,7 @@ editor-code-action = Рефакторинг…
 editor-cut = Вырезать
 editor-copy = Копировать
 editor-paste = Вставить
+editor-command-palette = Палитра команд…
 editor-unsaved = не сохранено
 editor-rendered-markdown = Отображённый Markdown с живым редактированием
 editor-note = Заметка

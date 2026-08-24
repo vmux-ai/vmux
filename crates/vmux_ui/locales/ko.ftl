@@ -611,6 +611,7 @@ editor-code-action = 리팩터링…
 editor-cut = 잘라내기
 editor-copy = 복사
 editor-paste = 붙여넣기
+editor-command-palette = 명령 팔레트…
 editor-unsaved = 저장되지 않음
 editor-rendered-markdown = 실시간 편집이 가능한 렌더링된 Markdown
 editor-note = 메모

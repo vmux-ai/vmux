@@ -611,6 +611,7 @@ editor-code-action = 重构…
 editor-cut = 剪切
 editor-copy = 复制
 editor-paste = 粘贴
+editor-command-palette = 命令面板…
 editor-unsaved = 未保存
 editor-rendered-markdown = 已渲染 Markdown，可实时编辑
 editor-note = 备注

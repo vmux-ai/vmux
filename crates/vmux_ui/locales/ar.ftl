@@ -611,6 +611,7 @@ editor-code-action = إعادة الهيكلة…
 editor-cut = قص
 editor-copy = نسخ
 editor-paste = لصق
+editor-command-palette = لوحة الأوامر…
 editor-unsaved = غير محفوظ
 editor-rendered-markdown = Markdown معروض مع تحرير مباشر
 editor-note = ملاحظة

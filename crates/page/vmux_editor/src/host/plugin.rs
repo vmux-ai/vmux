@@ -3065,6 +3065,7 @@ fn on_file_editor_action(
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
+    mut app_commands: MessageWriter<vmux_command::host::command::AppCommand>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -3077,6 +3078,16 @@ fn on_file_editor_action(
     let path = edit.core.buffer.path.clone();
 
     let cmds = match action.action {
+        EditorAction::CommandPalette => {
+            // The bar belongs to the layout page and only the shell can address it. Asking by
+            // command is how every other opener asks, so this does not become a second route in.
+            app_commands.write(vmux_command::host::command::AppCommand::Browser(
+                vmux_command::host::command::BrowserCommand::Bar(
+                    vmux_command::host::command::BrowserBarCommand::OpenCommandBar,
+                ),
+            ));
+            return;
+        }
         EditorAction::CodeAction => {
             let (from_line, to_line) = edit.core.selected_lines();
             code_actions.write(crate::lsp::manager::LspCodeActionRequest {

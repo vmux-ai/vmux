@@ -611,6 +611,7 @@ editor-code-action = Effettua refactoring…
 editor-cut = Taglia
 editor-copy = Copia
 editor-paste = Incolla
+editor-command-palette = Riquadro comandi…
 editor-unsaved = non salvato
 editor-rendered-markdown = Markdown renderizzato con modifica live
 editor-note = Nota

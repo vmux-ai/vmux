@@ -611,6 +611,7 @@ editor-code-action = Herstructureren…
 editor-cut = Knippen
 editor-copy = Kopiëren
 editor-paste = Plakken
+editor-command-palette = Opdrachtpalet…
 editor-unsaved = niet bewaard
 editor-rendered-markdown = Gerenderde Markdown met live bewerking
 editor-note = Notitie

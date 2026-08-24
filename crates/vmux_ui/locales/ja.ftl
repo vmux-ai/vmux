@@ -596,6 +596,7 @@ editor-code-action = リファクタリング…
 editor-cut = 切り取り
 editor-copy = コピー
 editor-paste = 貼り付け
+editor-command-palette = コマンドパレット…
 editor-unsaved = 未保存
 editor-rendered-markdown = ライブ編集付きMarkdownプレビュー
 editor-note = メモ
