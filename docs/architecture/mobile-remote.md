@@ -56,10 +56,29 @@ previous token.
 
 ## Runtime path
 
-The transport is QUIC end to end. There is no HTTP fallback and no loopback listener: a desktop
-behind NAT cannot be dialled, so the daemon dials the relay and holds that connection open, and the
-relay forwards a client's packets back over it verbatim. Those packets belong to a QUIC session
-that terminates on the desktop, so the relay cannot read them.
+The transport is QUIC end to end. There is no HTTP fallback and no loopback listener. What the
+relay does in the middle is [Topology](topology.md)'s subject and its internals live in
+`vmux-cloud`; three modules on this side of it are what the desktop actually runs.
+
+**`remote/quic/supervisor.rs`** owns the dialer's lifetime, and that ownership *is* the Remote
+switch. Off means no dial, no registration and nothing to retry. Gating admission alone would
+leave a desktop registered, retrying forever, and advertised as one that refuses everyone —
+asking the user to attend to a feature they never turned on. A phone that authenticated before
+the switch moved is dropped by the connection it is on, not by never having been dialled for.
+
+**`remote/quic/dialer.rs`** holds the outward connection open and redials on a doubling backoff
+from one second to thirty. A registration that stood for a minute restarts the sequence, so a
+desktop connected for hours reconnects in a second rather than inheriting the cap from however
+many attempts it took to get connected the first time — and a relay that accepts a registration
+then tears it down mid-redeploy is not mistaken for a healthy one. The phone's packets arrive as
+DATAGRAM frames on that connection and are handed to an inner endpoint that terminates their QUIC
+session *here*: same certificate, same `admit()`, same dispatch a phone dialling us directly would
+have reached. The inner MTU is floored at 1200 bytes — the smallest packet QUIC can handshake in —
+with 64 reserved for tunnel framing.
+
+**`remote/quic/dispatch.rs`** is the only place a remote message becomes an action. Prompt size,
+replay dedup and attachment confinement are enforced there once rather than remembered at each of
+nine handlers.
 
 Each client connection uses the same daemon registries as the local client:
 
@@ -67,10 +86,6 @@ Each client connection uses the same daemon registries as the local client:
 - `AcpSessionManager` for ACP agents.
 - One bidirectional stream per request, and a long-lived stream per subscribed session carrying
   transcript snapshots, streamed deltas, status and approvals.
-
-Every request funnels through `remote/quic/dispatch.rs`, the only place a remote message becomes an
-action. Prompt size, replay dedup and attachment confinement are enforced there once rather than
-remembered at each of nine handlers.
 
 ## Pairing and exposure
 

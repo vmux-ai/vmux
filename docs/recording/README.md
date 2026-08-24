@@ -1,8 +1,7 @@
 # Feature demos
 
 Short screen recordings showcasing vmux features. Captured with the
-`record_start` / `record_stop` MCP tools (see
-`docs/specs/2026-06-23-video-recording-mcp-tool-design.md`).
+`record_start` / `record_stop` MCP tools.
 
 ## Recording a demo
 

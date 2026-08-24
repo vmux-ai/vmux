@@ -108,9 +108,10 @@ After merging, clean up: remove the worktree (`git worktree remove .worktrees/<n
 
 ## Documentation
 
-- Save design specs to `docs/specs/YYYY-MM-DD-<topic>-design.md`.
-- Save implementation plans to `docs/plans/YYYY-MM-DD-<feature-name>.md`.
-- Delete the plan file once the plan is fully implemented.
+- **No design specs, no plan files, no dated design records.** Git, GitHub and Linear already hold the history, and a copy in the tree is one that goes stale silently — with nothing to catch it, because no test reads a spec. Write the decision into the architecture doc it changes, in the same PR as the behaviour.
+- `docs/architecture.md` is the index; each deep dive is one file under `docs/architecture/`. A new one earns its place by being a subject a reader would go looking for, not by being the thing you happened to build this week.
+- **Relay internals belong to `vmux-cloud`, not here.** This repo says what the client sends, what it pins, and what it does when the relay is unreachable. It does not explain the registry, tag routing, admission limits or deployment. `docs/architecture/topology.md` is the reference for that boundary: it names the relay as a node, then defers.
+- Rustdoc (`///`, `//!`) is separate from all of the above and stays. It is the source for `vmux.ai/docs/api`.
 
 ## Git
 
