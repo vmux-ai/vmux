@@ -2,14 +2,13 @@
 
 An agent-first workspace that ships with a browser and an IDE.
 
-Vmux is a native **Rust** host that embeds Chromium through **CEF**. The browser is a
-guest surface, not the container. That inversion is the whole thesis: instead of your app
-living inside a web sandbox, the web lives inside a native host that reaches straight to
-the OS and the GPU.
+Vmux is a native **Rust** host. Its own UI runs as native Dioxus components in the host
+process; Chromium is embedded through **CEF** as a guest surface for the pages you browse.
+That inversion is the whole thesis: instead of the app living inside a web sandbox, the web
+lives inside a native host that reaches straight to the OS and the GPU.
 
-The host runs on **Bevy**, a data-oriented ECS. Web views composite on the GPU into a
-`tmux`-style tiling tree, and agents drive all of it over **MCP** — the workspace is an
-API.
+The host runs on **Bevy**, a data-oriented ECS. Surfaces composite into a `tmux`-style
+tiling tree, and agents drive all of it over **MCP** — the workspace is an API.
 
 ---
 
@@ -17,13 +16,15 @@ API.
 
 The window is a client. The work lives somewhere that outlives the window.
 
-```
-   ┌── the app you see ──────────┐      ┌── the daemon ───────────────┐
-   │  Bevy host                  │      │  vmux_service               │
-   │  composites CEF surfaces    │◀────▶│  PTYs                       │
-   │  owns the workspace shape   │ unix │  agent + ACP sessions       │
-   └─────────────────────────────┘ sock └─────────────────────────────┘
-                                          supervised by launchd
+```mermaid
+flowchart LR
+    subgraph app["the app you see"]
+        bevy["Bevy host<br/>composites surfaces<br/>owns the workspace shape"]
+    end
+    subgraph daemon["the daemon — launchd supervised"]
+        svc["vmux_service<br/>PTYs<br/>agent + ACP sessions"]
+    end
+    bevy <-->|"unix socket"| svc
 ```
 
 Close the window and the shell keeps reading, the build keeps building, the agent keeps
@@ -46,18 +47,17 @@ a phone, or a watch.
   Its internals live in `vmux-cloud`; what matters here is that it forwards packets it
   cannot read.
 
-```
-   ┌─ host machine ───────────────────────┐
-   │  local client ──unix socket──▶ server │
-   └────────────────────────────────│──────┘
-                                    │ QUIC control, held open
-                                    ▼
-                                  relay          (vmux-cloud)
-                                    ▲
-                                    │ QUIC, the same UDP port
-                           ┌────────┴─────────┐
-                           │  remote client   │
-                           └──────────────────┘
+```mermaid
+flowchart TB
+    subgraph host["host machine"]
+        local["local client"]
+        server["vmux_service"]
+        local <-->|"unix socket"| server
+    end
+    relay(["relay — vmux-cloud"])
+    remote["remote client"]
+    server <-->|"QUIC control, held open"| relay
+    remote <-->|"QUIC, the same UDP port"| relay
 ```
 
 Neither end of the relay listens for the other. Both dial the same UDP port and are told
@@ -69,12 +69,19 @@ Nothing is dialled until Remote is switched on.
 
 ### What each link carries
 
-| Link | Transport | Payload |
-|---|---|---|
-| page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope |
-| local client ↔ server | unix socket | `u32`-length-prefixed rkyv, 64 MiB cap |
-| remote client ↔ server | QUIC, one stream per request | rkyv `SharedMessage` / `SharedResponse` |
-| server ↔ relay | QUIC control connection | JSON hello, then opaque DATAGRAM frames |
+```mermaid
+flowchart TB
+    page["a page"]
+    localc["local client"]
+    server["vmux_service"]
+    relay(["relay"])
+    remote["remote client"]
+
+    page -->|"wry IPC + vmux:// protocol<br/>binary DOM edits, rkyv events"| localc
+    localc -->|"unix socket<br/>u32-length-prefixed rkyv, 64 MiB cap"| server
+    remote -->|"QUIC, one stream per request<br/>rkyv SharedMessage / SharedResponse"| server
+    server -->|"QUIC control connection<br/>JSON hello, then opaque DATAGRAM frames"| relay
+```
 
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,
@@ -133,18 +140,30 @@ app.
 
 Ownership is structural — an element's position in the tree *is* its identity.
 
-```
-Window
-├─ Header                              shared top bar
-├─ SideSheet  Left / Right / Bottom    navigator + slide-in panels
-└─ Main
-   ├─ Space "vmux-ai/vmux" [Active]    visible project workspace
-   │  ├─ Tab [Active]
-   │  │  └─ PaneSplit
-   │  │     ├─ Pane [Active] ─ Stack [Active] ─ Browser
-   │  │     └─ Pane          ─ Stack          ─ Browser
-   │  └─ Tab
-   └─ Space "acme/dashboard"           fully alive, hidden
+```mermaid
+flowchart TB
+    win["Window"]
+    header["Header — shared top bar"]
+    sheet["SideSheet — left / right / bottom"]
+    main["Main"]
+    s1["Space 'vmux-ai/vmux' [Active]"]
+    s2["Space 'acme/dashboard' — alive, hidden"]
+    t1["Tab [Active]"]
+    t2["Tab"]
+    split["PaneSplit"]
+    p1["Pane [Active] — Stack [Active] — Browser"]
+    p2["Pane — Stack — Browser"]
+
+    win --> header
+    win --> sheet
+    win --> main
+    main --> s1
+    main --> s2
+    s1 --> t1
+    s1 --> t2
+    t1 --> split
+    split --> p1
+    split --> p2
 ```
 
 - **Space** — a project container. Exactly one is `Active` and drawn; the rest stay alive.
@@ -169,31 +188,84 @@ on an incompatible version rather than loading a broken store.
 
 ## How it paints
 
+Two engines, and which one draws a surface depends on what the surface *is*.
+
+```mermaid
+flowchart TB
+    win["Vmux window"]
+    native["Vmux's own pages — 16 of them<br/>native Dioxus components in this process<br/>painted by a transparent wry WKWebView"]
+    layout["the layout: header · URL bar · sidebar<br/>NativePagePlugin::as_layout"]
+    pane["everything in a pane: terminal, files,<br/>settings, agents, start, spaces …<br/>NativePagePlugin::in_pane"]
+    cef["content you browse — https://<br/>full Chromium via CEF"]
+
+    win --> native
+    win --> cef
+    native --> layout
+    native --> pane
 ```
-   Vmux window
-   │
-   ├─ content page  ─▶  native windowed CEF view, framed to its pane
-   │                    Chrome-parity CPU, no offscreen copy
-   │
-   └─ the layout    ─▶  one transparent CEF overlay running a Dioxus/WASM app
-                        header · URL bar · sidebar · command bar
-```
 
-Two backends, swapped at runtime. The everyday macOS path puts a real `NSView` over the
-pane, so scrolling costs what Chrome costs. Everywhere else — Linux, the layout overlay,
-3D mode — CEF paints **offscreen** into a GPU texture, imported straight into Bevy's `wgpu`
-device with no CPU copy. Switching tears the browser down and recreates it.
+**Vmux's own UI is not a web app any more.** Sixteen pages — the layout overlay included —
+run their components as native Dioxus in the host process, each painted by its own
+transparent `wry` webview. There is no wasm build of the UI and no `vmux://` page inside
+CEF. Even the command bar, which used to be its own webview, is now a panel drawn inside
+the layout page; the entity that survives holds only the state thirty-odd readers ask
+"is the bar open" through.
 
-The UI is Rust all the way down: one source compiles to native Bevy systems and to a
-`wasm32` Dioxus app rendered inside CEF. Dioxus is React-shaped — `rsx!` markup, signals
-and hooks — styled with Tailwind and shadcn tokens.
+**Content pages are still CEF.** `Browser::new` is the leaf that carries them — windowed,
+natively focused — so scrolling an `https://` page costs what Chrome costs. CEF also still
+backs the extension bridge pages, and the windowless path it paints offscreen.
 
-"All the way down" is about Vmux's *own* surfaces. The content you open is full Chromium;
-any React or Vue app renders exactly as it would in Chrome.
+Dioxus is React-shaped either way — `rsx!` markup, signals and hooks — styled with Tailwind
+and shadcn tokens. The content you open is full Chromium; any React or Vue app renders
+exactly as it would in Chrome.
 
-The whole workspace already lives in a Bevy 3D scene, so Player mode tilts your panes into
-a spatial view of the same workspace, pages still live. It was never why we reached for a
+The whole workspace lives in a Bevy 3D scene, so Player mode tilts your panes into a
+spatial view of the same workspace, pages still live. It was never why we reached for a
 game engine.
+
+---
+
+## How a native page works
+
+This is the part that changed most, and the part worth understanding.
+
+A page's components are ordinary Dioxus — the *same* code the phone runs. What differs is
+who executes them. There is no renderer and no `dioxus-desktop`: `PageDom` owns a
+`VirtualDom` and a `MutationState` and drives them **by hand**. The webview owns only the
+document.
+
+```mermaid
+sequenceDiagram
+    participant P as PageDom (host process)
+    participant W as wry WKWebView
+    participant E as Bevy ECS
+
+    P->>W: binary edit batch via evaluate_script
+    Note over W: window.interpreter.run_from_bytes(edits)
+    W->>P: window.ipc.postMessage — an EventRequest
+    P->>P: run the event through the VirtualDom
+    P->>W: EventOutcome — the verdict on a blocked event
+    P->>E: Outbox::send — BinIpcEventRaw
+    E->>P: state back through Requester / the waker
+```
+
+Everything the page loads arrives over a `vmux://` custom protocol registered on **that
+webview**: the document, the rendered frames, the verdict on an event it is blocked on, and
+every asset any of those reference. `Route` enumerates that list, so adding one is a variant
+rather than another branch in a chain of string tests.
+
+A page reaches the app through three channels, gathered once per app rather than per page:
+
+| Channel | Carries |
+|---|---|
+| `bin_ipc` | the page's emitted events, as `BinIpcEventRaw`, into the ECS |
+| `requester` | the page's requests for what the host must answer |
+| `waker` | a nudge to the winit event loop so the frame is actually drawn |
+
+One wart worth knowing: `BinIpcEventRaw` and `Requester` are **bevy_cef types**, reused as
+the app's bus. Nothing about a native page's messages touches CEF — wry carries them end to
+end — but the channel they land in is registered by a CEF plugin, so a wry page will not
+build until that plugin has. The transport moved and the channel types did not.
 
 ---
 
@@ -205,28 +277,34 @@ What fills a pane is decided by its URL scheme.
 |---|---|
 | `https://` | the open web — full Chromium |
 | `file://` | a local file or directory, in the editor |
-| `vmux://` | Vmux's own apps — terminal, history, settings, the layout overlay |
+| `vmux://` | Vmux's own pages, served from bundled assets |
 
-`vmux://` pages are not fetched. They are bundled into the app and served from a registered
-custom scheme, addressed by host, so a page loads instantly and offline.
+`vmux://` pages are not fetched from a server. They are answered from embedded assets by a
+custom protocol handler, so a page loads instantly and offline.
 
 "The workspace is an API" invites the obvious question: can a random website drive it?
 
-```
-   vmux://terminal   ─▶  trusted    ─▶  window.cef bridge  ─▶  ECS
-   file:///main.rs   ─▶  trusted    ─▶  window.cef bridge  ─▶  ECS
-   https://evil.com  ─▶  untrusted  ─▶  dropped
+```mermaid
+flowchart LR
+    v["vmux:// page"] -->|trusted| bridge["host bridge"]
+    f["file:// document"] -->|trusted| bridge
+    e["https://evil.com"] -->|untrusted| drop["dropped"]
+    bridge --> ecs["ECS"]
 ```
 
 A frame is trusted only when Vmux itself served it. Because `vmux://` and `file://` come
 straight from disk, no website can ever *be* at one of those URLs — the boundary is
-unforgeable rather than merely checked. It is enforced **per frame**, so an `evil.com`
-iframe inside a trusted page is still rejected, in the browser process with a
-defence-in-depth check in the renderer.
+unforgeable rather than merely checked. On the remaining CEF surfaces it is enforced **per
+frame**, so an `evil.com` iframe inside a trusted page is still rejected, in the browser
+process with a defence-in-depth check in the renderer.
+
+Native pages get the boundary for free in a different way: their components run in the host
+process and their webview is handed only its own `vmux://` protocol, so there is no bridge
+for an arbitrary URL to reach in the first place.
 
 A second layer adds least privilege *among* trusted pages: each message type is bound to
-the pages that may emit it, so a compromised Vmux page cannot pivot to another's handlers.
-The full Bevy Remote Protocol is locked to the `debug` page alone.
+the pages that may emit it, so a compromised page cannot pivot to another's handlers. The
+full Bevy Remote Protocol is locked to the `debug` page alone.
 
 ---
 
@@ -234,9 +312,10 @@ The full Bevy Remote Protocol is locked to the `debug` page alone.
 
 Two maps, and "registering" is inserting into one of them.
 
-```
-   ProcessManager        ProcessId ──▶ Process        PTY + child + cell grid
-   AgentSessionManager   sid       ──▶ SessionHandle  provider stream + history
+```mermaid
+flowchart LR
+    pm["ProcessManager"] -->|"ProcessId"| proc["Process<br/>PTY + child + cell grid"]
+    am["AgentSessionManager"] -->|"sid"| sess["SessionHandle<br/>provider stream + history"]
 ```
 
 Each exposes the same two surfaces: a **broadcast channel** of updates, and a point-in-time
@@ -260,10 +339,12 @@ only the visible slice of a file and re-slices as you scroll.
 The desktop is behind NAT, so it dials out and holds the connection open. Three modules own
 that on this side; what the relay does in the middle belongs to `vmux-cloud`.
 
-```
-   supervisor.rs  ─▶  owns the dialer's lifetime = the Remote switch
-   dialer.rs      ─▶  holds the connection open, terminates the inner QUIC session
-   dispatch.rs    ─▶  the only place a remote message becomes an action
+```mermaid
+flowchart TB
+    sup["supervisor.rs<br/>owns the dialer's lifetime = the Remote switch"]
+    dial["dialer.rs<br/>holds the connection open<br/>terminates the inner QUIC session"]
+    disp["dispatch.rs<br/>the only place a remote message becomes an action"]
+    sup --> dial --> disp
 ```
 
 **The switch is a lifetime, not an access check.** Off means no dial, no registration and
@@ -295,28 +376,34 @@ Discovery is manual by design. No mDNS, no zeroconf.
 A page never names a backend. It emits typed payloads under an event id, and a `PageHost`
 decides what that physically means.
 
-```
-   page (identical code everywhere)
-     └─ PageHost::emit / listen
-          ├─ CefHost     wasm in a webview  ─▶ crosses a process boundary ─▶ ECS
-          └─ MobileHost  native beside one  ─▶ QUIC ─▶ server ─▶ broker ─▶ ECS
+```mermaid
+flowchart TB
+    page["a page — identical code on desktop and phone<br/>components run natively in both"]
+    trait["PageHost::emit / listen"]
+    mobile["MobileHost — QUIC to the server"]
+    direct["desktop — straight into the ECS<br/>via the page's own channels"]
+    page --> trait
+    trait --> mobile
+    trait --> direct
+    mobile --> broker["server, then brokered to the ECS"]
 ```
 
-The asymmetry is not where you would guess. Locally the page is wasm inside an embedded
-browser and every message crosses a real process boundary. Remotely the page is native Rust
-in the same process as its webview and crosses nothing — the distance is to the *host*, not
-to the renderer.
+Both ends now run their components natively, so the old asymmetry — wasm in a webview on
+the desktop, native on the phone — is gone, and with it `CefHost`. `MobileHost` is the only
+`PageHost` implementation left; on the desktop a page reaches the ECS through its embedder's
+channels directly.
 
-Two current limits: `emit` is one-way on remote clients, and subscriptions are still
-polled. `ListAgents` and `ListTeam` are brokered into the local client's ECS rather than
-read from the server, so they answer `NoDesktop` until a window is there to ask.
+What remains different is distance. Two current limits: `emit` is one-way on remote clients,
+and subscriptions are still polled. `ListAgents` and `ListTeam` are brokered into the local
+client's ECS rather than read from the server, so they answer `NoDesktop` until a window is
+there to ask.
 
 ---
 
 ## Agents
 
 Every action a person can take is also an **MCP tool**. Vmux ships a stdio MCP server —
-line-delimited JSON-RPC in `crates/vmux_mcp` — so any MCP-capable agent drives the
+line-delimited JSON-RPC in `crates/host/vmux_mcp` — so any MCP-capable agent drives the
 workspace the way a person does.
 
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
@@ -343,28 +430,59 @@ React-style, in one atomic transaction.
 
 A remote client is strictly a client — the server half of `vmux_service` is compiled out.
 
-### The cfg aliases
+Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
+iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the
+desktop app and the daemon. Write `#[cfg(host)]` rather than a negation of target
+predicates. Cargo's own `[target.'cfg(...)'.dependencies]` still has to spell the targets
+out, because dependency resolution happens before any build script runs.
 
-The recurring trap was gating a desktop half on `not(target_arch = "wasm32")`, which is
-**true on iOS**. A build script emits three aliases so the gate names what it means:
+---
 
-| Alias | Means |
-|---|---|
-| `web` | wasm32 — the browser bundle |
-| `ui` | wasm32 *or* iOS — the pages, no Bevy, no process access |
-| `host` | everything else — the desktop app and the daemon |
+## Where a crate lives
 
-iOS is native code but is not `host`: it runs the pages, so it is `ui`. Write
-`#[cfg(host)]`, never a negation of two target predicates. Cargo's own
-`[target.'cfg(...)'.dependencies]` still has to spell the targets out, because dependency
-resolution happens before any build script runs.
+```
+crates/
+├── app/                    something a user starts
+│   ├── vmux_cli
+│   ├── vmux_desktop
+│   └── vmux_mobile
+├── host/                   runtime with no UI, owns state
+│   ├── vmux_client
+│   ├── vmux_command_mcp
+│   ├── vmux_mcp
+│   ├── vmux_remote
+│   └── vmux_service
+├── page/                   answers a URL, one per page
+│   ├── vmux_agent
+│   ├── vmux_chat
+│   ├── vmux_command
+│   ├── vmux_editor
+│   ├── vmux_history
+│   ├── vmux_knowledge
+│   ├── vmux_layout
+│   ├── vmux_setting
+│   ├── vmux_space
+│   ├── vmux_start
+│   ├── vmux_team
+│   └── vmux_terminal
+├── vmux_browser            composes pages into the desktop shell
+├── vmux_clipboard
+├── vmux_core
+├── vmux_flex
+├── vmux_git
+├── vmux_macro
+├── vmux_native             the VirtualDom driver and its wry webview
+├── vmux_profile
+├── vmux_session
+├── vmux_ui
+└── vmux_wire
+```
 
-### Where a crate lives
-
-`crates/app/` is something a user starts. `crates/page/` answers a URL, one per page.
-`crates/host/` is runtime with no UI that owns state. Everything else stays flat.
+Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
+which sits above `page/` and below `app/` — a `page/` crate must never depend on it, and
+nothing but `app/vmux_desktop` may.
 
 Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
-`host/vmux_service`, because those crates cfg-split and a page links only the non-host
-half. And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code
-while staying flat.
+`host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
+And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
+staying flat.
