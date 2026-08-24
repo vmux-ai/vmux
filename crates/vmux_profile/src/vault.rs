@@ -39,12 +39,18 @@ const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-const IGNORED_ROOTS: [&str; 8] = [
+/// Roots under the config directory the vault never syncs, and so never fingerprints.
+///
+/// `projects`, `workspace` and `worktrees` are checkout roots rather than configuration. Walking
+/// one means walking every `target/` inside it, which is enough files to hold a core for as long
+/// as the scan runs — and the scan reruns on every vault trigger.
+const IGNORED_ROOTS: [&str; 9] = [
     "agents",
     "extensions",
     "lsp",
     "local",
     "profiles",
+    "projects",
     "spaces",
     "workspace",
     "worktrees",
