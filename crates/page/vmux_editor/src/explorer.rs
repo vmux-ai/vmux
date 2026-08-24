@@ -142,47 +142,87 @@ fn cancel_tree_focus(mut generation: Signal<u32>) {
     generation.set(id);
 }
 
-fn reconcile_rows(
-    mut rows: Signal<Vec<MotionRow>>,
-    mut generation: Signal<u32>,
-    next: Vec<TreeRow>,
-) {
-    let id = generation().wrapping_add(1);
-    generation.set(id);
-    let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
-    let current = rows
-        .read()
-        .iter()
-        .map(|motion| motion.row.clone())
-        .collect::<Vec<_>>();
-    let merged = merge_tree_motion_rows(&current, &next)
-        .into_iter()
-        .map(|(row, visible)| MotionRow { row, visible })
-        .collect();
-    rows.set(merged);
-    spawn(async move {
-        sleep_ms(0).await;
-        if generation() != id {
-            return;
-        }
-        let mut opening = rows.read().clone();
-        for item in &mut opening {
-            if next_paths.contains(&item.row.path) {
-                item.visible = true;
-            }
-        }
-        rows.set(opening);
+#[derive(Clone, Copy)]
+struct TreeRows {
+    rows: Signal<Vec<MotionRow>>,
+    generation: Signal<u32>,
+}
 
-        sleep_ms(TREE_MOTION_MS).await;
-        if generation() != id {
-            return;
+impl TreeRows {
+    /// Take the tree the host just sent, animating the difference.
+    fn reconcile(self, next: Vec<TreeRow>) {
+        let mut rows = self.rows;
+        let generation = self.generation;
+        let id = self.claim();
+        let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
+        let current = rows
+            .read()
+            .iter()
+            .map(|motion| motion.row.clone())
+            .collect::<Vec<_>>();
+        let merged = merge_tree_motion_rows(&current, &next)
+            .into_iter()
+            .map(|(row, visible)| MotionRow { row, visible })
+            .collect();
+        rows.set(merged);
+        spawn(async move {
+            // A turn before anything is opened, so the new rows reach the document closed: one
+            // that appears already visible has no transition left to run.
+            sleep_ms(0).await;
+            if generation() != id {
+                return;
+            }
+            let mut opening = rows.read().clone();
+            for item in &mut opening {
+                if next_paths.contains(&item.row.path) {
+                    item.visible = true;
+                }
+            }
+            rows.set(opening);
+
+            sleep_ms(TREE_MOTION_MS).await;
+            if generation() != id {
+                return;
+            }
+            rows.set(
+                next.into_iter()
+                    .map(|row| MotionRow { row, visible: true })
+                    .collect(),
+            );
+        });
+    }
+
+    /// Close a directory now, rather than when the host gets round to saying so.
+    ///
+    /// The host owns which directories are open and answers with the whole tree rebuilt, which
+    /// over a large directory takes long enough to read as the click not having registered.
+    /// Dropping the descendants here costs nothing when the host agrees, and its answer replaces
+    /// them when it does not.
+    fn collapse(self, path: &str) {
+        self.claim();
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        let mut kept = Vec::new();
+        for motion in self.rows.read().iter() {
+            if motion.row.path.starts_with(&prefix) {
+                continue;
+            }
+            let mut motion = motion.clone();
+            if motion.row.path == path {
+                motion.row.expanded = false;
+            }
+            kept.push(motion);
         }
-        rows.set(
-            next.into_iter()
-                .map(|row| MotionRow { row, visible: true })
-                .collect(),
-        );
-    });
+        let mut rows = self.rows;
+        rows.set(kept);
+    }
+
+    /// Take ownership of the rows, abandoning whatever animation held them.
+    fn claim(self) -> u32 {
+        let mut generation = self.generation;
+        let id = generation().wrapping_add(1);
+        generation.set(id);
+        id
+    }
 }
 
 fn show_notice(
@@ -276,6 +316,10 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let mut root_loading = use_signal(|| false);
     let rows = use_signal(Vec::<MotionRow>::new);
     let row_generation = use_signal(|| 0u32);
+    let tree = TreeRows {
+        rows,
+        generation: row_generation,
+    };
     let focus_generation = use_signal(|| 0u32);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
@@ -301,7 +345,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         root_path.set(e.root_path);
         current_path.set(e.current_path);
         root_loading.set(e.loading);
-        reconcile_rows(rows, row_generation, e.rows);
+        tree.reconcile(e.rows);
         if visible() && !e.focus_path.is_empty() {
             schedule_tree_focus(e.focus_path, focus_generation);
         }
@@ -485,6 +529,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                 let path_menu = row.path.clone();
                                 let name_menu = row.name.clone();
                                 let is_dir = row.is_dir;
+                                let was_expanded = row.expanded;
                                 let active = row.path == current_path();
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
@@ -526,6 +571,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 },
                                                 onclick: move |_| {
                                                     if is_dir {
+                                                        if was_expanded {
+                                                            tree.collapse(&path_click);
+                                                        }
                                                         toggle_dir(path_click.clone());
                                                     } else {
                                                         open_file(path_click.clone());

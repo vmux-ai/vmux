@@ -367,9 +367,10 @@ pub(crate) fn sync_windowed_frames(
     mut last_windowed_pages: Local<Vec<Entity>>,
     mut pane_frames: ResMut<PaneFrames>,
 ) {
-    pane_frames.0.clear();
+    pane_frames.frames.clear();
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
+    pane_frames.all_corners = windowed_page_all_corners(layout_hidden.0, visible_pane_count);
     let header_frame = header_rect.iter().find_map(WindowedFrameRect::of);
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
@@ -395,7 +396,7 @@ pub(crate) fn sync_windowed_frames(
             visible_pane_count,
         );
         if let Some(logical) = PaneFrame::of(frame, scale) {
-            pane_frames.0.insert(entity, logical);
+            pane_frames.frames.insert(entity, logical);
         }
         let became_visible = !memory.visible_pages.contains(&entity);
         if became_visible {
@@ -494,12 +495,26 @@ pub(crate) struct FrameSyncMemory {
 }
 
 #[derive(Resource, Default)]
-pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
+pub(crate) struct PaneFrames {
+    frames: std::collections::HashMap<Entity, PaneFrame>,
+    all_corners: bool,
+}
 
 impl PaneFrames {
     #[cfg(target_os = "macos")]
     pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
-        self.0.get(&page).copied()
+        self.frames.get(&page).copied()
+    }
+
+    /// Whether a pane is rounded on all four corners this run, rather than only where it meets the
+    /// bottom of the window.
+    ///
+    /// Read off the same value the CEF path is given rather than worked out again, because the two
+    /// have to agree: a natively hosted page is laid over the pane CEF rounded, and a page that
+    /// disagreed about which corners those were would square off the ones it did not mask.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn all_corners(&self) -> bool {
+        self.all_corners
     }
 }
 

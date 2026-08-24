@@ -166,6 +166,7 @@ fn place_native_pages(
     window: Query<&Window, With<PrimaryWindow>>,
     pages: Query<(), With<HostsPage>>,
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
+    settings: Res<AppSettings>,
 ) {
     let Some(mut hosted) = hosted else {
         return;
@@ -173,12 +174,15 @@ fn place_native_pages(
     hosted.0.retain(|entity, _| pages.contains(*entity));
     let window = window.single().ok();
     let capturing = !capturing.is_empty();
+    let all_corners = frames.all_corners();
     for (entity, page) in hosted.0.iter() {
         let Some(bounds) = page.placement.bounds(*entity, window, &frames) else {
             page.surface.set_visible(false);
             continue;
         };
         page.surface.set_bounds(bounds);
+        page.surface
+            .set_corner_radius(settings.layout.radius as f64, all_corners);
         page.surface.set_visible(true);
         if let Some(order) = page.placement.pointer_order(capturing) {
             page.surface.order_among_siblings(order);

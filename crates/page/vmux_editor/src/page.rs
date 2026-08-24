@@ -1618,7 +1618,7 @@ pub fn Page() -> Element {
                                                 rsx! {
                                                     div {
                                                         key: "word{s.row}-{s.start}",
-                                                        class: "pointer-events-none absolute z-0 rounded-[2px] bg-foreground/10",
+                                                        class: "pointer-events-none absolute z-0 rounded-[2px] bg-foreground/20 ring-1 ring-inset ring-foreground/30",
                                                         style: "{style}",
                                                     }
                                                 }

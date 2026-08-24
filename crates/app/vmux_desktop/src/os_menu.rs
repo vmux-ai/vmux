@@ -260,7 +260,10 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
 
 #[cfg(target_os = "macos")]
 fn edit_menu_items_enabled(intent: HostFocusIntent) -> bool {
-    !matches!(intent, HostFocusIntent::WinitHost)
+    !matches!(
+        intent,
+        HostFocusIntent::WinitHost | HostFocusIntent::NativePane(_)
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -438,14 +441,20 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn edit_items_disabled_only_for_terminal_focus() {
+    fn edit_items_are_released_to_whatever_answers_the_chords_itself() {
         assert!(
             !edit_menu_items_enabled(HostFocusIntent::WinitHost),
             "terminal focus must release ⌘C/⌘V to the terminal's own handler"
         );
+        assert!(
+            !edit_menu_items_enabled(HostFocusIntent::NativePane(Entity::PLACEHOLDER)),
+            "a page hosted in this process binds ⌘Z itself, and the menu's undo would rewind the \
+             wrong buffer"
+        );
         assert!(edit_menu_items_enabled(HostFocusIntent::Windowed(
             Entity::PLACEHOLDER
         )));
+        assert!(edit_menu_items_enabled(HostFocusIntent::LayoutView));
     }
 
     fn test_settings() -> AppSettings {

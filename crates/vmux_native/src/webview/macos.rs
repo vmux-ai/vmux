@@ -41,6 +41,24 @@ impl WebView {
         layer.setZPosition(500.0);
     }
 
+    pub fn set_corner_radius(&self, radius: f64, all_corners: bool) {
+        use objc2_quartz_core::CACornerMask;
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            warn!("vmux_native: the view has no layer, its corners will stay square");
+            return;
+        };
+        let all = CACornerMask::LayerMinXMinYCorner
+            | CACornerMask::LayerMaxXMinYCorner
+            | CACornerMask::LayerMinXMaxYCorner
+            | CACornerMask::LayerMaxXMaxYCorner;
+        let bottom = CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner;
+        layer.setCornerRadius(radius.max(0.0));
+        layer.setMasksToBounds(true);
+        layer.setMaskedCorners(if all_corners { all } else { bottom });
+    }
     pub fn set_appearance(&self, appearance: Appearance) {
         let named = match appearance {
             Appearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
