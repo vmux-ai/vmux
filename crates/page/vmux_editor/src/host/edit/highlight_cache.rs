@@ -133,7 +133,11 @@ impl HighlightCache {
         let fg = crate::highlight::theme_foreground(&self.theme);
         let mut out = Vec::with_capacity(end - start);
         for i in start..end {
-            let text: String = rope.line(i).chars().filter(|c| *c != '\n').collect();
+            let text: String = rope
+                .line(i)
+                .chars()
+                .filter(|c| !matches!(c, '\n' | '\r'))
+                .collect();
             let spans = match text.is_empty() {
                 true => Vec::new(),
                 false => vec![StyledSpan {
@@ -205,6 +209,17 @@ mod tests {
         let r = rope(&"let x = 1;\n".repeat(500));
         let _ = c.line_window(&r, 0, 500);
         assert!(c.befores.is_empty());
+    }
+
+    /// A carriage return left in the span is a control character the renderer draws, and a CRLF
+    /// file is exactly the kind large enough to reach this path.
+    #[test]
+    fn a_plain_cache_drops_the_line_ending_whichever_it_is() {
+        let mut c = HighlightCache::plain(std::path::Path::new("a.rs"));
+        let r = rope("fn main() {}\r\nlet x = 1;\r\n");
+        let w = c.line_window(&r, 0, 2);
+        assert_eq!(w[0].spans[0].text, "fn main() {}");
+        assert_eq!(w[1].spans[0].text, "let x = 1;");
     }
 
     #[test]

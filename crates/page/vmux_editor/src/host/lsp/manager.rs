@@ -104,7 +104,7 @@ pub enum ReqKind {
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
-    SemanticTokens { key: ServerKey },
+    SemanticTokens { key: ServerKey, path: PathBuf },
 }
 
 pub struct InFlight {
@@ -464,7 +464,10 @@ impl LspManager {
         let (_, rx) = client.send_request("textDocument/semanticTokens/full", params);
         self.inflight.push(InFlight {
             entity,
-            kind: ReqKind::SemanticTokens { key },
+            kind: ReqKind::SemanticTokens {
+                key,
+                path: path.to_path_buf(),
+            },
             rx,
         });
     }
@@ -784,9 +787,10 @@ fn drain_lsp_requests(
                     ));
                 }
             }
-            ReqKind::SemanticTokens { key } => {
+            ReqKind::SemanticTokens { key, path } => {
                 semantic_w.write(LspSemantic {
                     entity: f.entity,
+                    path,
                     tokens: parse_semantic_tokens(&value, manager.semantic_legend(&key)),
                 });
             }
@@ -816,6 +820,13 @@ fn parse_semantic_tokens(
 #[derive(Message)]
 pub struct LspSemantic {
     pub entity: Entity,
+    /// The document the tokens were decoded against.
+    ///
+    /// A token is a row and a column, so laying one file's tokens over another recolours whatever
+    /// happens to be at those coordinates. The pane can navigate while the request is in flight —
+    /// the view keeps its entity across a navigation — so the entity alone does not say the reply
+    /// still belongs.
+    pub path: PathBuf,
     pub tokens: Vec<crate::lsp::semantic::SemanticToken>,
 }
 
@@ -823,14 +834,17 @@ pub struct LspSemantic {
 /// the window was already painted with the guessed colours by the time the server answered.
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut views: Query<(&mut EditState, &FileViewport)>,
+    mut views: Query<(&mut EditState, &FileView, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for message in reader.read() {
-        let Ok((mut edit, vp)) = views.get_mut(message.entity) else {
+        let Ok((mut edit, view, vp)) = views.get_mut(message.entity) else {
             continue;
         };
+        if crate::host::plugin::canon(&view.path) != crate::host::plugin::canon(&message.path) {
+            continue;
+        }
         edit.hl
             .set_semantic(crate::lsp::semantic::SemanticHighlight::of(
                 message.tokens.clone(),

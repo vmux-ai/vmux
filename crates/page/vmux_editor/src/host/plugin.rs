@@ -583,7 +583,13 @@ fn path_from_files_url(url: &str) -> Option<PathBuf> {
     let rest = url
         .strip_prefix("file://")
         .or_else(|| url.strip_prefix("FILE://"))?;
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    // Only where the whole host is `localhost`. Without the boundary check the two-slash form
+    // turns `file://localhost-notes/a.rs` into `/-notes/a.rs`, which is the very failure this
+    // function exists to stop.
+    let rest = match rest.strip_prefix("localhost") {
+        Some(after) if after.is_empty() || after.starts_with('/') => after,
+        _ => rest,
+    };
     let rest = rest.split(['?', '#']).next().unwrap_or_default();
     if rest.is_empty() {
         return None;
@@ -1695,7 +1701,9 @@ fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: No
         if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
+        // `has_browser`, as in `on_file_video_rect`: the overlay is CEF's own machinery rather
+        // than a host event, and a natively hosted page answers `can_emit_to` without having any.
+        if !browsers.has_browser(entity) {
             continue;
         }
         browsers.attach_media_overlay(&entity, &fv.path.to_string_lossy());
@@ -1985,7 +1993,11 @@ struct FileWatch {
     dirs: HashSet<PathBuf>,
 }
 
-fn canon(p: &Path) -> PathBuf {
+/// The path to compare two references to a file by, so a symlink and its target are one file.
+///
+/// Falls back to the path as written for anything that cannot be resolved, which is what makes it
+/// usable on a file that has just been deleted or renamed out from under a view.
+pub(crate) fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
@@ -5041,6 +5053,16 @@ mod url_tests {
         assert_eq!(
             path_from_files_url("file://localhost/Users/me/a.rs"),
             Some(PathBuf::from("/Users/me/a.rs"))
+        );
+    }
+
+    /// Only the whole host. A directory that merely starts with those nine letters is a directory,
+    /// and dropping the prefix off it names a path that does not exist.
+    #[test]
+    fn a_directory_named_after_localhost_keeps_its_name() {
+        assert_eq!(
+            path_from_files_url("file://localhost-notes/a.rs"),
+            Some(PathBuf::from("/localhost-notes/a.rs"))
         );
     }
 }

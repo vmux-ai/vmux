@@ -168,7 +168,37 @@ impl Highlighter {
             std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let content = String::from_utf8(bytes)
             .map_err(|_| format!("not a UTF-8 text file: {}", path.display()))?;
+        if meta.len() > HIGHLIGHT_MAX_BYTES {
+            return Ok(self.plain(&content, path));
+        }
         Ok(self.highlight(&content, path))
+    }
+
+    /// The text, one span per line, in the theme's plain colour.
+    ///
+    /// The same trade the editor makes past [`HIGHLIGHT_MAX_BYTES`], for the callers that hand a
+    /// whole file to syntect in one go rather than a window at a time. Without it, raising the
+    /// open limit to fifty megabytes raised the highlighting limit with it.
+    fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
+        let theme = &self.themes.themes[theme_name()];
+        let fg = theme_foreground(theme);
+        let lines = LinesWithEndings::from(content)
+            .enumerate()
+            .map(|(idx, line)| FileLine {
+                line_no: idx as u32,
+                fold: vmux_core::event::FoldGutter::None,
+                spans: vec![StyledSpan {
+                    text: line.trim_end_matches(['\n', '\r']).to_string(),
+                    fg,
+                    bold: false,
+                    italic: false,
+                }],
+            })
+            .collect();
+        HighlightedFile {
+            language: select_syntax(path).name.clone(),
+            lines,
+        }
     }
 }
 
@@ -266,6 +296,28 @@ mod tests {
         let dir = std::env::temp_dir();
         let err = hl.load_file(&dir).unwrap_err();
         assert!(err.to_lowercase().contains("not a file"), "got: {err}");
+    }
+
+    /// Raising the open limit to fifty megabytes must not raise the highlighting limit with it:
+    /// syntect over a file this size is what the cap exists to prevent.
+    #[test]
+    fn load_serves_a_file_past_the_highlight_cap_without_colouring_it() {
+        let hl = Highlighter::new();
+        let mut p = std::env::temp_dir();
+        p.push(format!("vmux-editor-large-{}.rs", std::process::id()));
+        let line = "fn main() { let x = 1; }\n";
+        std::fs::write(
+            &p,
+            line.repeat(1 + HIGHLIGHT_MAX_BYTES as usize / line.len()),
+        )
+        .unwrap();
+        let out = hl.load_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(out.language, "Rust", "the language is still recognised");
+        assert!(
+            out.lines.iter().all(|l| l.spans.len() <= 1),
+            "a line past the cap is one span, not a syntect parse"
+        );
     }
 
     #[test]

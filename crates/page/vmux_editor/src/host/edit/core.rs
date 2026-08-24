@@ -71,6 +71,25 @@ pub struct EditOutcome {
     pub yank: Option<RegisterValue>,
 }
 
+/// What one caret remembers between commands.
+///
+/// Held apart from [`EditCore::selections`] because that vector is the buffer's selection
+/// geometry and nothing else: undo restores it, the page renders from it, and the plugin assigns
+/// it whole. What belongs here is what a caret carries *across* keystrokes — the column a run of
+/// vertical moves is homing on, and what an overtype covered up so backspace can put it back.
+///
+/// One of these per caret. Shared, they are the difference between two carets descending their
+/// own columns and both snapping to the first one's, and between backspace restoring what this
+/// caret typed over and what some other caret did.
+#[derive(Default, Clone)]
+struct CaretMemory {
+    /// The column a vertical run started from, so passing through a short line does not
+    /// permanently pull the caret left.
+    preferred_vertical_col: Option<usize>,
+    /// What overtype wrote over, newest last.
+    replaced: Vec<Option<char>>,
+}
+
 pub struct EditCore {
     pub buffer: TextBuffer,
     pub selections: Vec<Selection>,
@@ -93,10 +112,10 @@ pub struct EditCore {
     saved_rev: Option<u64>,
     undo: crate::edit::undo::UndoTree,
     last_group: Option<Group>,
-    preferred_vertical_col: Option<usize>,
+    /// What each caret remembers between commands, in [`Self::selections`] order.
+    memory: Vec<CaretMemory>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
-    replaced: Vec<Option<char>>,
     block_insert: Option<(Vec<usize>, usize)>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
@@ -127,10 +146,9 @@ impl EditCore {
             saved_rev: Some(0),
             undo,
             last_group: None,
-            preferred_vertical_col: None,
+            memory: vec![CaretMemory::default()],
             fold_view,
             search: None,
-            replaced: Vec::new(),
             block_insert: None,
             search_highlight: false,
             marks: std::collections::HashMap::new(),
@@ -245,10 +263,12 @@ impl EditCore {
         if let Some(index) = self.selections.iter().position(|s| s.head == at) {
             if self.selections.len() > 1 {
                 self.selections.remove(index);
+                self.active = self.active.saturating_sub((self.active >= index) as usize);
             }
             return;
         }
         self.selections.push(Selection::caret(at));
+        self.active = self.selections.len() - 1;
         self.merge_overlapping_carets();
     }
 
@@ -263,8 +283,22 @@ impl EditCore {
         self.selections.len()
     }
 
+    /// What the caret being edited remembers.
+    ///
+    /// A count that no longer matches is how a changed caret set is noticed: a caret that has just
+    /// been added or removed has no column to home on and nothing overtyped, and reconciling here
+    /// rather than at each of the thirty places `selections` is written keeps the two from
+    /// drifting apart silently.
+    fn memory(&mut self) -> &mut CaretMemory {
+        if self.memory.len() != self.selections.len() {
+            self.memory = vec![CaretMemory::default(); self.selections.len()];
+        }
+        let at = self.active.min(self.memory.len().saturating_sub(1));
+        &mut self.memory[at]
+    }
+
     pub fn set_caret(&mut self, at: usize) {
-        self.preferred_vertical_col = None;
+        self.memory().preferred_vertical_col = None;
         self.place_caret(at);
     }
 
@@ -686,11 +720,14 @@ impl EditCore {
             _ => None,
         };
         let Some(delta) = delta else {
-            self.preferred_vertical_col = None;
+            self.memory().preferred_vertical_col = None;
             return self.resolve_motion(from, motion);
         };
         let (_, current_col) = self.buffer.char_to_coords(from);
-        let preferred_col = *self.preferred_vertical_col.get_or_insert(current_col);
+        let preferred_col = *self
+            .memory()
+            .preferred_vertical_col
+            .get_or_insert(current_col);
         let (line, _) = self.buffer.char_to_coords(from);
         let target = self.fold_view.step_rows(line as u32, delta) as usize;
         self.buffer.coords_to_char(target, preferred_col)
@@ -1421,10 +1458,15 @@ impl EditCore {
 
     /// Collapse carets that have run into each other, so a delete that pulls two together
     /// leaves one rather than a pair that types the same characters twice.
+    ///
+    /// This sorts, so the active caret is followed by value rather than left on its index —
+    /// otherwise placing a caret above an existing one silently makes the *other* one active, and
+    /// the collapse that follows keeps the wrong position.
     fn merge_overlapping_carets(&mut self) {
         if self.selections.len() == 1 {
             return;
         }
+        let active = self.primary();
         self.selections.sort_by_key(|s| (s.range().start, s.head));
         let mut merged: Vec<Selection> = Vec::with_capacity(self.selections.len());
         for sel in self.selections.drain(..) {
@@ -1435,6 +1477,11 @@ impl EditCore {
             }
         }
         self.selections = merged;
+        self.active = self
+            .selections
+            .iter()
+            .position(|s| *s == active)
+            .unwrap_or(0);
     }
 
     fn apply_at_active(&mut self, cmd: EditCommand) -> EditOutcome {
@@ -1452,7 +1499,7 @@ impl EditCore {
                 )
                 | EditCommand::ScrollViewport(_)
         ) {
-            self.preferred_vertical_col = None;
+            self.memory().preferred_vertical_col = None;
         }
 
         match cmd {
@@ -1464,7 +1511,7 @@ impl EditCore {
                 let selection = self.primary();
                 let collapse_selection = !self.mode.is_visual() && !selection.is_empty();
                 let h = if collapse_selection {
-                    self.preferred_vertical_col = None;
+                    self.memory().preferred_vertical_col = None;
                     match m.collapse_to_start() {
                         Some(true) => selection.range().start,
                         Some(false) => selection.range().end,
@@ -1491,10 +1538,11 @@ impl EditCore {
                     let at = self.primary().head;
                     let line_end = self.resolve_motion(at, Motion::LineEnd);
                     if at < line_end {
-                        self.replaced.push(Some(self.buffer.rope.char(at)));
+                        let covered = self.buffer.rope.char(at);
+                        self.memory().replaced.push(Some(covered));
                         self.buf_remove(at..at + 1);
                     } else {
-                        self.replaced.push(None);
+                        self.memory().replaced.push(None);
                     }
                     self.buf_insert(at, &ch.to_string());
                     self.set_caret(at + 1);
@@ -1515,7 +1563,7 @@ impl EditCore {
             EditCommand::InsertNewline => text_changed = self.insert_text("\n"),
             EditCommand::DeleteBack if self.mode == EditMode::Replace => {
                 let head = self.primary().head;
-                if let Some(original) = self.replaced.pop()
+                if let Some(original) = self.memory().replaced.pop()
                     && head > 0
                 {
                     self.checkpoint(Group::Delete);
@@ -1941,6 +1989,58 @@ mod tests {
         let mut heads: Vec<usize> = c.selections.iter().map(|s| s.head).collect();
         heads.sort_unstable();
         heads
+    }
+
+    /// Each caret descends the column it started in. Sharing one preferred column makes the
+    /// second row of a downward run collapse every caret onto the first one's column, which turns
+    /// two carets into one the moment they pass a short line.
+    #[test]
+    fn each_caret_keeps_its_own_column_through_a_short_line() {
+        // Two long lines with a two-column line under each, so both carets are pulled left on the
+        // first step and have somewhere different to return to on the second.
+        let mut c = multi_caret("abcdefgh\nij\nklmnopqr\nABCDEFGH\nkl\nMNOPQRST\n", &[6, 25]);
+        c.apply(EditCommand::Move(Motion::Down));
+        c.apply(EditCommand::Move(Motion::Down));
+        let cols: Vec<usize> = c
+            .selections
+            .iter()
+            .map(|s| c.buffer.char_to_coords(s.head).1)
+            .collect();
+        assert_eq!(cols, vec![6, 4], "each caret homes on the column it left");
+    }
+
+    /// Backspace after an overtype puts back what *this* caret covered. One shared stack hands the
+    /// second caret the character the first one wrote over.
+    #[test]
+    fn backspace_restores_what_this_caret_overtyped() {
+        let mut c = multi_caret("abc\nxyz\n", &[0, 4]);
+        c.mode = EditMode::Replace;
+        c.apply(EditCommand::OvertypeText("Q".into()));
+        assert_eq!(text_of(&c), "Qbc\nQyz\n");
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "abc\nxyz\n");
+    }
+
+    /// The caret the user placed last is the one a collapse keeps, and `merge_overlapping_carets`
+    /// sorts — so an index left over from before the sort names a different caret.
+    #[test]
+    fn collapsing_keeps_the_caret_placed_last_even_when_it_sorts_first() {
+        let mut c = multi_caret("abcdef\n", &[4, 1]);
+        c.collapse_carets();
+        assert_eq!(heads(&c), vec![1]);
+    }
+
+    /// Untoggling a caret *before* the active one slides every later caret down a slot, so an
+    /// index left where it was names the caret past the one it used to.
+    #[test]
+    fn untoggling_an_earlier_caret_does_not_move_which_one_is_active() {
+        // Placed last in the middle, so the active index is neither the first nor the last and a
+        // clamp to the end cannot accidentally land on the right answer.
+        let mut c = multi_caret("abcdef\n", &[1, 5, 3]);
+        c.toggle_caret(1);
+        assert_eq!(heads(&c), vec![3, 5]);
+        c.collapse_carets();
+        assert_eq!(heads(&c), vec![3], "still the caret the user placed last");
     }
 
     #[test]
