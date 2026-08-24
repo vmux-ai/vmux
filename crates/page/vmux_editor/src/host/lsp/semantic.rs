@@ -5,7 +5,10 @@
 //! which is which, and `textDocument/semanticTokens` is how it says so.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
+use syntect::highlighting::Highlighter;
+use syntect::parsing::ScopeStack;
 use vmux_core::event::StyledSpan;
 
 /// What this client tells a server it can colour. A server may only use types from this list, so
@@ -129,24 +132,61 @@ impl SemanticKind {
         })
     }
 
-    /// Chosen from the base16-ocean ramp the editor themes with, so the two agree.
-    fn colour(self, dark: bool) -> [u8; 3] {
-        match (self, dark) {
-            (Self::Type, true) => [0xeb, 0xcb, 0x8b],
-            (Self::Type, false) => [0xa3, 0x71, 0x0b],
-            (Self::Function, true) => [0x8f, 0xa1, 0xb3],
-            (Self::Function, false) => [0x40, 0x5c, 0x79],
-            (Self::Macro, true) => [0xb4, 0x8e, 0xad],
-            (Self::Macro, false) => [0x82, 0x54, 0x7d],
-            (Self::Namespace, true) => [0x96, 0xb5, 0xb4],
-            (Self::Namespace, false) => [0x4f, 0x7a, 0x78],
-            (Self::EnumMember, true) => [0xd0, 0x87, 0x70],
-            (Self::EnumMember, false) => [0x99, 0x50, 0x35],
-            (Self::Lifetime, true) => [0xab, 0x79, 0x67],
-            (Self::Lifetime, false) => [0x7a, 0x4c, 0x3a],
-            (Self::Parameter, true) => [0xc0, 0xc5, 0xce],
-            (Self::Parameter, false) => [0x4f, 0x55, 0x60],
+    const ALL: [Self; 7] = [
+        Self::Type,
+        Self::Function,
+        Self::Macro,
+        Self::Namespace,
+        Self::EnumMember,
+        Self::Lifetime,
+        Self::Parameter,
+    ];
+
+    /// The TextMate scope this kind is the server's word for.
+    ///
+    /// No colours here. A kind names a scope, the theme answers for the scope, and so the two
+    /// cannot drift: a server's `function` lands on exactly what syntect would have reached for
+    /// unaided, and a token does not change shade as the server warms up and starts answering.
+    fn scope(self) -> &'static str {
+        match self {
+            Self::Type => "entity.name.type",
+            Self::Function => "entity.name.function",
+            Self::Macro => "entity.name.function.macro",
+            Self::Namespace => "entity.name.namespace",
+            Self::EnumMember => "variable.other.enummember",
+            Self::Lifetime => "storage.modifier.lifetime",
+            Self::Parameter => "variable.parameter",
         }
+    }
+
+    fn colour(self, dark: bool) -> [u8; 3] {
+        let slot = Self::ALL
+            .iter()
+            .position(|kind| *kind == self)
+            .unwrap_or_default();
+        Self::resolved(dark)[slot]
+    }
+
+    /// Asked of the theme once per scheme: building a highlighter is not free, and the answer
+    /// cannot change while the scheme does not.
+    fn resolved(dark: bool) -> &'static [[u8; 3]; 7] {
+        static DARK: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
+        static LIGHT: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
+        let cell = if dark { &DARK } else { &LIGHT };
+        cell.get_or_init(|| {
+            let theme = crate::palette::Palette::of(dark).theme();
+            let highlighter = Highlighter::new(&theme);
+            let mut out = [[0u8; 3]; 7];
+            for (slot, kind) in Self::ALL.iter().enumerate() {
+                let mut stack = ScopeStack::new();
+                if let Ok(scope) = kind.scope().parse() {
+                    stack.push(scope);
+                }
+                let style = highlighter.style_for_stack(stack.as_slice());
+                out[slot] = [style.foreground.r, style.foreground.g, style.foreground.b];
+            }
+            out
+        })
     }
 }
 

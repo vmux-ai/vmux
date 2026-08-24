@@ -57,7 +57,7 @@ fn theme_name() -> &'static str {
 }
 
 pub fn default_theme() -> syntect::highlighting::Theme {
-    ThemeSet::load_defaults().themes[theme_name()].clone()
+    crate::palette::Palette::of(is_dark_theme()).theme()
 }
 
 /// The theme's plain text colour, for text served without highlighting.
@@ -66,7 +66,7 @@ pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
         .settings
         .foreground
         .map(|c| [c.r, c.g, c.b])
-        .unwrap_or([0xc0, 0xc5, 0xce])
+        .unwrap_or_else(|| crate::palette::Palette::of(is_dark_theme()).foreground_rgb())
 }
 
 pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
