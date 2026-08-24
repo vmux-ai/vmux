@@ -509,9 +509,13 @@ impl LspManager {
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
     use lsp_types::{HoverContents, MarkedString};
+    // The language is the whole point of a `LanguageString` — dropping it leaves the snippet
+    // indistinguishable from prose, so it goes back into a fence the block parser can read.
     let marked = |m: MarkedString| match m {
         MarkedString::String(s) => s,
-        MarkedString::LanguageString(ls) => ls.value,
+        MarkedString::LanguageString(ls) => {
+            format!("```{}\n{}\n```", ls.language, ls.value)
+        }
     };
     match c {
         HoverContents::Scalar(m) => marked(m),
@@ -1097,6 +1101,34 @@ fn lsp_status_system(
 mod tests {
     use super::*;
     use vmux_core::event::StyledSpan;
+
+    /// A server that answers in `MarkedString::LanguageString` names the language out of band
+    /// rather than in a fence. Dropping it leaves the snippet as prose, which renders unhighlighted
+    /// however good the highlighter is.
+    #[test]
+    fn a_language_string_hover_survives_as_a_highlighted_code_block() {
+        let contents = lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
+            lsp_types::LanguageString {
+                language: "rust".into(),
+                value: "fn build(self) -> StartHeroProps".into(),
+            },
+        ));
+        let blocks = markdown_to_hover_blocks(&hover_contents_to_string(contents));
+
+        let [block] = blocks.as_slice() else {
+            panic!("one block, got {}", blocks.len());
+        };
+        assert!(block.code, "a language string is code, not prose");
+        let colours: std::collections::HashSet<_> = block
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.fg))
+            .collect();
+        assert!(
+            colours.len() > 1,
+            "`fn` and the identifier should not come back the same colour"
+        );
+    }
 
     fn fline(no: u32, text: &str) -> FileLine {
         FileLine {

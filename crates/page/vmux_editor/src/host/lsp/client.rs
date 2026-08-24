@@ -250,6 +250,13 @@ impl ServerClient {
                 ..Default::default()
             }),
             text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                // Absent means plaintext, and a server that believes that strips the fences off
+                // its hover before sending it — which is the only thing naming the language a
+                // block is written in, and so the only thing that can highlight it.
+                hover: Some(lsp_types::HoverClientCapabilities {
+                    content_format: Some(vec![lsp_types::MarkupKind::Markdown]),
+                    ..Default::default()
+                }),
                 publish_diagnostics: Some(lsp_types::PublishDiagnosticsClientCapabilities {
                     related_information: Some(false),
                     ..Default::default()
