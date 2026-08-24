@@ -650,7 +650,7 @@ fn ProjectsCard(
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                div { class: "flex min-w-0 flex-1 items-start gap-2 px-2.5 py-2",
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
@@ -939,7 +939,7 @@ fn BookmarksSection(
                 } else {
                     "flex items-center transition-colors hover:bg-glass-hover"
                 },
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                div { class: "flex min-w-0 flex-1 items-start gap-2 px-2.5 py-2",
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
@@ -1075,7 +1075,7 @@ fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool)
         button {
             r#type: "button",
             title: translate("vault-open"),
-            class: "glass mb-2 flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-glass-hover",
+            class: "glass mb-2 flex shrink-0 cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-glass-hover",
             onclick: move |_| open_vault(pane_id),
             div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-300 ring-1 ring-inset ring-violet-500/20",
                 Icon { class: "h-4 w-4",
@@ -1168,7 +1168,7 @@ fn KnowledgeCard(
                             r#type: "button",
                             disabled: !loaded || root.is_empty(),
                             title: "{root_action_title}",
-                            class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left enabled:cursor-pointer disabled:cursor-default",
+                            class: "flex min-w-0 flex-1 items-start gap-2 px-2.5 py-2 text-left enabled:cursor-pointer disabled:cursor-default",
                             onclick: move |_| open_knowledge_path(pane_id, landing_path.clone()),
                             div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                                 Icon { class: "h-3.5 w-3.5",
@@ -1311,7 +1311,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                 button {
                     r#type: "button",
                     title: translate("tools-open"),
-                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
+                    class: "flex min-w-0 flex-1 cursor-pointer items-start gap-2 px-2.5 py-2 text-left",
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                         {rsx! { BuiltinIconView { icon: vmux_core::BuiltinIcon::Hammer, class: "h-4 w-4" } }}

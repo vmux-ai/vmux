@@ -166,11 +166,13 @@ mod address_tests {
         assert_eq!(parts.rest, "about:blank");
     }
 
+    /// Every internal page shares the scheme, so pilling it separates a name from a word that
+    /// tells the reader nothing.
     #[test]
-    fn an_internal_page_hangs_off_vmux() {
+    fn an_internal_page_is_shown_whole_and_unpilled() {
         let parts = AddressParts::internal("vmux://terminal/");
-        assert_eq!(parts.origin, "vmux");
-        assert_eq!(parts.rest, "terminal");
+        assert_eq!(parts.origin, "");
+        assert_eq!(parts.rest, "vmux://terminal");
     }
 
     #[test]
@@ -431,13 +433,14 @@ impl AddressParts {
         Self::new(host, title)
     }
 
-    /// A page vmux serves itself: `vmux://terminal/` is the `vmux` origin's `terminal`.
+    /// A page vmux serves itself, shown whole and without a pill.
+    ///
+    /// `vmux` is not an origin a reader is orienting by — every internal page shares it, and the
+    /// tab beside the bar already says which one this is. Split out, `vmux` + `tools` reads as two
+    /// facts; left alone, `vmux://tools` reads as the one address it is. Chrome does the same with
+    /// `chrome://settings`.
     pub fn internal(url: &str) -> Self {
-        let rest = url
-            .strip_prefix("vmux://")
-            .unwrap_or(url)
-            .trim_end_matches('/');
-        Self::new("vmux", rest)
+        Self::new("", url.trim_end_matches('/'))
     }
 
     /// A file inside a checkout, shown against the repository and branch it belongs to.
