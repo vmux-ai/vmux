@@ -317,6 +317,29 @@ impl EditCore {
     /// the caret is not in an identifier, which leaves the caret set alone rather than collapsing
     /// it to a selection of nothing.
     pub fn select_all_occurrences(&mut self) {
+        let Some((under_caret, found)) = self.word_occurrences() else {
+            return;
+        };
+        self.active = found
+            .iter()
+            .position(|range| range.start == under_caret.start)
+            .unwrap_or(0);
+        self.selections = found
+            .into_iter()
+            .map(|range| Selection {
+                anchor: range.start,
+                head: range.end,
+            })
+            .collect();
+    }
+
+    /// Every whole-word occurrence of the identifier under the caret, and which of them that is.
+    ///
+    /// `None` when the caret is not in an identifier. Whole-word, so `id` does not match inside
+    /// `width` — the distinction the caller cannot make afterwards from the ranges alone.
+    pub fn word_occurrences(
+        &self,
+    ) -> Option<(std::ops::Range<usize>, Vec<std::ops::Range<usize>>)> {
         let text = self.buffer.text();
         let chars: Vec<char> = text.chars().collect();
         let caret = self.primary().head.min(chars.len());
@@ -331,7 +354,7 @@ impl EditCore {
             end += 1;
         }
         if start == end {
-            return;
+            return None;
         }
         let needle = &chars[start..end];
 
@@ -342,23 +365,16 @@ impl EditCore {
             let bounded = (at == 0 || !word(at - 1))
                 && (at + needle.len() == chars.len() || !word(at + needle.len()));
             if matches && bounded {
-                found.push(Selection {
-                    anchor: at,
-                    head: at + needle.len(),
-                });
+                found.push(at..at + needle.len());
                 at += needle.len();
                 continue;
             }
             at += 1;
         }
         if found.is_empty() {
-            return;
+            return None;
         }
-        self.active = found
-            .iter()
-            .position(|sel| sel.anchor == start)
-            .unwrap_or(0);
-        self.selections = found;
+        Some((start..end, found))
     }
 
     pub fn caret_count(&self) -> usize {
@@ -630,6 +646,30 @@ impl EditCore {
         crate::edit::search::step(&matches, from, forward)
     }
 
+    pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
+        if rows == 0 || !self.primary().is_empty() {
+            return Vec::new();
+        }
+        let Some((_, found)) = self.word_occurrences() else {
+            return Vec::new();
+        };
+        let last_line = first as usize + rows as usize;
+        let mut out = Vec::new();
+        for range in found {
+            let (line, start) = self.buffer.char_to_coords(range.start);
+            if line < first as usize || line >= last_line {
+                continue;
+            }
+            let ls = self.buffer.line_to_char(line);
+            out.push(SelSpan {
+                line: line as u32,
+                row: line as u32,
+                start: start as u32,
+                end: (range.end - ls) as u32,
+            });
+        }
+        out
+    }
     pub fn search_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
         if !self.search_highlight || rows == 0 {
             return Vec::new();

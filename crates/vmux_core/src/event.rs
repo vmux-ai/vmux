@@ -1831,6 +1831,8 @@ pub struct FileCursorEvent {
     pub source_selections: Vec<crate::editor::SelSpan>,
     pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
+    /// Every occurrence of the word under the caret, for the highlight VS Code draws on a click.
+    pub word_highlights: Vec<crate::editor::SelSpan>,
 }
 
 #[derive(
@@ -2416,6 +2418,12 @@ mod tests {
                 row: 1,
                 start: 2,
                 end: 6,
+            }],
+            word_highlights: vec![SelSpan {
+                line: 3,
+                row: 3,
+                start: 0,
+                end: 5,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();

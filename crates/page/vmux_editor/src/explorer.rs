@@ -536,7 +536,12 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
-                                                {rsx! { TypeIcon { path: row.path.to_string(), is_dir: is_dir, class: "h-4 w-4 shrink-0 opacity-80" } }}
+                                                // A directory gets the chevron and nothing else, as
+                                                // VS Code does: the chevron already says it is one,
+                                                // and a folder glyph beside it says it twice.
+                                                if !is_dir {
+                                                    {rsx! { TypeIcon { path: row.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
+                                                }
                                                 span { class: "truncate", "{row.name}" }
                                             }
                                         }

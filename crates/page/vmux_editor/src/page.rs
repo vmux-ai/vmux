@@ -98,6 +98,7 @@ pub fn Page() -> Element {
     let mut ed_label = use_signal(String::new);
     let mut ed_command_line = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     // Every caret. The primary is drawn from `cursor` as before; these are the rest.
@@ -248,6 +249,9 @@ pub fn Page() -> Element {
         }
         if search_spans.peek().as_slice() != c.search.as_slice() {
             search_spans.set(c.search.clone());
+        }
+        if word_spans.peek().as_slice() != c.word_highlights.as_slice() {
+            word_spans.set(c.word_highlights.clone());
         }
         let note_mode = *file_view_mode.peek() == FileViewMode::Note
             && is_markdown_file(git_path.peek().as_str());
@@ -1521,9 +1525,19 @@ pub fn Page() -> Element {
                                                             if hover_pos() != Some((ln, col)) {
                                                                 hover_pos.set(Some((ln, col)));
                                                                 lsp_hover.set(None);
-                                                                let _ = send(&FileHoverRequest {
-                                                                    line: ln,
-                                                                    col,
+                                                                // VS Code waits before asking, so a pointer
+                                                                // crossing the file does not trail popups
+                                                                // behind it. Moving on cancels the request by
+                                                                // moving `hover_pos` out from under it.
+                                                                spawn(async move {
+                                                                    sleep_ms(HOVER_DELAY_MS).await;
+                                                                    if hover_pos() != Some((ln, col)) {
+                                                                        return;
+                                                                    }
+                                                                    let _ = send(&FileHoverRequest {
+                                                                        line: ln,
+                                                                        col,
+                                                                    });
                                                                 });
                                                             }
                                                         },
@@ -1606,6 +1620,22 @@ pub fn Page() -> Element {
                                                                 }
                                                             }
                                                         }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        for s in word_spans().iter() {
+                                            {
+                                                let top = s.row as f64 * ch;
+                                                let left = gutter + s.start as f64 * cw;
+                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
+                                                rsx! {
+                                                    div {
+                                                        key: "word{s.row}-{s.start}",
+                                                        class: "pointer-events-none absolute z-0 rounded-[2px] bg-foreground/10",
+                                                        style: "{style}",
                                                     }
                                                 }
                                             }
@@ -1719,7 +1749,10 @@ pub fn Page() -> Element {
                                                 let left = gw as f64 * cw + 48.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
-                                                        class: "pointer-events-none absolute z-30 max-w-2xl overflow-hidden rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        // Selectable and scrollable, and capped: VS Code lets the pointer into a
+                                                        // hover so its content can be read and copied, and stops it
+                                                        // growing over the code it is describing.
+                                                        class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (bi, b) in h.blocks.iter().enumerate() {
                                                             if b.code {
@@ -2121,6 +2154,8 @@ const INPUT_ID: &str = "file-input";
 const RENAME_ID: &str = "file-rename";
 const CODE_ACTION_ID: &str = "file-code-action";
 const RENAME_NOTICE_MS: u32 = 2400;
+/// What VS Code waits before asking for a hover, so a pointer crossing the file asks for nothing.
+const HOVER_DELAY_MS: u32 = 300;
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
 const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
