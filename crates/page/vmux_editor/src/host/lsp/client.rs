@@ -181,9 +181,9 @@ impl ServerClient {
         &self,
         method: &str,
         params: serde_json::Value,
-    ) -> (i64, mpsc::Receiver<serde_json::Value>) {
+    ) -> (i64, crossbeam_channel::Receiver<serde_json::Value>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         self.pending
             .lock()
             .unwrap_or_else(|p| p.into_inner())

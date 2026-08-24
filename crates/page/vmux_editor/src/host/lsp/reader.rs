@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn response_routes_to_pending_sender() {
         let h = Harness::start();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         h.reader.pending.lock().unwrap().insert(7, tx);
         h.reader
             .dispatch(json!({"jsonrpc": "2.0", "id": 7, "result": {}}));

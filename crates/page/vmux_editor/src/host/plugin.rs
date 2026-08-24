@@ -1882,7 +1882,7 @@ fn navigate_file_view(
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
     mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -2095,7 +2095,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     q: Query<(Entity, &FileView, Option<&EditState>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     for (entity, fv, edit) in &q {
@@ -2509,7 +2509,7 @@ fn on_file_key(
     view_mode: Res<SharedFileViewMode>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -2643,7 +2643,7 @@ fn on_file_text_input(
     )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -2694,7 +2694,7 @@ fn on_file_property_edit(
     )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -2754,7 +2754,7 @@ fn apply_lsp_workspace_edit(
     )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut commands: Commands,
@@ -2902,7 +2902,7 @@ fn edit_closed_file(
 fn on_file_hover_request(
     trigger: On<BinReceive<FileHoverRequest>>,
     q: Query<&EditState>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload;
@@ -2966,7 +2966,7 @@ fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
 fn on_file_definition_request(
     trigger: On<BinReceive<FileDefinitionRequest>>,
     q: Query<&EditState>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload;
@@ -2981,7 +2981,7 @@ fn on_file_definition_request(
 fn on_file_references_request(
     trigger: On<BinReceive<FileReferencesRequest>>,
     q: Query<&EditState>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload;
@@ -2999,7 +2999,7 @@ fn on_file_completion_request(
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload;
@@ -3045,7 +3045,7 @@ fn on_file_completion_commit(
     )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -3104,7 +3104,7 @@ fn apply_goto(
         &mut PageMetadata,
         &EditorKeymap,
     )>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -3242,7 +3242,7 @@ fn flush_lsp_changes(
     time: Res<Time>,
     mut acc: Local<f32>,
     q: Query<(Entity, &FileView, &EditState), With<LspEditDirty>>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     if q.is_empty() {
@@ -4132,7 +4132,7 @@ fn emit_global_search(
 fn on_explorer_search_open(
     trigger: On<BinReceive<ExplorerSearchOpen>>,
     mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -4273,7 +4273,7 @@ mod edit_flow_tests {
         app.world_mut().insert_non_send(SelfWrites::default());
         app.world_mut().insert_non_send(Browsers::default());
         app.world_mut()
-            .insert_non_send(crate::lsp::manager::LspManager::new(
+            .insert_resource(crate::lsp::manager::LspManager::new(
                 crate::lsp::LspOutbox::default(),
                 crate::lsp::server_request::ServerEvents::default().sender(),
             ));
@@ -5088,7 +5088,7 @@ mod parked_edit_tests {
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut()
-                .insert_non_send(crate::lsp::manager::LspManager::new(
+                .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
                     crate::lsp::server_request::ServerEvents::default().sender(),
                 ));
@@ -5280,7 +5280,7 @@ mod workspace_edit_tests {
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut()
-                .insert_non_send(crate::lsp::manager::LspManager::new(
+                .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
                     crate::lsp::server_request::ServerEvents::default().sender(),
                 ));

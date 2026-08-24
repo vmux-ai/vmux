@@ -54,4 +54,6 @@ pub struct OpenDoc {
     pub refs: u32,
 }
 
-pub type PendingMap = Arc<Mutex<HashMap<i64, std::sync::mpsc::Sender<serde_json::Value>>>>;
+/// Crossbeam rather than `std::sync::mpsc`, because the matching `Receiver` parks in `LspManager`
+/// until the server answers and only a `Sync` one lets that be a Bevy `Resource`.
+pub type PendingMap = Arc<Mutex<HashMap<i64, crossbeam_channel::Sender<serde_json::Value>>>>;

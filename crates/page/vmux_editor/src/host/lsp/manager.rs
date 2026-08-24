@@ -110,7 +110,7 @@ pub enum ReqKind {
 pub struct InFlight {
     entity: Entity,
     kind: ReqKind,
-    rx: std::sync::mpsc::Receiver<serde_json::Value>,
+    rx: crossbeam_channel::Receiver<serde_json::Value>,
 }
 
 #[derive(Message)]
@@ -143,6 +143,7 @@ pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldR
         .unwrap_or_default()
 }
 
+#[derive(Resource)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
     open_docs: HashMap<PathBuf, OpenDoc>,
@@ -670,7 +671,7 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 fn lsp_open_documents(
     q: Query<(Entity, &FileView, &EditState), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
-    mut manager: NonSendMut<LspManager>,
+    mut manager: ResMut<LspManager>,
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
@@ -686,7 +687,7 @@ fn lsp_open_documents(
 }
 
 fn drain_lsp_requests(
-    mut manager: NonSendMut<LspManager>,
+    mut manager: ResMut<LspManager>,
     browsers: NonSend<Browsers>,
     mut goto_w: MessageWriter<LspGoto>,
     mut folds_w: MessageWriter<LspFolds>,
@@ -702,11 +703,11 @@ fn drain_lsp_requests(
     for f in drained {
         let value = match f.rx.try_recv() {
             Ok(v) => v,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {
                 still.push(f);
                 continue;
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => continue,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => continue,
         };
         let ready = browsers.can_emit_to(&f.entity);
         match f.kind {
@@ -861,7 +862,7 @@ fn apply_semantic_tokens(
 
 pub fn build(app: &mut App, outbox: LspOutbox) {
     let events = app.world().resource::<ServerEvents>().sender();
-    app.insert_non_send(LspManager::new(outbox, events))
+    app.insert_resource(LspManager::new(outbox, events))
         .init_resource::<LintOutbox>()
         .init_resource::<DiagState>()
         .add_message::<LspGoto>()
@@ -1009,7 +1010,7 @@ pub struct LspStatusSent {
 fn lsp_status_system(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
     settings: Res<vmux_setting::AppSettings>,
-    manager: NonSend<LspManager>,
+    manager: Res<LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
