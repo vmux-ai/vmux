@@ -172,6 +172,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       case 'scrollIntoView':
         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         break;
+      case 'scrollTo':
+        el.scrollTo({ top: request.top, behavior: 'instant' });
+        break;
       case 'selectAll':
         el.setSelectionRange(0, el.value.length);
         break;

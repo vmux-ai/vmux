@@ -13,7 +13,7 @@ use crate::page_model::{
     note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
     squiggle_style,
 };
-use dioxus::html::geometry::{ClientPoint, ElementPoint, PixelsVector2D};
+use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -283,7 +283,7 @@ pub fn Page() -> Element {
             }
         }
         if moved && !note_mode {
-            viewport.reveal_row(c.primary.row, cell_dims().1);
+            viewport.reveal_caret();
         }
     });
 
@@ -3860,24 +3860,7 @@ impl FileViewport {
     }
 
     fn scroll_to(self, top: f64) {
-        spawn(async move {
-            let Some(element) = self.element.peek().clone() else {
-                return;
-            };
-            let field = self.field.peek().clone();
-            if let Some(field) = &field {
-                let _ = field.set_focus(false).await;
-            }
-            let _ = element
-                .scroll(
-                    PixelsVector2D::new(0.0, top.max(0.0)),
-                    ScrollBehavior::Instant,
-                )
-                .await;
-            if field.is_some() {
-                focus_file_input();
-            }
-        });
+        ScrollIntoView::element_to(SCROLL_ID, top);
     }
 
     fn scroll_by(self, lines: i32, line_height: f64) {
@@ -3889,18 +3872,8 @@ impl FileViewport {
         self.scroll_to(0.0);
     }
 
-    fn reveal_row(self, row: u32, ch: f64) {
-        let geometry = *self.geometry.peek();
-        if ch <= 0.0 || geometry.size.1 <= 0.0 {
-            return;
-        }
-        let top = row as f64 * ch;
-        let from = self.offset.peek().1;
-        if top < from {
-            self.scroll_to(top);
-        } else if top + ch > from + geometry.size.1 {
-            self.scroll_to(top + ch - geometry.size.1);
-        }
+    fn reveal_caret(self) {
+        ScrollIntoView::nearest(INPUT_ID);
     }
 
     fn center_row(self, row: u32, ch: f64) {

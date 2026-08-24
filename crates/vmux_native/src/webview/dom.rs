@@ -270,6 +270,13 @@ impl PageHost for SurfaceHost {
         });
     }
 
+    fn scroll_element_to(&self, element_id: &str, top: f64) {
+        self.request(DomRequest::ScrollTo {
+            element: element_id.to_string(),
+            top,
+        });
+    }
+
     fn reveal_first_rendered(&self, element_ids: &[&str], centered: bool) {
         self.request(DomRequest::RevealElement {
             elements: element_ids.iter().map(|id| id.to_string()).collect(),

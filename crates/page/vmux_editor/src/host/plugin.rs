@@ -2325,6 +2325,7 @@ fn run_commands(
                 .view(edit.core.buffer.len_lines() as u32)
                 .buffer_to_row(edit.core.cursor_pos().line);
             let rows = vp.rows.max(1) as u32;
+            let was = vp.top_row;
             vp.top_row = match placement {
                 crate::edit::command::ScrollPlacement::Top => row,
                 crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
@@ -2332,6 +2333,17 @@ fn run_commands(
             };
             edit.core.top_row = vp.top_row;
             viewport_changed = true;
+            // The caret does not move, so nothing the page does on its own brings the view along:
+            // it positions rows against its own scroll offset, and only a scroll request moves that.
+            if vp.top_row != was && browsers.can_emit_to(&entity) {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_SCROLL_BY_EVENT,
+                    &FileScrollByEvent {
+                        lines: vp.top_row as i32 - was as i32,
+                    },
+                ));
+            }
             continue;
         }
         if matches!(
