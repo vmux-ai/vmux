@@ -4,7 +4,7 @@ use std::rc::Rc;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
-use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender};
+use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, ZoomLevel};
 use bevy_cef_core::prelude::{
     BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
     asset_load_path_from_request_url, embedded_page_host_of,
@@ -29,6 +29,7 @@ impl Plugin for NativePagesMacosPlugin {
             (
                 open_native_pages,
                 sync_native_appearance.run_if(resource_changed::<AppSettings>),
+                sync_native_page_scale,
             )
                 .chain(),
         )
@@ -231,6 +232,32 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
     for page in hosted.0.values() {
         page.surface.set_appearance(appearance);
     }
+}
+
+/// Apply the zoom the user asked for to the pages CEF cannot reach.
+///
+/// [`ZoomLevel`] rides on every browser entity and `bevy_cef` answers it for the ones it owns, but
+/// a natively hosted page has been handed to `Browsers::set_externally_hosted`, so that answer
+/// lands on nothing. Without this, Cmd +/- does nothing at all on the editor.
+fn sync_native_page_scale(
+    hosted: Option<NonSend<HostedPages>>,
+    zoom: Query<(Entity, &ZoomLevel), Changed<ZoomLevel>>,
+) {
+    let Some(hosted) = hosted else {
+        return;
+    };
+    for (entity, level) in zoom.iter() {
+        let Some(page) = hosted.0.get(&entity) else {
+            continue;
+        };
+        page.surface.set_page_scale(page_scale_of(level.0));
+    }
+}
+
+/// `ZoomLevel` counts steps rather than a multiplier, the way CEF and Chromium define it, so a
+/// natively hosted page has to raise it the same way to land where a CEF one would.
+fn page_scale_of(level: f64) -> f64 {
+    1.2f64.powf(level)
 }
 
 fn appearance_of(mode: ColorScheme) -> Appearance {

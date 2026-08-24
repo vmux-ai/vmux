@@ -72,6 +72,11 @@ impl WebView {
         }
     }
 
+    pub fn set_page_scale(&self, scale: f64) {
+        if let Err(error) = self.webview.zoom(scale) {
+            error!("vmux_native: zoom failed: {error}");
+        }
+    }
     pub fn set_visible(&self, visible: bool) {
         if let Err(error) = self.webview.set_visible(visible) {
             error!("vmux_native: set_visible failed: {error}");
