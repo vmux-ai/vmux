@@ -3553,6 +3553,9 @@ impl ExplorerPane {
     }
 
     fn sync(mut self) {
+        if (self.page_width)() == 0 {
+            return;
+        }
         let next = (self.preferred_visible)() && self.has_room();
         if (self.visible)() != next {
             self.visible.set(next);

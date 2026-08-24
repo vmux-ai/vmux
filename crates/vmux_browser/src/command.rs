@@ -50,7 +50,7 @@ fn handle_browser_commands(
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
-    terminal_q: Query<(), With<Terminal>>,
+    kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     host_spawn: Res<HostSpawnRegistry>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
@@ -79,7 +79,12 @@ fn handle_browser_commands(
         else {
             continue;
         };
-        let is_terminal = terminal_q.contains(webview);
+        let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
+        // A page that draws a character grid resizes its font rather than scaling its document:
+        // the cell size is what everything else is measured against — wrap width, the caret, the
+        // gutter — and scaling the view leaves all of that behind at the old size. The editor
+        // reads the same font as the terminal, so one size moves both.
+        let is_text_grid = is_terminal || is_file;
         match browser_cmd {
             BrowserCommand::Navigation(nav) => match nav {
                 BrowserNavigationCommand::PrevPage => {
@@ -151,21 +156,21 @@ fn handle_browser_commands(
             },
             BrowserCommand::View(view) => match view {
                 BrowserViewCommand::ZoomIn => {
-                    if is_terminal {
+                    if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 += 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomOut => {
-                    if is_terminal {
+                    if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 -= 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomReset => {
-                    if is_terminal {
+                    if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 = 0.0;

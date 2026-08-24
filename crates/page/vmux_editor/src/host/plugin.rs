@@ -130,7 +130,7 @@ impl Plugin for EditorPlugin {
                         .after(load_file_buffers)
                         .after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
-                    send_file_theme,
+                    (resend_file_theme_on_change, send_file_theme).chain(),
                     apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
                     send_file_keymap,
@@ -963,6 +963,34 @@ fn send_initial_text_meta(
             &mut commands,
         );
         commands.entity(entity).insert(FileInitialMetaSent);
+    }
+}
+
+/// Let [`send_file_theme`] speak again once the settings it reads have moved.
+///
+/// It is a send-once system, gated on a marker, because a theme does not ordinarily change under
+/// a page. Cmd +/- changes it on purpose: it steps the font size these pages share with the
+/// terminal, and without this the grid would keep the size it was opened at.
+///
+/// The explorer's state goes with it, the same set the reload path clears: the page rebuilds
+/// around the new style and its sidebar comes back empty, because what fills it — the chrome, the
+/// tree, the open-editors list — lives in the page and is only ever refilled by the host saying it
+/// again.
+fn resend_file_theme_on_change(
+    q: Query<Entity, With<FileThemeSent>>,
+    settings: Res<vmux_setting::AppSettings>,
+    mut commands: Commands,
+) {
+    if !settings.is_changed() || settings.is_added() {
+        return;
+    }
+    for entity in &q {
+        commands
+            .entity(entity)
+            .remove::<FileThemeSent>()
+            .remove::<ExplorerChromeSent>()
+            .insert(ExplorerTreeDirty)
+            .insert(OpenEditorsDirty);
     }
 }
 

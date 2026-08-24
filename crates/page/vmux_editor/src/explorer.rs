@@ -160,6 +160,19 @@ impl TreeRows {
             .iter()
             .map(|motion| motion.row.clone())
             .collect::<Vec<_>>();
+        // A tree arriving into an empty sidebar is the whole tree, and there is nothing on screen
+        // for it to animate away from. Showing it at once also keeps it from depending on the
+        // reveal below, which is a task owned by this scope: when the page rebuilds — a font size
+        // change is enough — the scope goes and takes the pending reveal with it, and every row
+        // stays staged at `opacity-0` with nothing left to turn it on.
+        if current.is_empty() {
+            rows.set(
+                next.into_iter()
+                    .map(|row| MotionRow { row, visible: true })
+                    .collect(),
+            );
+            return;
+        }
         let merged = merge_tree_motion_rows(&current, &next)
             .into_iter()
             .map(|(row, visible)| MotionRow { row, visible })
