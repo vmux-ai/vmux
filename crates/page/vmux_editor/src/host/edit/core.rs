@@ -1931,6 +1931,7 @@ impl EditCore {
             | EditCommand::ScrollCursorTo(_)
             | EditCommand::GotoDefinition
             | EditCommand::FindReferences
+            | EditCommand::BeginRename
             | EditCommand::Hover
             | EditCommand::TriggerCompletion
             | EditCommand::FoldToggle

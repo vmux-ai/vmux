@@ -153,6 +153,7 @@ impl Keymap for VscodeKeymap {
             "Tab" => vec![InsertTab],
             "F12" if m.shift => vec![FindReferences],
             "F12" => vec![GotoDefinition],
+            "F2" => vec![BeginRename],
             _ => vec![],
         }
     }

@@ -50,6 +50,9 @@ pub fn Page() -> Element {
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
     let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
     let mut lsp_notice_generation = use_signal(|| 0u32);
+    let mut rename_box = use_signal(|| Option::<RenameBox>::None);
+    let mut rename_failed = use_signal(String::new);
+    let mut rename_failed_generation = use_signal(|| 0u32);
     let mut error = use_signal(String::new);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
@@ -487,6 +490,30 @@ pub fn Page() -> Element {
     let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
     });
+
+    let _rename_begin =
+        use_listener::<FileRenameBeginEvent, _>(FILE_RENAME_BEGIN_EVENT, move |e| {
+            rename_failed.set(String::new());
+            rename_box.set(Some(RenameBox {
+                line: e.line,
+                col: e.col,
+                original: e.current.clone(),
+                draft: e.current,
+            }));
+        });
+
+    let _rename_failed =
+        use_listener::<FileRenameFailedEvent, _>(FILE_RENAME_FAILED_EVENT, move |e| {
+            rename_failed.set(e.reason);
+            let id = rename_failed_generation().wrapping_add(1);
+            rename_failed_generation.set(id);
+            spawn(async move {
+                sleep_ms(RENAME_NOTICE_MS).await;
+                if rename_failed_generation() == id {
+                    rename_failed.set(String::new());
+                }
+            });
+        });
 
     let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         error.set(String::new());
@@ -1712,6 +1739,51 @@ pub fn Page() -> Element {
                                         }
 
                                         {
+                                            rename_box().map(|box_| {
+                                                let top = box_.line as f64 * ch + ch;
+                                                let left = gutter + box_.col as f64 * cw;
+                                                rsx! {
+                                                    input {
+                                                        id: RENAME_ID,
+                                                        autofocus: true,
+                                                        spellcheck: false,
+                                                        autocomplete: "off",
+                                                        class: "absolute z-50 min-w-32 rounded-md bg-background/95 px-2 py-1 text-xs text-foreground ring-1 ring-inset ring-cyan-400/40 outline-none backdrop-blur-2xl shadow-lg",
+                                                        style: "left:{left}px;top:{top}px;",
+                                                        value: "{box_.draft}",
+                                                        oninput: move |e| {
+                                                            if let Some(open) = rename_box.write().as_mut() {
+                                                                open.draft = e.value();
+                                                            }
+                                                        },
+                                                        onkeydown: move |e| {
+                                                            e.stop_propagation();
+                                                            match e.key() {
+                                                                Key::Enter => {
+                                                                    e.prevent_default();
+                                                                    if let Some(open) = rename_box() {
+                                                                        open.submit();
+                                                                    }
+                                                                    rename_box.set(None);
+                                                                    focus_file_input();
+                                                                }
+                                                                Key::Escape => {
+                                                                    e.prevent_default();
+                                                                    rename_box.set(None);
+                                                                    focus_file_input();
+                                                                }
+                                                                _ => {}
+                                                            }
+                                                        },
+                                                        onblur: move |_| {
+                                                            rename_box.set(None);
+                                                        },
+                                                    }
+                                                }
+                                            })
+                                        }
+
+                                        {
                                             (comp_open() && !comp_filtered.is_empty()).then(|| {
                                                 let (cline, cfrom) = comp_anchor();
                                                 let top = cline as f64 * ch + ch;
@@ -1764,6 +1836,22 @@ pub fn Page() -> Element {
                             div { class: "min-w-0",
                                 div { class: "truncate font-medium", "{progress.name}" }
                                 div { class: "truncate text-[10px] text-muted-foreground", "{detail}" }
+                            }
+                        }
+                    }
+                })
+            }
+
+            {
+                (!rename_failed().is_empty()).then(|| {
+                    let reason = rename_failed();
+                    rsx! {
+                        div {
+                            class: "pointer-events-none fixed right-4 bottom-14 z-[60] flex min-w-64 max-w-sm items-center gap-3 rounded-xl bg-background/95 px-3 py-2.5 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28)] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
+                            span { class: "grid h-4 w-4 shrink-0 place-items-center text-base font-semibold text-ansi-1", "×" }
+                            div { class: "min-w-0",
+                                div { class: "truncate font-medium", {translate("editor-rename-failed")} }
+                                div { class: "truncate text-[10px] text-muted-foreground", "{reason}" }
                             }
                         }
                     }
@@ -1964,6 +2052,8 @@ const MEASURE_ROWS: usize = 8;
 const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
+const RENAME_ID: &str = "file-rename";
+const RENAME_NOTICE_MS: u32 = 2400;
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
 const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
@@ -1971,6 +2061,30 @@ const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
+
+/// The rename box while it is open: where the caret sat when the host asked for it, what the
+/// symbol was called, and what the user has typed since.
+#[derive(Clone, PartialEq)]
+struct RenameBox {
+    line: u32,
+    col: u32,
+    original: String,
+    draft: String,
+}
+
+impl RenameBox {
+    fn submit(&self) {
+        let name = self.draft.trim();
+        if name.is_empty() || name == self.original {
+            return;
+        }
+        let _ = send(&FileRenameRequest {
+            line: self.line,
+            col: self.col,
+            new_name: name.to_string(),
+        });
+    }
+}
 
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')

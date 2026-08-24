@@ -584,6 +584,7 @@ agent-working-spelunking = 探索中
 
 editor-toggle-explorer = エクスプローラーを切り替え（Cmd+B）
 editor-cannot-open = このファイルを開けませんでした
+editor-rename-failed = 名前の変更に失敗しました
 editor-unsaved = 未保存
 editor-rendered-markdown = ライブ編集付きMarkdownプレビュー
 editor-note = メモ

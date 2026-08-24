@@ -52,6 +52,8 @@ pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
+pub const FILE_RENAME_BEGIN_EVENT: &str = "file_rename_begin";
+pub const FILE_RENAME_FAILED_EVENT: &str = "file_rename_failed";
 pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
 pub const FILE_REFERENCES_EVENT: &str = "file_references";
 pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
@@ -2069,6 +2071,57 @@ pub struct FileHoverEvent {
 pub struct FileDefinitionRequest {
     pub line: u32,
     pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileRenameRequest {
+    pub line: u32,
+    pub col: u32,
+    pub new_name: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileRenameFailedEvent {
+    pub reason: String,
+}
+
+/// Asks the page to open its rename box. The host resolves the key and the word under the caret,
+/// but only the page can prompt, so the round trip goes host -> page -> `FileRenameRequest`.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileRenameBeginEvent {
+    pub line: u32,
+    pub col: u32,
+    pub current: String,
 }
 
 #[derive(

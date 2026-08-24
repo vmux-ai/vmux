@@ -101,6 +101,7 @@ pub enum ReqKind {
     Hover { line: u32, col: u32 },
     Definition,
     References,
+    Rename,
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
@@ -128,6 +129,11 @@ pub struct LspFolds {
     pub regions: Vec<crate::fold::FoldRegion>,
 }
 
+#[derive(Message)]
+pub struct LspRenameEdit {
+    pub entity: Entity,
+    pub result: Result<lsp_types::WorkspaceEdit, String>,
+}
 pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
     value
         .as_array()
@@ -375,6 +381,25 @@ impl LspManager {
             utf16_col,
             serde_json::json!({ "context": { "includeDeclaration": true } }),
             ReqKind::References,
+        );
+    }
+
+    pub fn rename(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+        new_name: &str,
+    ) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/rename",
+            line,
+            utf16_col,
+            serde_json::json!({ "newName": new_name }),
+            ReqKind::Rename,
         );
     }
 
@@ -692,6 +717,7 @@ fn drain_lsp_requests(
     mut goto_w: MessageWriter<LspGoto>,
     mut folds_w: MessageWriter<LspFolds>,
     mut semantic_w: MessageWriter<LspSemantic>,
+    mut rename_w: MessageWriter<LspRenameEdit>,
     mut commands: Commands,
 ) {
     use vmux_core::event::{
@@ -730,6 +756,18 @@ fn drain_lsp_requests(
                         utf16_col,
                     });
                 }
+            }
+            ReqKind::Rename => {
+                let result = if value.is_null() {
+                    Err("the language server would not rename this".to_string())
+                } else {
+                    serde_json::from_value::<lsp_types::WorkspaceEdit>(value)
+                        .map_err(|e| format!("the rename could not be read: {e}"))
+                };
+                rename_w.write(LspRenameEdit {
+                    entity: f.entity,
+                    result,
+                });
             }
             ReqKind::References => {
                 let items: Vec<RefItem> = parse_references(&value)
@@ -868,6 +906,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         .add_message::<LspGoto>()
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
+        .add_message::<LspRenameEdit>()
         .add_systems(
             Update,
             (

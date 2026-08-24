@@ -246,6 +246,8 @@ pub enum EditCommand {
     Save,
     GotoDefinition,
     FindReferences,
+    /// Ask the page to prompt for a new name. The rename itself only starts once the page answers.
+    BeginRename,
     Hover,
     TriggerCompletion,
     FoldToggle,

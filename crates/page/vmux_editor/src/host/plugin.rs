@@ -79,6 +79,7 @@ impl Plugin for EditorPlugin {
                 FileDefinitionRequest,
                 FileReferencesRequest,
                 FileFoldToggle,
+                FileRenameRequest,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 FileCompletionRequest,
@@ -183,6 +184,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_hover_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
+            .add_observer(on_file_rename_request)
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
@@ -2197,6 +2199,20 @@ fn word_start_col(line_text: &str, char_col: usize) -> u32 {
     i as u32
 }
 
+/// The identifier the caret sits in, for pre-filling the rename box.
+///
+/// Empty when the caret is not in one, which is how the caller tells there is nothing to rename
+/// without asking the server first.
+fn word_at_col(line_text: &str, char_col: usize) -> String {
+    let chars: Vec<char> = line_text.chars().collect();
+    let start = word_start_col(line_text, char_col) as usize;
+    let mut end = char_col.min(chars.len());
+    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+        end += 1;
+    }
+    chars[start..end].iter().collect()
+}
+
 fn wiki_completion_context(edit: &EditState) -> Option<(u32, u32, String)> {
     if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
         return None;
@@ -2373,6 +2389,23 @@ fn run_commands(
                 let (line, utf16, _, _) = caret_lsp(edit);
                 let path = edit.core.buffer.path.clone();
                 manager.references(entity, &path, line, utf16);
+                continue;
+            }
+            EditCommand::BeginRename => {
+                let (line, _, ccol, lt) = caret_lsp(edit);
+                let current = word_at_col(&lt, ccol);
+                if current.is_empty() || !browsers.can_emit_to(&entity) {
+                    continue;
+                }
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_RENAME_BEGIN_EVENT,
+                    &vmux_core::event::FileRenameBeginEvent {
+                        line,
+                        col: ccol as u32,
+                        current,
+                    },
+                ));
                 continue;
             }
             EditCommand::TriggerCompletion => {
@@ -2757,6 +2790,7 @@ fn apply_lsp_workspace_edit(
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
+    mut renames: MessageReader<crate::lsp::manager::LspRenameEdit>,
     mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
@@ -2781,6 +2815,36 @@ fn apply_lsp_workspace_edit(
                 }
             },
         });
+    }
+
+    // A rename reaches the same planner, but there is no request to answer — the user asked, so a
+    // refusal goes back to the pane they asked from.
+    for rename in renames.read() {
+        let refusal = match &rename.result {
+            Err(reason) => Some(reason.clone()),
+            Ok(edit) => match WorkspaceEditPlan::of(edit) {
+                Ok(plan) => apply_planned_documents(
+                    plan,
+                    &mut views,
+                    &mut clipboard,
+                    &mut self_writes,
+                    &mut manager,
+                    &browsers,
+                    &mut commands,
+                ),
+                Err(refusal) => Some(refusal.to_string()),
+            },
+        };
+        let Some(reason) = refusal else {
+            continue;
+        };
+        if browsers.can_emit_to(&rename.entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                rename.entity,
+                vmux_core::event::FILE_RENAME_FAILED_EVENT,
+                &vmux_core::event::FileRenameFailedEvent { reason },
+            ));
+        }
     }
 }
 
@@ -2976,6 +3040,24 @@ fn on_file_definition_request(
     let (line, utf16, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.definition(entity, &path, line, utf16);
+}
+
+fn on_file_rename_request(
+    trigger: On<BinReceive<FileRenameRequest>>,
+    q: Query<&EditState>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event().webview;
+    let req = &trigger.event().payload;
+    if req.new_name.trim().is_empty() {
+        return;
+    }
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let path = edit.core.buffer.path.clone();
+    manager.rename(entity, &path, line, utf16, &req.new_name);
 }
 
 fn on_file_references_request(
@@ -5265,12 +5347,48 @@ mod workspace_edit_tests {
     impl ApplyEdit {
         const BEFORE: &'static str = "one two three\n";
 
+        /// The same panes and the same edit, but arriving as a `textDocument/rename` reply rather
+        /// than as a request from the server. Nothing answers a reply, so `sent` stays empty.
+        fn renamed(path: &Path, panes: usize) -> Self {
+            let (mut app, views) = Self::bare(path, panes);
+            app.world_mut()
+                .write_message(crate::lsp::manager::LspRenameEdit {
+                    entity: views[0],
+                    result: Ok(Self::renaming(path)),
+                });
+            let (_outgoing, sent) = std::sync::mpsc::channel();
+            Self { app, views, sent }
+        }
+
         fn of(path: &Path, panes: usize) -> Self {
+            let (app, views) = Self::bare(path, panes);
+            let (outgoing, sent) = std::sync::mpsc::channel();
+            let events = app
+                .world()
+                .resource::<crate::lsp::server_request::ServerEvents>()
+                .sender();
+            events
+                .send(crate::lsp::server_request::ServerEvent::ApplyEdit {
+                    reply: crate::lsp::server_request::ReplyHandle::new(
+                        crate::lsp::wire::RequestId::Number(1000),
+                        outgoing,
+                    ),
+                    params: lsp_types::ApplyWorkspaceEditParams {
+                        label: None,
+                        edit: Self::renaming(path),
+                    },
+                })
+                .unwrap();
+            Self { app, views, sent }
+        }
+
+        fn bare(path: &Path, panes: usize) -> (App, Vec<Entity>) {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
                 crate::lsp::server_request::ServerRequestPlugin,
             ))
+            .add_message::<crate::lsp::manager::LspRenameEdit>()
             .add_systems(
                 Update,
                 apply_lsp_workspace_edit
@@ -5321,25 +5439,7 @@ mod workspace_edit_tests {
                 );
             }
 
-            let (outgoing, sent) = std::sync::mpsc::channel();
-            let events = app
-                .world()
-                .resource::<crate::lsp::server_request::ServerEvents>()
-                .sender();
-            events
-                .send(crate::lsp::server_request::ServerEvent::ApplyEdit {
-                    reply: crate::lsp::server_request::ReplyHandle::new(
-                        crate::lsp::wire::RequestId::Number(1000),
-                        outgoing,
-                    ),
-                    params: lsp_types::ApplyWorkspaceEditParams {
-                        label: None,
-                        edit: Self::renaming(path),
-                    },
-                })
-                .unwrap();
-
-            Self { app, views, sent }
+            (app, views)
         }
 
         /// Two ranges in one document, given out of order, as a rename would produce.
@@ -5387,6 +5487,39 @@ mod workspace_edit_tests {
                 .unwrap()
                 .core
                 .apply(EditCommand::Undo);
+        }
+    }
+
+    /// The pre-filled name, and the gate that decides there is nothing to rename.
+    ///
+    /// A caret sits *between* characters, so the word has to grow both ways from it; taking only
+    /// the prefix gives the server half an identifier to rename.
+    #[test]
+    fn the_rename_prefill_is_the_whole_identifier_around_the_caret() {
+        assert_eq!(word_at_col("let some_name = 1;", 8), "some_name");
+        assert_eq!(word_at_col("let some_name = 1;", 4), "some_name");
+        assert_eq!(word_at_col("let some_name = 1;", 13), "some_name");
+        assert_eq!(
+            word_at_col("let some_name = 1;", 14),
+            "",
+            "a caret on whitespace has nothing to rename"
+        );
+    }
+
+    /// A rename's reply carries the `WorkspaceEdit` in the response rather than in a request, so
+    /// it reaches the applier by message. Wiring the reader but never draining it, or ordering it
+    /// outside the set the applier runs in, leaves the rename silently doing nothing.
+    #[test]
+    fn a_rename_reply_edits_the_panes_the_way_an_apply_edit_request_does() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.rs");
+        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+
+        let mut h = ApplyEdit::renamed(&path, 2);
+        h.app.update();
+
+        for view in h.views.clone() {
+            assert_eq!(h.text(view), "1 two 3\n");
         }
     }
 

@@ -599,6 +599,7 @@ agent-working-spelunking = Diep graven
 
 editor-toggle-explorer = Verkenner tonen/verbergen (Cmd+B)
 editor-cannot-open = Dit bestand kon niet worden geopend
+editor-rename-failed = Hernoemen mislukt
 editor-unsaved = niet bewaard
 editor-rendered-markdown = Gerenderde Markdown met live bewerking
 editor-note = Notitie

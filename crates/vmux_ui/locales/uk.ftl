@@ -599,6 +599,7 @@ agent-working-spelunking = Досліджує глибини
 
 editor-toggle-explorer = Показати/сховати Провідник (Cmd+B)
 editor-cannot-open = Не вдалося відкрити цей файл
+editor-rename-failed = Не вдалося перейменувати
 editor-unsaved = не збережено
 editor-rendered-markdown = Відтворений Markdown із живим редагуванням
 editor-note = Нотатка

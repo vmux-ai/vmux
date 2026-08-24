@@ -599,6 +599,7 @@ agent-working-spelunking = 깊이 탐색 중
 
 editor-toggle-explorer = 탐색기 토글(Cmd+B)
 editor-cannot-open = 이 파일을 열 수 없습니다
+editor-rename-failed = 이름 바꾸기에 실패했습니다
 editor-unsaved = 저장되지 않음
 editor-rendered-markdown = 실시간 편집이 가능한 렌더링된 Markdown
 editor-note = 메모
