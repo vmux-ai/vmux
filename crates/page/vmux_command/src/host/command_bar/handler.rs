@@ -929,6 +929,10 @@ fn on_command_bar_action(
     }
 }
 
+/// Close the launcher over a surface that has just taken the focus out from under it.
+///
+/// Both surfaces it can be drawn on have to be told: the overlay window it owns, and the panel the
+/// layout page draws inline. Closing only the overlay leaves the panel up on the page that opened.
 fn deferred_dismiss_modal(
     mut pending_launch: ResMut<PendingLaunch>,
     mut modal_q: Query<
@@ -940,12 +944,16 @@ fn deferred_dismiss_modal(
         ),
         With<CommandBar>,
     >,
+    panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
     if !pending_launch.dismiss_modal {
         return;
     }
     pending_launch.dismiss_modal = false;
+    for layout_e in &panel_q {
+        close_command_bar_panel(layout_e, &mut commands);
+    }
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut()
         && modal_node.display != Display::None
     {
@@ -1751,6 +1759,28 @@ mod tests {
         assert_eq!(
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
+        );
+    }
+
+    #[test]
+    fn a_surface_opening_under_the_launcher_closes_the_panel_too() {
+        let mut app = panel_app();
+        app.add_systems(Update, deferred_dismiss_modal);
+        let layout = app
+            .world_mut()
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
+            .id();
+        app.world_mut()
+            .resource_mut::<PendingLaunch>()
+            .dismiss_modal = true;
+
+        app.update();
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())],
+            "the launcher is drawn by the layout page here, so closing only the overlay window \
+             leaves it on screen"
         );
     }
 
