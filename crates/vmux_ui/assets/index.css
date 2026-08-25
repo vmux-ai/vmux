@@ -17,8 +17,10 @@
 @source "../../page";
 @source ".";
 
+/* Matches `theme.css`. The Nerd Font used to sit second and so drew every ordinary character; at
+   the end it answers only for the glyphs nothing before it has. */
 @theme {
-  --font-mono: ui-monospace, "JetBrainsMono NF", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "JetBrainsMono NF", monospace;
 }
 
 @font-face {

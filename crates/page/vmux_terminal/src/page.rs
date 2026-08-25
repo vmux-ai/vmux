@@ -317,7 +317,7 @@ pub fn Page() -> Element {
                 }
                 if !t.font_family.is_empty() {
                     s.push_str(&format!(
-                        "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
+                        "font-family:\"{}\",var(--font-mono);",
                         t.font_family
                     ));
                 }

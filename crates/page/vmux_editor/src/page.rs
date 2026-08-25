@@ -624,7 +624,7 @@ pub fn Page() -> Element {
         let mut s = String::new();
         if !t.font_family.is_empty() {
             s.push_str(&format!(
-                "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
+                "font-family:\"{}\",var(--font-mono);",
                 t.font_family
             ));
         }
