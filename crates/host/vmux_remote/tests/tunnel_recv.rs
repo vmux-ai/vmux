@@ -1,11 +1,3 @@
-//! Proves a dead tunnel reports itself in a way quinn acts on.
-//!
-//! quinn ignores `ConnectionReset` from `poll_recv` — it is injectable by an attacker, so the
-//! endpoint driver retries the read, and the retry skips the loop's own work limiter. A closed
-//! control connection is permanent, so reporting that kind spins a core until the process dies
-//! rather than retiring the endpoint. Only a live socket shows this: the error kind is chosen in
-//! one place and its consequence lives in a dependency.
-
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;

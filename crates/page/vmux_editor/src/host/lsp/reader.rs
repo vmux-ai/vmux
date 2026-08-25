@@ -1,10 +1,3 @@
-//! The thread that reads one server's stdout, and the only place that answers it.
-//!
-//! Requests that need no world state are answered here, where the server is blocked and
-//! latency matters. Anything else is handed to the world with the write handle attached. The
-//! catch-all matters as much as the handled cases: an unanswered request leaves an id pending
-//! in the server forever, and some servers serialise behind it.
-
 use std::io::BufReader;
 use std::process::ChildStdout;
 use std::sync::mpsc;
@@ -151,7 +144,6 @@ impl Reader {
         serde_json::json!([{ "uri": self.root_uri, "name": self.root_name }])
     }
 
-    /// One `null` per requested section: spec-legal, and reads as "use your defaults".
     fn no_configuration(params: &Value) -> Value {
         let sections = params
             .get("items")

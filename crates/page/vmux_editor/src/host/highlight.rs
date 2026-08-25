@@ -6,17 +6,8 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_core::event::{FileLine, StyledSpan};
 
-/// Where the editor stops opening a file at all, matching the cap VS Code's text model has.
-///
-/// Well past the point where the features come off: a rope of this size is affordable, and a
-/// user who asked for a file would rather read it plainly than be told no.
 pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
-/// Where syntax highlighting, folding and the language server come off.
-///
-/// `HighlightCache` keeps a syntect parser state *per line*, so what actually bites on a large
-/// file is highlighting rather than the text. Past this the file still opens and still edits, it
-/// is just uncoloured — which is what VS Code's `editor.largeFileOptimizations` does.
 pub const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 fn syntaxes() -> &'static SyntaxSet {
@@ -60,7 +51,6 @@ pub fn default_theme() -> syntect::highlighting::Theme {
     crate::palette::Palette::of(is_dark_theme()).theme()
 }
 
-/// The theme's plain text colour, for text served without highlighting.
 pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
     theme
         .settings
@@ -174,11 +164,6 @@ impl Highlighter {
         Ok(self.highlight(&content, path))
     }
 
-    /// The text, one span per line, in the theme's plain colour.
-    ///
-    /// The same trade the editor makes past [`HIGHLIGHT_MAX_BYTES`], for the callers that hand a
-    /// whole file to syntect in one go rather than a window at a time. Without it, raising the
-    /// open limit to fifty megabytes raised the highlighting limit with it.
     fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
         let theme = &self.themes.themes[theme_name()];
         let fg = theme_foreground(theme);
@@ -298,8 +283,6 @@ mod tests {
         assert!(err.to_lowercase().contains("not a file"), "got: {err}");
     }
 
-    /// Raising the open limit to fifty megabytes must not raise the highlighting limit with it:
-    /// syntect over a file this size is what the cap exists to prevent.
     #[test]
     fn load_serves_a_file_past_the_highlight_cap_without_colouring_it() {
         let hl = Highlighter::new();

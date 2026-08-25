@@ -246,7 +246,6 @@ pub enum EditCommand {
     Save,
     GotoDefinition,
     FindReferences,
-    /// Ask the page to prompt for a new name. The rename itself only starts once the page answers.
     BeginRename,
     Hover,
     TriggerCompletion,
@@ -256,21 +255,11 @@ pub enum EditCommand {
     FoldToggleRecursive,
     FoldAll,
     UnfoldAll,
-    /// Put a caret on every whole-word occurrence of the identifier under the primary caret.
-    ///
-    /// The editor's own answer to renaming, for the cases a language server has none: a file with
-    /// no server, a local that no server tracks, or text that is not code at all.
     SelectAllOccurrences,
-    /// Put back every caret the user added, keeping the one they placed last.
     CollapseCarets,
-    /// Add a caret one row above or below the active one, in the same column.
-    ///
-    /// The keyboard's way into multi-caret editing. Alt-click was the only other, which left the
-    /// feature unreachable without a mouse.
     AddCaretVertically(VerticalDirection),
 }
 
-/// Which way [`EditCommand::AddCaretVertically`] grows the caret set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerticalDirection {
     Up,
@@ -278,12 +267,6 @@ pub enum VerticalDirection {
 }
 
 impl EditCommand {
-    /// Whether this means "do it at each caret" rather than "do it to the buffer".
-    ///
-    /// Deliberately a small allowlist. Multi-caret editing is reachable from the VS Code keymap
-    /// only, so this covers typing, deleting and moving; everything else — undo, search, ex
-    /// ranges, folds, whole-buffer replacement — runs once against the first caret, which is
-    /// what a command with buffer-wide meaning should do.
     pub fn is_per_caret(&self) -> bool {
         matches!(
             self,

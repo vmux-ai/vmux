@@ -149,28 +149,17 @@ struct TreeRows {
 }
 
 impl TreeRows {
-    /// Take the tree the host just sent, animating the difference.
     fn reconcile(self, next: Vec<TreeRow>) {
         let mut rows = self.rows;
         let generation = self.generation;
         let id = self.claim();
         let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
-        // Only what is on screen. A row that is not is either arriving, and so is in `next`
-        // anyway, or leaving — and carrying a leaving row forward is how a fast second toggle
-        // strands it: the pass that would have dropped it is abandoned by this one, and it is
-        // read as leaving again on every round after. Toggling a large directory a few times
-        // used to leave the list carrying every row it had ever removed.
         let current = rows
             .read()
             .iter()
             .filter(|motion| motion.visible)
             .map(|motion| motion.row.clone())
             .collect::<Vec<_>>();
-        // A tree arriving into an empty sidebar is the whole tree, and there is nothing on screen
-        // for it to animate away from. Showing it at once also keeps it from depending on the
-        // reveal below, which is a task owned by this scope: when the page rebuilds — a font size
-        // change is enough — the scope goes and takes the pending reveal with it, and every row
-        // stays staged at `opacity-0` with nothing left to turn it on.
         if current.is_empty() {
             rows.set(
                 next.into_iter()
@@ -185,8 +174,6 @@ impl TreeRows {
             .collect();
         rows.set(merged);
         spawn(async move {
-            // A turn before anything is opened, so the new rows reach the document closed: one
-            // that appears already visible has no transition left to run.
             sleep_ms(0).await;
             if generation() != id {
                 return;
@@ -211,12 +198,6 @@ impl TreeRows {
         });
     }
 
-    /// Close a directory now, rather than when the host gets round to saying so.
-    ///
-    /// The host owns which directories are open and answers with the whole tree rebuilt, which
-    /// over a large directory takes long enough to read as the click not having registered.
-    /// Dropping the descendants here costs nothing when the host agrees, and its answer replaces
-    /// them when it does not.
     fn collapse(self, path: &str) {
         self.claim();
         let prefix = format!("{}/", path.trim_end_matches('/'));
@@ -235,11 +216,6 @@ impl TreeRows {
         rows.set(kept);
     }
 
-    /// Turn a directory's chevron now, and say it is working.
-    ///
-    /// The children cannot be shown before they are read, but the click can be acknowledged: over
-    /// a large directory the read plus the round trip is long enough that an unturned chevron
-    /// reads as a click that missed, and the second click closes what the first one opened.
     fn expand(self, path: &str) {
         self.claim();
         let mut opened = self.rows.read().clone();
@@ -253,7 +229,6 @@ impl TreeRows {
         rows.set(opened);
     }
 
-    /// Take ownership of the rows, abandoning whatever animation held them.
     fn claim(self) -> u32 {
         let mut generation = self.generation;
         let id = generation().wrapping_add(1);
@@ -623,9 +598,6 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
-                                                // A directory gets the chevron and nothing else, as
-                                                // VS Code does: the chevron already says it is one,
-                                                // and a folder glyph beside it says it twice.
                                                 if !is_dir {
                                                     {rsx! { TypeIcon { path: row.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                                 }

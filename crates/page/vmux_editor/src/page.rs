@@ -104,7 +104,6 @@ pub fn Page() -> Element {
     let mut find_index = use_signal(|| 0u32);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
-    // Every caret. The primary is drawn from `cursor` as before; these are the rest.
     let mut carets = use_signal(Vec::<vmux_core::editor::CursorPos>::new);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
@@ -1059,8 +1058,6 @@ pub fn Page() -> Element {
                 })
             }
 
-            // A path that cannot be opened — mistyped, deleted, unreadable, too large — used to
-            // leave the pane blank: the host sent the reason and nothing rendered it.
             if !error().is_empty() {
                 div {
                     class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center",
@@ -1429,11 +1426,6 @@ pub fn Page() -> Element {
                                                 let lt = layout.row as f64 * ch;
                                                 let line_height = layout.rows as f64 * ch;
                                                 let wrap_cols = wrap_columns();
-                                                // `pointer-events-none` so the row stays the target
-                                                // of its own pointer events. The offsets an event
-                                                // carries are measured from whatever it hit, and a
-                                                // hit on a syntax span reports a column counted
-                                                // from the start of that span rather than the line.
                                                 let text_class = if wrap_cols > 0 {
                                                     "pointer-events-none relative whitespace-pre-wrap break-all pr-8"
                                                 } else {
@@ -1528,10 +1520,6 @@ pub fn Page() -> Element {
                                                             if hover_pos() != Some((ln, col)) {
                                                                 hover_pos.set(Some((ln, col)));
                                                                 lsp_hover.set(None);
-                                                                // VS Code waits before asking, so a pointer
-                                                                // crossing the file does not trail popups
-                                                                // behind it. Moving on cancels the request by
-                                                                // moving `hover_pos` out from under it.
                                                                 spawn(async move {
                                                                     sleep_ms(HOVER_DELAY_MS).await;
                                                                     if hover_pos() != Some((ln, col)) {
@@ -1672,9 +1660,6 @@ pub fn Page() -> Element {
                                                 };
                                                 rsx! {
                                                     div {
-                                                        // Row and column, not line: two carets on
-                                                        // one line each produce a span, and keying
-                                                        // by line alone collides.
                                                         key: "sel{s.row}:{s.start}:{s.end}",
                                                         class: "pointer-events-none absolute z-0 bg-cyan-400/20",
                                                         style: "{style}",
@@ -1689,8 +1674,6 @@ pub fn Page() -> Element {
                                             style: "{cursor_style}",
                                         }
 
-                                        // The added carets. The primary is the block above; it
-                                        // keeps the hidden textarea and so the IME with it.
                                         for extra in carets().iter().filter(|c| **c != cursor()) {
                                             {
                                                 let ex = gutter + extra.col as f64 * cw;
@@ -1752,9 +1735,6 @@ pub fn Page() -> Element {
                                                 let left = gw as f64 * cw + 48.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
-                                                        // Selectable and scrollable, and capped: VS Code lets the pointer into a
-                                                        // hover so its content can be read and copied, and stops it
-                                                        // growing over the code it is describing.
                                                         class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (bi, b) in h.blocks.iter().enumerate() {
@@ -2158,7 +2138,6 @@ const RENAME_ID: &str = "file-rename";
 const CODE_ACTION_ID: &str = "file-code-action";
 pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 const RENAME_NOTICE_MS: u32 = 2400;
-/// What VS Code waits before asking for a hover, so a pointer crossing the file asks for nothing.
 const HOVER_DELAY_MS: u32 = 300;
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
@@ -2168,14 +2147,11 @@ const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
 
-/// One row of the editor's context menu.
 #[derive(Clone, Copy, PartialEq)]
 struct MenuRow {
     label: &'static str,
     shortcut: &'static str,
-    /// `None` for the two rows that predate `FileEditorAction` and still send their own request.
     action: Option<EditorAction>,
-    /// Draw a separator above this row. VS Code groups navigation, modification and clipboard.
     opens_group: bool,
 }
 
@@ -2195,10 +2171,6 @@ impl MenuRow {
     }
 }
 
-/// The context menu, minus whatever the language server behind this file cannot do.
-///
-/// The clipboard rows are always there — they are the editor's own and need no server — which is
-/// what keeps the menu useful in a file no server has claimed.
 struct EditorMenu {
     offered: Vec<EditorAction>,
 }
@@ -2310,8 +2282,6 @@ impl EditorMenu {
     }
 }
 
-/// The rename box while it is open: where the caret sat when the host asked for it, what the
-/// symbol was called, and what the user has typed since.
 #[derive(Clone, PartialEq)]
 struct RenameBox {
     line: u32,
@@ -2644,11 +2614,6 @@ fn ExplorerSidebar(
     }
 }
 
-/// Find in this file: what to look for, how many there are, and which one the caret is on.
-///
-/// It drives the buffer's own search rather than one of its own, so what it finds is what `n`
-/// steps through and what the highlight already draws — vim's `/` and this are two ways into the
-/// same thing rather than two searches that would fight over the highlight.
 #[component]
 fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) -> Element {
     let mut query = query;
@@ -4126,8 +4091,6 @@ mod menu_tests {
             .collect()
     }
 
-    /// A file no server has claimed still has an editor behind it, so the rows that need no server
-    /// stay. Offering a rename that the host will refuse is the failure worth avoiding.
     #[test]
     fn a_file_without_a_server_keeps_only_the_rows_needing_none() {
         let rows = labels(&[]);
@@ -4146,8 +4109,6 @@ mod menu_tests {
         assert!(!rows.contains(&"editor-format-selection"));
     }
 
-    /// The separator is drawn as the row's own top border, so exactly one row per group may carry
-    /// it — two in a row would draw a line inside a group.
     #[test]
     fn each_group_opens_exactly_once() {
         let all = [

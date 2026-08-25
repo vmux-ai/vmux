@@ -480,9 +480,6 @@ fn HeaderView(
                 if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    // `overflow-y-hidden` because CSS will not let one axis scroll while the other
-                    // stays `visible`: asking for `overflow-x: auto` alone computes the y axis to
-                    // `auto` as well, and the tab row would scroll away under the pointer.
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden pl-2",
                         for tab in tabs.iter() {
                             {
@@ -712,8 +709,6 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     let mut copied = use_signal(|| false);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
-    // `None` where the switch beside it has already said this. On and Off are its two positions,
-    // and printing them underneath is the same fact twice.
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
         RemotePhase::Starting if remote.enabled => Some("Starting…"),
@@ -1321,9 +1316,6 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                         }
                         div { class: "mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-hidden text-[10px] text-foreground/65",
                             if loaded {
-                                // Yields to the counts, which are the line's reason for existing.
-                                // The number beside the title has already said how many there are,
-                                // and the row is not wide enough to carry all three.
                                 if tools.updates == 0 && tools.conflicts == 0 {
                                     span { class: "whitespace-nowrap", {translate("common-installed")} }
                                 }

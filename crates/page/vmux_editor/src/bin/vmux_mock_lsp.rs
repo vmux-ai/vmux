@@ -5,8 +5,6 @@ fn main() {
     use serde_json::{Value, json};
     use vmux_editor::lsp::framing::{read_message, write_message};
 
-    /// Diagnostics are the one channel the integration test already watches, so the mock
-    /// reports back through them rather than growing a second observation path.
     fn diagnostic(uri: &str, message: String) -> Value {
         json!({
             "jsonrpc": "2.0",
@@ -74,8 +72,6 @@ fn main() {
                 let _ = write_message(&mut stdout, &resp);
             }
             "exit" => break,
-            // No method and an id: the client answered a request we sent it. Before this
-            // existed the client stayed silent and nothing here ever ran.
             "" if id.is_some() => {
                 let code = msg
                     .pointer("/error/code")

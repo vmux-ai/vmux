@@ -1,46 +1,28 @@
-//! One palette per colour scheme, read by the editor, the semantic layer and the terminal.
-//!
-//! GitHub Dark/Light Default, transcribed from `primer/github-vscode-theme` (MIT). Transcribed
-//! rather than loaded so the colours are in the binary and there is nothing to install, and kept
-//! in one place because three surfaces used to disagree about them: syntect themed the buffer from
-//! `base16-ocean`, the semantic layer carried its own seven, and the terminal had a palette of its
-//! own. A token coloured by the language server has to land on the colour syntect would have used
-//! for the same thing, or the two flicker against each other as the server warms up.
-
 use syntect::highlighting::{
     Color, FontStyle, ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings,
 };
 
-/// One TextMate rule: the scopes it covers, and how they are drawn.
 pub struct Token {
     pub scope: &'static str,
     pub colour: &'static str,
     pub style: &'static str,
 }
 
-/// Everything a colour scheme decides, for every surface that draws text.
 pub struct Palette {
     pub background: &'static str,
     pub foreground: &'static str,
     pub selection: &'static str,
     pub line_highlight: &'static str,
     pub caret: &'static str,
-    /// The sixteen ANSI colours, in the order a terminal indexes them.
     pub ansi: [&'static str; 16],
     pub tokens: &'static [Token],
 }
 
 impl Palette {
-    /// The palette in force for a scheme.
     pub fn of(dark: bool) -> &'static Self {
         if dark { &GITHUB_DARK } else { &GITHUB_LIGHT }
     }
 
-    /// This palette as a syntect theme.
-    ///
-    /// Built rather than parsed from a `.tmTheme`: the source is VS Code's JSON, whose scope lists
-    /// are the same TextMate selectors syntect matches on, so the rules carry across one for one
-    /// and there is no intermediate format to keep honest.
     pub fn theme(&self) -> Theme {
         let settings = ThemeSettings {
             background: Some(rgb(self.background)),
@@ -53,8 +35,6 @@ impl Palette {
 
         let mut scopes = Vec::with_capacity(self.tokens.len());
         for token in self.tokens {
-            // A selector syntect cannot parse is dropped rather than defaulted: a rule that
-            // matched nothing is invisible, and one that matched everything would repaint the file.
             let Ok(selectors) = token.scope.parse::<ScopeSelectors>() else {
                 continue;
             };
@@ -95,7 +75,6 @@ fn font_style(style: &str) -> FontStyle {
     out
 }
 
-/// `#rrggbb`, opaque. Anything else is black, which is visible enough to be reported.
 fn rgb(hex: &str) -> Color {
     let digits = hex.strip_prefix('#').unwrap_or(hex);
     let byte =
@@ -627,7 +606,6 @@ mod tests {
         }
     }
 
-    /// The colours a reader actually names when they say a theme is wrong.
     #[test]
     fn a_comment_and_a_keyword_are_the_colours_github_gives_them() {
         let theme = GITHUB_DARK.theme();

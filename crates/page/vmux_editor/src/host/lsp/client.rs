@@ -32,16 +32,9 @@ pub struct ServerClient {
     _stderr: JoinHandle<()>,
 }
 
-/// What a server answered `initialize` with, and the question every request site asks of it.
-///
-/// `Default` means "provides nothing", which is the right reading of a server whose reply did
-/// not parse. Asking before sending is what stops `foldingRange` and `documentSymbol` going to
-/// every server on every file open, and it is how the UI decides whether to offer rename.
 #[derive(Default)]
 pub struct Capabilities {
     server: lsp_types::ServerCapabilities,
-    /// Resolved once here rather than on every response: the legend is the only way to read a
-    /// semantic-tokens reply, and it never changes for the life of the server.
     semantic: Option<crate::lsp::semantic::SemanticLegend>,
 }
 
@@ -61,7 +54,6 @@ impl Capabilities {
         self.semantic.as_ref()
     }
 
-    /// A method not listed here is allowed through: this models what we send, not the protocol.
     pub fn allows(&self, method: &str) -> bool {
         let caps = &self.server;
         match method {
@@ -97,7 +89,6 @@ impl Capabilities {
         }
     }
 
-    /// `Some(Left(false))` is a server explicitly declining, which is not the same as absent.
     fn offered<T>(provider: &Option<lsp_types::OneOf<bool, T>>) -> bool {
         match provider {
             Some(lsp_types::OneOf::Left(yes)) => *yes,
@@ -234,19 +225,12 @@ impl ServerClient {
         Ok(Capabilities::of(&reply))
     }
 
-    /// What this client tells a server it can do.
-    ///
-    /// Every entry here is a promise the reader thread or a system actually keeps. Advertising
-    /// more than that is worse than advertising less: a server sends work that then goes
-    /// unanswered, which is invisible from this side.
     fn capabilities() -> lsp_types::ClientCapabilities {
         lsp_types::ClientCapabilities {
             workspace: Some(lsp_types::WorkspaceClientCapabilities {
                 apply_edit: Some(true),
                 workspace_edit: Some(lsp_types::WorkspaceEditClientCapabilities {
                     document_changes: Some(true),
-                    // Empty, not absent: file create/rename/delete is refused, so a conforming
-                    // server will not put one in a `WorkspaceEdit`.
                     resource_operations: Some(vec![]),
                     failure_handling: Some(lsp_types::FailureHandlingKind::Abort),
                     ..Default::default()
@@ -256,9 +240,6 @@ impl ServerClient {
                 ..Default::default()
             }),
             text_document: Some(lsp_types::TextDocumentClientCapabilities {
-                // Absent means plaintext, and a server that believes that strips the fences off
-                // its hover before sending it — which is the only thing naming the language a
-                // block is written in, and so the only thing that can highlight it.
                 hover: Some(lsp_types::HoverClientCapabilities {
                     content_format: Some(vec![lsp_types::MarkupKind::Markdown]),
                     ..Default::default()
@@ -273,8 +254,6 @@ impl ServerClient {
                 }),
                 semantic_tokens: Some(lsp_types::SemanticTokensClientCapabilities {
                     requests: lsp_types::SemanticTokensClientCapabilitiesRequests {
-                        // Whole document only: the range and delta forms need state this client
-                        // does not keep, and a re-request is cheap next to getting them wrong.
                         full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
                         range: Some(false),
                     },
@@ -363,7 +342,6 @@ mod tests {
         assert!(!caps.allows("textDocument/documentSymbol"));
     }
 
-    /// Declining is not the same as staying silent, and both must stop the request.
     #[test]
     fn an_explicit_false_is_honoured() {
         assert!(

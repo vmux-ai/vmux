@@ -114,11 +114,6 @@ fn push_layout_state_emit(
     *last = body;
 }
 
-/// Works out which root each address in the header should be shown against.
-///
-/// A type rather than a function because the answer needs the git cache and the home directory,
-/// and the ladder it walks — checkout, then home, then the filesystem — is the same order for
-/// every row emitted in a frame.
 struct AddressRoots<'a> {
     repos: Option<&'a mut vmux_git::RepoInfoCache>,
     home: std::path::PathBuf,
@@ -143,9 +138,6 @@ impl AddressRoots<'_> {
         vmux_layout::event::AddressParts::on_disk(&path, &self.home)
     }
 
-    /// The innermost checkout `path` sits in, which for a submodule is the submodule and not its
-    /// parent: the file belongs to that repository, and it is that repository's branch it is read
-    /// against.
     fn checkout_of(&mut self, path: &std::path::Path) -> Option<vmux_git::worktree::RepoInfo> {
         let dir = match path.is_dir() {
             true => path,

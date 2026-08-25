@@ -238,11 +238,6 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
     }
 }
 
-/// Apply the zoom the user asked for to the pages CEF cannot reach.
-///
-/// [`ZoomLevel`] rides on every browser entity and `bevy_cef` answers it for the ones it owns, but
-/// a natively hosted page has been handed to `Browsers::set_externally_hosted`, so that answer
-/// lands on nothing. Without this, Cmd +/- does nothing at all on the editor.
 fn sync_native_page_scale(
     hosted: Option<NonSend<HostedPages>>,
     zoom: Query<(Entity, &ZoomLevel), Changed<ZoomLevel>>,
@@ -258,8 +253,6 @@ fn sync_native_page_scale(
     }
 }
 
-/// `ZoomLevel` counts steps rather than a multiplier, the way CEF and Chromium define it, so a
-/// natively hosted page has to raise it the same way to land where a CEF one would.
 fn page_scale_of(level: f64) -> f64 {
     1.2f64.powf(level)
 }

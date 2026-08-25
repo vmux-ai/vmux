@@ -15,10 +15,6 @@ pub(crate) enum DomRequest {
     ScrollIntoView {
         element: String,
     },
-    /// Scroll a container to an absolute offset from its top.
-    ///
-    /// Distinct from [`Self::ScrollIntoView`], which can only aim at an element that exists. A
-    /// viewport scroll — a page down, a `zz` — names a position no element sits at.
     ScrollTo {
         element: String,
         top: f64,
@@ -163,13 +159,6 @@ impl RequestQueue {
 mod tests {
     use super::*;
 
-    /// Every request the host can queue must be a case the page's shim answers.
-    ///
-    /// A source scan because there is no way to run the switch without a webview, and the two
-    /// halves are edited apart: the tag comes from `serde` here and the case is written by hand in
-    /// the shim, so a new variant is silently ignored by the page until someone notices the
-    /// feature does nothing. The tag is serialized rather than spelled out, so this fails if the
-    /// rename attribute drifts too.
     #[test]
     fn every_request_kind_is_a_case_the_shim_handles() {
         let requests = [

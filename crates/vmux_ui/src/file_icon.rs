@@ -354,13 +354,6 @@ pub enum FileIcon {
     File,
 }
 
-/// A language's mark, and the colour it is drawn in.
-///
-/// The colours are the `nvim-web-devicons` palette rather than each brand's own, because a brand
-/// colour is chosen to sit on a page of that brand's choosing: Rust's mark is black, Flutter's is
-/// nearly white, and several are within a few percent of one another. A file tree needs every one
-/// of them legible on the same surface and distinct from its neighbours, which is the problem that
-/// palette already solves — and it is the one a reader coming from a terminal has learnt.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Logo {
     pub path: &'static str,

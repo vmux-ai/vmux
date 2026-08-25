@@ -89,9 +89,6 @@ fn decide(
         return KeyAction::PassThrough;
     }
 
-    // A field being typed into keeps its own chords. The leader is `ctrl+b`, which readline spells
-    // "back one character", so opening a chord here would take the key from the command bar every
-    // time and give back a prefix waiting for a second key that never comes.
     if !text_entry_owns_keys && map.has_chord_prefix(&combo) {
         *pending = Some((combo, now));
         return KeyAction::Consume(None);
@@ -310,9 +307,6 @@ mod tests {
         }
     }
 
-    /// The leader is `ctrl+b`, which readline spells "back one character". A field being typed
-    /// into has to win that key, or the command bar loses it on every press to a prefix left
-    /// waiting for a second key nobody is going to type.
     #[test]
     fn a_field_being_typed_into_keeps_the_leader_key() {
         let map = map();

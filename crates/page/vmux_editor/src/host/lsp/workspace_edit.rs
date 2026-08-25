@@ -1,9 +1,3 @@
-//! Turning a server's `WorkspaceEdit` into per-document work this editor can carry out.
-//!
-//! The two shapes a server may send — the legacy `changes` map and the newer
-//! `documentChanges` — collapse to the same thing here, and the operations this client cannot
-//! honour are refused whole rather than applied in part.
-
 use std::path::PathBuf;
 
 use crate::lsp::client::path_from_uri;
@@ -16,7 +10,6 @@ pub struct WorkspaceEditPlan {
 impl WorkspaceEditPlan {
     pub fn of(edit: &lsp_types::WorkspaceEdit) -> Result<Self, PlanRefusal> {
         let mut documents = Vec::new();
-        // `documentChanges` supersedes `changes` when both are present, so never merge them.
         match &edit.document_changes {
             Some(lsp_types::DocumentChanges::Edits(edits)) => {
                 for doc in edits {
@@ -54,7 +47,6 @@ impl WorkspaceEditPlan {
 pub struct PlannedDocument {
     pub path: PathBuf,
     pub edits: Vec<lsp_types::TextEdit>,
-    /// The document version the server computed against, when it said.
     pub version: Option<i32>,
 }
 
@@ -79,11 +71,8 @@ impl PlannedDocument {
     }
 }
 
-/// Why a whole `WorkspaceEdit` was rejected before any of it was applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanRefusal {
-    /// Creating, renaming or deleting files. Correspondingly not advertised in
-    /// `workspace.workspaceEdit.resourceOperations`, so a conforming server will not ask.
     ResourceOperation,
     UnsupportedUri,
 }
@@ -112,8 +101,6 @@ mod tests {
         format!("file://{path}").parse().unwrap()
     }
 
-    /// `clippy::mutable_key_type` fires on `Uri`'s internal cache, but `WorkspaceEdit.changes`
-    /// is keyed that way by `lsp-types` and nothing here mutates a key.
     #[allow(clippy::mutable_key_type)]
     fn changes(
         entries: Vec<(&str, &str)>,
@@ -163,7 +150,6 @@ mod tests {
         assert_eq!(plan.documents[0].version, Some(4));
     }
 
-    /// Merging the two would apply the same edit twice.
     #[test]
     fn document_changes_supersede_the_changes_map() {
         let plan = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {

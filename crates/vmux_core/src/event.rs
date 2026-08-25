@@ -49,7 +49,6 @@ pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
-/// File page → host: what to look for, and which way to step through it.
 pub const FILE_FIND_EVENT: &str = "file_find";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
@@ -746,11 +745,6 @@ pub struct FileLspStatusEvent {
     pub server: String,
     pub package: Option<String>,
     pub state: LspServerState,
-    /// Which context-menu rows this server can actually answer.
-    ///
-    /// The host refuses a request the server never advertised, so without this the menu would
-    /// offer rows that quietly do nothing — and a row that does nothing reads as a broken editor
-    /// rather than as a server that does not implement it.
     pub actions: Vec<EditorAction>,
 }
 
@@ -1806,7 +1800,6 @@ pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
     pub extend: bool,
-    /// Alt held: put another caret here rather than moving the one that exists.
     pub add: bool,
 }
 
@@ -1825,20 +1818,14 @@ pub struct FileCursorEvent {
     pub mode: crate::editor::EditMode,
     pub mode_label: String,
     pub primary: crate::editor::CursorPos,
-    /// Every caret, `primary` included — one entry for an ordinary buffer, more once the user
-    /// has added some. The page draws these rather than `primary` alone.
     pub carets: Vec<crate::editor::CursorPos>,
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
     pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
-    /// Every occurrence of the word under the caret, for the highlight VS Code draws on a click.
     pub word_highlights: Vec<crate::editor::SelSpan>,
-    /// How many matches the current search has, over the whole file rather than the viewport
-    /// [`Self::search`] covers.
     pub search_total: u32,
-    /// Which of them the caret is on, counted from one. Zero when it is on none of them.
     pub search_index: u32,
 }
 
@@ -1961,7 +1948,6 @@ pub enum FileKey {
     PanelPrevious,
     PanelChoose,
     PanelDismiss,
-    /// Open the find bar, on the word under the caret.
     Find,
 }
 
@@ -2047,11 +2033,6 @@ pub struct FileHoverRequest {
     pub col: u32,
 }
 
-/// What the find bar wants done.
-///
-/// One event rather than three, because the bar only ever has one thing to say and the query
-/// travels with all of it: stepping needs the pattern as much as searching does, and a bar that
-/// sent them apart could step against a pattern the host had not been told about yet.
 #[derive(
     Debug,
     Clone,
@@ -2066,10 +2047,8 @@ pub struct FileHoverRequest {
 )]
 pub struct FileFindRequest {
     pub query: String,
-    /// Step to the next match rather than settling on the one nearest the caret.
     pub step: bool,
     pub reverse: bool,
-    /// The bar has closed: drop the highlight and leave the caret where it is.
     pub done: bool,
 }
 
@@ -2139,10 +2118,6 @@ pub struct FileRenameRequest {
     pub new_name: String,
 }
 
-/// Host → page: what the server offers doing to the selection, in the order it offered them.
-///
-/// Titles only. The actions themselves stay on the host, because each carries a whole
-/// `WorkspaceEdit` the page would only hand straight back.
 #[derive(
     Debug,
     Clone,
@@ -2158,7 +2133,6 @@ pub struct FileCodeActionsEvent {
     pub titles: Vec<String>,
 }
 
-/// Page → host: run the action at this index of the set last offered.
 #[derive(
     Debug,
     Clone,
@@ -2175,11 +2149,6 @@ pub struct FileCodeActionPick {
     pub index: u32,
 }
 
-/// What the editor's context menu can ask for.
-///
-/// One event rather than one per row: every entry is the same shape — a position and a verb — and
-/// the host answers them all in one place, so the alternative is a dozen near-identical events
-/// and a dozen observers that differ by a single call.
 #[derive(
     Debug,
     Clone,
@@ -2240,8 +2209,6 @@ pub struct FileEditFailedEvent {
     pub reason: String,
 }
 
-/// Asks the page to open its rename box. The host resolves the key and the word under the caret,
-/// but only the page can prompt, so the round trip goes host -> page -> `FileRenameRequest`.
 #[derive(
     Debug,
     Clone,

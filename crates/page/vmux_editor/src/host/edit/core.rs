@@ -72,36 +72,16 @@ pub struct EditOutcome {
     pub yank: Option<RegisterValue>,
 }
 
-/// What one caret remembers between commands.
-///
-/// Held apart from [`EditCore::selections`] because that vector is the buffer's selection
-/// geometry and nothing else: undo restores it, the page renders from it, and the plugin assigns
-/// it whole. What belongs here is what a caret carries *across* keystrokes — the column a run of
-/// vertical moves is homing on, and what an overtype covered up so backspace can put it back.
-///
-/// One of these per caret. Shared, they are the difference between two carets descending their
-/// own columns and both snapping to the first one's, and between backspace restoring what this
-/// caret typed over and what some other caret did.
 #[derive(Default, Clone)]
 struct CaretMemory {
-    /// The column a vertical run started from, so passing through a short line does not
-    /// permanently pull the caret left.
     preferred_vertical_col: Option<usize>,
-    /// What overtype wrote over, newest last.
     replaced: Vec<Option<char>>,
 }
 
 pub struct EditCore {
     pub buffer: TextBuffer,
     pub selections: Vec<Selection>,
-    /// Which of [`Self::selections`] the current pass is editing.
-    ///
-    /// Every command was written against one caret and reads it through [`Self::primary`], so
-    /// multi-caret editing runs the same code once per caret and moves this instead of
-    /// threading a loop through each arm of the match.
     active: usize,
-    /// Set while [`Self::apply`] is sweeping the carets, so the N passes of one keystroke
-    /// share a single undo entry instead of stacking N of them.
     in_sweep: bool,
     sweep_snapshotted: bool,
     pub mode: EditMode,
@@ -113,7 +93,6 @@ pub struct EditCore {
     saved_rev: Option<u64>,
     undo: crate::edit::undo::UndoTree,
     last_group: Option<Group>,
-    /// What each caret remembers between commands, in [`Self::selections`] order.
     memory: Vec<CaretMemory>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
@@ -245,15 +224,10 @@ impl EditCore {
         self.last_group = None;
     }
 
-    /// The caret the current pass is editing, which is the only one for a single-caret buffer.
     pub fn primary(&self) -> Selection {
         self.selections[self.active.min(self.selections.len() - 1)]
     }
 
-    /// The line range the primary selection covers, inclusive of both ends.
-    ///
-    /// A bare caret selects nothing, so both ends are its own line — which is what makes "format
-    /// selection" on an empty selection mean "format this line" rather than "format nothing".
     pub fn selected_lines(&self) -> (u32, u32) {
         let sel = self.primary();
         let (from, _) = self.buffer.char_to_coords(sel.anchor.min(sel.head));
@@ -266,10 +240,6 @@ impl EditCore {
         self.selections[at] = sel;
     }
 
-    /// Put a second caret at `at`, or take it away if one is already there.
-    ///
-    /// Toggling rather than always adding is what makes an alt-click on an existing caret undo
-    /// itself; the last caret is never removed, since a buffer with no caret has no meaning.
     pub fn toggle_caret(&mut self, at: usize) {
         let at = at.min(self.buffer.len_chars());
         if let Some(index) = self.selections.iter().position(|s| s.head == at) {
@@ -284,12 +254,6 @@ impl EditCore {
         self.merge_overlapping_carets();
     }
 
-    /// Put a caret one row from the active one, in the column it sits in.
-    ///
-    /// The column comes from the caret itself rather than from
-    /// [`CaretMemory::preferred_vertical_col`]: growing the caret set is not a vertical run, and
-    /// homing on a column left over from one would put the new caret somewhere the user is not
-    /// looking. A row that is too short takes the caret at its end, which is what VS Code does.
     pub fn add_caret_vertically(&mut self, direction: VerticalDirection) {
         let delta = match direction {
             VerticalDirection::Up => -1,
@@ -304,18 +268,12 @@ impl EditCore {
         self.toggle_caret(self.buffer.coords_to_char(row, col));
     }
 
-    /// Drop every caret but the one the user last placed.
     pub fn collapse_carets(&mut self) {
         let keep = self.primary();
         self.selections = vec![keep];
         self.active = 0;
     }
 
-    /// Select every whole-word occurrence of the identifier under the primary caret.
-    ///
-    /// Whole-word, so renaming `id` does not also rewrite the middle of `width`. Does nothing when
-    /// the caret is not in an identifier, which leaves the caret set alone rather than collapsing
-    /// it to a selection of nothing.
     pub fn select_all_occurrences(&mut self) {
         let Some((under_caret, found)) = self.word_occurrences() else {
             return;
@@ -333,10 +291,6 @@ impl EditCore {
             .collect();
     }
 
-    /// Every whole-word occurrence of the identifier under the caret, and which of them that is.
-    ///
-    /// `None` when the caret is not in an identifier. Whole-word, so `id` does not match inside
-    /// `width` — the distinction the caller cannot make afterwards from the ranges alone.
     pub fn word_occurrences(
         &self,
     ) -> Option<(std::ops::Range<usize>, Vec<std::ops::Range<usize>>)> {
@@ -381,12 +335,6 @@ impl EditCore {
         self.selections.len()
     }
 
-    /// What the caret being edited remembers.
-    ///
-    /// A count that no longer matches is how a changed caret set is noticed: a caret that has just
-    /// been added or removed has no column to home on and nothing overtyped, and reconciling here
-    /// rather than at each of the thirty places `selections` is written keeps the two from
-    /// drifting apart silently.
     fn memory(&mut self) -> &mut CaretMemory {
         if self.memory.len() != self.selections.len() {
             self.memory = vec![CaretMemory::default(); self.selections.len()];
@@ -428,7 +376,6 @@ impl EditCore {
         self.cursor_pos_of(self.primary())
     }
 
-    /// Where every caret sits, in document order.
     pub fn cursor_positions(&self) -> Vec<CursorPos> {
         let mut sorted: Vec<Selection> = self.selections.clone();
         sorted.sort_by_key(|s| s.head);
@@ -1543,21 +1490,11 @@ impl EditCore {
         true
     }
 
-    /// Run `cmd` against every caret, back to front.
-    ///
-    /// Back to front so an edit never invalidates a caret still waiting its turn; the carets
-    /// already done are slid by [`Self::buf_insert`] and [`Self::buf_remove`] instead. The
-    /// undo checkpoint is taken once for the whole sweep, so N carets typing is one undo step
-    /// rather than N.
     pub fn apply(&mut self, cmd: EditCommand) -> EditOutcome {
         if self.selections.len() == 1 {
             self.active = 0;
             return self.apply_at_active(cmd);
         }
-        // A command with buffer-wide meaning runs against the active caret rather than the first.
-        // Normalising to zero here is how "add a caret below" used to grow the same caret twice
-        // and toggle its own second caret away, and how Escape kept whichever caret happened to
-        // sort first instead of the one the user placed last.
         if !cmd.is_per_caret() {
             return self.apply_at_active(cmd);
         }
@@ -1565,9 +1502,6 @@ impl EditCore {
         let mut order: Vec<usize> = (0..self.selections.len()).collect();
         order.sort_by_key(|&i| std::cmp::Reverse(self.selections[i].range().start));
 
-        // Which caret is active has to survive the sweep, and it cannot survive as an index: the
-        // sweep visits them out of order and `merge_overlapping_carets` sorts. Follow it by
-        // value, the same way the merge does.
         let was_active = self.active;
         let mut outcome = EditOutcome::default();
         self.in_sweep = true;
@@ -1589,12 +1523,6 @@ impl EditCore {
         outcome
     }
 
-    /// Collapse carets that have run into each other, so a delete that pulls two together
-    /// leaves one rather than a pair that types the same characters twice.
-    ///
-    /// This sorts, so the active caret is followed by value rather than left on its index —
-    /// otherwise placing a caret above an existing one silently makes the *other* one active, and
-    /// the collapse that follows keeps the wrong position.
     fn merge_overlapping_carets(&mut self) {
         if self.selections.len() == 1 {
             return;
@@ -2110,7 +2038,6 @@ mod tests {
         c.buffer.text()
     }
 
-    /// Whole-word, or renaming `id` also rewrites the middle of every `width` in the file.
     #[test]
     fn selecting_all_occurrences_skips_the_ones_inside_longer_words() {
         let mut c = core("id width id_x\nid\n");
@@ -2130,11 +2057,6 @@ mod tests {
         assert_eq!(hits, vec!["id", "id"], "`width` and `id_x` are other words");
     }
 
-    /// Nothing under the caret means nothing to change, and collapsing to an empty selection would
-    /// silently drop the carets the user already has.
-    ///
-    /// A caret touching a word still counts as being in it — resting just past `id` selects `id`,
-    /// as it does in VS Code — so this needs a position with a word character on neither side.
     #[test]
     fn selecting_all_occurrences_off_a_word_leaves_the_carets_alone() {
         let mut c = core("id  id\n");
@@ -2145,7 +2067,6 @@ mod tests {
         assert_eq!(c.primary().head, 3);
     }
 
-    /// A buffer with a caret on each of the given offsets, in the order the user placed them.
     fn multi_caret(text: &str, at: &[usize]) -> EditCore {
         let mut c = core(text);
         c.set_caret(at[0]);
@@ -2162,13 +2083,8 @@ mod tests {
         heads
     }
 
-    /// Each caret descends the column it started in. Sharing one preferred column makes the
-    /// second row of a downward run collapse every caret onto the first one's column, which turns
-    /// two carets into one the moment they pass a short line.
     #[test]
     fn each_caret_keeps_its_own_column_through_a_short_line() {
-        // Two long lines with a two-column line under each, so both carets are pulled left on the
-        // first step and have somewhere different to return to on the second.
         let mut c = multi_caret("abcdefgh\nij\nklmnopqr\nABCDEFGH\nkl\nMNOPQRST\n", &[6, 25]);
         c.apply(EditCommand::Move(Motion::Down));
         c.apply(EditCommand::Move(Motion::Down));
@@ -2180,8 +2096,6 @@ mod tests {
         assert_eq!(cols, vec![6, 4], "each caret homes on the column it left");
     }
 
-    /// Backspace after an overtype puts back what *this* caret covered. One shared stack hands the
-    /// second caret the character the first one wrote over.
     #[test]
     fn backspace_restores_what_this_caret_overtyped() {
         let mut c = multi_caret("abc\nxyz\n", &[0, 4]);
@@ -2192,8 +2106,6 @@ mod tests {
         assert_eq!(text_of(&c), "abc\nxyz\n");
     }
 
-    /// The caret the user placed last is the one a collapse keeps, and `merge_overlapping_carets`
-    /// sorts — so an index left over from before the sort names a different caret.
     #[test]
     fn collapsing_keeps_the_caret_placed_last_even_when_it_sorts_first() {
         let mut c = multi_caret("abcdef\n", &[4, 1]);
@@ -2201,7 +2113,6 @@ mod tests {
         assert_eq!(heads(&c), vec![1]);
     }
 
-    /// Growing the caret set downward and typing reaches every row, which is the whole gesture.
     #[test]
     fn adding_a_caret_below_twice_types_on_three_rows() {
         let mut c = core("ab\ncd\nef\ngh\n");
@@ -2213,9 +2124,6 @@ mod tests {
         assert_eq!(text_of(&c), ">ab\n>cd\n>ef\ngh\n");
     }
 
-    /// Which caret is active has to survive a sweep. It used to be reset to zero at the end of
-    /// each one, so typing at three carets and pressing Escape kept the first rather than the one
-    /// the gesture was built down to.
     #[test]
     fn a_sweep_leaves_the_active_caret_where_it_was() {
         let mut c = core("ab\ncd\nef\n");
@@ -2228,8 +2136,6 @@ mod tests {
         assert_eq!(line, 2, "the caret the gesture ended on");
     }
 
-    /// The last row has nothing under it, so the gesture stops rather than stacking a caret on
-    /// the row it is already on.
     #[test]
     fn adding_a_caret_past_the_last_row_adds_nothing() {
         let mut c = core("ab\ncd\n");
@@ -2238,12 +2144,8 @@ mod tests {
         assert_eq!(c.caret_count(), 1);
     }
 
-    /// Untoggling a caret *before* the active one slides every later caret down a slot, so an
-    /// index left where it was names the caret past the one it used to.
     #[test]
     fn untoggling_an_earlier_caret_does_not_move_which_one_is_active() {
-        // Placed last in the middle, so the active index is neither the first nor the last and a
-        // clamp to the end cannot accidentally land on the right answer.
         let mut c = multi_caret("abcdef\n", &[1, 5, 3]);
         c.toggle_caret(1);
         assert_eq!(heads(&c), vec![3, 5]);
@@ -2263,7 +2165,6 @@ mod tests {
         );
     }
 
-    /// The whole keystroke is one undo step, not one per caret.
     #[test]
     fn a_multi_caret_edit_undoes_in_one_step() {
         let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
@@ -2272,8 +2173,6 @@ mod tests {
         assert_eq!(text_of(&c), "aa\nbb\ncc\n");
     }
 
-    /// Deleting is where back-to-front matters: sweeping the other way would invalidate every
-    /// later offset as soon as the first character came out.
     #[test]
     fn deleting_reaches_every_caret() {
         let mut c = multi_caret("aXa\nbXb\ncXc\n", &[2, 6, 10]);
@@ -2313,8 +2212,6 @@ mod tests {
         assert_eq!(c.caret_count(), 1);
     }
 
-    /// Undo, unlike typing, means the buffer rather than each caret. Running it once per caret
-    /// would walk three steps back up the tree for one keystroke.
     #[test]
     fn a_buffer_wide_command_runs_once_however_many_carets() {
         let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);

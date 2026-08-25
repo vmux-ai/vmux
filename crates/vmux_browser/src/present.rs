@@ -507,12 +507,6 @@ impl PaneFrames {
         self.frames.get(&page).copied()
     }
 
-    /// Whether a pane is rounded on all four corners this run, rather than only where it meets the
-    /// bottom of the window.
-    ///
-    /// Read off the same value the CEF path is given rather than worked out again, because the two
-    /// have to agree: a natively hosted page is laid over the pane CEF rounded, and a page that
-    /// disagreed about which corners those were would square off the ones it did not mask.
     #[cfg(target_os = "macos")]
     pub(crate) fn all_corners(&self) -> bool {
         self.all_corners
@@ -578,10 +572,6 @@ fn windowed_page_frame_rect(
     if layout_hidden {
         return pane;
     }
-    // A single pane runs edge to edge under the header and takes the header's own sides, so it
-    // meets the header flush. Once there are several, they are already separated from each other
-    // by `gap`, and the header is one more edge among them — sitting flush against it while
-    // holding its neighbours at arm's length is what read as a missing gap.
     let (left, right, top_gap) = if visible_pane_count == 1 {
         (header.left.ceil(), header.right().floor(), 0.0)
     } else {
@@ -1643,8 +1633,6 @@ mod tests {
             frame,
             WindowedFrameRect {
                 left: 611.0,
-                // The header is one more edge among several panes, so it is held off by the same
-                // gap they hold each other off by: 24 + 72.2 + 8, rounded up.
                 top: 105.0,
                 width: 559.0,
                 height: 639.0,

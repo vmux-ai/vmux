@@ -497,9 +497,6 @@ fn focus_start_input_on_request(
     }
 }
 
-/// Both inserts are `try_`: the request names entities that a page open can despawn between the
-/// message being written and this command applying, and the start page navigating away is the
-/// ordinary case rather than an exceptional one.
 fn begin_requested_inline_transition(
     mut requests: MessageReader<InlineTransitionRequested>,
     mut commands: Commands,
@@ -556,12 +553,6 @@ mod tests {
         assert!(q.iter(app.world()).any(|m| m.host == "start"));
     }
 
-    /// Sending a prompt navigates the start page away, which despawns the very webview the
-    /// transition names. Reaching it with a plain `insert` took the whole app down.
-    ///
-    /// Registers the one system rather than `StartPlugin`: the plugin's other systems pull in
-    /// `FocusedStack`, tab gathering and contributions, and `begin_requested_inline_transition`
-    /// is scheduled with no set and no ordering, so this is the schedule it runs under anyway.
     #[test]
     fn a_transition_whose_page_already_closed_is_skipped() {
         let mut app = App::new();

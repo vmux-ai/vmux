@@ -1,9 +1,3 @@
-//! Colour from the server's understanding of the code, laid over syntect's guess.
-//!
-//! A regex grammar can tell a keyword from a string and little else: every identifier comes back
-//! the same colour, so a type, a function and a local all read alike. The server already knows
-//! which is which, and `textDocument/semanticTokens` is how it says so.
-
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -11,8 +5,6 @@ use syntect::highlighting::Highlighter;
 use syntect::parsing::ScopeStack;
 use vmux_core::event::StyledSpan;
 
-/// What this client tells a server it can colour. A server may only use types from this list, so
-/// leaving one out is how a token silently never arrives.
 pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
     "namespace",
     "type",
@@ -36,10 +28,6 @@ pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
     "lifetime",
 ];
 
-/// The token types a server declared at `initialize`, in the order it will refer to them by.
-///
-/// The protocol sends indices into this list rather than names, so without it a response is
-/// undecodable — which is why a server that omits a legend gets no semantic colour at all.
 pub struct SemanticLegend {
     kinds: Vec<Option<SemanticKind>>,
 }
@@ -61,10 +49,6 @@ impl SemanticLegend {
         Some(Self { kinds })
     }
 
-    /// Expand the flat, delta-encoded array the protocol sends into one token per entry.
-    ///
-    /// Five integers each: line delta, start delta, length, type index, modifier bits. Both
-    /// deltas are relative to the previous token, and the start delta resets on a new line.
     pub fn decode(&self, data: &[u32]) -> Vec<SemanticToken> {
         let mut out = Vec::with_capacity(data.len() / 5);
         let mut line = 0u32;
@@ -102,10 +86,6 @@ pub struct SemanticToken {
     pub kind: SemanticKind,
 }
 
-/// The token types worth a colour of their own.
-///
-/// Anything the server reports outside this set keeps whatever syntect gave it, which is the
-/// right answer for comments, strings and numbers — a regex grammar gets those right already.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SemanticKind {
     Type,
@@ -142,11 +122,6 @@ impl SemanticKind {
         Self::Parameter,
     ];
 
-    /// The TextMate scope this kind is the server's word for.
-    ///
-    /// No colours here. A kind names a scope, the theme answers for the scope, and so the two
-    /// cannot drift: a server's `function` lands on exactly what syntect would have reached for
-    /// unaided, and a token does not change shade as the server warms up and starts answering.
     fn scope(self) -> &'static str {
         match self {
             Self::Type => "entity.name.type",
@@ -167,8 +142,6 @@ impl SemanticKind {
         Self::resolved(dark)[slot]
     }
 
-    /// Asked of the theme once per scheme: building a highlighter is not free, and the answer
-    /// cannot change while the scheme does not.
     fn resolved(dark: bool) -> &'static [[u8; 3]; 7] {
         static DARK: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
         static LIGHT: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
@@ -190,7 +163,6 @@ impl SemanticKind {
     }
 }
 
-/// One file's tokens, ready to lay over a line at a time.
 #[derive(Default)]
 pub struct SemanticHighlight {
     by_line: HashMap<u32, Vec<(u32, u32, SemanticKind)>>,
@@ -213,10 +185,6 @@ impl SemanticHighlight {
         self.by_line.is_empty()
     }
 
-    /// Recolour the parts of `spans` a token covers, leaving the rest as syntect had it.
-    ///
-    /// Spans are split at token boundaries rather than replaced wholesale, so a token that
-    /// covers half of one syntect span colours only that half.
     pub fn apply(&self, line: u32, spans: Vec<StyledSpan>, dark: bool) -> Vec<StyledSpan> {
         let Some(tokens) = self.by_line.get(&line) else {
             return spans;
@@ -268,7 +236,6 @@ impl SemanticHighlight {
         out
     }
 
-    /// LSP counts columns in UTF-16 code units; a span's text is chars.
     fn char_index(chars: &[char], utf16: u32) -> usize {
         let mut seen = 0u32;
         for (index, ch) in chars.iter().enumerate() {
@@ -303,7 +270,6 @@ mod tests {
     #[test]
     fn deltas_expand_to_absolute_positions() {
         let legend = legend(&["struct", "function"]);
-        // line 0 col 4 len 3 struct; same line col 10 len 2 function; line 2 col 1 len 5 struct
         let tokens = legend.decode(&[0, 4, 3, 0, 0, 0, 6, 2, 1, 0, 2, 1, 5, 0, 0]);
         let at: Vec<_> = tokens
             .iter()
@@ -350,7 +316,6 @@ mod tests {
         );
     }
 
-    /// Splitting has to survive a token that starts inside one syntect span and ends in another.
     #[test]
     fn a_token_spanning_two_syntect_spans_is_coloured_throughout() {
         let hl = SemanticHighlight::of(vec![SemanticToken {
@@ -368,8 +333,6 @@ mod tests {
         assert_eq!(coloured, "foobar");
     }
 
-    /// Columns are UTF-16, so the emoji counts twice and `Foo` starts at 9 rather than 8.
-    /// Reading the column as chars would land the colour on `= F`.
     #[test]
     fn columns_are_utf16() {
         let hl = SemanticHighlight::of(vec![SemanticToken {

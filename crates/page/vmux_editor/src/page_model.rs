@@ -790,10 +790,6 @@ mod tests {
         );
     }
 
-    /// Every row entering an empty sidebar is hidden, which is why the caller shows the first tree
-    /// outright rather than animating it: the reveal is a task the page's scope owns, and a page
-    /// that rebuilds — a font size change is enough — drops that task along with the scope and
-    /// leaves the whole sidebar sitting at `opacity-0`.
     #[test]
     fn a_tree_arriving_into_nothing_is_entirely_hidden() {
         let row = |path: &str| TreeRow {

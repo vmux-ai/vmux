@@ -50,10 +50,7 @@ pub type ServerKey = (PathBuf, String);
 pub struct OpenDoc {
     pub key: ServerKey,
     pub version: i32,
-    /// How many editor panes are showing this document. `didClose` waits for zero.
     pub refs: u32,
 }
 
-/// Crossbeam rather than `std::sync::mpsc`, because the matching `Receiver` parks in `LspManager`
-/// until the server answers and only a `Sync` one lets that be a Bevy `Resource`.
 pub type PendingMap = Arc<Mutex<HashMap<i64, crossbeam_channel::Sender<serde_json::Value>>>>;

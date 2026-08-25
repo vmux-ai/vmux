@@ -1304,9 +1304,6 @@ impl PaletteRows {
                         is_dir: entry.is_dir,
                     })
                     .collect();
-                // A completion opens in the editor already, so the typed row would be the same
-                // action twice once the text names an entry exactly — which is precisely when
-                // the user is about to press Enter.
                 let listed: Vec<&str> = completions
                     .iter()
                     .take(8)

@@ -55,14 +55,6 @@ impl Plugin for TabPlugin {
     }
 }
 
-/// Close the command bar when something opens underneath it.
-///
-/// Picking from the bar closes it on the way out, but a tab, pane or stack opened any other way —
-/// Cmd+T, the new-tab button, a split — left the bar standing over the thing it just made.
-///
-/// The stack the bar itself stages is the exception, and the reason this watches for surfaces
-/// rather than being called by each opener: from here that stack is indistinguishable from any
-/// other, so it is named and skipped.
 fn dismiss_launcher_over_new_surfaces(
     opened: Query<
         Entity,

@@ -286,11 +286,6 @@ impl EditState {
     }
 }
 
-/// Editor state for files this view has already shown.
-///
-/// Switching files replaces a view's contents in place, and discarding the state meant the undo
-/// tree, cursor, marks, jump list and search all started over on the way back. Holding them here
-/// is what makes the open-editors list behave like a tab strip rather than a history of reloads.
 #[derive(Component, Default)]
 struct ParkedEdits {
     by_path: HashMap<PathBuf, ParkedEdit>,
@@ -304,11 +299,8 @@ struct ParkedEdit {
 }
 
 impl ParkedEdits {
-    /// `EditCore` keeps a whole-rope snapshot per undo group, so this is bounded by count rather
-    /// than left to grow with every file a session visits.
     const CAPACITY: usize = 8;
 
-    /// Move the view's current editor state off `entity` and hold it under `path`.
     fn park(entity: &mut EntityWorldMut, path: PathBuf) {
         if !entity.contains::<EditState>() || !entity.contains::<vmux_git::GitDiffSource>() {
             return;
@@ -339,10 +331,6 @@ impl ParkedEdits {
         }
     }
 
-    /// Take back the state for `path`, unless the file moved on underneath it.
-    ///
-    /// Unsaved edits win over a changed file: dropping them would lose work, and the external
-    /// change path already refuses to overwrite a dirty buffer and warns instead.
     fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
         let parked = self.by_path.remove(path)?;
         self.recent.retain(|p| p != path);
@@ -352,10 +340,6 @@ impl ParkedEdits {
         None
     }
 
-    /// Whether a file this view is no longer showing has unsaved changes.
-    ///
-    /// Before parking, only the visible file's dirtiness was knowable at all — every other entry
-    /// in the open-editors list had nowhere to read it from.
     fn is_dirty(&self, path: &Path) -> bool {
         self.by_path
             .get(path)
@@ -719,8 +703,6 @@ fn load_file_buffers(
             continue;
         }
         let size = std::fs::metadata(&fv.path).map(|m| m.len());
-        // Past this the file still opens, it just opens plainly. Highlighting keeps a parser
-        // state per line, so that is the cost that has to come off, not the text.
         let heavy = size
             .as_ref()
             .is_ok_and(|len| *len > crate::highlight::HIGHLIGHT_MAX_BYTES);
@@ -968,15 +950,6 @@ fn send_initial_text_meta(
     }
 }
 
-/// Let [`send_file_theme`] speak again once the settings it reads have moved.
-///
-/// It is a send-once system, gated on a marker, because a theme does not ordinarily change under
-/// a page. Cmd +/- changes it on purpose: it steps the font size these pages share with the
-/// terminal, and without this the grid would keep the size it was opened at.
-///
-/// Only the theme. The sidebar's state was cleared here too while the cause of it going blank was
-/// being looked for, and that made every font step re-flatten and re-serialise the whole expanded
-/// tree — which is what made stepping the size feel slow.
 fn resend_file_theme_on_change(
     q: Query<Entity, With<FileThemeSent>>,
     settings: Res<vmux_setting::AppSettings>,
@@ -1236,8 +1209,6 @@ fn wrapped_view<'a>(edit: &'a mut EditState, vp: &FileViewport) -> &'a WrapView 
     &edit.wrap_cache.as_ref().expect("wrap cache").view
 }
 
-/// Redraw the visible window for a caller outside this module that changed how the text should
-/// look rather than what it says.
 pub(crate) fn repaint_window(
     entity: Entity,
     edit: &mut EditState,
@@ -1347,8 +1318,6 @@ fn emit_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    // Over the whole file, unlike `search`, which is only what the viewport can show. The find
-    // bar counts every match and says which one it is on.
     let matches = edit.core.search_matches();
     let caret = edit.core.primary().head;
     let search_index = matches
@@ -1718,8 +1687,6 @@ fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: No
         if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
             continue;
         }
-        // `has_browser`, as in `on_file_video_rect`: the overlay is CEF's own machinery rather
-        // than a host event, and a natively hosted page answers `can_emit_to` without having any.
         if !browsers.has_browser(entity) {
             continue;
         }
@@ -1733,8 +1700,6 @@ fn on_file_video_rect(
     browsers: NonSend<Browsers>,
 ) {
     let entity = trigger.event().webview;
-    // `has_browser` rather than `can_emit_to`, unlike every other guard here: the overlay is
-    // CEF's own machinery, not a host event, and a natively hosted page has none of it.
     if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
         return;
     }
@@ -2010,10 +1975,6 @@ struct FileWatch {
     dirs: HashSet<PathBuf>,
 }
 
-/// The path to compare two references to a file by, so a symlink and its target are one file.
-///
-/// Falls back to the path as written for anything that cannot be resolved, which is what makes it
-/// usable on a file that has just been deleted or renamed out from under a view.
 pub(crate) fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
@@ -2214,10 +2175,6 @@ fn word_start_col(line_text: &str, char_col: usize) -> u32 {
     i as u32
 }
 
-/// The identifier the caret sits in, for pre-filling the rename box.
-///
-/// Empty when the caret is not in one, which is how the caller tells there is nothing to rename
-/// without asking the server first.
 fn word_at_col(line_text: &str, char_col: usize) -> String {
     let chars: Vec<char> = line_text.chars().collect();
     let start = word_start_col(line_text, char_col) as usize;
@@ -2344,8 +2301,6 @@ fn run_commands(
             };
             edit.core.top_row = vp.top_row;
             viewport_changed = true;
-            // The caret does not move, so nothing the page does on its own brings the view along:
-            // it positions rows against its own scroll offset, and only a scroll request moves that.
             if vp.top_row != was && browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
                     entity,
@@ -2796,11 +2751,6 @@ fn on_file_property_edit(
     );
 }
 
-/// Apply a `workspace/applyEdit` the server asked for, and answer it.
-///
-/// A rename touches every pane showing the file, so this collects them all rather than the
-/// first match. Each pane keeps its own undo history, so each gets its own entry — but one
-/// entry, not one per range: the whole document is swapped with a single `ReplaceText`.
 #[allow(clippy::too_many_arguments)]
 fn apply_lsp_workspace_edit(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
@@ -2844,8 +2794,6 @@ fn apply_lsp_workspace_edit(
         });
     }
 
-    // A rename reaches the same planner, but there is no request to answer — the user asked, so a
-    // refusal goes back to the pane they asked from.
     for rename in renames.read() {
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
@@ -2875,10 +2823,6 @@ fn apply_lsp_workspace_edit(
     }
 }
 
-/// Returns the reason the edit could not be applied, or `None` when it was.
-///
-/// Documents are independent, so a failure part-way leaves earlier ones applied — honest
-/// rollback across N ropes and M files buys less than it costs for a rename.
 #[allow(clippy::too_many_arguments)]
 fn apply_planned_documents(
     plan: WorkspaceEditPlan,
@@ -2921,9 +2865,6 @@ fn apply_planned_documents(
             continue;
         }
 
-        // The server computed these ranges against one text. If two panes on this file have
-        // drifted apart, at most one of them is that text and there is no way to tell which, so
-        // applying would corrupt the other rather than merely overwrite it.
         let mut texts = open
             .iter()
             .filter_map(|entity| views.get(*entity).ok())
@@ -2941,9 +2882,6 @@ fn apply_planned_documents(
             else {
                 continue;
             };
-            // Each pane owns its `EditCore`, so two panes on one file can hold different text.
-            // Computing once and broadcasting would overwrite whichever pane did not win with
-            // the other's unsaved work.
             let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
                 Ok(updated) => updated,
                 Err(e) => return Some(format!("{}: {e}", document.path.display())),
@@ -2966,10 +2904,6 @@ fn apply_planned_documents(
     None
 }
 
-/// Apply to disk, for a document no pane is showing.
-///
-/// Registered as a self-write first so the watcher does not read the rename back as an external
-/// change and schedule a reload.
 fn edit_closed_file(
     document: &crate::lsp::workspace_edit::PlannedDocument,
     self_writes: &mut SelfWrites,
@@ -2990,12 +2924,6 @@ fn edit_closed_file(
         .map_err(|e| format!("{}: {e}", document.path.display()))
 }
 
-/// Drive the buffer's own search from the find bar.
-///
-/// The same search vim's `/` sets, so the two are one feature: a pattern typed in the bar is
-/// steppable with `n`, and the highlight is the one already being drawn. The query is escaped
-/// because a find bar takes text, not a regex — the engine underneath takes a pattern, and a user
-/// searching for `foo(` means those four characters.
 fn on_file_find_request(
     trigger: On<BinReceive<FileFindRequest>>,
     mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
@@ -3007,8 +2935,6 @@ fn on_file_find_request(
     let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
         return;
     };
-    // An emptied field is the same as a closed bar as far as the buffer is concerned: there is
-    // nothing to look for, so there is nothing to keep lit.
     if request.done || request.query.is_empty() {
         edit.core.apply(EditCommand::ClearSearchHighlight);
     } else if request.step {
@@ -3110,12 +3036,6 @@ fn on_file_definition_request(
     manager.definition(entity, &path, line, utf16);
 }
 
-/// Every context-menu row lands here.
-///
-/// The rows split three ways: some are a language-server request, some are an `EditCommand` that
-/// has to go through `run_commands` so the clipboard and the viewport stay in step, and one is a
-/// message to the shell. Keeping them in one observer is what lets the menu stay a table of
-/// (label, shortcut, action) instead of a dozen bespoke wires.
 #[allow(clippy::too_many_arguments)]
 fn on_file_editor_action(
     trigger: On<BinReceive<FileEditorAction>>,
@@ -3143,8 +3063,6 @@ fn on_file_editor_action(
 
     let cmds = match action.action {
         EditorAction::CommandPalette => {
-            // The bar belongs to the layout page and only the shell can address it. Asking by
-            // command is how every other opener asks, so this does not become a second route in.
             app_commands.write(vmux_command::host::command::AppCommand::Browser(
                 vmux_command::host::command::BrowserCommand::Bar(
                     vmux_command::host::command::BrowserBarCommand::OpenCommandBar,
@@ -3230,11 +3148,6 @@ fn on_file_editor_action(
     );
 }
 
-/// Run the code action the user picked.
-///
-/// An action can carry an edit, a command, or both. The edit joins the same queue a rename's does;
-/// the command goes to the server, which typically answers by asking this client to apply an edit
-/// — the `workspace/applyEdit` path, already handled.
 fn on_file_code_action_pick(
     trigger: On<BinReceive<FileCodeActionPick>>,
     q: Query<&EditState>,
@@ -3518,7 +3431,6 @@ fn on_file_pointer(
         let anchor = edit.core.primary().anchor;
         edit.core.selections = vec![Selection { anchor, head: at }];
     } else {
-        // A plain click means "one caret, here", so it puts back any the user had added.
         edit.core.collapse_carets();
         edit.core.set_caret(at);
     }
@@ -5309,7 +5221,6 @@ mod page_open_tests {
 mod parked_edit_tests {
     use super::*;
 
-    /// One view navigating between two files, driven through the observer production uses.
     struct Session {
         app: App,
         entity: Entity,
@@ -5391,8 +5302,6 @@ mod parked_edit_tests {
         }
     }
 
-    /// The bug this exists to stop: edit a file, look at another, come back, and the undo tree,
-    /// cursor and marks were all gone because `navigate_file_view` dropped `EditState`.
     #[test]
     fn returning_to_a_file_keeps_its_undo_history() {
         let mut s = Session::open("main.rs");
@@ -5417,7 +5326,6 @@ mod parked_edit_tests {
         assert_eq!(s.text(), "one\n", "and so does the undo tree behind it");
     }
 
-    /// A clean buffer whose file moved on must not be restored over the newer text.
     #[test]
     fn a_file_changed_while_parked_is_reloaded() {
         let mut s = Session::open("main.rs");
@@ -5434,8 +5342,6 @@ mod parked_edit_tests {
         assert_eq!(s.text(), "changed on disk\n");
     }
 
-    /// Losing unsaved work to an external write would be worse than showing stale text; the
-    /// external-change path warns about the conflict instead.
     #[test]
     fn unsaved_edits_survive_a_file_changing_while_parked() {
         let mut s = Session::open("main.rs");
@@ -5489,11 +5395,6 @@ mod parked_edit_tests {
 mod workspace_edit_tests {
     use super::*;
 
-    /// A server-driven edit, from the channel a reader thread pushes to through to the reply.
-    ///
-    /// Carries `ServerRequestPlugin` rather than re-registering its systems, so the ordering
-    /// between answering and replying is the one production has. `EditorPlugin` itself cannot
-    /// be added here: it opens a clipboard and a file watcher.
     struct ApplyEdit {
         app: App,
         views: Vec<Entity>,
@@ -5503,8 +5404,6 @@ mod workspace_edit_tests {
     impl ApplyEdit {
         const BEFORE: &'static str = "one two three\n";
 
-        /// The same panes and the same edit, but arriving as a `textDocument/rename` reply rather
-        /// than as a request from the server. Nothing answers a reply, so `sent` stays empty.
         fn renamed(path: &Path, panes: usize) -> Self {
             let (mut app, views) = Self::bare(path, panes);
             app.world_mut()
@@ -5598,10 +5497,6 @@ mod workspace_edit_tests {
             (app, views)
         }
 
-        /// Two ranges in one document, given out of order, as a rename would produce.
-        ///
-        /// `clippy::mutable_key_type` fires on `Uri`'s internal cache, but `changes` is keyed
-        /// that way by `lsp-types` and nothing here mutates a key.
         #[allow(clippy::mutable_key_type)]
         fn renaming(path: &Path) -> lsp_types::WorkspaceEdit {
             let edit = |start: u32, end: u32, text: &str| lsp_types::TextEdit {
@@ -5646,10 +5541,6 @@ mod workspace_edit_tests {
         }
     }
 
-    /// The pre-filled name, and the gate that decides there is nothing to rename.
-    ///
-    /// A caret sits *between* characters, so the word has to grow both ways from it; taking only
-    /// the prefix gives the server half an identifier to rename.
     #[test]
     fn the_rename_prefill_is_the_whole_identifier_around_the_caret() {
         assert_eq!(word_at_col("let some_name = 1;", 8), "some_name");
@@ -5662,9 +5553,6 @@ mod workspace_edit_tests {
         );
     }
 
-    /// A rename's reply carries the `WorkspaceEdit` in the response rather than in a request, so
-    /// it reaches the applier by message. Wiring the reader but never draining it, or ordering it
-    /// outside the set the applier runs in, leaves the rename silently doing nothing.
     #[test]
     fn a_rename_reply_edits_the_panes_the_way_an_apply_edit_request_does() {
         let temp = tempfile::tempdir().unwrap();
@@ -5702,7 +5590,6 @@ mod workspace_edit_tests {
         );
     }
 
-    /// N ranges must collapse to one undo entry, which a naive edit-per-range does not.
     #[test]
     fn the_whole_edit_undoes_in_one_step() {
         let temp = tempfile::tempdir().unwrap();
@@ -5718,10 +5605,6 @@ mod workspace_edit_tests {
         assert_eq!(h.text(view), ApplyEdit::BEFORE);
     }
 
-    /// Two panes on one file hold independent buffers. The server's ranges were computed
-    /// against one text, so once the panes drift there is no text to apply them to: applying
-    /// the first pane's result to the second overwrites its unsaved work, and re-applying the
-    /// stale ranges to the second's own text corrupts it. Refuse instead.
     #[test]
     fn panes_that_have_drifted_apart_are_refused_rather_than_corrupted() {
         let temp = tempfile::tempdir().unwrap();

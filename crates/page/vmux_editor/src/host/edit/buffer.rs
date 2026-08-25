@@ -9,10 +9,6 @@ pub struct TextBuffer {
     pub language: String,
 }
 
-/// Why a server's [`lsp_types::WorkspaceEdit`] could not be applied.
-///
-/// Both cases are the server violating the protocol, so the answer is a refusal rather than a
-/// best-effort partial application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LspEditError {
     Inverted,
@@ -82,10 +78,6 @@ impl TextBuffer {
         base + col.min(self.line_len_chars(line))
     }
 
-    /// Convert an LSP `Position` to a char index.
-    ///
-    /// LSP columns count UTF-16 code units; every other column in this crate is a char index,
-    /// so a line holding anything outside the BMP disagrees with [`Self::coords_to_char`].
     pub fn lsp_position_to_char(&self, position: lsp_types::Position) -> usize {
         let line = (position.line as usize).min(self.len_lines().saturating_sub(1));
         let base = self.rope.line_to_char(line);
@@ -102,11 +94,6 @@ impl TextBuffer {
         base + chars.min(len)
     }
 
-    /// The text this buffer would hold with `edits` applied, leaving the buffer untouched.
-    ///
-    /// Sorting and rejecting overlap is the client's job: LSP guarantees a server's edits do not
-    /// overlap but says nothing about their order, and applying them back-to-front is what keeps
-    /// earlier offsets valid.
     pub fn with_lsp_edits(&self, edits: &[lsp_types::TextEdit]) -> Result<String, LspEditError> {
         let mut ranges = Vec::with_capacity(edits.len());
         for edit in edits {
@@ -266,8 +253,6 @@ mod tests {
         assert_eq!(b.text(), "one two three\n", "source buffer is untouched");
     }
 
-    /// A rename lands on a line holding an emoji whenever the file has one above the caret.
-    /// Reading the LSP column as a char index puts the edit in the wrong place.
     #[test]
     fn columns_are_utf16_not_chars() {
         let b = buf("let 😀 = old;\n");

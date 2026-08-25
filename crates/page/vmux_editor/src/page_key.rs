@@ -193,10 +193,6 @@ impl FilePage {
         self.explorer.reveal_current(self.mode);
     }
 
-    /// Show the find bar and put the caret in it.
-    ///
-    /// Focus is asked for on the next turn rather than now: the field does not exist until this
-    /// render has been through the document, and focusing something unmounted does nothing.
     fn open_find(&self) {
         let mut open = self.find_open;
         open.set(true);

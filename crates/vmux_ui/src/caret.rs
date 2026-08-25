@@ -44,11 +44,6 @@ impl TextCaret {
         crate::transport::Host::offer_element_text(self.element_id);
     }
 
-    /// Past the last character, with the field scrolled until the caret shows.
-    ///
-    /// The length is the field's to know. A caller that has just replaced part of the value
-    /// through a signal has not seen the render that applied it, so a byte offset computed here
-    /// would be an offset into the text the field is about to stop holding.
     pub fn to_end(self) {
         crate::transport::Host::caret_to_end(self.element_id);
     }

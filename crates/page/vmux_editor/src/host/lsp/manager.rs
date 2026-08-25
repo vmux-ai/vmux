@@ -92,9 +92,6 @@ use crate::lsp::{LspOutbox, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
-/// The same point at which highlighting comes off: a file too large to colour is too large to
-/// hand a language server, and the two limits moving together is what keeps the degraded view
-/// coherent rather than half-featured.
 const LSP_MAX_BYTES: u64 = crate::highlight::HIGHLIGHT_MAX_BYTES;
 
 pub enum ReqKind {
@@ -159,10 +156,6 @@ pub struct LspManager {
     outbox: LspOutbox,
     events: crossbeam_channel::Sender<ServerEvent>,
     inflight: Vec<InFlight>,
-    /// The actions the last `textDocument/codeAction` offered, per pane.
-    ///
-    /// Held here rather than sent to the page because an action carries its whole `WorkspaceEdit`,
-    /// and the page has no use for one — it picks by index and the edit never leaves the host.
     offered_actions: HashMap<Entity, Vec<lsp_types::CodeActionOrCommand>>,
 }
 
@@ -170,10 +163,6 @@ fn uri_for(path: &Path) -> Option<String> {
     url::Url::from_file_path(path).ok().map(|u| u.to_string())
 }
 
-/// Wrap edits to one file in the envelope `workspace/applyEdit` already travels in.
-///
-/// `clippy::mutable_key_type` fires on `Uri`'s internal cache, but `changes` is keyed that way by
-/// `lsp-types` and nothing here mutates a key.
 #[allow(clippy::mutable_key_type)]
 fn one_document_edit(
     path: &Path,
@@ -213,16 +202,10 @@ impl LspManager {
         self.open_docs.contains_key(path)
     }
 
-    /// The version last sent to the server, for checking a `WorkspaceEdit` was computed against
-    /// the text we still hold.
     pub(crate) fn document_version(&self, path: &Path) -> Option<i32> {
         self.open_docs.get(path).map(|doc| doc.version)
     }
 
-    /// Which menu rows the server behind this file can answer.
-    ///
-    /// Empty for a file with no server, which is the honest answer: the whole language half of the
-    /// menu is unavailable, and the editor's own rows do not come from here.
     fn menu_actions(&self, path: &Path) -> Vec<vmux_core::event::EditorAction> {
         use vmux_core::event::EditorAction;
         let Some(doc) = self.open_docs.get(path) else {
@@ -353,11 +336,6 @@ impl LspManager {
         }
     }
 
-    /// Drop one holder's interest in `path`, closing the document once none are left.
-    ///
-    /// Two panes can show one file. Closing unconditionally on the first to navigate away sent
-    /// `didClose` out from under the other, after which its `change` silently no-ops and it
-    /// stops receiving diagnostics.
     pub fn close(&mut self, path: &Path) {
         let Some(doc) = self.open_docs.get_mut(path) else {
             return;
@@ -437,11 +415,6 @@ impl LspManager {
         );
     }
 
-    /// The three siblings of `definition`.
-    ///
-    /// All four answer in the same shape — a `Location`, a list of them, or `LocationLink`s — so
-    /// they share `ReqKind::Definition` and land on the same jump. Only the method name and the
-    /// capability behind it differ.
     pub fn declaration(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
         self.goto(entity, path, "textDocument/declaration", line, utf16_col);
     }
@@ -478,11 +451,6 @@ impl LspManager {
         );
     }
 
-    /// Ask what can be done to the selected lines, given the diagnostics sitting on them.
-    ///
-    /// The diagnostics are the context a quick fix is matched against, so a request without them
-    /// comes back with refactorings only — which looks like a server that has no fixes rather than
-    /// a client that never asked for any.
     pub fn code_actions(
         &mut self,
         entity: Entity,
@@ -511,10 +479,6 @@ impl LspManager {
         );
     }
 
-    /// Run the action at `index` of the last set offered to this pane.
-    ///
-    /// Returns the edit to apply, if the action carries one. A `Command` is sent on its own and
-    /// answers by asking this client to apply an edit, which is a path that already exists.
     pub fn run_code_action(
         &mut self,
         entity: Entity,
@@ -592,8 +556,6 @@ impl LspManager {
     }
 
     pub fn format_range(&mut self, entity: Entity, path: &Path, from_line: u32, to_line: u32) {
-        // To the end of the last line rather than to its start, so formatting a selection that
-        // ends mid-line still hands the server a whole statement.
         let end_col = self.line_len_utf16(path, to_line);
         self.send_format(
             entity,
@@ -737,7 +699,6 @@ impl LspManager {
         });
     }
 
-    /// Ask what each identifier in the document actually is, so the colours can say so.
     pub fn semantic_tokens(&mut self, entity: Entity, path: &Path) {
         let Some(doc) = self.open_docs.get(path) else {
             return;
@@ -764,7 +725,6 @@ impl LspManager {
         });
     }
 
-    /// The token legend the server declared, needed to read its indices back.
     pub fn semantic_legend(
         &self,
         key: &ServerKey,
@@ -775,8 +735,6 @@ impl LspManager {
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
     use lsp_types::{HoverContents, MarkedString};
-    // The language is the whole point of a `LanguageString` — dropping it leaves the snippet
-    // indistinguishable from prose, so it goes back into a fence the block parser can read.
     let marked = |m: MarkedString| match m {
         MarkedString::String(s) => s,
         MarkedString::LanguageString(ls) => {
@@ -1053,8 +1011,6 @@ fn drain_lsp_requests(
                 if !ready {
                     continue;
                 }
-                // Asking and being told nothing is still an answer. Left silent it reads as a menu
-                // row that does not work.
                 if titles.is_empty() {
                     commands.trigger(BinHostEmitEvent::from_rkyv(
                         f.entity,
@@ -1072,9 +1028,6 @@ fn drain_lsp_requests(
                 ));
             }
             ReqKind::Formatting { path } => {
-                // Formatting answers with edits to the one document, not a `WorkspaceEdit`. Giving
-                // it the envelope the apply path already knows costs a wrap and saves a
-                // second implementation of the same thing.
                 let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(value) {
                     Ok(edits) if edits.is_empty() => continue,
                     Ok(edits) => one_document_edit(&path, edits)
@@ -1155,7 +1108,6 @@ fn drain_lsp_requests(
     manager.inflight = still;
 }
 
-/// Decode a `textDocument/semanticTokens/full` reply against the server's own legend.
 fn parse_semantic_tokens(
     value: &serde_json::Value,
     legend: Option<&crate::lsp::semantic::SemanticLegend>,
@@ -1176,18 +1128,10 @@ fn parse_semantic_tokens(
 #[derive(Message)]
 pub struct LspSemantic {
     pub entity: Entity,
-    /// The document the tokens were decoded against.
-    ///
-    /// A token is a row and a column, so laying one file's tokens over another recolours whatever
-    /// happens to be at those coordinates. The pane can navigate while the request is in flight —
-    /// the view keeps its entity across a navigation — so the entity alone does not say the reply
-    /// still belongs.
     pub path: PathBuf,
     pub tokens: Vec<crate::lsp::semantic::SemanticToken>,
 }
 
-/// Hand the decoded tokens to the highlighter that lays them over syntect's output, then redraw:
-/// the window was already painted with the guessed colours by the time the server answered.
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
     mut views: Query<(&mut EditState, &FileView, &FileViewport)>,
@@ -1255,9 +1199,6 @@ fn canon(p: &Path) -> PathBuf {
 struct DiagState {
     lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
     lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    /// The server's own diagnostics, kept beside the mapped ones because a code action is matched
-    /// against them: a quick fix carries the `code` and `data` of the diagnostic it repairs, and
-    /// the mapped form has dropped both.
     raw: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
 }
 
@@ -1330,11 +1271,6 @@ fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
     }
 }
 
-/// Ask for the code actions on a pane's selection.
-///
-/// A message rather than a direct call because the diagnostics that make up the request's context
-/// live in `DiagState`, which is private to this module — the observer that hears the menu row
-/// cannot reach them.
 #[derive(Message)]
 pub struct LspCodeActionRequest {
     pub entity: Entity,
@@ -1457,9 +1393,6 @@ mod tests {
     use super::*;
     use vmux_core::event::StyledSpan;
 
-    /// A server that answers in `MarkedString::LanguageString` names the language out of band
-    /// rather than in a fence. Dropping it leaves the snippet as prose, which renders unhighlighted
-    /// however good the highlighter is.
     #[test]
     fn a_language_string_hover_survives_as_a_highlighted_code_block() {
         let contents = lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(

@@ -424,12 +424,6 @@ pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepoInfo {
-    /// What the repository is called, which is not what its checkout directory is called.
-    ///
-    /// Taken from `origin` rather than from [`Self::repo_root`], because a checkout is routinely
-    /// named after something else: a linked worktree is named for its branch, and a submodule is
-    /// named for the slot it fills in its parent. Both would answer with a name that belongs to
-    /// this checkout rather than to the repository every checkout shares.
     pub name: String,
     pub branch: String,
     pub is_worktree: bool,
@@ -574,7 +568,6 @@ mod tests {
         test_repo::run(repo, &["commit", "-qm", "init"]);
     }
 
-    /// Every spelling `origin` can take has to answer with the same repository.
     #[test]
     fn a_remote_url_names_its_repository_however_it_is_spelled() {
         for url in [
@@ -593,8 +586,6 @@ mod tests {
         }
     }
 
-    /// A checkout is routinely named after something other than its repository: a linked worktree
-    /// after its branch, a submodule after the slot it fills. The name has to come from `origin`.
     #[test]
     fn a_worktree_is_named_for_its_repository_not_its_directory() {
         let origin = tempfile::tempdir().unwrap();

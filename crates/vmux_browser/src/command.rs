@@ -80,10 +80,6 @@ fn handle_browser_commands(
             continue;
         };
         let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
-        // A page that draws a character grid resizes its font rather than scaling its document:
-        // the cell size is what everything else is measured against — wrap width, the caret, the
-        // gutter — and scaling the view leaves all of that behind at the old size. The editor
-        // reads the same font as the terminal, so one size moves both.
         let is_text_grid = is_terminal || is_file;
         match browser_cmd {
             BrowserCommand::Navigation(nav) => match nav {

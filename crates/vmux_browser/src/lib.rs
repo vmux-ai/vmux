@@ -557,15 +557,6 @@ pub(crate) fn set_native_text_entry_owns_keys(owns: bool) {
     NATIVE_TEXT_ENTRY_OWNS_KEYS.store(owns, Ordering::Relaxed);
 }
 
-/// Whether a field being typed into holds the keyboard, so the host must not read a keystroke as
-/// the start of a chord.
-///
-/// The leader is `ctrl+b` by default, which readline spells "back one character" — so in the
-/// command bar the two want the same key and the field has to win. Narrower than
-/// [`native_page_owns_escape`]: a focused terminal owns Escape but not the leader, since vmux is
-/// the multiplexer the leader belongs to and taking it away there removes the prefix entirely.
-///
-/// Read from the `NSEvent` monitor on the AppKit thread, hence the static rather than a resource.
 pub fn native_text_entry_owns_keys() -> bool {
     NATIVE_TEXT_ENTRY_OWNS_KEYS.load(Ordering::Relaxed)
 }

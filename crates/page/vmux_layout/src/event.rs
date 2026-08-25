@@ -150,8 +150,6 @@ mod address_tests {
         assert_eq!(parts.rest, "Add a pill");
     }
 
-    /// A page that has not reported a title yet must not fall back to showing the whole url
-    /// beside its own host, which would print the host twice.
     #[test]
     fn an_untitled_web_address_is_its_host_alone() {
         let parts = AddressParts::web("https://github.com/vmux-ai/vmux", "  ");
@@ -166,8 +164,6 @@ mod address_tests {
         assert_eq!(parts.rest, "about:blank");
     }
 
-    /// Every internal page shares the scheme, so pilling it separates a name from a word that
-    /// tells the reader nothing.
     #[test]
     fn an_internal_page_is_shown_whole_and_unpilled() {
         let parts = AddressParts::internal("vmux://terminal/");
@@ -187,8 +183,6 @@ mod address_tests {
         assert_eq!(parts.rest, "crates/app/main.rs");
     }
 
-    /// A detached head has no branch to name, and `repo@` reads as a truncation rather than as
-    /// the absence of one.
     #[test]
     fn a_checkout_on_no_branch_is_shown_as_the_repository_alone() {
         let parts = AddressParts::in_repo(Path::new("/w/a.rs"), Path::new("/w"), "vmux", "");
@@ -391,14 +385,6 @@ pub struct StackRow {
     pub address: AddressParts,
 }
 
-/// An address split into the root it hangs off and the rest of it.
-///
-/// One shape for every kind of address, because they all want the same treatment: a web url's
-/// host and a file's repository are each the part a reader recognises at a glance and the part
-/// that stays still while the tail moves. Split host-side because the file case has to ask git,
-/// which a page has no way to do.
-///
-/// An empty [`Self::origin`] means there is no root worth naming, and the rest stands alone.
 #[derive(
     Clone,
     Debug,
@@ -417,10 +403,6 @@ pub struct AddressParts {
 }
 
 impl AddressParts {
-    /// A web address, shown as its host and then the page's own name.
-    ///
-    /// The name rather than the path, because a url's path is routing that the title has already
-    /// said in words. This is the one kind of address whose tail is not part of its own text.
     pub fn web(url: &str, title: &str) -> Self {
         let host = vmux_ui::favicon::host_for_favicon_fallback(url).unwrap_or_default();
         let title = title.trim();
@@ -433,17 +415,10 @@ impl AddressParts {
         Self::new(host, title)
     }
 
-    /// A page vmux serves itself, shown whole and without a pill.
-    ///
-    /// `vmux` is not an origin a reader is orienting by — every internal page shares it, and the
-    /// tab beside the bar already says which one this is. Split out, `vmux` + `tools` reads as two
-    /// facts; left alone, `vmux://tools` reads as the one address it is. Chrome does the same with
-    /// `chrome://settings`.
     pub fn internal(url: &str) -> Self {
         Self::new("", url.trim_end_matches('/'))
     }
 
-    /// A file inside a checkout, shown against the repository and branch it belongs to.
     pub fn in_repo(path: &Path, root: &Path, name: &str, branch: &str) -> Self {
         let Ok(rest) = path.strip_prefix(root) else {
             return Self::new("", path.to_string_lossy());
@@ -455,7 +430,6 @@ impl AddressParts {
         Self::new(origin, rest.to_string_lossy())
     }
 
-    /// A file with no checkout to hang off, shown against the home directory or the filesystem.
     pub fn on_disk(path: &Path, home: &Path) -> Self {
         match path.strip_prefix(home) {
             Ok(rest) => Self::new("~", rest.to_string_lossy()),

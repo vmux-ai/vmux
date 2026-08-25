@@ -72,8 +72,6 @@ fn mock_server_handshake_and_diagnostics() {
     assert_eq!(path, tmp.path().join("main.rs"));
 }
 
-/// The client must answer a request it does not implement. Left unanswered, the id stays
-/// pending in the server forever and some servers serialise behind it.
 #[test]
 fn unimplemented_server_request_is_refused_over_real_pipes() {
     let tmp = tempfile::tempdir().unwrap();

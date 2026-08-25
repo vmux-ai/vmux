@@ -1,10 +1,3 @@
-//! The world's half of server-to-client LSP requests.
-//!
-//! A server request that needs world state cannot be answered on the reader thread, but the
-//! server is blocked until it is. Each one becomes an entity carrying the handle that answers
-//! it, so a system can take as long as it needs and a stalled request expires on its own
-//! rather than hanging the server forever.
-
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -38,10 +31,6 @@ impl Plugin for ServerRequestPlugin {
     }
 }
 
-/// Ordering contract for answering server requests.
-///
-/// Exported so a module that answers a request can order itself against `Reply` without naming
-/// a system that is private to this plugin.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ServerRequestSet {
     Receive,
@@ -49,10 +38,6 @@ pub enum ServerRequestSet {
     Reply,
 }
 
-/// Ingress for everything the reader threads hand to the world.
-///
-/// Holds the sending half as well so a test can stand in for a reader thread and push through
-/// the same path production uses.
 #[derive(Resource)]
 pub struct ServerEvents {
     tx: crossbeam_channel::Sender<ServerEvent>,
@@ -71,10 +56,6 @@ impl ServerEvents {
         self.tx.clone()
     }
 
-    /// Lets a test observe what a reader thread produced without a running `App`.
-    ///
-    /// The channel is multi-consumer, so a receiver taken while [`ServerRequestPlugin`] is
-    /// scheduled competes with it for messages.
     pub fn receiver(&self) -> crossbeam_channel::Receiver<ServerEvent> {
         self.rx.clone()
     }
@@ -91,10 +72,6 @@ pub enum ServerEvent {
     },
 }
 
-/// Everything needed to answer one server request, and nothing else.
-///
-/// Carrying the server's own write handle is what keeps the answering systems from having to
-/// reach into [`crate::lsp::manager::LspManager`] to find the right server.
 #[derive(Clone)]
 pub struct ReplyHandle {
     id: RequestId,
@@ -115,7 +92,6 @@ impl ReplyHandle {
     }
 }
 
-/// A server request the world has accepted but not yet answered.
 #[derive(Component)]
 pub struct ServerRequestPending {
     reply: ReplyHandle,
@@ -124,8 +100,6 @@ pub struct ServerRequestPending {
 }
 
 impl ServerRequestPending {
-    /// Frames alone cannot bound the wait: `UpdateMode::Reactive` stops producing them when the
-    /// app is idle, so a request arriving into an idle app would never expire.
     const MAX_FRAMES: u32 = 180;
     const MAX_WAIT: Duration = Duration::from_secs(5);
 
@@ -143,7 +117,6 @@ impl ServerRequestPending {
     }
 }
 
-/// The edit a server asked us to apply, waiting for a system that owns buffers to do it.
 #[derive(Component)]
 pub struct AwaitingApplyEdit(pub lsp_types::ApplyWorkspaceEditParams);
 
@@ -168,11 +141,6 @@ fn spawn_server_requests(events: Res<ServerEvents>, mut commands: Commands) {
     }
 }
 
-/// Answer every request that a system resolved this frame, then give up on the rest.
-///
-/// One system, not two, because a despawn is deferred: the request answered on the frame it
-/// would also have expired is still visible to the expiry pass, and would be replied to twice
-/// under the same id.
 fn answer_server_requests(
     mut replies: MessageReader<ServerReply>,
     mut pending: Query<(Entity, &mut ServerRequestPending)>,
@@ -283,8 +251,6 @@ mod tests {
         assert!(h.pending().is_none(), "expired request should despawn");
     }
 
-    /// Answering on the very frame the request would expire must not send both replies: two
-    /// results under one JSON-RPC id is a protocol violation.
     #[test]
     fn a_request_answered_as_it_expires_is_replied_to_once() {
         let mut h = Harness::start();

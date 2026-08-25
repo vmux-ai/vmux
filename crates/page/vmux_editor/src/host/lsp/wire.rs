@@ -1,16 +1,5 @@
-//! JSON-RPC message shapes on the LSP wire.
-//!
-//! The four [`Incoming`] variants are the whole protocol as far as the reader thread is
-//! concerned. Telling a server-to-client *request* apart from a *response* is the distinction
-//! that matters: both carry an `id`, and only the request also carries a `method`.
-
 use serde_json::Value;
 
-/// A JSON-RPC request id.
-///
-/// LSP permits strings as well as numbers. We only ever allocate numeric ids ourselves, but a
-/// server may echo ours back stringified, and a server-initiated request may use either — in
-/// which case the id must be replayed verbatim on the reply.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum RequestId {
@@ -27,10 +16,6 @@ impl RequestId {
         Some(Self::String(s.to_string()))
     }
 
-    /// The key this id correlates to in the pending-request map, if any.
-    ///
-    /// Only numeric ids are ever issued, so a string is accepted purely to tolerate a server
-    /// that stringifies what we sent.
     pub fn to_key(&self) -> Option<i64> {
         match self {
             Self::Number(n) => Some(*n),
@@ -51,12 +36,10 @@ impl RequestId {
     }
 }
 
-/// The subset of JSON-RPC and LSP error codes this client answers with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
     MethodNotFound,
     InvalidParams,
-    /// LSP's own code, read by rust-analyzer and gopls as "the client gave up".
     RequestCancelled,
 }
 
@@ -78,9 +61,7 @@ impl ErrorCode {
     }
 }
 
-/// A message read off a server's stdout, classified by shape.
 pub enum Incoming {
-    /// Carries the whole envelope: consumers read `result` off it themselves.
     Response {
         id: RequestId,
         body: Value,

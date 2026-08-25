@@ -1164,10 +1164,6 @@ fn deferred_dismiss_modal(
         return;
     }
     pending_launch.dismiss_modal = false;
-    // A deferred dismiss is a dismiss, so it gives back the empty stack the launcher staged the
-    // way the explicit one does. Hiding the surface and leaving the stack staged is what let the
-    // bar come straight back: the stack is still sitting there waiting to be filled, and the paths
-    // that open the launcher onto a pending stack find one and open it again.
     if let Some(stack) = pending_launch.stack.take() {
         let previous_stack = pending_launch.previous_stack.take();
         abandoned.write(PendingStackAbandoned {

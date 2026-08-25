@@ -661,8 +661,6 @@ pub struct TerminalTheme {
     pub shell: String,
 }
 
-/// The scheme the editor themes with too, so a terminal beside a file is the same set of colours
-/// rather than a second opinion about them.
 fn default_color_scheme() -> String {
     "github-dark".to_string()
 }
