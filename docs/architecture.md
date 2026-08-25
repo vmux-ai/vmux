@@ -24,7 +24,7 @@ flowchart LR
     subgraph daemon["the daemon — launchd supervised"]
         svc["vmux_service<br/>PTYs<br/>agent + ACP sessions"]
     end
-    bevy <-->|"unix socket"| svc
+    bevy <-->|unix socket| svc
 ```
 
 Close the window and the shell keeps reading, the build keeps building, the agent keeps
@@ -48,16 +48,12 @@ a phone, or a watch.
   cannot read.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph host["host machine"]
-        local["local client"]
-        server["vmux_service"]
-        local <-->|"unix socket"| server
+        local["local client"] <-->|unix socket| server["vmux_service"]
     end
-    relay(["relay — vmux-cloud"])
-    remote["remote client"]
-    server <-->|"QUIC control, held open"| relay
-    remote <-->|"QUIC, the same UDP port"| relay
+    server <-->|QUIC control, held open| relay(["relay — vmux-cloud"])
+    relay <-->|QUIC, the same UDP port| remote["remote client"]
 ```
 
 Neither end of the relay listens for the other. Both dial the same UDP port and are told
@@ -70,18 +66,18 @@ Nothing is dialled until Remote is switched on.
 ### What each link carries
 
 ```mermaid
-flowchart TB
-    page["a page"]
-    localc["local client"]
-    server["vmux_service"]
-    relay(["relay"])
-    remote["remote client"]
-
-    page -->|"wry IPC + vmux:// protocol<br/>binary DOM edits, rkyv events"| localc
-    localc -->|"unix socket<br/>u32-length-prefixed rkyv, 64 MiB cap"| server
-    remote -->|"QUIC, one stream per request<br/>rkyv SharedMessage / SharedResponse"| server
-    server -->|"QUIC control connection<br/>JSON hello, then opaque DATAGRAM frames"| relay
+flowchart LR
+    page["a page"] -->|wry IPC · rkyv| localc["local client"]
+    localc -->|unix socket · rkyv| server["vmux_service"]
+    remote["remote client"] -->|QUIC · one stream per request| server
+    server -->|QUIC control · JSON hello, then DATAGRAM| relay(["relay"])
 ```
+
+A page reaches its local client over wry's IPC and the `vmux://` protocol, carrying binary
+DOM edits one way and rkyv events the other. The unix socket runs `u32`-length-prefixed
+rkyv with a 64 MiB cap. A remote client opens one bidirectional QUIC stream per request,
+carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control connection is
+the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,
@@ -314,8 +310,8 @@ Two maps, and "registering" is inserting into one of them.
 
 ```mermaid
 flowchart LR
-    pm["ProcessManager"] -->|"ProcessId"| proc["Process<br/>PTY + child + cell grid"]
-    am["AgentSessionManager"] -->|"sid"| sess["SessionHandle<br/>provider stream + history"]
+    pm["ProcessManager"] -->|ProcessId| proc["Process<br/>PTY + child + cell grid"]
+    am["AgentSessionManager"] -->|sid| sess["SessionHandle<br/>provider stream + history"]
 ```
 
 Each exposes the same two surfaces: a **broadcast channel** of updates, and a point-in-time

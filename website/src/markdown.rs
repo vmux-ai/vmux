@@ -11,6 +11,21 @@ use syntect::util::LinesWithEndings;
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
+include!(concat!(env!("OUT_DIR"), "/mermaid.rs"));
+
+pub struct Diagram;
+
+impl Diagram {
+    pub fn svg(source: &str) -> Option<&'static str> {
+        for (diagram, svg) in DIAGRAMS {
+            if *diagram == source {
+                return Some(svg);
+            }
+        }
+        None
+    }
+}
+
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -263,6 +278,13 @@ fn render_node(n: &Node) -> Element {
             }
         },
         Node::CodeBlock(lang, code) => {
+            if lang == "mermaid"
+                && let Some(svg) = Diagram::svg(code)
+            {
+                return rsx! {
+                    figure { class: "my-6 overflow-x-auto", dangerous_inner_html: "{svg}" }
+                };
+            }
             let html = highlight_code(lang, code);
             rsx! {
                 pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
@@ -407,5 +429,28 @@ mod tests {
         let html = highlight_code("rust", "pub fn x() {}");
         assert!(html.contains("span"));
         assert!(!html.is_empty());
+    }
+
+    #[test]
+    fn every_published_mermaid_block_was_rendered_at_build_time() {
+        let mut checked = 0;
+        for doc in crate::docs::DOCS {
+            for block in doc.content.split("```mermaid\n").skip(1) {
+                let Some(end) = block.find("\n```") else {
+                    panic!("{}: unterminated mermaid fence", doc.slug);
+                };
+                let source = &block[..end];
+                assert!(
+                    Diagram::svg(source).is_some_and(|svg| svg.contains("<svg")),
+                    "{}: a mermaid block has no build-time SVG, so the page shows its source:\n{source}",
+                    doc.slug
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "no mermaid blocks found, so this proves nothing"
+        );
     }
 }
