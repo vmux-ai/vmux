@@ -1032,7 +1032,7 @@ fn broadcast_service_unavailable(
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 SERVICE_UNAVAILABLE_EVENT,
@@ -1338,7 +1338,7 @@ fn poll_service_messages(
                                 commands.entity(entity).insert(ShellOutputSeen);
                             }
                         }
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
                             commands.entity(entity).insert(OwedSnapshot);
                             continue;
                         }
@@ -1381,7 +1381,7 @@ fn poll_service_messages(
                 });
                 for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
                             continue;
                         }
                         let evt = TermTitleEvent { title };
@@ -1409,7 +1409,7 @@ fn poll_service_messages(
                                 commands.entity(entity).insert(ShellOutputSeen);
                             }
                         }
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
                             continue;
                         }
                         let mut changed_lines: Vec<(u32, TermLine)> = lines
@@ -2972,7 +2972,7 @@ fn resend_the_screen_a_page_missed(
 ) {
     let Some(service) = service else { return };
     for (entity, pid) in &owed {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         service
@@ -3151,7 +3151,7 @@ fn sync_terminal_theme(
     };
 
     for entity in targets {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 TERM_THEME_EVENT,
