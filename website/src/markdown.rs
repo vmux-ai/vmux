@@ -283,10 +283,7 @@ fn render_node(n: &Node) -> Element {
                 && let Some(svg) = Diagram::svg(code)
             {
                 return rsx! {
-                    figure {
-                        class: "diagram my-6 -mx-6 px-6 overflow-x-auto sm:-mx-10 sm:px-10",
-                        dangerous_inner_html: "{svg}",
-                    }
+                    DiagramFigure { svg: svg.to_string() }
                 };
             }
             let html = highlight_code(lang, code);
@@ -413,6 +410,27 @@ fn resolve_link(href: &str) -> String {
             }
         }
         None => href.to_string(),
+    }
+}
+
+#[component]
+fn DiagramFigure(svg: String) -> Element {
+    let mut zoomed = use_signal(|| false);
+    rsx! {
+        figure {
+            class: "my-6 -mx-6 px-6 overflow-x-auto sm:-mx-10 sm:px-10 cursor-zoom-in",
+            onclick: move |_| zoomed.set(true),
+            dangerous_inner_html: "{svg}",
+        }
+        if zoomed() {
+            div {
+                class: "fixed inset-0 z-50 overflow-auto bg-bg/95 p-6 cursor-zoom-out sm:p-10",
+                onclick: move |_| zoomed.set(false),
+                div { class: "grid min-h-full w-max min-w-full place-items-center",
+                    div { dangerous_inner_html: "{svg}" }
+                }
+            }
+        }
     }
 }
 

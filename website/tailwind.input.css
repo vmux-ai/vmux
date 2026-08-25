@@ -136,33 +136,6 @@
 }
 
 @layer components {
-    /* A diagram is wider than the prose column and scrolls rather than shrinking:
-       scaled to fit, the labels stop being readable. macOS hides overlay scrollbars
-       until they move, so this one is drawn permanently — otherwise a cut-off
-       diagram looks broken rather than scrollable. */
-    .diagram {
-        scrollbar-width: thin;
-        scrollbar-color: var(--color-border) transparent;
-    }
-    .diagram::-webkit-scrollbar {
-        height: 8px;
-    }
-    .diagram::-webkit-scrollbar-track {
-        background: transparent;
-    }
-    .diagram::-webkit-scrollbar-thumb {
-        background: var(--color-border);
-        border-radius: 4px;
-    }
-    .diagram::-webkit-scrollbar-thumb:hover {
-        background: var(--color-text-muted);
-    }
-    .diagram > svg {
-        max-width: none;
-    }
-}
-
-@layer components {
     .scene-cycle {
         position: absolute;
         inset: 0;
