@@ -10,6 +10,7 @@ use crate::webview::measurement::{Measurement, PendingReads};
 
 type Answer<T> = Pin<Box<dyn Future<Output = MountedResult<T>>>>;
 
+#[derive(Clone)]
 pub(crate) struct Element {
     node: ElementId,
     requests: RequestQueue,
