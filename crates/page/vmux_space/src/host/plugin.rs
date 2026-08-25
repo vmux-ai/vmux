@@ -200,29 +200,28 @@ fn space_rows_from_world(
     tab_q: &Query<(), With<vmux_layout::tab::Tab>>,
     settings: Option<&vmux_setting::AppSettings>,
 ) -> Vec<SpaceRow> {
-    let mut rows: Vec<(u32, SpaceRow)> = spaces
-        .iter()
-        .map(|(sid, name, is_active, order, children)| {
-            let tab_count = children
-                .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
-                .unwrap_or(0) as u32;
-            let startup_dir = settings
-                .and_then(|s| vmux_setting::resolve_startup_dir(s, &sid.0))
-                .map(|path| display_dir(&path))
-                .unwrap_or_default();
-            (
-                order.map(|o| o.0).unwrap_or(u32::MAX),
-                SpaceRow {
-                    id: sid.0.clone(),
-                    name: name.to_string(),
-                    profile: crate::model::bootstrap_profile_name(),
-                    is_active,
-                    tab_count,
-                    startup_dir,
-                },
-            )
-        })
-        .collect();
+    let profile = crate::model::bootstrap_profile_name();
+    let mut rows: Vec<(u32, SpaceRow)> = Vec::new();
+    for (sid, name, is_active, order, children) in spaces.iter() {
+        let tab_count = children
+            .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
+            .unwrap_or(0) as u32;
+        let startup_dir = settings
+            .and_then(|s| vmux_setting::resolve_startup_dir(s, &sid.0))
+            .map(|path| display_dir(&path))
+            .unwrap_or_default();
+        rows.push((
+            order.map(|o| o.0).unwrap_or(u32::MAX),
+            SpaceRow {
+                id: sid.0.clone(),
+                name: name.to_string(),
+                profile: profile.clone(),
+                is_active,
+                tab_count,
+                startup_dir,
+            },
+        ));
+    }
     rows.sort_by_key(|(order, _)| *order);
     rows.into_iter().map(|(_, row)| row).collect()
 }
@@ -250,7 +249,7 @@ fn broadcast_spaces_to_views(
     >,
     browsers: NonSend<Browsers>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut last_body: Local<String>,
+    mut last_body: Local<Option<SpacesListEvent>>,
     mut commands: Commands,
 ) {
     let pending_total = pending_spaces.iter().count() + pending_cef.iter().count();
@@ -261,8 +260,7 @@ fn broadcast_spaces_to_views(
     let payload = SpacesListEvent {
         spaces: space_rows_from_world(&spaces, &tab_q, settings.as_deref()),
     };
-    let body = ron::ser::to_string(&payload).unwrap_or_default();
-    let body_changed = body != *last_body;
+    let body_changed = last_body.as_ref() != Some(&payload);
     for entity in pending_spaces.iter().chain(pending_cef.iter()) {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -285,7 +283,7 @@ fn broadcast_spaces_to_views(
                 &payload,
             ));
         }
-        *last_body = body;
+        *last_body = Some(payload);
     }
 }
 

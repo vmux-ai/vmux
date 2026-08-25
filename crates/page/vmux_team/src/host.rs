@@ -271,7 +271,7 @@ fn emit_team(
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
-    mut last: Local<String>,
+    mut last: Local<Option<TeamEvent>>,
     mut commands: Commands,
 ) {
     let pending_total = pending_layout.iter().count() + pending_team.iter().count();
@@ -291,8 +291,7 @@ fn emit_team(
             &children_q,
         ),
     };
-    let body = ron::ser::to_string(&payload).unwrap_or_default();
-    let body_changed = body != *last;
+    let body_changed = last.as_ref() != Some(&payload);
 
     for entity in pending_layout.iter().chain(pending_team.iter()) {
         if !browsers.can_emit_to(&entity) {
@@ -308,7 +307,7 @@ fn emit_team(
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
         }
-        *last = body;
+        *last = Some(payload);
     }
 }
 
