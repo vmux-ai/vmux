@@ -155,9 +155,15 @@ impl TreeRows {
         let generation = self.generation;
         let id = self.claim();
         let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
+        // Only what is on screen. A row that is not is either arriving, and so is in `next`
+        // anyway, or leaving — and carrying a leaving row forward is how a fast second toggle
+        // strands it: the pass that would have dropped it is abandoned by this one, and it is
+        // read as leaving again on every round after. Toggling a large directory a few times
+        // used to leave the list carrying every row it had ever removed.
         let current = rows
             .read()
             .iter()
+            .filter(|motion| motion.visible)
             .map(|motion| motion.row.clone())
             .collect::<Vec<_>>();
         // A tree arriving into an empty sidebar is the whole tree, and there is nothing on screen

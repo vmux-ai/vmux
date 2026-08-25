@@ -972,10 +972,9 @@ fn send_initial_text_meta(
 /// a page. Cmd +/- changes it on purpose: it steps the font size these pages share with the
 /// terminal, and without this the grid would keep the size it was opened at.
 ///
-/// The explorer's state goes with it, the same set the reload path clears: the page rebuilds
-/// around the new style and its sidebar comes back empty, because what fills it — the chrome, the
-/// tree, the open-editors list — lives in the page and is only ever refilled by the host saying it
-/// again.
+/// Only the theme. The sidebar's state was cleared here too while the cause of it going blank was
+/// being looked for, and that made every font step re-flatten and re-serialise the whole expanded
+/// tree — which is what made stepping the size feel slow.
 fn resend_file_theme_on_change(
     q: Query<Entity, With<FileThemeSent>>,
     settings: Res<vmux_setting::AppSettings>,
@@ -985,12 +984,7 @@ fn resend_file_theme_on_change(
         return;
     }
     for entity in &q {
-        commands
-            .entity(entity)
-            .remove::<FileThemeSent>()
-            .remove::<ExplorerChromeSent>()
-            .insert(ExplorerTreeDirty)
-            .insert(OpenEditorsDirty);
+        commands.entity(entity).remove::<FileThemeSent>();
     }
 }
 
