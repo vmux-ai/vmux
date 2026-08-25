@@ -69,12 +69,8 @@ fn dismiss_launcher_over_new_surfaces(
     let Some(mut pending_launch) = pending_launch else {
         return;
     };
-    for entity in &opened {
-        if pending_launch.stack == Some(entity) {
-            continue;
-        }
+    if !opened.is_empty() {
         pending_launch.opened_elsewhere();
-        return;
     }
 }
 

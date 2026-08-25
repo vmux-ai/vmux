@@ -1,6 +1,5 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
-    PendingLaunch,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
     tab::{CloseTabRequest, Tab},
@@ -71,7 +70,6 @@ fn handle_close_stack_requests(
     child_of_q: Query<&ChildOf>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -84,12 +82,6 @@ fn handle_close_stack_requests(
         let stack_count = children.iter().filter(|&e| stack_q.contains(e)).count();
         if stack_count <= 1 {
             continue;
-        }
-        if new_stack_ctx.stack == Some(req.stack) {
-            new_stack_ctx.stack = None;
-        }
-        if new_stack_ctx.previous_stack == Some(req.stack) {
-            new_stack_ctx.previous_stack = None;
         }
         commands.entity(req.stack).despawn();
     }
@@ -232,8 +224,6 @@ fn handle_stack_commands(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut close_tab_requests: MessageWriter<CloseTabRequest>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -322,11 +312,6 @@ fn handle_stack_commands(
                             &mut close_tab_requests,
                         )
                     {
-                        if new_stack_ctx.stack == Some(active) {
-                            new_stack_ctx.stack = None;
-                        }
-                        new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
@@ -361,11 +346,6 @@ fn handle_stack_commands(
                             {
                                 commands.entity(t).insert(LastActivatedAt::now());
                             }
-                            if new_stack_ctx.stack == Some(active) {
-                                new_stack_ctx.stack = None;
-                            }
-                            new_stack_ctx.previous_stack = None;
-                            new_stack_ctx.needs_open = false;
                             continue;
                         }
 
@@ -429,11 +409,6 @@ fn handle_stack_commands(
                         if let Some(t) = new_stack {
                             commands.entity(t).insert(LastActivatedAt::now());
                         }
-                        if new_stack_ctx.stack == Some(active) {
-                            new_stack_ctx.stack = None;
-                        }
-                        new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
@@ -441,9 +416,6 @@ fn handle_stack_commands(
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-                    new_stack_ctx.previous_stack = None;
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.needs_open = false;
                     page_open_requests.write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack),
                         url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
@@ -462,12 +434,6 @@ fn handle_stack_commands(
                 commands.entity(next).insert(LastActivatedAt::now());
             }
             Dispatch::Stack(sc @ (StackCommand::Next | StackCommand::Previous)) => {
-                let empty_stack = new_stack_ctx.stack.take();
-                let prev_stack = new_stack_ctx.previous_stack.take();
-                if let Some(e) = empty_stack {
-                    commands.entity(e).despawn();
-                }
-
                 let Some(active_tab_e) = active_tab else {
                     continue;
                 };
@@ -477,7 +443,7 @@ fn handle_stack_commands(
                 for &pane_e in &tab_panes {
                     if let Ok(children) = pane_children.get(pane_e) {
                         for child in children.iter() {
-                            if stack_q.contains(child) && Some(child) != empty_stack {
+                            if stack_q.contains(child) {
                                 flat.push((pane_e, child));
                             }
                         }
@@ -486,13 +452,7 @@ fn handle_stack_commands(
                 if flat.len() < 2 {
                     continue;
                 }
-                let effective_current = if empty_stack.is_some() {
-                    prev_stack.or(active_stack)
-                } else {
-                    active_stack
-                };
-                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == effective_current)
-                else {
+                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == active_stack) else {
                     continue;
                 };
                 let delta: i32 = if sc == StackCommand::Next { 1 } else { -1 };
@@ -620,6 +580,7 @@ fn entity_tree_contains_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PendingLaunch;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -949,10 +910,6 @@ mod tests {
         assert!(app.world().get_entity(closing_stack).is_err());
         assert!(app.world().get_entity(remaining_tab).is_ok());
         assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
-
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
     }
 
     #[test]
@@ -1071,8 +1028,6 @@ mod tests {
             Some(split)
         );
         assert!(!app.world().entity(split).contains::<PaneSplit>());
-        assert_eq!(app.world().resource::<PendingLaunch>().stack, None);
-        assert!(!app.world().resource::<PendingLaunch>().needs_open);
     }
 
     #[test]
@@ -1218,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_active_pane_does_not_open_command_bar_when_tab_has_stacks() {
+    fn empty_active_pane_does_not_open_a_page_when_tab_has_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<PendingLaunch>()
@@ -1243,13 +1198,18 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none(),
+            "the tab already shows a page, so an empty sibling pane is not one to fill"
+        );
     }
 
     #[test]
-    fn active_empty_stack_does_not_reopen_command_bar() {
+    fn a_pane_that_already_holds_a_stack_is_not_filled_again() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<PendingLaunch>()
@@ -1264,16 +1224,18 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
-            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)));
 
         app.update();
 
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_ne!(ctx.stack, Some(stack));
-        assert!(!ctx.needs_open);
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
     }
 
     #[derive(Resource, Default)]
@@ -1340,9 +1302,6 @@ mod tests {
 
         assert!(app.world().get_entity(original_stack).is_ok());
         assert!(app.world().get_entity(tab).is_ok());
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert!(collected.0.is_empty());

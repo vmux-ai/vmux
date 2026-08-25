@@ -164,7 +164,6 @@ fn sync_children_to_ui(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     glass: Single<(Entity, &ComputedNode), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node) = &*glass;
@@ -234,11 +233,7 @@ fn sync_children_to_ui(
             true
         };
 
-        let is_previous_stack =
-            pending_launch.stack.is_some() && pending_launch.previous_stack == Some(parent);
-
-        let is_inactive_stack =
-            parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
+        let is_inactive_stack = parent != glass_entity && !is_cef_ui && !is_active_stack;
 
         let is_inactive_tab = under_inactive_tab;
 
@@ -1054,7 +1049,6 @@ fn sync_osr_webview_focus(
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -1152,7 +1146,7 @@ fn sync_osr_webview_focus(
         let mut parent_is_stack = false;
         let mut pane_is_leaf = false;
         let mut is_active = false;
-        let mut is_prev = false;
+        let is_prev = false;
 
         if let Ok(parent) = child_of_q.get(e).map(|co| co.get()) {
             parent_is_stack = tab_ts.get(parent).is_ok();
@@ -1161,8 +1155,6 @@ fn sync_osr_webview_focus(
                 if pane_is_leaf {
                     is_active =
                         active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
-                    is_prev = pending_launch.stack.is_some()
-                        && pending_launch.previous_stack == Some(parent);
                 }
             }
         }

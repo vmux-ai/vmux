@@ -1,5 +1,5 @@
 use crate::{
-    CloseRequiresConfirmation, PendingLaunch,
+    CloseRequiresConfirmation,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
@@ -971,7 +971,6 @@ pub fn handle_open_beside_requests(
     rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut spawn_counter: ResMut<SpawnCounter>,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
@@ -1088,7 +1087,6 @@ pub fn handle_open_beside_requests(
                 target_pane,
                 req,
                 &mut commands,
-                &mut new_stack_ctx,
                 &mut page_open_requests,
                 &mut spawn_counter,
                 &rc.seq_q,
@@ -1107,7 +1105,6 @@ pub fn handle_open_beside_requests(
                 req.pane,
                 req,
                 &mut commands,
-                &mut new_stack_ctx,
                 &mut page_open_requests,
                 &mut spawn_counter,
                 &rc.seq_q,
@@ -1150,7 +1147,6 @@ pub fn handle_open_beside_requests(
                     pane,
                     req,
                     &mut commands,
-                    &mut new_stack_ctx,
                     &mut page_open_requests,
                     &mut spawn_counter,
                     &rc.seq_q,
@@ -1200,7 +1196,6 @@ pub fn handle_open_beside_requests(
                     split.target,
                     req,
                     &mut commands,
-                    &mut new_stack_ctx,
                     &mut page_open_requests,
                     &mut spawn_counter,
                     &rc.seq_q,
@@ -1360,7 +1355,6 @@ fn spawn_beside_stack(
     target_pane: Entity,
     req: &OpenBesideRequest,
     commands: &mut Commands,
-    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
     spawn_counter: &mut SpawnCounter,
     seq_q: &Query<&SpawnSeq>,
@@ -1405,7 +1399,6 @@ fn spawn_beside_stack(
         req.url.clone(),
         (!req.url.starts_with("file:") && !req.url.starts_with("vmux://"))
             .then_some(req.request_id),
-        new_stack_ctx,
         page_open_requests,
     );
     new_stack
@@ -1772,7 +1765,6 @@ fn handle_open_in_pane(
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
@@ -1852,39 +1844,21 @@ fn handle_open_in_pane(
             let new_stack = commands
                 .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                 .id();
-            open_stack(
-                new_stack,
-                resolved,
-                None,
-                &mut new_stack_ctx,
-                &mut page_open_requests,
-            );
+            open_stack(new_stack, resolved, None, &mut page_open_requests);
         } else {
             match mode {
                 PaneOpenMode::InPlace => {
                     let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
                         .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
                     if let Some(stack) = active_stack {
-                        open_stack(
-                            stack,
-                            resolved,
-                            None,
-                            &mut new_stack_ctx,
-                            &mut page_open_requests,
-                        );
+                        open_stack(stack, resolved, None, &mut page_open_requests);
                     }
                 }
                 PaneOpenMode::NewStack => {
                     let new_stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                         .id();
-                    open_stack(
-                        new_stack,
-                        resolved,
-                        None,
-                        &mut new_stack_ctx,
-                        &mut page_open_requests,
-                    );
+                    open_stack(new_stack, resolved, None, &mut page_open_requests);
                 }
             }
         }
@@ -1896,12 +1870,8 @@ fn open_stack(
     stack: Entity,
     url: String,
     request_id: Option<[u8; 16]>,
-    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
 ) {
-    new_stack_ctx.stack = None;
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = false;
     page_open_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
         url,
@@ -1918,7 +1888,6 @@ fn on_pane_select(
     pane_pos_q: Query<&ComputedNode, With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -1933,11 +1902,6 @@ fn on_pane_select(
             AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown)) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
-
-        if let Some(e) = new_stack_ctx.stack.take() {
-            commands.entity(e).despawn();
-            new_stack_ctx.previous_stack = None;
-        }
 
         let active_tab = active_tab_param.get();
         let Some(tab_e) = active_tab else {
@@ -2492,6 +2456,7 @@ fn process_pending_stack_closes(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PendingLaunch;
     use crate::{
         settings::ConfirmCloseSettings,
         settings::{

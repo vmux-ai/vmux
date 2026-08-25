@@ -24,8 +24,7 @@ use vmux_setting::AppSettings;
 use crate::{
     LayoutFixedOffsets, abbreviate_home, active_stack_in_tab, first_browser_meta,
     layout_window_padding_from_node, layout_window_padding_from_settings,
-    should_emit_cached_payload, should_emit_new_stack_placeholder, should_emit_update,
-    tab_boundary_dir, tab_of,
+    should_emit_cached_payload, should_emit_update, tab_boundary_dir, tab_of,
 };
 use vmux_flex::prelude::*;
 
@@ -163,7 +162,6 @@ fn push_stacks_host_emit(
     >,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
@@ -216,17 +214,6 @@ fn push_stacks_host_emit(
             });
         }
     }
-    if should_emit_new_stack_placeholder(pending_launch.stack, active_stack_opt, &rows) {
-        rows.retain(|r| !r.is_active);
-        rows.push(StackRow {
-            title: "New Stack".to_string(),
-            url: String::new(),
-            icon: vmux_core::PageIcon::None,
-            is_active: true,
-            bg_color: None,
-            address: vmux_layout::event::AddressParts::default(),
-        });
-    }
     if active_stack_opt.is_some() && rows.is_empty() {
         return;
     }
@@ -249,7 +236,6 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
     tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
@@ -298,8 +284,7 @@ fn push_pane_tree_emit(
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
                         if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
-                            let is_new_stack = pending_launch.stack == Some(child)
-                                && (meta.url.is_empty() || meta.url == "about:blank");
+                            let is_new_stack = false;
                             stacks.push(StackNode {
                                 title: if is_new_stack {
                                     "New Stack".to_string()

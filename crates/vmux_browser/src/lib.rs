@@ -47,7 +47,7 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::{HeaderCommandEvent, StackRow},
+    event::HeaderCommandEvent,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
@@ -636,22 +636,6 @@ impl LayoutFixedOffsets {
     }
 }
 
-fn should_emit_new_stack_placeholder(
-    pending_stack: Option<Entity>,
-    active_stack: Option<Entity>,
-    rows: &[StackRow],
-) -> bool {
-    let Some(pending_stack) = pending_stack else {
-        return false;
-    };
-    if active_stack != Some(pending_stack) {
-        return false;
-    }
-    !rows
-        .iter()
-        .any(|row| row.is_active && !row.url.is_empty() && row.url != "about:blank")
-}
-
 fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) -> bool {
     page_ready_changed || body != last
 }
@@ -1128,25 +1112,6 @@ mod tests {
             assert!(app.world().get::<WebviewWindowed>(entity).is_some());
             assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
         }
-    }
-
-    #[test]
-    fn active_browser_url_wins_over_stale_new_stack_placeholder() {
-        let stack = Entity::from_bits(1);
-        let rows = [StackRow {
-            title: "Google".to_string(),
-            url: "https://www.google.com".to_string(),
-            icon: vmux_core::PageIcon::None,
-            is_active: true,
-            bg_color: None,
-            address: Default::default(),
-        }];
-
-        assert!(!should_emit_new_stack_placeholder(
-            Some(stack),
-            Some(stack),
-            &rows
-        ));
     }
 
     #[test]

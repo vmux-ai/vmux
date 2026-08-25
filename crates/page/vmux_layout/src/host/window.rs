@@ -383,7 +383,6 @@ pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<crate::PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
     spaces: Query<(), With<crate::space::Space>>,
@@ -418,17 +417,8 @@ pub fn spawn_requested_tab_layouts(
             commands.entity(leaf).insert(LastActivatedAt(0));
             commands.entity(stack).insert(LastActivatedAt(0));
         }
-        if request.clear_pending_stack
-            && let Some(old_stack) = new_stack_ctx.stack.take()
-        {
-            commands.entity(old_stack).despawn();
-        }
-        new_stack_ctx.previous_stack = None;
-
         match &request.content {
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
-                new_stack_ctx.stack = None;
-                new_stack_ctx.needs_open = false;
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
                     url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
@@ -439,8 +429,6 @@ pub fn spawn_requested_tab_layouts(
                 url,
                 pending_prompt,
             } => {
-                new_stack_ctx.stack = None;
-                new_stack_ctx.needs_open = false;
                 if let Some(prompt) = pending_prompt {
                     commands
                         .entity(stack)
