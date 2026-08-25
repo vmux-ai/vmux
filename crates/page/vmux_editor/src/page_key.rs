@@ -5,7 +5,9 @@ use vmux_core::event::{
     RefItem,
 };
 use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim, use_listener};
+use vmux_ui::platform::sleep_ms;
 
 pub fn use_file_keys(page: FilePage) -> FileKeys {
     let keys = FileKeys {
@@ -44,6 +46,7 @@ impl FileKeys {
             FileKey::PanelPrevious => self.move_panel(MenuDirection::Previous),
             FileKey::PanelChoose => self.choose(),
             FileKey::PanelDismiss => self.dismiss(),
+            FileKey::Find => self.page.open_find(),
         }
     }
 
@@ -161,6 +164,7 @@ pub struct FilePage {
     pub references_open: Signal<bool>,
     pub reference_selection: Signal<usize>,
     pub references: Signal<Vec<RefItem>>,
+    pub find_open: Signal<bool>,
 }
 
 impl FilePage {
@@ -187,6 +191,19 @@ impl FilePage {
 
     fn reveal_in_explorer(&self) {
         self.explorer.reveal_current(self.mode);
+    }
+
+    /// Show the find bar and put the caret in it.
+    ///
+    /// Focus is asked for on the next turn rather than now: the field does not exist until this
+    /// render has been through the document, and focusing something unmounted does nothing.
+    fn open_find(&self) {
+        let mut open = self.find_open;
+        open.set(true);
+        spawn(async move {
+            sleep_ms(0).await;
+            FocusClaim::new(crate::page::FIND_INPUT_ID).request();
+        });
     }
 }
 

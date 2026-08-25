@@ -93,6 +93,7 @@ impl Plugin for EditorPlugin {
                 FileKeymapSet,
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
+                FileFindRequest,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExplorerTreeToggle,
@@ -184,6 +185,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
             .add_observer(on_file_hover_request)
+            .add_observer(on_file_find_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
             .add_observer(on_file_rename_request)
@@ -1345,10 +1347,22 @@ fn emit_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
+    // Over the whole file, unlike `search`, which is only what the viewport can show. The find
+    // bar counts every match and says which one it is on.
+    let matches = edit.core.search_matches();
+    let caret = edit.core.primary().head;
+    let search_index = matches
+        .iter()
+        .position(|found| found.contains(&caret) || found.start == caret)
+        .map(|at| at as u32 + 1)
+        .unwrap_or_default();
+    let search_total = matches.len() as u32;
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
         &FileCursorEvent {
+            search_total,
+            search_index,
             mode: keymap.mode(),
             mode_label: keymap.mode_label(),
             primary,
@@ -2974,6 +2988,47 @@ fn edit_closed_file(
         .insert(canon(&document.path), std::time::Instant::now());
     write_atomic(&document.path, updated.as_bytes())
         .map_err(|e| format!("{}: {e}", document.path.display()))
+}
+
+/// Drive the buffer's own search from the find bar.
+///
+/// The same search vim's `/` sets, so the two are one feature: a pattern typed in the bar is
+/// steppable with `n`, and the highlight is the one already being drawn. The query is escaped
+/// because a find bar takes text, not a regex — the engine underneath takes a pattern, and a user
+/// searching for `foo(` means those four characters.
+fn on_file_find_request(
+    trigger: On<BinReceive<FileFindRequest>>,
+    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let request = trigger.event().payload.clone();
+    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
+        return;
+    };
+    // An emptied field is the same as a closed bar as far as the buffer is concerned: there is
+    // nothing to look for, so there is nothing to keep lit.
+    if request.done || request.query.is_empty() {
+        edit.core.apply(EditCommand::ClearSearchHighlight);
+    } else if request.step {
+        edit.core.apply(EditCommand::Move(Motion::SearchNext {
+            reverse: request.reverse,
+        }));
+    } else {
+        edit.core.apply(EditCommand::SetSearch {
+            pattern: regex::escape(&request.query),
+            forward: true,
+        });
+    }
+    emit_cursor(
+        entity,
+        &mut edit,
+        keymap.0.as_ref(),
+        vp,
+        &browsers,
+        &mut commands,
+    );
 }
 
 fn on_file_hover_request(

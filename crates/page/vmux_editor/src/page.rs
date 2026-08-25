@@ -98,6 +98,10 @@ pub fn Page() -> Element {
     let mut ed_command_line = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let find_open = use_signal(|| false);
+    let find_query = use_signal(String::new);
+    let mut find_total = use_signal(|| 0u32);
+    let mut find_index = use_signal(|| 0u32);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     // Every caret. The primary is drawn from `cursor` as before; these are the rest.
@@ -153,6 +157,7 @@ pub fn Page() -> Element {
         references_open: refs_open,
         reference_selection: refs_sel,
         references: refs,
+        find_open,
     };
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
@@ -251,6 +256,12 @@ pub fn Page() -> Element {
         }
         if word_spans.peek().as_slice() != c.word_highlights.as_slice() {
             word_spans.set(c.word_highlights.clone());
+        }
+        if *find_total.peek() != c.search_total {
+            find_total.set(c.search_total);
+        }
+        if *find_index.peek() != c.search_index {
+            find_index.set(c.search_index);
         }
         let note_mode = *file_view_mode.peek() == FileViewMode::Note
             && is_markdown_file(git_path.peek().as_str());
@@ -875,6 +886,14 @@ pub fn Page() -> Element {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
                 }
                 div { class: "flex-1" }
+                if find_open() {
+                    FindBar {
+                        query: find_query,
+                        open: find_open,
+                        total: find_total(),
+                        index: find_index(),
+                    }
+                }
                 if mode() == Mode::Text {
                     if is_markdown_file(&git_path()) || git_has_diff() {
                         div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
@@ -2137,6 +2156,7 @@ const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const RENAME_ID: &str = "file-rename";
 const CODE_ACTION_ID: &str = "file-code-action";
+pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 const RENAME_NOTICE_MS: u32 = 2400;
 /// What VS Code waits before asking for a hover, so a pointer crossing the file asks for nothing.
 const HOVER_DELAY_MS: u32 = 300;
@@ -2620,6 +2640,105 @@ fn ExplorerSidebar(
                 e.prevent_default();
                 resizing.set(true);
             },
+        }
+    }
+}
+
+/// Find in this file: what to look for, how many there are, and which one the caret is on.
+///
+/// It drives the buffer's own search rather than one of its own, so what it finds is what `n`
+/// steps through and what the highlight already draws — vim's `/` and this are two ways into the
+/// same thing rather than two searches that would fight over the highlight.
+#[component]
+fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) -> Element {
+    let mut query = query;
+    let mut open = open;
+    let mut close = move || {
+        open.set(false);
+        query.set(String::new());
+        let _ = send(&FileFindRequest {
+            done: true,
+            ..Default::default()
+        });
+        focus_file_input();
+    };
+    let step = move |reverse: bool| {
+        let _ = send(&FileFindRequest {
+            query: query.peek().clone(),
+            step: true,
+            reverse,
+            done: false,
+        });
+    };
+    let count = match (total, index) {
+        (0, _) => translate("editor-find-no-results"),
+        (total, 0) => format!("{total}"),
+        (total, index) => format!("{index}/{total}"),
+    };
+
+    rsx! {
+        div {
+            class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-2 pr-1 ring-1 ring-inset ring-foreground/10",
+            input {
+                id: FIND_INPUT_ID,
+                r#type: "text",
+                class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
+                placeholder: translate("editor-find-placeholder"),
+                value: "{query}",
+                oninput: move |event| {
+                    let text = event.value();
+                    query.set(text.clone());
+                    let _ = send(&FileFindRequest {
+                        query: text,
+                        step: false,
+                        reverse: false,
+                        done: false,
+                    });
+                },
+                onkeydown: move |event: Event<KeyboardData>| {
+                    event.stop_propagation();
+                    match event.key() {
+                        Key::Enter => {
+                            event.prevent_default();
+                            step(event.modifiers().shift());
+                        }
+                        Key::Escape => {
+                            event.prevent_default();
+                            close();
+                        }
+                        _ => {}
+                    }
+                },
+            }
+            span {
+                class: if total == 0 && !query().is_empty() {
+                    "shrink-0 tabular-nums text-[10px] text-destructive"
+                } else {
+                    "shrink-0 tabular-nums text-[10px] text-muted-foreground"
+                },
+                "{count}"
+            }
+            button {
+                r#type: "button",
+                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                title: translate("editor-find-previous"),
+                onclick: move |_| step(true),
+                "‹"
+            }
+            button {
+                r#type: "button",
+                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                title: translate("editor-find-next"),
+                onclick: move |_| step(false),
+                "›"
+            }
+            button {
+                r#type: "button",
+                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                title: translate("editor-find-close"),
+                onclick: move |_| close(),
+                "✕"
+            }
         }
     }
 }

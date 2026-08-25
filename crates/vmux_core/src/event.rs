@@ -49,6 +49,8 @@ pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
+/// File page → host: what to look for, and which way to step through it.
+pub const FILE_FIND_EVENT: &str = "file_find";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
@@ -1833,6 +1835,11 @@ pub struct FileCursorEvent {
     pub search: Vec<crate::editor::SelSpan>,
     /// Every occurrence of the word under the caret, for the highlight VS Code draws on a click.
     pub word_highlights: Vec<crate::editor::SelSpan>,
+    /// How many matches the current search has, over the whole file rather than the viewport
+    /// [`Self::search`] covers.
+    pub search_total: u32,
+    /// Which of them the caret is on, counted from one. Zero when it is on none of them.
+    pub search_index: u32,
 }
 
 #[derive(
@@ -1954,6 +1961,8 @@ pub enum FileKey {
     PanelPrevious,
     PanelChoose,
     PanelDismiss,
+    /// Open the find bar, on the word under the caret.
+    Find,
 }
 
 #[derive(
@@ -2036,6 +2045,32 @@ pub struct FileExternalChange {
 pub struct FileHoverRequest {
     pub line: u32,
     pub col: u32,
+}
+
+/// What the find bar wants done.
+///
+/// One event rather than three, because the bar only ever has one thing to say and the query
+/// travels with all of it: stepping needs the pattern as much as searching does, and a bar that
+/// sent them apart could step against a pattern the host had not been told about yet.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileFindRequest {
+    pub query: String,
+    /// Step to the next match rather than settling on the one nearest the caret.
+    pub step: bool,
+    pub reverse: bool,
+    /// The bar has closed: drop the highlight and leave the caret where it is.
+    pub done: bool,
 }
 
 #[derive(
@@ -2376,6 +2411,8 @@ mod tests {
     fn file_cursor_event_roundtrips() {
         use crate::editor::{CursorPos, EditMode, SelSpan};
         let e = FileCursorEvent {
+            search_total: 4,
+            search_index: 2,
             mode: EditMode::Insert,
             mode_label: "INSERT".into(),
             primary: CursorPos {
