@@ -368,6 +368,7 @@ pub(crate) fn sync_windowed_frames(
     mut pane_frames: ResMut<PaneFrames>,
 ) {
     pane_frames.frames.clear();
+    pane_frames.rings.clear();
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
     pane_frames.all_corners = windowed_page_all_corners(layout_hidden.0, visible_pane_count);
@@ -394,7 +395,6 @@ pub(crate) fn sync_windowed_frames(
             header_frame,
             layout_hidden.0,
             visible_pane_count,
-            vmux_layout::event::PANE_GAP_PX * scale,
         );
         if let Some(logical) = PaneFrame::of(frame, scale) {
             pane_frames.frames.insert(entity, logical);
@@ -428,6 +428,13 @@ pub(crate) fn sync_windowed_frames(
             scale,
         );
         browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
+        pane_frames.rings.insert(
+            entity,
+            FocusRing {
+                width: focus_ring_width / scale,
+                rgb: focus_ring_rgb,
+            },
+        );
         let badge = focus_ring_kind.and_then(|kind| {
             agent_logo(kind).map(|logo| {
                 (
@@ -498,6 +505,7 @@ pub(crate) struct FrameSyncMemory {
 #[derive(Resource, Default)]
 pub(crate) struct PaneFrames {
     frames: std::collections::HashMap<Entity, PaneFrame>,
+    rings: std::collections::HashMap<Entity, FocusRing>,
     all_corners: bool,
 }
 
@@ -508,9 +516,21 @@ impl PaneFrames {
     }
 
     #[cfg(target_os = "macos")]
+    pub(crate) fn ring_of(&self, page: Entity) -> FocusRing {
+        self.rings.get(&page).copied().unwrap_or_default()
+    }
+
+    #[cfg(target_os = "macos")]
     pub(crate) fn all_corners(&self) -> bool {
         self.all_corners
     }
+}
+
+/// The ring a pane wears while it holds the keyboard, or while an agent is working in it.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub(crate) struct FocusRing {
+    pub(crate) width: f32,
+    pub(crate) rgb: [f32; 3],
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -564,7 +584,6 @@ fn windowed_page_frame_rect(
     header: Option<WindowedFrameRect>,
     layout_hidden: bool,
     visible_pane_count: usize,
-    gap: f32,
 ) -> WindowedFrameRect {
     let Some(header) = header else {
         return pane;
@@ -572,12 +591,12 @@ fn windowed_page_frame_rect(
     if layout_hidden {
         return pane;
     }
-    let (left, right, top_gap) = if visible_pane_count == 1 {
-        (header.left.ceil(), header.right().floor(), 0.0)
+    let (left, right) = if visible_pane_count == 1 {
+        (header.left.ceil(), header.right().floor())
     } else {
-        (pane.left.ceil(), pane.right().floor(), gap)
+        (pane.left.ceil(), pane.right().floor())
     };
-    let top = (header.bottom() + top_gap).ceil().max(pane.top.ceil());
+    let top = header.bottom().ceil().max(pane.top.ceil());
     let bottom = pane.bottom().floor();
     if right <= left || bottom <= top {
         return pane;
@@ -1599,7 +1618,7 @@ mod tests {
             height: 84.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 8.0);
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 1);
 
         assert_eq!(
             frame,
@@ -1613,12 +1632,12 @@ mod tests {
     }
 
     #[test]
-    fn split_pane_windowed_frame_starts_below_header_without_changing_width() {
+    fn split_pane_windowed_frame_keeps_the_gap_the_layout_gave_it() {
         let pane = WindowedFrameRect {
             left: 610.2,
-            top: 24.0,
+            top: 104.2,
             width: 560.6,
-            height: 720.0,
+            height: 640.0,
         };
         let header = WindowedFrameRect {
             left: 150.0,
@@ -1627,7 +1646,7 @@ mod tests {
             height: 72.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 2, 8.0);
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 2);
 
         assert_eq!(
             frame,

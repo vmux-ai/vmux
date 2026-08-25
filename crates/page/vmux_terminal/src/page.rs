@@ -384,15 +384,6 @@ pub fn Page() -> Element {
             },
 
             onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                spawn(async move {
-                    let Some(element) = container.peek().clone() else {
-                        return;
-                    };
-                    if let Err(error) = element.set_focus(true).await {
-                        dioxus::logger::tracing::warn!("focusing the terminal failed: {error:?}");
-                    }
-                });
                 if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
                     emit_mouse(trigger_button_id(&e), col, row, modifier_bits(e.modifiers()), true, false);
                 }

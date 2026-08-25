@@ -183,6 +183,8 @@ fn place_native_pages(
         page.surface.set_bounds(bounds);
         page.surface
             .set_corner_radius(settings.layout.radius as f64, all_corners);
+        let ring = frames.ring_of(*entity);
+        page.surface.set_focus_ring(ring.width as f64, ring.rgb);
         page.surface.set_visible(true);
         if let Some(order) = page.placement.pointer_order(capturing) {
             page.surface.order_among_siblings(order);
