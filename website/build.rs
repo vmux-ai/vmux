@@ -40,6 +40,29 @@ fn sources(docs: &Path) -> Vec<PathBuf> {
     found
 }
 
+struct Theme;
+
+impl Theme {
+    fn site() -> mermaid_rs_renderer::Theme {
+        let mut theme = mermaid_rs_renderer::Theme::dark();
+        theme.background = "transparent".into();
+        theme.primary_color = "#1a1a2e".into();
+        theme.primary_border_color = "#2a2a2a".into();
+        theme.primary_text_color = "#e0e0e0".into();
+        theme.text_color = "#e0e0e0".into();
+        theme.line_color = "#888".into();
+        theme.edge_label_background = "transparent".into();
+        theme.cluster_background = "#151515".into();
+        theme.cluster_border = "#2a2a2a".into();
+        theme.sequence_actor_fill = "#1a1a2e".into();
+        theme.sequence_actor_border = "#2a2a2a".into();
+        theme.sequence_actor_line = "#888".into();
+        theme.sequence_note_fill = "#151515".into();
+        theme.sequence_note_border = "#2a2a2a".into();
+        theme
+    }
+}
+
 struct Diagram;
 
 impl Diagram {
@@ -62,7 +85,11 @@ impl Diagram {
     }
 
     fn render(diagram: &str, source: &Path) -> String {
-        match mermaid_rs_renderer::render(diagram) {
+        let options = mermaid_rs_renderer::RenderOptions {
+            theme: Theme::site(),
+            ..Default::default()
+        };
+        match mermaid_rs_renderer::render_with_options(diagram, options) {
             Ok(svg) => svg,
             Err(error) => panic!(
                 "{}: mermaid diagram did not render: {error}\n---\n{diagram}\n---",

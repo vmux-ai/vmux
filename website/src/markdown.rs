@@ -17,8 +17,9 @@ pub struct Diagram;
 
 impl Diagram {
     pub fn svg(source: &str) -> Option<&'static str> {
+        let wanted = source.trim_end();
         for (diagram, svg) in DIAGRAMS {
-            if *diagram == source {
+            if diagram.trim_end() == wanted {
                 return Some(svg);
             }
         }
@@ -432,17 +433,19 @@ mod tests {
     }
 
     #[test]
-    fn every_published_mermaid_block_was_rendered_at_build_time() {
+    fn every_published_mermaid_block_resolves_to_an_svg_as_the_parser_yields_it() {
         let mut checked = 0;
         for doc in crate::docs::DOCS {
-            for block in doc.content.split("```mermaid\n").skip(1) {
-                let Some(end) = block.find("\n```") else {
-                    panic!("{}: unterminated mermaid fence", doc.slug);
+            for node in parse(doc.content) {
+                let Node::CodeBlock(lang, code) = node else {
+                    continue;
                 };
-                let source = &block[..end];
+                if lang != "mermaid" {
+                    continue;
+                }
                 assert!(
-                    Diagram::svg(source).is_some_and(|svg| svg.contains("<svg")),
-                    "{}: a mermaid block has no build-time SVG, so the page shows its source:\n{source}",
+                    Diagram::svg(&code).is_some_and(|svg| svg.contains("<svg")),
+                    "{}: a mermaid block has no build-time SVG, so the page shows its source:\n{code}",
                     doc.slug
                 );
                 checked += 1;
