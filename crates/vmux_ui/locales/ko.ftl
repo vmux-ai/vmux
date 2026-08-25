@@ -677,7 +677,6 @@ git-accept = ✓ 수락
 git-deny = ✗ 거부
 git-show-unchanged-lines = 변경 없는 줄 { $count }개 표시
 
-terminal-loading = 로드 중…
 terminal-runs-when-ready = 준비되면 실행 · Ctrl+C로 지우기 · Esc로 건너뛰기
 terminal-booting = 부팅 중
 terminal-type-command = 명령 입력 · 준비되면 실행 · Esc로 건너뛰기

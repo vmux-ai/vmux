@@ -677,7 +677,6 @@ git-accept = ✓ قبول
 git-deny = ✗ رفض
 git-show-unchanged-lines = عرض { $count } أسطر بلا تغييرات
 
-terminal-loading = جارٍ التحميل…
 terminal-runs-when-ready = يعمل عند الجاهزية · Ctrl+C يمسح · Esc يتخطى
 terminal-booting = جارٍ التمهيد
 terminal-type-command = اكتب أمرًا · يعمل عند الجاهزية · Esc يتخطى

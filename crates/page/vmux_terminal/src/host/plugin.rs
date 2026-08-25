@@ -102,13 +102,19 @@ impl Plugin for TerminalPlugin {
                 (
                     arm_agent_loading,
                     arm_agent_loading_on_restart,
+                    announce_slow_shell_boot.after(poll_service_messages),
                     clear_agent_loading.after(poll_service_messages),
                     flush_buffered_agent_prompt.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
                     set_terminal_shell_icon,
                 ),
-            );
+            )
+            .add_systems(Startup, prewarm_login_shell_env);
     }
+}
+
+fn prewarm_login_shell_env(settings: Res<AppSettings>) {
+    crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
 }
 
 struct TerminalUpdatePlugin;
@@ -264,11 +270,26 @@ pub struct TerminalModeFlags {
 pub struct AgentFocusBlurred;
 
 const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-const TERMINAL_LOADING_MIN_DISPLAY: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// How long a plain shell may take to reach its prompt before the boot screen is worth showing.
+///
+/// A local shell beats this, so opening a terminal shows the terminal — the way tmux does. The
+/// screen is for the shell that does not, and for an agent, which never does.
+const SHELL_BOOT_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AgentLoading {
     pub since: Instant,
+    pub announced: bool,
+}
+
+impl AgentLoading {
+    fn armed(announced: bool) -> Self {
+        Self {
+            since: Instant::now(),
+            announced,
+        }
+    }
 }
 
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
@@ -2723,16 +2744,20 @@ fn arm_agent_loading(
             Entity,
             Option<&vmux_core::agent::AgentSession>,
             Option<&PromptCapture>,
+            Has<ShellOutputSeen>,
         ),
         (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, session, capture) in &newly_ready {
-        let (label, segment) = terminal_loading_labels(session);
-        commands.entity(entity).insert(AgentLoading {
-            since: Instant::now(),
-        });
+    for (entity, session, capture, output_seen) in &newly_ready {
+        if session.is_none() && output_seen {
+            continue;
+        }
+        let announced = session.is_some();
+        commands
+            .entity(entity)
+            .insert(AgentLoading::armed(announced));
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }
@@ -2746,6 +2771,39 @@ fn arm_agent_loading(
                 },
             ));
         }
+        if !announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: true,
+                label,
+                segment,
+            },
+        ));
+    }
+}
+
+fn announce_slow_shell_boot(
+    mut waiting: Query<
+        (Entity, &mut AgentLoading),
+        (
+            With<Terminal>,
+            Without<vmux_core::agent::AgentSession>,
+            Without<ShellOutputSeen>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, mut loading) in &mut waiting {
+        if loading.announced || loading.since.elapsed() < SHELL_BOOT_GRACE {
+            continue;
+        }
+        loading.announced = true;
+        let (label, segment) = terminal_loading_labels(None);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2775,10 +2833,10 @@ fn arm_agent_loading_on_restart(
     mut commands: Commands,
 ) {
     for (entity, session, capture) in &restarted {
-        let (label, segment) = terminal_loading_labels(session);
-        commands.entity(entity).insert(AgentLoading {
-            since: Instant::now(),
-        });
+        let announced = session.is_some();
+        commands
+            .entity(entity)
+            .insert(AgentLoading::armed(announced));
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }
@@ -2792,6 +2850,10 @@ fn arm_agent_loading_on_restart(
                 },
             ));
         }
+        if !announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2812,43 +2874,48 @@ fn clear_agent_loading(
             Option<&vmux_core::agent::AgentSession>,
             &AgentLoading,
             Option<&PromptCapture>,
+            Has<ShellOutputSeen>,
         ),
         With<Terminal>,
     >,
     mode_map: Res<TerminalModeMap>,
     mut commands: Commands,
 ) {
-    for (entity, pid, session, loading, capture) in &loading_q {
+    for (entity, pid, session, loading, capture, output_seen) in &loading_q {
         let ready = match session {
             Some(_) => mode_map
                 .modes
                 .get(pid)
                 .map(|m| m.alt_screen || m.mouse_capture || m.focus_reporting)
                 .unwrap_or(false),
-            None => loading.since.elapsed() >= TERMINAL_LOADING_MIN_DISPLAY,
+            None => output_seen,
         };
-        if ready || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
-            let (label, segment) = terminal_loading_labels(session);
-            if let Some(capture) = capture {
-                if !capture.skipped && !capture.draft.trim().is_empty() {
-                    commands.entity(entity).insert(BufferedAgentPrompt {
-                        text: capture.draft.clone(),
-                        submit: true,
-                    });
-                }
-                commands.entity(entity).remove::<PromptCapture>();
-            }
-            commands.entity(entity).remove::<AgentLoading>();
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                TERM_LOADING_EVENT,
-                &crate::event::TermLoadingEvent {
-                    loading: false,
-                    label,
-                    segment,
-                },
-            ));
+        if !ready && loading.since.elapsed() < AGENT_LOADING_TIMEOUT {
+            continue;
         }
+        if let Some(capture) = capture {
+            if !capture.skipped && !capture.draft.trim().is_empty() {
+                commands.entity(entity).insert(BufferedAgentPrompt {
+                    text: capture.draft.clone(),
+                    submit: true,
+                });
+            }
+            commands.entity(entity).remove::<PromptCapture>();
+        }
+        commands.entity(entity).remove::<AgentLoading>();
+        if !loading.announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: false,
+                label,
+                segment,
+            },
+        ));
     }
 }
 
@@ -4734,6 +4801,59 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_already_at_its_prompt_is_shown_without_arming_loading() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((Terminal, ShellOutputSeen, PageReady {}))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn a_plain_terminal_holds_its_boot_screen_back_until_the_shell_is_late() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (arm_agent_loading, announce_slow_shell_boot).chain(),
+        );
+        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
+
+        app.update();
+        assert!(
+            !app.world().get::<AgentLoading>(e).unwrap().announced,
+            "a shell that may still beat the grace period must not have been announced"
+        );
+
+        let mut loading = app.world_mut().get_mut::<AgentLoading>(e).unwrap();
+        loading.since = Instant::now() - SHELL_BOOT_GRACE - Duration::from_millis(1);
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
+    }
+
+    #[test]
+    fn an_agent_announces_its_boot_screen_at_once() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                PageReady {},
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
+    }
+
+    #[test]
     fn agent_loading_preserves_initial_prompt_capture() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -4805,6 +4925,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4840,6 +4961,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
                 capture,
             ))
@@ -4899,6 +5021,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now() - AGENT_LOADING_TIMEOUT - Duration::from_secs(1),
+                    announced: true,
                 },
             ))
             .id();
@@ -4923,6 +5046,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4953,6 +5077,7 @@ mod tests {
                 ProcessId::new(),
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4961,7 +5086,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_terminal_loading_cleared_after_min_display() {
+    fn plain_terminal_loading_cleared_once_the_shell_prompt_lands() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<TerminalModeMap>()
@@ -4972,10 +5097,16 @@ mod tests {
                 Terminal,
                 ProcessId::new(),
                 AgentLoading {
-                    since: Instant::now() - TERMINAL_LOADING_MIN_DISPLAY - Duration::from_millis(1),
+                    since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
+
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+
+        app.world_mut().entity_mut(e).insert(ShellOutputSeen);
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
     }

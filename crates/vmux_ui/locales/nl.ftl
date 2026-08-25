@@ -677,7 +677,6 @@ git-accept = ✓ accepteren
 git-deny = ✗ weigeren
 git-show-unchanged-lines = Toon { $count } ongewijzigde regels
 
-terminal-loading = Laden…
 terminal-runs-when-ready = voert uit zodra klaar · Ctrl+C wist · Esc slaat over
 terminal-booting = opstarten
 terminal-type-command = typ een commando · voert uit zodra klaar · Esc slaat over

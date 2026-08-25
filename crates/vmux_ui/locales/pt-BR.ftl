@@ -677,7 +677,6 @@ git-accept = ✓ aceitar
 git-deny = ✗ negar
 git-show-unchanged-lines = Mostrar { $count } linhas sem alterações
 
-terminal-loading = Carregando…
 terminal-runs-when-ready = executa quando estiver pronto · Ctrl+C limpa · Esc pula
 terminal-booting = inicializando
 terminal-type-command = digite um comando · executa quando estiver pronto · Esc pula

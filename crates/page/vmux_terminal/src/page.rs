@@ -522,19 +522,6 @@ pub fn Page() -> Element {
             }
 
             {
-                let waiting = rows.read().is_empty()
-                    && service_error.read().is_empty()
-                    && loading.read().is_none();
-                waiting.then(|| rsx! {
-                    div {
-                        class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
-                        style: "color:#888;",
-                        {translate("terminal-loading")}
-                    }
-                })
-            }
-
-            {
                 let state = loading.read().clone();
                 state.map(|(label, segment)| {
                     let accent = agent_accent(&segment);

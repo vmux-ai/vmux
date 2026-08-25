@@ -677,7 +677,6 @@ git-accept = ✓ 接受
 git-deny = ✗ 拒绝
 git-show-unchanged-lines = 显示 { $count } 行未更改内容
 
-terminal-loading = 正在加载…
 terminal-runs-when-ready = 就绪后运行 · Ctrl+C 清除 · Esc 跳过
 terminal-booting = 正在启动
 terminal-type-command = 输入命令 · 就绪后运行 · Esc 跳过

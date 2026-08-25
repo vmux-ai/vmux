@@ -662,7 +662,6 @@ git-accept = ✓ 承認
 git-deny = ✗ 拒否
 git-show-unchanged-lines = 変更なしの行を{ $count }行表示
 
-terminal-loading = 読み込み中…
 terminal-runs-when-ready = 準備でき次第実行 · Ctrl+Cでクリア · Escでスキップ
 terminal-booting = 起動中
 terminal-type-command = コマンドを入力 · 準備でき次第実行 · Escでスキップ
