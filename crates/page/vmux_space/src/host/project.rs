@@ -12,7 +12,10 @@ impl Plugin for SpaceProjectPlugin {
 }
 
 fn remember_space_project(
-    bound: Query<(Entity, &vmux_layout::tab::TabWorkspace), Changed<vmux_layout::tab::TabWorkspace>>,
+    bound: Query<
+        (Entity, &vmux_layout::tab::TabWorkspace),
+        Changed<vmux_layout::tab::TabWorkspace>,
+    >,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<vmux_layout::space::Space>>,
     ids: Query<&vmux_layout::space::SpaceId>,

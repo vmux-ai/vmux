@@ -1233,6 +1233,50 @@ pub struct PaletteProps {
     pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
 }
 
+/// Places file hits relative to the rest of the palette.
+///
+/// A typed path is an instruction to go there, so its hits lead. A bare word is a search the
+/// commands and open tabs answer too, and burying those under a project's files is what made the
+/// bar feel like it was guessing.
+struct FileRows;
+
+impl FileRows {
+    const LEADING: usize = 8;
+    const TRAILING: usize = 5;
+
+    fn merge(query: &str, completions: &[PathEntry], matched: Vec<ResultItem>) -> Vec<ResultItem> {
+        if completions.is_empty() {
+            return matched;
+        }
+        let leads = looks_like_path(query.trim());
+        let take = if leads { Self::LEADING } else { Self::TRAILING };
+        let mut files = Vec::with_capacity(take);
+        let mut listed = Vec::with_capacity(take);
+        for entry in completions.iter().take(take) {
+            files.push(ResultItem::File {
+                path: entry.full_path.clone(),
+                is_dir: entry.is_dir,
+            });
+            listed.push(entry.full_path.as_str());
+        }
+        let mut rest = Vec::with_capacity(matched.len());
+        for item in matched {
+            if let ResultItem::Editor { path } = &item
+                && listed.contains(&path.as_str())
+            {
+                continue;
+            }
+            rest.push(item);
+        }
+        if leads {
+            files.extend(rest);
+            return files;
+        }
+        rest.extend(files);
+        rest
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct PaletteRows {
     items: Vec<ResultItem>,
@@ -1293,32 +1337,7 @@ impl PaletteRows {
             } else {
                 &[]
             };
-            let matched = if completions.is_empty() {
-                matched
-            } else {
-                let mut combined: Vec<ResultItem> = completions
-                    .iter()
-                    .take(8)
-                    .map(|entry| ResultItem::File {
-                        path: entry.full_path.clone(),
-                        is_dir: entry.is_dir,
-                    })
-                    .collect();
-                let listed: Vec<&str> = completions
-                    .iter()
-                    .take(8)
-                    .map(|entry| entry.full_path.as_str())
-                    .collect();
-                let rest: Vec<ResultItem> = matched
-                    .into_iter()
-                    .filter(|item| match item {
-                        ResultItem::Editor { path } => !listed.contains(&path.as_str()),
-                        _ => true,
-                    })
-                    .collect();
-                combined.extend(rest);
-                combined
-            };
+            let matched = FileRows::merge(query, completions, matched);
             if is_start {
                 matched
                     .into_iter()
@@ -1515,12 +1534,15 @@ fn looks_like_path(s: &str) -> bool {
 fn completion_query(input: &str) -> Option<String> {
     let t = input.trim();
     if let Some(rest) = t.strip_prefix("file://") {
-        Some(rest.to_string())
-    } else if looks_like_path(t) {
-        Some(t.to_string())
-    } else {
-        None
+        return Some(rest.to_string());
     }
+    if looks_like_path(t) {
+        return Some(t.to_string());
+    }
+    if t.is_empty() || t.contains(' ') || t.contains("://") || is_data_uri(t) {
+        return None;
+    }
+    Some(t.to_string())
 }
 
 fn file_extension_label(name: &str) -> String {
@@ -1630,4 +1652,74 @@ fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
     event.stop_propagation();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl FileRows {
+        fn hits(paths: &[&str]) -> Vec<PathEntry> {
+            let mut entries = Vec::new();
+            for path in paths {
+                entries.push(PathEntry {
+                    name: (*path).to_string(),
+                    is_dir: false,
+                    full_path: format!("/root/{path}"),
+                });
+            }
+            entries
+        }
+
+        fn a_command() -> ResultItem {
+            ResultItem::Command {
+                id: "settings".to_string(),
+                name: "Settings".to_string(),
+                shortcut: String::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_bare_word_keeps_commands_above_the_files_it_also_matched() {
+        let merged = FileRows::merge(
+            "settings",
+            &FileRows::hits(&["src/settings.rs"]),
+            vec![FileRows::a_command()],
+        );
+        assert!(matches!(merged[0], ResultItem::Command { .. }));
+        assert!(matches!(merged[1], ResultItem::File { .. }));
+    }
+
+    #[test]
+    fn a_typed_path_puts_its_files_first() {
+        let merged = FileRows::merge(
+            "~/src",
+            &FileRows::hits(&["src/settings.rs"]),
+            vec![FileRows::a_command()],
+        );
+        assert!(matches!(merged[0], ResultItem::File { .. }));
+        assert!(matches!(merged[1], ResultItem::Command { .. }));
+    }
+
+    #[test]
+    fn an_editor_row_for_an_already_listed_file_is_dropped() {
+        let merged = FileRows::merge(
+            "~/src",
+            &FileRows::hits(&["src/settings.rs"]),
+            vec![ResultItem::Editor {
+                path: "/root/src/settings.rs".to_string(),
+            }],
+        );
+        assert_eq!(merged.len(), 1);
+        assert!(matches!(merged[0], ResultItem::File { .. }));
+    }
+
+    #[test]
+    fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
+        assert_eq!(completion_query("handler").as_deref(), Some("handler"));
+        assert_eq!(completion_query("how do i").as_deref(), None);
+        assert_eq!(completion_query("https://example.com").as_deref(), None);
+        assert_eq!(completion_query("file://~/x").as_deref(), Some("~/x"));
+    }
 }

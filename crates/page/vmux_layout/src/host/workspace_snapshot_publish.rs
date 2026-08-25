@@ -22,9 +22,11 @@ fn publish_workspace_snapshot(
     tab_gather: TabGatherParams,
     spaces: Res<CommandBarSpacesSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
+    projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
     mut snapshot: ResMut<CommandBarWorkspaceSnapshot>,
 ) {
     let active_tab = tab_gather.active_tab.get();
+    let project_root = ProjectRoot::of(active_tab, &projects);
     let (_, pane, stack) = crate::stack::focused_stack(
         active_tab,
         &tab_gather.all_children,
@@ -55,8 +57,33 @@ fn publish_workspace_snapshot(
         pane,
         tabs,
         stack_count: tab_gather.stack_q.iter().count(),
+        project_root,
     };
     if *snapshot != next {
         *snapshot = next;
+    }
+}
+
+struct ProjectRoot;
+
+impl ProjectRoot {
+    fn of(
+        active_tab: Option<Entity>,
+        projects: &Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
+    ) -> Option<String> {
+        let Ok((tab, workspace)) = projects.get(active_tab?) else {
+            return None;
+        };
+        if let Some(workspace) = workspace {
+            let dir = workspace.project_dir.trim();
+            if !dir.is_empty() {
+                return Some(dir.to_string());
+            }
+        }
+        let dir = tab.startup_dir.as_deref()?.trim();
+        if dir.is_empty() {
+            return None;
+        }
+        Some(dir.to_string())
     }
 }

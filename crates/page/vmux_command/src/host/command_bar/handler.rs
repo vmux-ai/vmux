@@ -1097,7 +1097,9 @@ fn retry_pending_command_bar_open(
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
     modal_q: Query<Entity, With<CommandBar>>,
+    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     browsers: NonSend<Browsers>,
+    mut index: Local<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
 ) {
     let query = &trigger.event().payload.query;
@@ -1108,13 +1110,38 @@ fn on_path_complete_request(
         return;
     }
 
-    let completions = complete_path(query);
+    let mut completions = None;
+    if let Some(root) = ProjectQuery::root_for(query, workspace.project_root.as_deref()) {
+        completions = index.matches(&root, query);
+    }
+    let completions = completions.unwrap_or_else(|| complete_path(query));
     let payload = PathCompleteResponse { completions };
     commands.trigger(BinHostEmitEvent::from_rkyv(
         modal_e,
         PATH_COMPLETE_RESPONSE,
         &payload,
     ));
+}
+
+/// Decides whether a query is asking to walk the filesystem or to search the open project.
+struct ProjectQuery;
+
+impl ProjectQuery {
+    fn root_for(query: &str, project_root: Option<&str>) -> Option<std::path::PathBuf> {
+        let query = query.trim();
+        if query.is_empty() || Self::names_a_location(query) {
+            return None;
+        }
+        let root = std::path::PathBuf::from(project_root?.trim());
+        if !root.is_dir() {
+            return None;
+        }
+        Some(root)
+    }
+
+    fn names_a_location(query: &str) -> bool {
+        query.starts_with('/') || query.starts_with('~') || query.starts_with('.')
+    }
 }
 
 fn complete_path(query: &str) -> Vec<PathEntry> {

@@ -35,5 +35,8 @@ vmux_ui = { path = "../../vmux_ui", default-features = false }
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

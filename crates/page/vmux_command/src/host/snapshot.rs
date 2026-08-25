@@ -28,6 +28,7 @@ pub struct CommandBarWorkspaceSnapshot {
     pub pane: Option<Entity>,
     pub tabs: Vec<vmux_wire::command_bar::CommandBarTab>,
     pub stack_count: usize,
+    pub project_root: Option<String>,
 }
 
 #[derive(Resource, Default, Clone, Debug)]

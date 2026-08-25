@@ -10265,6 +10265,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "tempfile",
  "url",
  "vmux_core",
  "vmux_flex",
