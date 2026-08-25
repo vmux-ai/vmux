@@ -394,6 +394,7 @@ pub(crate) fn sync_windowed_frames(
             header_frame,
             layout_hidden.0,
             visible_pane_count,
+            vmux_layout::event::PANE_GAP_PX * scale,
         );
         if let Some(logical) = PaneFrame::of(frame, scale) {
             pane_frames.frames.insert(entity, logical);
@@ -569,6 +570,7 @@ fn windowed_page_frame_rect(
     header: Option<WindowedFrameRect>,
     layout_hidden: bool,
     visible_pane_count: usize,
+    gap: f32,
 ) -> WindowedFrameRect {
     let Some(header) = header else {
         return pane;
@@ -576,12 +578,16 @@ fn windowed_page_frame_rect(
     if layout_hidden {
         return pane;
     }
-    let (left, right) = if visible_pane_count == 1 {
-        (header.left.ceil(), header.right().floor())
+    // A single pane runs edge to edge under the header and takes the header's own sides, so it
+    // meets the header flush. Once there are several, they are already separated from each other
+    // by `gap`, and the header is one more edge among them — sitting flush against it while
+    // holding its neighbours at arm's length is what read as a missing gap.
+    let (left, right, top_gap) = if visible_pane_count == 1 {
+        (header.left.ceil(), header.right().floor(), 0.0)
     } else {
-        (pane.left.ceil(), pane.right().floor())
+        (pane.left.ceil(), pane.right().floor(), gap)
     };
-    let top = header.bottom().ceil().max(pane.top.ceil());
+    let top = (header.bottom() + top_gap).ceil().max(pane.top.ceil());
     let bottom = pane.bottom().floor();
     if right <= left || bottom <= top {
         return pane;
@@ -1603,7 +1609,7 @@ mod tests {
             height: 84.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1);
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 8.0);
 
         assert_eq!(
             frame,
@@ -1631,15 +1637,17 @@ mod tests {
             height: 72.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 2);
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 2, 8.0);
 
         assert_eq!(
             frame,
             WindowedFrameRect {
                 left: 611.0,
-                top: 97.0,
+                // The header is one more edge among several panes, so it is held off by the same
+                // gap they hold each other off by: 24 + 72.2 + 8, rounded up.
+                top: 105.0,
                 width: 559.0,
-                height: 647.0,
+                height: 639.0,
             }
         );
     }
