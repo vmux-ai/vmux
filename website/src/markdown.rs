@@ -283,7 +283,10 @@ fn render_node(n: &Node) -> Element {
                 && let Some(svg) = Diagram::svg(code)
             {
                 return rsx! {
-                    figure { class: "my-6 overflow-x-auto", dangerous_inner_html: "{svg}" }
+                    figure {
+                        class: "diagram my-6 -mx-6 px-6 overflow-x-auto sm:-mx-10 sm:px-10",
+                        dangerous_inner_html: "{svg}",
+                    }
                 };
             }
             let html = highlight_code(lang, code);
