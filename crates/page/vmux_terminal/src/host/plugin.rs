@@ -110,7 +110,10 @@ impl Plugin for TerminalPlugin {
                     set_terminal_shell_icon,
                 ),
             )
-            .add_systems(Startup, prewarm_login_shell_env);
+            .add_systems(
+                Update,
+                prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
+            );
     }
 }
 
