@@ -5,7 +5,6 @@ use vmux_layout::space::{ActiveSpaceId, Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
 
-/// Publishes the space entries the command bar searches over.
 pub struct SpaceSnapshotPlugin;
 
 impl Plugin for SpaceSnapshotPlugin {
@@ -17,13 +16,6 @@ impl Plugin for SpaceSnapshotPlugin {
     }
 }
 
-/// Republish the space entries, but only when they differ from what is published.
-///
-/// `set_if_neq` rather than four field writes. A `ResMut` marks its resource changed the moment it
-/// is dereferenced, whatever is assigned, and `sync_live_start_pages` rebuilds and re-pushes the
-/// whole launcher payload whenever this snapshot reports a change. Writing unconditionally
-/// therefore re-rendered `vmux://start` every frame, which held the schedule at ~200% CPU with the
-/// app sitting idle. The three sibling snapshot writers each guard for the same reason.
 fn update_spaces_snapshot(
     spaces: Query<(&SpaceId, &Name, Option<&Order>), With<Space>>,
     active_id: Res<ActiveSpaceId>,
@@ -61,7 +53,6 @@ fn update_spaces_snapshot(
 mod tests {
     use super::*;
 
-    /// One active space, with the system scheduled.
     struct Spaces {
         app: App,
         published_at: u32,
@@ -83,10 +74,6 @@ mod tests {
             Self { app, published_at }
         }
 
-        /// Run a turn, and say whether it published the snapshot again.
-        ///
-        /// The tick is compared rather than `is_changed`, which answers against the world's own
-        /// last-change tick and so reads false from outside a system once `update` has advanced it.
         fn republished(&mut self) -> bool {
             self.app.update();
             let now = Self::changed_tick(&self.app);
@@ -130,9 +117,6 @@ mod tests {
         assert_eq!(snap.spaces.len(), 1);
     }
 
-    /// `sync_live_start_pages` rebuilds and re-pushes the whole launcher payload whenever this
-    /// snapshot reports a change, so republishing an identical one re-renders `vmux://start` every
-    /// frame — which is what held the desktop schedule at ~200% CPU with the app sitting idle.
     #[test]
     fn an_unchanged_space_list_is_not_republished() {
         let mut spaces = Spaces::of_one();

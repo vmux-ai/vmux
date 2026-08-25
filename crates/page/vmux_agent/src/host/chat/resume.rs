@@ -1,9 +1,3 @@
-//! Picking up an earlier conversation, and moving one between runtimes.
-//!
-//! Listing resumable sessions walks every agent's on-disk history, so it runs on the IO pool and
-//! reaches the webview through a drain system. A handoff additionally has to rebuild the context
-//! the new runtime never saw.
-
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
@@ -20,7 +14,6 @@ use vmux_core::team::Profile;
 use vmux_session::AcpSession;
 use vmux_session::AgentSession;
 
-/// Resuming a session, and switching the runtime that serves one.
 pub(super) struct ChatResumePlugin;
 
 impl Plugin for ChatResumePlugin {
@@ -54,7 +47,6 @@ struct ResumeHandoffTask {
     task: Task<Result<StackSessionHandoff, String>>,
 }
 
-/// Age in seconds for a session's last-modified time.
 fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
     std::time::SystemTime::now()
         .duration_since(mtime)
@@ -62,7 +54,6 @@ fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
         .unwrap_or(0)
 }
 
-/// Page → native: `/resume` was opened — reply with the on-disk session list.
 fn resume_entries(
     sessions: Vec<crate::client::cli::strategy::ResumableSession>,
     active_kind: Option<AgentKind>,
@@ -199,7 +190,6 @@ fn drain_resume_handoff_tasks(
     }
 }
 
-/// Page → native: resume a picked session on this stack, in the current runtime.
 fn on_resume_session(
     trigger: On<BinReceive<ResumeSession>>,
     child_of: Query<&ChildOf>,
@@ -260,7 +250,6 @@ fn on_resume_session(
     });
 }
 
-/// Page → native: hand the current ACP session off to the other runtime (the `/cli` fallback).
 fn on_runtime_switch_request(
     trigger: On<BinReceive<RuntimeSwitchRequest>>,
     child_of: Query<&ChildOf>,
@@ -299,8 +288,6 @@ fn on_runtime_switch_request(
     });
 }
 
-/// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
-/// the handoff is unavailable (unknown agent, no session id yet, bad `to`).
 fn runtime_switch_target(
     agent_id: &str,
     resume: Option<&str>,

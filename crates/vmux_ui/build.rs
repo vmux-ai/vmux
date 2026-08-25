@@ -1,10 +1,3 @@
-//! Generates the Fluent catalogue index, and builds the stylesheet bundle every page links.
-//!
-//! The bundle used to fall out of a `dx build --platform web`, because the pages were wasm. They
-//! are not any more, and Tailwind never read that build's output anyway — every `@source` in
-//! `assets/index.css` names a Rust source directory. So this runs the CLI directly and copies the
-//! two static things beside it.
-
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,12 +6,8 @@ use std::process::Command;
 #[path = "../build_platform_cfg.rs"]
 mod build_platform_cfg;
 
-/// Set by CI, which has no Tailwind CLI and does not package the app.
 const SKIP_ENV: &str = "VMUX_SKIP_DX_BUILD";
 
-/// Directories whose Rust source Tailwind scans for class names. Must agree with the `@source`
-/// list in `assets/index.css`: a directory missing here does not fail the build, it just stops
-/// the stylesheet being rebuilt when that page's classes change.
 const SCANNED: &[&str] = &[
     "../vmux_browser/src",
     "../vmux_ui/src",
@@ -100,7 +89,6 @@ fn build_stylesheet_bundle() {
         &manifest_dir.join("assets/theme.css"),
         &assets.join("theme.css"),
     );
-    // The terminal owns the font it renders in; every other page just inherits it.
     copy_dir(
         &manifest_dir.join("../page/vmux_terminal/assets/fonts"),
         &assets.join("fonts"),
@@ -108,8 +96,6 @@ fn build_stylesheet_bundle() {
     write_bundle_stamp(&manifest_dir.join("dist"));
 }
 
-/// A SHA-256 manifest of the bundle, checked again after it is copied into the `.app`, so a
-/// partial or corrupted copy fails packaging instead of shipping a page with no styles.
 fn write_bundle_stamp(dist: &Path) {
     let stamp = dist.join(".bundle-stamp");
     let _ = fs::remove_file(&stamp);
@@ -140,8 +126,6 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 
-/// Enumerating the bucket rather than listing its crates is what keeps a page added later from
-/// being silently unscanned.
 fn page_crate_sources(manifest_dir: &Path) -> Vec<PathBuf> {
     let bucket = manifest_dir.join("../page");
     let entries = fs::read_dir(&bucket)

@@ -35,7 +35,6 @@ pub enum CommandBarResultItem {
         title: String,
         icon: PageIcon,
         shortcut: String,
-        /// Mirrors [`vmux_wire::command_bar::CommandBarPage::prompt_target`].
         prompt_target: bool,
     },
     Navigate {
@@ -134,10 +133,6 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
-/// Pages a prompt can be sent to, in recent-first input order.
-///
-/// A matching query narrows the choices; text that matches none of them keeps every choice
-/// visible, because that text is the prompt rather than a search for a target.
 pub fn prompt_target_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
     let targets: Vec<_> = pages.iter().filter(|page| page.prompt_target).collect();
@@ -186,10 +181,6 @@ pub fn prompt_target_matches_query(item: &CommandBarResultItem, query: &str) -> 
             || url.to_lowercase().contains(&search_lower))
 }
 
-/// Whether the query should offer "Terminal".
-///
-/// Display and activation share this so a partially typed `ter` cannot list Terminal while
-/// Enter quietly routes the text to a prompt target instead.
 pub fn terminal_matches_query(query: &str) -> bool {
     let query = query.trim().to_lowercase();
     !query.is_empty() && "terminal".starts_with(&query)
@@ -222,7 +213,6 @@ pub fn prepend_prompt_targets(
             break;
         }
     }
-    // Terminal stays first when the query named it, so Enter still opens a terminal.
     let at = results
         .iter()
         .take_while(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
@@ -230,10 +220,6 @@ pub fn prepend_prompt_targets(
     results.splice(at..at, suggestions);
 }
 
-/// The launcher's resting state: every open session.
-///
-/// An empty query used to render nothing on the desktop launcher, so the sessions already open
-/// were the one thing it could not show you. Both hosts now open on this list.
 pub fn open_session_results(
     tabs: &[CommandBarTab],
     pages: &[CommandBarPage],
@@ -258,7 +244,6 @@ pub fn start_page_results(
     query: &str,
 ) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
-    // Terminal leads when the query names it, but never at the cost of the other options.
     let mut results = Vec::new();
     if terminal_matches_query(query) {
         results.push(CommandBarResultItem::Terminal {
@@ -346,8 +331,6 @@ fn space_list_items(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<Comma
         .collect()
 }
 
-/// Build the space-switcher result list: every space in snapshot order (filtered by
-/// `query`), then a trailing "Manage spaces…" entry that opens the full spaces page.
 pub fn space_switch_results(
     spaces: &[CommandBarSpace],
     pages: &[CommandBarPage],
@@ -367,7 +350,6 @@ pub fn space_switch_results(
     items
 }
 
-/// Index of the active space, for pre-selecting the current space in the switcher.
 pub fn active_space_index(spaces: &[CommandBarSpace]) -> usize {
     spaces.iter().position(|s| s.is_active).unwrap_or(0)
 }

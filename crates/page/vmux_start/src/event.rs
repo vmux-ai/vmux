@@ -1,5 +1,3 @@
-/// Page→host request: the `vmux://start/` page emits this on mount to ask the host
-/// for its launcher entries. The host answers with a `CommandBarOpenEvent`.
 #[derive(
     Clone,
     Copy,
@@ -19,8 +17,6 @@ pub use vmux_wire::command_bar::StartSelectWorkspace;
 
 pub const START_COMMAND_BAR_OPEN_EVENT: &str = "start-command-bar-open";
 
-/// Host→page signal: focus the start launcher's input. Sent when a command-bar
-/// shortcut fires while the start page is active (instead of opening the modal).
 pub const START_FOCUS_INPUT_EVENT: &str = "start-focus-input";
 
 #[derive(

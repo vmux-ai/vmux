@@ -1,9 +1,3 @@
-//! The conversation: what has been said, and what is queued to be said next.
-//!
-//! Queued prompts render below the scroller rather than inside it, but they are the same thread
-//! read forward — the transcript already draws the interrupted divider the queue puts there, so
-//! the two are described together rather than split across the seam the layout happens to have.
-
 use super::agent::AgentBanner;
 use super::error::ChatErrorCard;
 use super::state::Chat;
@@ -15,7 +9,6 @@ use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-/// The conversation itself, and the scroller that pages older messages in as it is read back.
 #[component]
 pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
@@ -36,10 +29,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
-                // Re-pin once the user reaches the bottom; unpin only when they scroll UP
-                // (scroll_top decreases). Never unpin from our own programmatic
-                // scroll-to-bottom, which only moves down and would otherwise poison
-                // `at_bottom` with a stale, mid-stream scroll height.
                 if dist <= 48 {
                     at_bottom.set(true);
                 } else if top < *last_top.peek() - 4 {
@@ -96,7 +85,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     }
 }
 
-/// The agent, front and centre, while it is being installed.
 #[component]
 fn InstallIntro(chat: Chat, detail: String) -> Element {
     let accent = agent_accent(&chat.agent());
@@ -111,7 +99,6 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
     }
 }
 
-/// The same, once it is installed and waiting for a first prompt.
 #[component]
 fn ReadyIntro(chat: Chat) -> Element {
     rsx! {
@@ -122,7 +109,6 @@ fn ReadyIntro(chat: Chat) -> Element {
     }
 }
 
-/// Where a handed-over conversation stops and this agent's own turns begin.
 #[component]
 fn HandoffDivider(source: String, truncated: bool) -> Element {
     rsx! {
@@ -142,7 +128,6 @@ fn HandoffDivider(source: String, truncated: bool) -> Element {
     }
 }
 
-/// Prompts typed while the agent was busy, waiting their turn.
 #[component]
 pub(super) fn QueuedPrompts(chat: Chat) -> Element {
     let queued = (chat.queue.queued)();

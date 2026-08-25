@@ -5,20 +5,12 @@ use bevy::input::keyboard::KeyCode;
 use std::time::Instant;
 use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
 
-/// Every binding in force, and how long a chord may stay half-typed.
-///
-/// Built once and held as a resource. Three surfaces consult it — the native keyboard, the macOS
-/// event monitor and a webview page — and they used to carry a copy of these lookups each, which is
-/// how they drifted.
-///
-/// Held in precedence order, so the first match wins and callers need no tie-break of their own.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct Keymap {
     bindings: Vec<(Source, Binding)>,
     pub chord_timeout_ms: u64,
 }
 
-/// One binding: what to press, what it runs, and when it applies.
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub shortcut: Shortcut,
@@ -26,20 +18,15 @@ pub struct Binding {
     pub when: Option<When>,
 }
 
-/// Where a binding came from. A settings file outranks the compiled-in default it replaces —
-/// otherwise rebinding a key that already has a default would silently do nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Source {
     Default,
     Settings,
 }
 
-/// A chord that has not been answered within this long is abandoned, so a half-typed prefix cannot
-/// silently swallow the next real keystroke.
 const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
 
 impl Keymap {
-    /// The bindings compiled into the command tree, before any settings file has its say.
     pub fn defaults() -> Self {
         let mut keymap = Self {
             bindings: Vec::new(),
@@ -49,11 +36,6 @@ impl Keymap {
         keymap
     }
 
-    /// Add bindings from one source, keeping the whole list in precedence order.
-    ///
-    /// Sorted rather than appended because the lookups take the first match: a binding that arrives
-    /// later but outranks what is already there has to move ahead of it. The sort is stable, so
-    /// bindings that tie stay in the order they were declared.
     pub fn extend(&mut self, source: Source, bindings: impl IntoIterator<Item = Binding>) {
         self.bindings
             .extend(bindings.into_iter().map(|binding| (source, binding)));
@@ -63,15 +45,10 @@ impl Keymap {
         });
     }
 
-    /// Every binding in force, most specific first.
     pub fn bindings(&self) -> impl Iterator<Item = &Binding> {
         self.bindings.iter().map(|(_, binding)| binding)
     }
 
-    /// Repoint every chord at a different prefix.
-    ///
-    /// Rebinding the leader moves the whole family of chords at once. Doing it any other way would
-    /// leave the defaults on the compiled-in prefix and only the overrides on the new one.
     pub fn set_leader(&mut self, leader: &KeyCombo) {
         for (_, binding) in &mut self.bindings {
             if let Shortcut::Chord(prefix, _) = &mut binding.shortcut {
@@ -80,7 +57,6 @@ impl Keymap {
         }
     }
 
-    /// This keymap as it looks to a surface that has published these context keys.
     pub fn in_context<'a>(&'a self, context: &'a KeyContext) -> KeymapView<'a> {
         KeymapView {
             keymap: self,
@@ -88,24 +64,19 @@ impl Keymap {
         }
     }
 
-    /// The command bound to this key on its own, ignoring anything context-scoped.
     pub fn direct(&self, pressed: &KeyCombo) -> Option<AppCommand> {
         self.in_context(KeyContext::NONE).direct(pressed)
     }
 
-    /// Whether this key opens a chord, and so should be held rather than acted on.
     pub fn has_chord_prefix(&self, pressed: &KeyCombo) -> bool {
         self.in_context(KeyContext::NONE).has_chord_prefix(pressed)
     }
 
-    /// The command bound to this key as the second half of a chord.
     pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<AppCommand> {
         self.in_context(KeyContext::NONE).chord(prefix, pressed)
     }
 }
 
-/// A keymap narrowed to one surface's context, which is what makes a key mean different things in
-/// different places without either place knowing about the other.
 pub struct KeymapView<'a> {
     keymap: &'a Keymap,
     context: &'a KeyContext,
@@ -131,11 +102,6 @@ impl KeymapView<'_> {
             })
     }
 
-    /// The command this key means *because of* where it was pressed.
-    ///
-    /// Only context-scoped bindings are considered, and that is the whole point: a key a page hands
-    /// over has already passed the native keyboard, which resolves the unconditional bindings for
-    /// every surface at once. Answering those a second time here would issue the command twice.
     pub fn scoped(&self, pressed: &KeyCombo) -> Option<AppCommand> {
         self.applicable()
             .filter(|binding| binding.when.is_some())
@@ -166,14 +132,6 @@ impl KeymapView<'_> {
             })
     }
 
-    /// Every stroke a page in this context has to hand over rather than let the browser act on.
-    ///
-    /// A chord contributes its prefix, not its second key: pressing the prefix is what the page
-    /// must give up, and by the time the second key is typed the core has already stopped
-    /// forwarding keys to the page at all.
-    ///
-    /// Bindings naming a command that no longer exists are skipped, because claiming a key that
-    /// goes on to do nothing costs the page the key for nothing.
     pub fn claims(&self) -> KeyClaims {
         let mut keys: Vec<ClaimedKey> = Vec::new();
         for binding in self.applicable() {
@@ -197,10 +155,6 @@ impl KeymapView<'_> {
 }
 
 impl AppCommand {
-    /// The command a binding names, accepting two ids that predate the command tree.
-    ///
-    /// `split_v` and `split_h` were never menu items, so they have no generated id; they are kept
-    /// because they appear in settings files already written.
     pub fn from_shortcut_id(id: &str) -> Option<Self> {
         let split = |direction| {
             Some(AppCommand::Browser(BrowserCommand::Open(
@@ -220,12 +174,6 @@ impl AppCommand {
     }
 }
 
-/// The condition under which a binding applies, read from a settings file's `when` field.
-///
-/// Deliberately not an expression language. Every term must hold, and a term is a context key
-/// optionally negated — `chat.selector`, or `chat && !chat.approval`. A binding with more terms is
-/// more specific and is tried first, which is what lets `Enter` mean "choose the highlighted row"
-/// with a picker open and "submit" without one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct When(Vec<WhenTerm>);
 
@@ -236,8 +184,6 @@ struct WhenTerm {
 }
 
 impl When {
-    /// Read a `when` field. `None` when it names no terms, so an empty string cannot silently
-    /// produce a condition that holds everywhere and outranks the unconditional bindings.
     pub fn parse(text: &str) -> Option<Self> {
         let mut terms = Vec::new();
         for term in text.split("&&") {
@@ -268,32 +214,16 @@ impl When {
     }
 }
 
-/// The context keys a surface has published about itself.
-///
-/// Strings rather than a closed enum because a settings file has to name them, and the set grows
-/// with the pages rather than with this crate.
-///
-/// A component on the webview it describes, not a resource. Two chat panes have to be able to
-/// differ — one with a picker open and one without — and they can only differ if the context hangs
-/// off the entity. That costs nothing, because a page's message already names its webview.
-///
-/// Deriving `Resource` here would look equivalent and is not: a resource-derived type also
-/// implements `Component`, but Bevy keeps its singleton semantics, so the *second* entity to be
-/// given one silently gets nothing.
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyContext(std::collections::BTreeSet<String>);
 
 impl KeyContext {
-    /// No context at all — what a caller that has not published one sees. Context-scoped bindings
-    /// never match it, so an unscoped surface cannot accidentally claim another's keys.
     pub const NONE: &'static Self = &Self(std::collections::BTreeSet::new());
 
     pub fn has(&self, key: &str) -> bool {
         self.0.contains(key)
     }
 
-    /// Replace the whole set. A surface publishes what is true of it now rather than diffing,
-    /// because a missed toggle would leave a key claimed by a picker that has since closed.
     pub fn set(&mut self, keys: impl IntoIterator<Item = String>) {
         self.0 = keys.into_iter().collect();
     }
@@ -336,11 +266,6 @@ pub struct KeyCombo {
 }
 
 impl KeyCombo {
-    /// The combo a page's keystroke names, or `None` for a bare modifier or a key with no
-    /// [`KeyCode`].
-    ///
-    /// Read from `code` rather than `key`, the same half of the event [`KeyCombo::web_code`]
-    /// writes, so a layout that renames the character cannot change which binding matches.
     pub fn of(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
         if stroke.is_modifier_key() {
             return None;
@@ -356,10 +281,6 @@ impl KeyCombo {
         })
     }
 
-    /// Escape held with no chord modifier — Ctrl, Alt or Command.
-    ///
-    /// Shift is deliberately allowed: nothing binds Shift-Escape, and a user who has not let go of
-    /// Shift still means Escape.
     pub fn is_bare_escape(&self) -> bool {
         self.key == KeyCode::Escape
             && !self.modifiers.ctrl
@@ -367,10 +288,6 @@ impl KeyCombo {
             && !self.modifiers.super_key
     }
 
-    /// True for the two combos that close the command bar: bare Escape, and Ctrl-C.
-    ///
-    /// The bar is the only surface that answers Ctrl-C this way, so the pairing belongs here
-    /// rather than in whichever key monitor happens to ask.
     pub fn dismisses_command_bar(&self) -> bool {
         self.is_bare_escape()
             || (self.key == KeyCode::KeyC
@@ -380,12 +297,6 @@ impl KeyCombo {
                 && !self.modifiers.super_key)
     }
 
-    /// This combo as a claim a page can test, or `None` when the page decides it without asking.
-    ///
-    /// The excluded case is exactly [`KeyCombo::is_text_input`]: a printable key held with nothing
-    /// but Shift. A page answers that from the keystroke alone, in the same tick, so putting it in
-    /// a set that is briefly stale after every context change could only lose a character.
-    /// Everything else is claimable, because a page has no way to know whether it is bound.
     pub fn claimed(&self) -> Option<ClaimedKey> {
         if self.is_text_input() {
             return None;
@@ -396,11 +307,6 @@ impl KeyCombo {
         })
     }
 
-    /// True when pressing this is someone typing rather than invoking something.
-    ///
-    /// The counterpart of [`vmux_core::input::KeyStroke::is_text_input`] on the keymap side of the
-    /// wire, and it has to agree with it: this decides what is left out of the claimed set, and
-    /// that one decides what the page keeps when the set says nothing.
     fn is_text_input(&self) -> bool {
         if KeyModifiers::from(self.modifiers).has_chord() {
             return false;
@@ -437,21 +343,10 @@ impl KeyCombo {
         )
     }
 
-    /// This key's `code` attribute, as a page reports it.
-    ///
-    /// [`KeyCode`]'s variants are named after the W3C `code` values, so its `Debug` spelling *is*
-    /// the wire name. Mirroring [`key_code_from_str`] by hand instead would be a second copy of
-    /// that table with nothing keeping the two in step; `web_code_round_trips_through_resolve_key`
-    /// pins the assumption against the table itself and fails loudly if Bevy ever renames one.
     fn web_code(&self) -> String {
         format!("{:?}", self.key)
     }
 
-    /// This key read as the second half of a chord opened by `prefix`.
-    ///
-    /// A modifier the prefix already holds is dropped, because people keep Ctrl down through
-    /// `Ctrl+g s` rather than releasing it between the halves. Shift is kept: it distinguishes the
-    /// second key rather than merely surviving from the first.
     fn chord_second_after(&self, prefix: &KeyCombo) -> KeyCombo {
         let mut second = self.clone();
         second.modifiers.ctrl &= !prefix.modifiers.ctrl;
@@ -624,8 +519,6 @@ fn key_code_from_str(s: &str) -> Option<KeyCode> {
 mod tests {
     use super::*;
 
-    /// Two ids that exist in the command tree and are not the same command, so a precedence test
-    /// cannot pass by accident.
     const STACK_CLOSE: &str = "stack_close";
     const PANE_CLOSE: &str = "close_pane";
 
@@ -691,8 +584,6 @@ mod tests {
         assert!(!combo_with(KeyCode::KeyC, super_key).dismisses_command_bar());
     }
 
-    /// The point of putting bindings in a settings file: rebinding a key that already has a
-    /// compiled-in default has to actually take effect.
     #[test]
     fn a_configured_binding_outranks_the_default_on_the_same_key() {
         let mut keymap = Keymap::default();
@@ -705,8 +596,6 @@ mod tests {
         );
     }
 
-    /// Order of arrival must not decide the winner, or the same settings file would behave
-    /// differently depending on how the keymap happened to be assembled.
     #[test]
     fn the_default_still_loses_when_it_arrives_last() {
         let mut keymap = Keymap::default();
@@ -719,7 +608,6 @@ mod tests {
         );
     }
 
-    /// The whole reason `when` exists: one key meaning two things depending on what is open.
     #[test]
     fn a_scoped_binding_wins_only_inside_its_context() {
         let mut keymap = Keymap::default();
@@ -745,7 +633,6 @@ mod tests {
         );
     }
 
-    /// A surface that publishes no context must not inherit another's scoped bindings.
     #[test]
     fn a_scoped_binding_never_matches_an_absent_context() {
         let mut keymap = Keymap::default();
@@ -766,8 +653,6 @@ mod tests {
         assert!(!when.matches(&context(&["chat.approval"])));
     }
 
-    /// An empty condition would otherwise parse as a clause that holds everywhere and, being
-    /// present, sort ahead of the unconditional bindings it should tie with.
     #[test]
     fn a_condition_naming_no_terms_is_not_a_condition() {
         assert_eq!(When::parse(""), None);
@@ -793,9 +678,6 @@ mod tests {
         super_key: false,
     };
 
-    /// `web_code` reads a page-facing string off `KeyCode`'s `Debug`. The `key_code_from_str` table
-    /// is the independent oracle: every name it accepts has to come back out unchanged, so a Bevy
-    /// rename shows up here rather than as a shortcut that silently stops firing in the browser.
     #[test]
     fn web_code_round_trips_through_resolve_key() {
         for name in [
@@ -843,9 +725,6 @@ mod tests {
         }
     }
 
-    /// The rule that decides the claimed set. A printable key held with nothing but Shift stays
-    /// with the page, because a stale set claiming it would swallow a character; everything else is
-    /// claimable, because the page cannot tell whether it is bound.
     #[test]
     fn only_strokes_a_page_cannot_decide_for_itself_are_claimable() {
         assert_eq!(combo(KeyCode::KeyX).claimed(), None);
@@ -860,8 +739,6 @@ mod tests {
         assert!(combo(KeyCode::F5).claimed().is_some());
     }
 
-    /// What a page is told to hand over, and what changes when its context does. A chord is
-    /// represented by its prefix, since that is the press the page has to give up.
     #[test]
     fn the_claimed_set_follows_the_context() {
         let mut keymap = Keymap::default();
@@ -905,8 +782,6 @@ mod tests {
         );
     }
 
-    /// A binding naming a command that no longer exists would otherwise cost the page a key and
-    /// give it nothing back.
     #[test]
     fn a_binding_on_an_unknown_command_claims_nothing() {
         let mut keymap = Keymap::default();
@@ -922,8 +797,6 @@ mod tests {
         assert_eq!(keymap.in_context(KeyContext::NONE).claims().keys, vec![]);
     }
 
-    /// The two sides of the wire have to agree on what a claim matches, or the page would hand over
-    /// a key the core does not act on — or keep one it does.
     #[test]
     fn a_claim_matches_the_stroke_that_produced_it() {
         let claims = KeyClaims {
@@ -946,12 +819,6 @@ mod tests {
         })));
     }
 
-    /// What the spaces page gets back for each chord it hands over, out of the compiled defaults.
-    ///
-    /// [`KeymapView::claims`] skips a binding whose command id no longer resolves, so a leaf that
-    /// stopped round-tripping would cost the page the key with no error anywhere: it would simply
-    /// stop navigating. `scoped` is what `PageKeyPlugin` calls on a stroke that arrived, so this is
-    /// the answer the page itself would receive.
     #[test]
     fn the_spaces_page_resolves_every_chord_it_hands_over() {
         use crate::{LayoutCommand, SpaceCommand};
@@ -988,8 +855,6 @@ mod tests {
         }
     }
 
-    /// Every spaces key is scoped, so off that page it belongs to whoever is focused. One that
-    /// leaked would delete a space from a terminal.
     #[test]
     fn a_spaces_chord_means_nothing_off_the_spaces_page() {
         let keymap = Keymap::defaults();

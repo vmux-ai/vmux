@@ -1,12 +1,9 @@
-//! Why the agent stopped, shown inline in the transcript where the turn died.
-
 use crate::event::ChatOpenPage;
 use dioxus::prelude::*;
 use vmux_ui::clipboard::Clipboard;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-/// Why the agent stopped, and the way out when the cause is a bad package version.
 #[component]
 pub(super) fn ChatErrorCard(message: String) -> Element {
     let is_startup = message.to_lowercase().contains("startup");
@@ -100,8 +97,6 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
     }
 }
 
-/// Whether a startup/run error looks like a package registry/version block (npm 403, security
-/// policy, forbidden version) — where the fix is usually pinning a different version.
 fn is_version_error(message: &str) -> bool {
     let lower = message.to_lowercase();
     [

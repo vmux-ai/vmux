@@ -1,7 +1,3 @@
-//! Git worktree operations for per-tab isolation: create/remove/list a worktree and report
-//! its dirty/ahead status. Root/path-based (unlike [`crate::host::runner`], which is file-centric),
-//! because a worktree is created at a path that does not exist yet.
-
 use std::{
     fs::{File, OpenOptions},
     os::fd::AsRawFd,
@@ -10,7 +6,6 @@ use std::{
 
 use crate::host::runner::{GitError, git, git_err, git_read};
 
-/// A vmux-managed worktree: its checkout path, branch, base ref, and owning repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
     pub path: PathBuf,
@@ -19,14 +14,12 @@ pub struct WorktreeInfo {
     pub repo_root: PathBuf,
 }
 
-/// Uncommitted (working-tree) and unpushed (ahead-of-upstream) commit counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorktreeStatus {
     pub uncommitted: u32,
     pub ahead: u32,
 }
 
-/// Canonical checkout root and shared Git directory for a repository checkout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckoutInfo {
     pub root: PathBuf,
@@ -114,7 +107,6 @@ fn bare_checkout_root(input_dir: &Path, common_dir: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-/// Resolve checkout root and shared Git directory.
 pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     let input_dir = dir
         .canonicalize()
@@ -142,12 +134,10 @@ pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     Ok(CheckoutInfo { root, common_dir })
 }
 
-/// The repo root containing `dir` (`git rev-parse --show-toplevel`). `dir` must exist.
 pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.root)
 }
 
-/// Initialize a Git repository in an existing directory.
 pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     let dir = dir
         .canonicalize()
@@ -162,7 +152,6 @@ pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(&dir).map(|info| info.root)
 }
 
-/// Create the empty root commit required before Git can add a linked worktree.
 pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
     let (_, _, has_head) = git(root, &["rev-parse", "--verify", "HEAD"])?;
     if has_head {
@@ -213,12 +202,10 @@ pub fn ensure_initial_snapshot(root: &Path, message: &str) -> Result<(), GitErro
     Ok(())
 }
 
-/// The absolute common Git directory shared by a repository's main and linked worktrees.
 pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.common_dir)
 }
 
-/// The current branch name at `root`, falling back to a short SHA when HEAD is detached.
 pub fn head_ref(root: &Path) -> Result<String, GitError> {
     if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
         let name = stdout.trim();
@@ -233,7 +220,6 @@ pub fn head_ref(root: &Path) -> Result<String, GitError> {
     Ok(stdout.trim().to_string())
 }
 
-/// Create a worktree at `path` on a new `branch` based on `base` (`git worktree add`).
 pub fn worktree_add(
     root: &Path,
     path: &Path,
@@ -257,7 +243,6 @@ pub fn worktree_add(
     })
 }
 
-/// Recreate a worktree at `path` from an existing local `branch`.
 pub fn worktree_add_existing(
     root: &Path,
     path: &Path,
@@ -321,7 +306,6 @@ pub fn worktree_add_existing(
     })
 }
 
-/// Remove the worktree at `path` and delete its `branch` (best-effort branch cleanup).
 pub fn worktree_remove(
     root: &Path,
     path: &Path,
@@ -343,7 +327,6 @@ pub fn worktree_remove(
     Ok(())
 }
 
-/// Working-tree dirtiness and unpushed-commit count for the worktree at `path`.
 pub fn worktree_status(path: &Path) -> Result<WorktreeStatus, GitError> {
     let (stdout, stderr, ok) = git(path, &["status", "--porcelain"])?;
     if !ok {
@@ -358,7 +341,6 @@ pub fn worktree_status(path: &Path) -> Result<WorktreeStatus, GitError> {
     Ok(WorktreeStatus { uncommitted, ahead })
 }
 
-/// Registered worktree checkout paths for the repo at `root` (`git worktree list`).
 pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
     Ok(worktree_registrations(root)?
         .into_iter()
@@ -397,7 +379,6 @@ pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, 
     Ok(registrations)
 }
 
-/// Local branch names (`git branch --format=%(refname:short)`).
 pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
     let (stdout, stderr, ok) = git(root, &["branch", "--format=%(refname:short)"])?;
     if !ok {
@@ -410,7 +391,6 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
         .collect())
 }
 
-/// Validate a local branch name using Git's own ref-format rules.
 pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
     if branch.is_empty() || branch.trim() != branch {
         return Err(GitError(
@@ -424,9 +404,6 @@ pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
     Ok(())
 }
 
-/// Absolute path to the repo's `info/exclude` (the local, untracked ignore list). Resolved via
-/// git so it works for both the main worktree and a linked worktree, where `.git` is a file
-/// pointer rather than a directory and the exclude lives in the shared common dir.
 pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
     let (stdout, _, ok) = git(
         dir,
@@ -445,7 +422,6 @@ pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
     (!p.is_empty()).then(|| PathBuf::from(p))
 }
 
-/// Live git status of a directory, for the side-sheet git-integration card.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepoInfo {
     pub branch: String,
@@ -457,8 +433,6 @@ pub struct RepoInfo {
     pub(crate) common_dir: PathBuf,
 }
 
-/// Detect git info for `dir`: `None` if it isn't inside a git repo, else the current branch,
-/// whether it's a linked worktree, and uncommitted/ahead counts. Auto-detected from git alone.
 pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
     let (status, _, ok) = git_read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
     if !ok {
@@ -509,8 +483,6 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
     })
 }
 
-/// True if `dir` is a *linked* worktree (its git-dir differs from the repo's common git-dir),
-/// i.e. not the repo's main working tree. False for the main worktree or a non-repo.
 pub fn is_linked_worktree(dir: &Path) -> bool {
     let Ok(git_dir) = rev_parse_path(dir, "--git-dir", "git directory") else {
         return false;
@@ -521,15 +493,12 @@ pub fn is_linked_worktree(dir: &Path) -> bool {
     git_dir != common_dir
 }
 
-/// A worktree that has been checked to belong to the expected repository and branch.
 pub struct ValidatedLinkedWorkspace {
     pub cwd: PathBuf,
     pub workspace_cwd: PathBuf,
     pub checkout: CheckoutInfo,
 }
 
-/// Check that `cwd` is a linked worktree of the same repository as `workspace_cwd`, sitting on
-/// `branch`.
 pub fn validate_linked_workspace(
     cwd: &Path,
     workspace_cwd: &Path,

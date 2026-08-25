@@ -3,8 +3,6 @@ use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-/// The macOS half of [`crate::host_focus::HostFocusPlugin`]: hands first-responder back to the
-/// winit host window when the intent says the host should own the keyboard.
 pub(crate) struct HostFocusPlatformPlugin;
 
 impl Plugin for HostFocusPlatformPlugin {
@@ -61,7 +59,6 @@ fn should_release_keys(outcome: ReclaimOutcome, pending_key_window: &mut bool) -
     }
 }
 
-/// Make the winit content view the window's first responder.
 fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSResponder, NSView};

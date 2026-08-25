@@ -3,10 +3,8 @@ use dioxus::prelude::*;
 use crate::components::prompt_box::PromptBox;
 use crate::i18n::translate;
 
-/// Default DOM id for the shared prompt textarea.
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
 
-/// One attachment pill rendered inside a prompt composer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptComposerAttachment {
     pub key: String,
@@ -16,7 +14,6 @@ pub struct PromptComposerAttachment {
     pub remove_index: Option<usize>,
 }
 
-/// Primary action displayed by a prompt composer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PromptComposerAction {
     #[default]
@@ -25,16 +22,13 @@ pub enum PromptComposerAction {
 }
 
 #[component]
-/// Shared prompt composer used by desktop and mobile chat surfaces.
 pub fn PromptComposer(
     value: String,
     #[props(default)] preview: String,
     #[props(default)] completion: String,
     #[props(default)] attachments: Vec<PromptComposerAttachment>,
     #[props(default)] ghost: Option<Element>,
-    /// Render the rotating example prompts behind an empty input.
-    #[props(default)]
-    show_examples: bool,
+    #[props(default)] show_examples: bool,
     placeholder: String,
     #[props(default)] accent_bg: String,
     accent_color: String,
@@ -160,25 +154,10 @@ pub fn PromptComposer(
                     }
                     textarea {
                         id: "{input_id}",
-                        // The placeholder is ellipsised rather than wrapped, because
-                        // `field-sizing:content` does not count it as content: an empty field
-                        // stays one line tall however many lines its placeholder would need, so a
-                        // wrapped one has its second line cut off by the box. Where it fits — every
-                        // width but a phone's — this changes nothing.
                         class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
                         autofocus,
                         disabled,
                         rows: "1",
-                        // Text checking off, and it is not only a matter of taste.
-                        //
-                        // WebKit runs spelling, grammar and data detection on a focused editable
-                        // field continuously, on a USER_INTERACTIVE queue. This field is focused
-                        // the moment the launcher mounts and stays focused, so that queue never
-                        // stops: it measured at 1589 of 6047 samples — a quarter of the process —
-                        // with the app doing nothing at all.
-                        //
-                        // What it was checking is commands, paths and urls, which it underlines as
-                        // misspelt anyway.
                         spellcheck: "false",
                         autocapitalize: "off",
                         autocomplete: "off",
@@ -230,8 +209,4 @@ pub fn PromptComposer(
     }
 }
 
-/// Caret and focus helpers for the shared composer textarea. Only the CEF host can reach
-/// the DOM directly; on every other target these are no-ops so the composer itself stays
-/// host-agnostic.
-/// Move the caret to the end of the composer input on the next tick.
 pub fn focus_prompt_end(_input_id: &str) {}

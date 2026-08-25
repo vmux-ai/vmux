@@ -1,26 +1,7 @@
-//! Length-prefixed frames, for a stream that carries more than one message.
-//!
-//! `u32` little-endian length, then that many bytes. Nothing here interprets the body — the same
-//! framing carries rkyv over a local unix socket and over a QUIC stream, and neither transport is
-//! named in this module.
-//!
-//! It lives in this crate rather than beside its first caller because the relay links
-//! `vmux_remote` precisely for being free of domain types. A codec in `vmux_client` would drag
-//! `vmux_wire` and `vmux_profile` behind it, and the relay must stay unable to decode a payload.
-//!
-//! [`Frame`] builds on it: a message type, then a length-prefixed body. One scheme serves every
-//! stream in the transport — a control exchange is one frame and a subscription is many.
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::quic::{FRAME_VERSION, MessageType};
 
-/// A stream of length-prefixed frames, bounded by what one frame may claim.
-///
-/// The bound is a field rather than a constant because one framing runs over two transports with
-/// very different threat models: a local unix socket, where an oversized frame is a memory copy,
-/// and a remote QUIC stream, where it is a peer's licence to make this process allocate. A single
-/// constant would have to be the looser of the two.
 #[derive(Clone, Copy, Debug)]
 pub struct LengthPrefixed {
     max_frame_bytes: usize,
@@ -40,12 +21,6 @@ impl LengthPrefixed {
         writer.flush().await
     }
 
-    /// Read one frame, or `None` once the peer has stopped sending.
-    ///
-    /// `None` means the stream ended *between* frames, which is how a stream ordinarily ends. A
-    /// peer that stopped part-way through one is an error and must not be folded into the same
-    /// answer: a subscription that was reset mid-frame would otherwise read as one the desktop
-    /// finished, and the caller would stop listening instead of reconnecting.
     pub async fn read<R>(self, reader: &mut R) -> std::io::Result<Option<Vec<u8>>>
     where
         R: AsyncReadExt + Unpin,
@@ -59,12 +34,6 @@ impl LengthPrefixed {
         Ok(Some(body))
     }
 
-    /// Fill `buffer`, saying whether the stream ended instead.
-    ///
-    /// `false` means nothing at all was there, which is how a stream ordinarily ends. Anything
-    /// short of a full buffer is an error, and telling those apart is the entire job: `read_exact`
-    /// reports an empty prefix and a half-written one identically, so using it directly here is
-    /// how a peer that vanished mid-prefix comes back as a clean end of stream.
     async fn fill_or_end<R>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<bool>
     where
         R: AsyncReadExt + Unpin,
@@ -79,7 +48,6 @@ impl LengthPrefixed {
         Ok(true)
     }
 
-    /// The blocking twin of [`LengthPrefixed::fill_or_end`].
     fn fill_or_end_blocking<R: std::io::Read>(
         reader: &mut R,
         buffer: &mut [u8],
@@ -104,8 +72,6 @@ impl LengthPrefixed {
         writer.flush()
     }
 
-    /// The blocking twin of [`LengthPrefixed::read`], with the same distinction between a stream
-    /// that ended and a frame that was cut short.
     pub fn read_blocking<R: std::io::Read>(
         self,
         reader: &mut R,
@@ -119,10 +85,6 @@ impl LengthPrefixed {
         Ok(Some(body))
     }
 
-    /// What the prefix claims, once it is small enough to believe.
-    ///
-    /// Checked before the allocation it sizes, so a peer cannot spend this process's memory with
-    /// four bytes and then hang up.
     fn length_of(self, prefix: [u8; 4]) -> std::io::Result<usize> {
         let length = u32::from_le_bytes(prefix) as usize;
         if length > self.max_frame_bytes {
@@ -134,15 +96,6 @@ impl LengthPrefixed {
         Ok(length)
     }
 
-    /// Whether an error means the peer is gone rather than that something went wrong.
-    ///
-    /// A clean shutdown yields `UnexpectedEof`; a crashed peer that closes its socket with unread
-    /// data resets the connection, so the next read fails with `ConnectionReset` on Linux where
-    /// macOS delivers a clean EOF. Both are a normal end of stream — in the service, a read error
-    /// that escaped here would skip client cleanup and orphan PTY children.
-    ///
-    /// Only ever consulted at a frame boundary. Part-way through a frame the same error kinds mean
-    /// data was lost, which is the opposite conclusion.
     fn peer_gone(error: &std::io::Error) -> bool {
         matches!(
             error.kind(),
@@ -154,20 +107,11 @@ impl LengthPrefixed {
     }
 }
 
-/// Why a frame could not be read.
 #[derive(Debug)]
 pub enum FrameError {
-    /// The peer frames its streams in a layout this build cannot read.
     UnsupportedVersion(u8),
-    /// A frame arrived, and it was not the one this reader is waiting for.
-    ///
-    /// The refusal the type field exists to make possible. Without it a reader parses whatever it
-    /// expects, and serde's tolerance for unknown fields means another leg's message decodes
-    /// cleanly instead of being turned away.
     UnexpectedType(MessageType),
-    /// The stream ended part-way through a frame, so bytes were lost.
     Truncated,
-    /// Read, but the body was not what its type promised.
     Malformed,
     Io(std::io::Error),
 }
@@ -181,11 +125,6 @@ impl From<std::io::Error> for FrameError {
     }
 }
 
-/// One typed message, as it travels.
-///
-/// A stream announces [`FRAME_VERSION`] once and then carries these. That is the whole framing:
-/// a control exchange writes one and finishes, a subscription writes many, and the same reader
-/// serves both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     pub message_type: MessageType,
@@ -197,8 +136,6 @@ impl Frame {
         Self { message_type, body }
     }
 
-    /// A frame carrying `value` as JSON, for the messages parsed before either peer has agreed on
-    /// anything.
     pub fn json<T: serde::Serialize>(
         message_type: MessageType,
         value: &T,
@@ -206,10 +143,6 @@ impl Frame {
         Ok(Self::new(message_type, serde_json::to_vec(value)?))
     }
 
-    /// The body, once the type has been checked against what the caller is waiting for.
-    ///
-    /// Checked *before* the body is looked at, which is the point: a relay setup satisfies a
-    /// session setup byte for byte, so deciding on the payload is deciding too late.
     pub fn body_of(&self, want: MessageType) -> Result<&[u8], FrameError> {
         if self.message_type != want {
             return Err(FrameError::UnexpectedType(self.message_type));
@@ -217,7 +150,6 @@ impl Frame {
         Ok(&self.body)
     }
 
-    /// Read this frame's body as JSON, if it is the type expected.
     pub fn read_json<T: serde::de::DeserializeOwned>(
         &self,
         want: MessageType,
@@ -226,7 +158,6 @@ impl Frame {
     }
 }
 
-/// Frames on one stream: a version byte, then any number of [`Frame`]s.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameStream {
     codec: LengthPrefixed,
@@ -239,7 +170,6 @@ impl FrameStream {
         }
     }
 
-    /// Announce this build's framing, then write the first frame.
     pub async fn open<W>(self, writer: &mut W, frame: &Frame) -> std::io::Result<()>
     where
         W: AsyncWriteExt + Unpin,
@@ -248,7 +178,6 @@ impl FrameStream {
         self.send(writer, frame).await
     }
 
-    /// Write a further frame on a stream already opened.
     pub async fn send<W>(self, writer: &mut W, frame: &Frame) -> std::io::Result<()>
     where
         W: AsyncWriteExt + Unpin,
@@ -259,10 +188,6 @@ impl FrameStream {
         self.codec.write(writer, &frame.body).await
     }
 
-    /// Check the peer's framing, then read its first frame.
-    ///
-    /// A version this build cannot read is refused here rather than being carried into a decode
-    /// that would fail somewhere less obvious.
     pub async fn accept<R>(self, reader: &mut R) -> Result<Frame, FrameError>
     where
         R: AsyncReadExt + Unpin,
@@ -278,7 +203,6 @@ impl FrameStream {
         }
     }
 
-    /// Read a further frame, or `None` once the peer has finished sending.
     pub async fn next<R>(self, reader: &mut R) -> Result<Option<Frame>, FrameError>
     where
         R: AsyncReadExt + Unpin,
@@ -340,9 +264,6 @@ mod tests {
         assert_eq!(read.as_deref(), Some(&b"\x00opaque\xff"[..]));
     }
 
-    /// The distinction the whole type exists for. A peer that stopped part-way through a frame
-    /// lost data; reporting that as "no more frames" is how a reset subscription reads as one the
-    /// desktop finished, and the caller stops listening instead of reconnecting.
     #[tokio::test]
     async fn a_frame_cut_short_is_not_a_stream_that_ended() {
         let mut whole = Vec::new();
@@ -373,9 +294,6 @@ mod tests {
         );
     }
 
-    /// The same distinction one layer up. A subscription that dies after one byte of a message
-    /// type has lost data; reading that as the desktop finishing is what stops the client
-    /// reconnecting.
     #[tokio::test]
     async fn a_message_type_cut_in_half_is_not_a_stream_that_ended() {
         let stream = FrameStream::new(64 * 1024);
@@ -420,7 +338,6 @@ mod tests {
         );
     }
 
-    /// Refused from the prefix alone, so four bytes cannot make this process allocate.
     #[tokio::test]
     async fn a_frame_over_the_limit_is_refused_before_it_is_allocated() {
         let tiny = LengthPrefixed::new(16);
@@ -434,10 +351,6 @@ mod tests {
         );
     }
 
-    /// The defect the type field exists to close. A relay setup carries `device_id`, `role` and
-    /// `token`; a client setup carries `device_id` and `token`. Serde ignores the extra field, so
-    /// before there was a type on the wire the first decoded cleanly as the second — and a shared
-    /// ALPN meant nothing at the connection layer separated them either.
     #[tokio::test]
     async fn one_legs_setup_is_refused_by_the_other_legs_reader() {
         use crate::quic::{PeerRole, RelaySetup};
@@ -475,8 +388,6 @@ mod tests {
         );
     }
 
-    /// A stale peer must be told its framing is old, not handed a decode failure that looks like
-    /// corruption. `read_hello` used to collapse both into one answer.
     #[tokio::test]
     async fn a_stale_framing_is_refused_as_a_version_rather_than_as_rubbish() {
         let stream = FrameStream::new(64 * 1024);
@@ -495,8 +406,6 @@ mod tests {
         );
     }
 
-    /// One version byte for the stream, one length for each message. This is what lets a
-    /// subscription and a one-shot request share a format.
     #[tokio::test]
     async fn a_stream_announces_itself_once_and_then_carries_many_frames() {
         let stream = FrameStream::new(64 * 1024);
@@ -534,8 +443,6 @@ mod tests {
         assert_eq!(bodies, vec![b"first".to_vec(), b"second".to_vec()]);
     }
 
-    /// The reason the setups are JSON: a peer one release ahead can send a field this build has
-    /// never heard of and still be understood, so a message can grow without a version bump.
     #[tokio::test]
     async fn an_unknown_field_degrades_instead_of_failing() {
         let stream = FrameStream::new(64 * 1024);

@@ -1,9 +1,3 @@
-//! Pure decision logic behind the macOS native event monitors: pointer ownership,
-//! scroll wakes, render demand, and live-resize geometry.
-//!
-//! Only the macOS runtime drives these, but they are compiled under `test` on every
-//! platform so CI exercises them away from AppKit.
-
 pub(super) fn windowed_pointer_inside_after_event(
     pointer_position_changed: bool,
     previous: bool,

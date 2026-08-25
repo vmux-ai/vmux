@@ -15,11 +15,6 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-/// What enabling an extension is asking the reader to agree to.
-///
-/// Kept apart from its rendering because the two halves are not the same shape: the message is one
-/// of two sentences, and the permissions are a list. They were one newline-joined string while
-/// `window.confirm` was showing them, which is a plain-text box and the only thing it could take.
 #[derive(Clone, PartialEq)]
 struct Approval {
     message: String,
@@ -148,7 +143,6 @@ pub fn Page() -> Element {
     }
 }
 
-/// One installed extension, with its enable and remove controls.
 #[component]
 fn ExtensionRow(extension: ExtRow) -> Element {
     let item = extension;

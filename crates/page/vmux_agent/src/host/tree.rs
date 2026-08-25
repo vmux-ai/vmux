@@ -1,7 +1,3 @@
-//! The agent domain's plugin tree.
-//!
-//! [`AgentPlugin`] is the whole of it; every other module in `plugin/` is one of its slices.
-
 use bevy::prelude::*;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -29,8 +25,6 @@ use crate::strategy::AgentStrategies;
 use super::command::{FocusPaneRequest, ProcessStackSpawnRequest, RenameProfileRequest};
 use super::run_terminal::AgentTerminalRegions;
 
-/// Root plugin for the agent domain, aggregating session lifecycle, the agent pages, and
-/// the agent clients (ACP and in-page providers).
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
@@ -43,7 +37,6 @@ impl Plugin for AgentPlugin {
     }
 }
 
-/// Wires the agent-owned pages: the chat page, the agents manager page, and the setup flow.
 pub struct AgentPagesPlugin;
 
 impl Plugin for AgentPagesPlugin {
@@ -56,8 +49,6 @@ impl Plugin for AgentPagesPlugin {
     }
 }
 
-/// Wires the agent domain: CLI agent strategies, session watching, discovery and exit
-/// detection, and handling of agent commands, queries, tool calls, screenshots, and recordings.
 pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {

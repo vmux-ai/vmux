@@ -2,7 +2,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput};
 
-/// Expand `#[derive(VariantNames)]` into the enum's `VARIANT_NAMES` constant.
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let Data::Enum(data) = &input.data else {
@@ -21,7 +20,6 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl #impl_generics #name #ty_generics #where_clause {
-            /// Every variant of this enum, named, in declaration order.
             pub const VARIANT_NAMES: &'static [&'static str] = &[#(#variants),*];
         }
     })

@@ -10,8 +10,6 @@ use bevy_cef_core::prelude::CefEmbeddedHost;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// Embeds each page manifest's static webview bundle into Bevy's asset registry so pages
-/// can be served over `vmux://` URLs.
 pub struct PagePlugin;
 
 impl Plugin for PagePlugin {
@@ -27,29 +25,13 @@ pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 pub struct PageManifest {
     pub host: &'static str,
     pub title: &'static str,
-    /// Fluent id naming this page in the command bar, resolved against the active locale.
-    ///
-    /// `None` falls back to [`Self::title`], which is untranslated. Declared here rather than
-    /// looked up by host so a page names itself, and adding one does not mean editing the command
-    /// bar.
     pub title_message_id: Option<&'static str>,
-    /// A command id this page supersedes.
-    ///
-    /// The command's own row is dropped from the command bar and its shortcut is shown on this
-    /// page's entry instead, because reaching the page is what the command did. Its menu item and
-    /// its keybinding are untouched.
     pub replaces_command: Option<&'static str>,
     pub keywords: &'static [&'static str],
     pub icon: Option<crate::icon::BuiltinIcon>,
     pub command_bar: bool,
 }
 
-/// A Dioxus page is mounted on this entity, wherever its components run.
-///
-/// `WebviewSource` used to be the way to ask this, because a page was always a URL a CEF browser
-/// loaded. That stopped being true when the layout began running its components in the host
-/// process: it hosts a page and has no source, so every query filtered on one silently skipped it
-/// — which left its keyboard claims empty and its published context read by nobody.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostsPage;
 
@@ -61,12 +43,6 @@ pub struct PrewarmPage {
     pub pool_size: usize,
 }
 
-/// A page whose components run in this process, declared beside its [`PageManifest`].
-///
-/// The opposite of [`PrewarmPage`], and a page has one or the other. A prewarmed page keeps hidden
-/// browsers mounted so it can be revealed rather than loaded; this one has nothing to keep warm,
-/// because mounting it is building a `VirtualDom` rather than starting a browser and fetching a
-/// bundle into it.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativelyHosted {
     pub url: &'static str,

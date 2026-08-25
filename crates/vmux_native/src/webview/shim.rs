@@ -1,13 +1,3 @@
-//! What a natively-hosted page finds on `window`.
-//!
-//! Deliberately the same two verbs a page in the wasm bundle finds. `vmux_ui::transport` picks its
-//! `PageHost` at runtime, so the page half of this is a matter of answering to whichever object is
-//! present, not of teaching the pages a second protocol.
-//!
-//! The rest is what a natively-hosted page has to do for itself, because nothing evaluates script
-//! into it: pull its own edits, apply the element requests its components queued, and put what is
-//! selected on the request for the event that needs to know.
-
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
   const report = (kind, text) => {

@@ -1,9 +1,3 @@
-//! Questions an agent asks about the app, and the answers that come back out of band.
-//!
-//! A query whose answer needs another subsystem — a screenshot, a recording, a layout snapshot —
-//! is forwarded as a request and matched to its response by request id, so nothing blocks a frame
-//! waiting on it.
-
 use bevy::prelude::*;
 use vmux_command::WriteAppCommands;
 use vmux_service::client::ServiceClient;
@@ -245,8 +239,6 @@ pub(super) fn handle_agent_queries(
                     name: name.clone(),
                 });
             }
-            // ReadTerminal/ReadTerminalFull/CommandExit/RunCompletion are
-            // answered by the service directly; they never reach the GUI.
             AgentQuery::ReadTerminal { .. }
             | AgentQuery::ReadTerminalFull { .. }
             | AgentQuery::CommandExit { .. }

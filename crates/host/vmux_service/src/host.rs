@@ -1,5 +1,3 @@
-//! The daemon itself: process supervision, transports and the ACP bridge.
-
 pub use vmux_client::{
     pairing, read_message, read_message_blocking, write_message, write_message_blocking,
 };

@@ -13,8 +13,6 @@ pub fn resolve(cwd: &Path, anchor: ProcessId, kind: AgentKind) -> Result<McpServ
     resolve_inner(cwd, anchor, false, false, run_timeout_secs_for_kind(kind))
 }
 
-/// Resolve the MCP sidecar for an ACP agent. Agents that use ACP client terminals hide the
-/// overlapping vmux terminal tools; compatibility adapters keep them available.
 pub fn resolve_acp(
     cwd: &Path,
     anchor: ProcessId,

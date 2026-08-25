@@ -1,8 +1,3 @@
-//! Fixtures shared by more than one slice's tests.
-//!
-//! A fixture used by a single slice belongs in that slice; these are here because the world they
-//! build is the same one several features need to observe.
-
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_layout::settings::{

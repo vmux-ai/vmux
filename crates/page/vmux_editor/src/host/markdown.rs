@@ -1,5 +1,3 @@
-//! Markdown render tree generation for editable Note view.
-
 use std::path::Path;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};

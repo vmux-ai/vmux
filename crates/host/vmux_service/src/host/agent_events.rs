@@ -5,10 +5,6 @@ use crate::protocol::{
     ProcessId,
 };
 
-/// Who issued a command relayed through the agent request plumbing. Most
-/// `AgentCommandRequest`s originate from an agent (`Agent`), but some user
-/// actions (e.g. opening a history entry) reuse the same path. A CLI agent is
-/// identified by its MCP `anchor` (`ProcessId`); a page agent by its `sid`.
 #[derive(Clone, Debug, Default)]
 pub enum CommandOrigin {
     #[default]
@@ -84,7 +80,6 @@ pub struct PageAgentSnapshot {
     pub messages_json: String,
 }
 
-/// Human-readable identity reported by a running ACP agent.
 #[derive(Message)]
 pub struct PageAgentInfo {
     pub sid: String,
@@ -100,7 +95,6 @@ pub struct PageAgentWorkspaceChanged {
     pub workspace_cwd: String,
 }
 
-/// Current model and selectable models reported by a running ACP session.
 #[derive(Message)]
 pub struct PageAgentModelInfo {
     pub sid: String,
@@ -117,16 +111,12 @@ pub struct PageAgentModelSelectionResult {
     pub succeeded: bool,
 }
 
-/// The ACP session was created/loaded; carries the agent-assigned session id so the GUI can
-/// redirect the pane url to `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle).
 #[derive(Message)]
 pub struct PageAgentSessionCreated {
     pub sid: String,
     pub acp_session_id: String,
 }
 
-/// An ACP agent created a terminal (`terminal/create`); the GUI opens a visible pane beside the
-/// agent (`sid`) bound to the daemon-spawned `process_id` (attach only — the PTY already exists).
 #[derive(Message)]
 pub struct PageAgentAcpTerminalCreated {
     pub sid: String,

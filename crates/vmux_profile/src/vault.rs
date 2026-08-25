@@ -436,12 +436,6 @@ pub fn initialize() -> Result<(), String> {
     initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
 }
 
-/// The Recovery Key this process generated and has not yet committed.
-///
-/// The page is shown the key so the user can save it, but never hands it back. A key arriving
-/// from the page could be one an attacker already knows, and wrapping the master key with it
-/// would open the Vault to them; taking it from here means the key that does the wrapping is
-/// provably the one this process drew from the system CSPRNG.
 static PENDING_RECOVERY_KEY: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
 
 fn pending_recovery_key() -> std::sync::MutexGuard<'static, Option<Zeroizing<String>>> {
@@ -451,10 +445,6 @@ fn pending_recovery_key() -> std::sync::MutexGuard<'static, Option<Zeroizing<Str
     })
 }
 
-/// Draw a new Recovery Key and hold it until [`create_recovery_key`] commits it.
-///
-/// 256 bits from `ring`'s `SystemRandom`, rendered in the grouped form the user sees and pastes
-/// back. Replaces any key drawn earlier and never committed.
 pub fn generate_recovery_key() -> Result<Zeroizing<String>, String> {
     let mut bytes = Zeroizing::new(vec![0_u8; KEY_LEN]);
     SystemRandom::new()
@@ -471,7 +461,6 @@ pub fn generate_recovery_key() -> Result<Zeroizing<String>, String> {
     Ok(key)
 }
 
-/// Commit the key [`generate_recovery_key`] drew, once the user has confirmed saving it.
 pub fn create_recovery_key() -> Result<RecoveryKeyCreation, String> {
     let key = pending_recovery_key()
         .take()
@@ -2456,7 +2445,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// One test owns `PENDING_RECOVERY_KEY`, because it is process-wide and the suite is parallel.
     #[test]
     fn a_recovery_key_is_committed_only_when_this_process_drew_it() {
         pending_recovery_key().take();

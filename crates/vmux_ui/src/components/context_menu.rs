@@ -23,16 +23,6 @@ impl ContextMenuState {
     }
 }
 
-/// Keep a just-opened menu inside the window.
-///
-/// `web` only, and it needs a real element: the menu is positioned at the pointer, so without
-/// this a right-click near an edge opens a menu that runs off it.
-/// Lift the menu into the browser's top layer, then keep it on screen.
-///
-/// `web` only. Both halves need an element to act on, and a native `MountedData` answers
-/// `NotSupported` — the downcast below already returns `None` there, so this was inert rather
-/// than wrong. Until a `RenderedElementBacking` exists, a native menu stays in normal flow and
-/// is positioned by CSS alone: it can be overlapped, and it is not clamped to the window.
 fn mount_context_menu_top_layer(_event: Event<MountedData>) {}
 
 #[component]

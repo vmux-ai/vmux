@@ -133,12 +133,6 @@ fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
     }
 }
 
-/// Point an external agent's instruction file at the shared canonical config, without ever
-/// destroying a user's own config. A file vmux previously managed (it carries the
-/// `vmux-knowledge` marker) is migrated: its hand-authored preamble seeds the canonical once and
-/// the original is kept as `*.bak`. A pristine real file or a foreign symlink is left untouched
-/// (with a warning). A missing path is only wired up when the canonical already has content, so a
-/// user who has not populated the vmux vault is never touched.
 #[cfg(unix)]
 fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
     use std::os::unix::fs::symlink;
@@ -744,7 +738,6 @@ mod tests {
 
         link_instructions(&path, &canonical).unwrap();
 
-        // A user who has not populated the vault is untouched: no file planted, no canonical created.
         assert!(!path.exists());
         assert!(std::fs::symlink_metadata(&path).is_err());
         assert!(!canonical.exists());

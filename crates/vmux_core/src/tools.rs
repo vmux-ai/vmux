@@ -1,11 +1,6 @@
-//! Wire model for local tools and dotfiles.
-
-/// Host-to-page event carrying a complete tools snapshot.
 pub const TOOLS_SNAPSHOT_EVENT: &str = "tools-snapshot";
-/// Host-to-page event carrying one completed mutation.
 pub const TOOL_ACTION_RESULT_EVENT: &str = "tool-action-result";
 
-/// Source that owns an installed tool item.
 #[derive(
     Clone,
     Copy,
@@ -32,7 +27,6 @@ pub enum ToolProvider {
 }
 
 impl ToolProvider {
-    /// Providers rendered by the tools manager, in display order.
     pub const ALL: [Self; 7] = [
         Self::HomebrewFormula,
         Self::HomebrewCask,
@@ -43,7 +37,6 @@ impl ToolProvider {
         Self::Dotfiles,
     ];
 
-    /// Stable manifest and wire identifier.
     pub const fn id(self) -> &'static str {
         match self {
             Self::HomebrewFormula => "homebrew-formula",
@@ -56,7 +49,6 @@ impl ToolProvider {
         }
     }
 
-    /// User-facing category title.
     pub const fn title(self) -> &'static str {
         match self {
             Self::HomebrewFormula => "Homebrew Formulae",
@@ -70,7 +62,6 @@ impl ToolProvider {
     }
 }
 
-/// Reconciled state of one installed or declared item.
 #[derive(
     Clone,
     Copy,
@@ -92,7 +83,6 @@ pub enum ToolStatus {
     Failed,
 }
 
-/// Mutation offered for a tool item.
 #[derive(
     Clone,
     Copy,
@@ -117,7 +107,6 @@ pub enum ToolAction {
     Import,
 }
 
-/// Provider-qualified package or dotfile-package row.
 #[derive(
     Clone,
     Debug,
@@ -140,7 +129,6 @@ pub struct ToolItem {
     pub actions: Vec<ToolAction>,
 }
 
-/// Items grouped under one provider.
 #[derive(
     Clone,
     Debug,
@@ -157,7 +145,6 @@ pub struct ToolCategory {
     pub items: Vec<ToolItem>,
 }
 
-/// Complete tools state rendered by the manager and side sheet.
 #[derive(
     Clone,
     Debug,
@@ -180,7 +167,6 @@ pub struct ToolsSnapshot {
     pub error: String,
 }
 
-/// Requests a cached scan or an explicit catalog/update refresh.
 #[derive(
     Clone,
     Debug,
@@ -197,7 +183,6 @@ pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
 
-/// Opens a Tools-owned manifest in the editor.
 #[derive(
     Clone,
     Debug,
@@ -213,7 +198,6 @@ pub struct ToolOpenRequest {
     pub path: String,
 }
 
-/// Requests one package, manifest, or dotfile mutation.
 #[derive(
     Clone,
     Debug,
@@ -233,7 +217,6 @@ pub struct ToolActionRequest {
     pub value: String,
 }
 
-/// Completion result for a tools mutation.
 #[derive(
     Clone,
     Debug,

@@ -99,14 +99,6 @@ pub fn Page() -> Element {
     }
 }
 
-/// The spaces page's keyboard, on the far side of the keymap.
-///
-/// Nothing here names a key. The page hands the stroke over, the core decides, and this performs
-/// the verb it came back as — which is the only reason `Ctrl+n` can be rebound in `settings.json`
-/// without this file agreeing.
-///
-/// Both fields are signals rather than values, because the answer arrives in a listener registered
-/// on first render: a captured list would be one keystroke stale by the time a key was pressed.
 #[derive(Clone, Copy)]
 struct SpaceKeys {
     state: Signal<SpacesListEvent>,
@@ -114,7 +106,6 @@ struct SpaceKeys {
 }
 
 impl SpaceKeys {
-    /// Take the host's answers about keys this page handed over.
     fn listen(self) {
         let mut keys = self;
         let _resolved = use_listener::<SpaceKey, _>(SPACE_KEY_EVENT, move |key| keys.apply(key));
@@ -129,7 +120,6 @@ impl SpaceKeys {
         }
     }
 
-    /// Clamped at both ends rather than wrapping, which is what this list has always done.
     fn move_selection(&mut self, direction: MenuDirection) {
         let count = self.state.peek().spaces.len();
         let from = self.row();
@@ -147,7 +137,6 @@ impl SpaceKeys {
         emit_command("attach", Some(id), None);
     }
 
-    /// The last space is never deleted: the window it holds would have nowhere to put a tab.
     fn delete(&self) {
         if self.state.peek().spaces.len() <= 1 {
             return;
@@ -158,8 +147,6 @@ impl SpaceKeys {
         emit_command("delete", Some(id), None);
     }
 
-    /// The highlighted row, clamped to what the list holds now, so a selection survives a list that
-    /// shrank under it.
     fn row(&self) -> usize {
         let count = self.state.peek().spaces.len();
         (*self.selected.peek()).min(count.saturating_sub(1))

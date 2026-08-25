@@ -808,9 +808,6 @@ pub fn Page() -> Element {
                 }
             },
 
-            // Out of flow, and blockified by that — a resize observer skips inline elements, and
-            // this has to be observed rather than measured because what changes it is the font
-            // arriving, which nothing else announces.
             span {
                 id: MEASURE_ID,
                 style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
@@ -1785,8 +1782,6 @@ pub fn Page() -> Element {
             }
 
             {
-                // Vim puts the command line on the last screen row; mirror that rather than
-                // tucking it in the header, where it reads as a label instead of a prompt.
                 (!ed_command_line().is_empty()).then(|| rsx! {
                     div {
                         id: "vim-command-line",
@@ -1925,11 +1920,6 @@ pub fn Page() -> Element {
 const CONTAINER_ID: &str = "file-container";
 const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
-/// How many rows of how many columns the measuring span holds.
-///
-/// Both dimensions come off the one element: the width divides out to a character and the height
-/// to a line box — which a single-line span could not give, since its box is the font's content
-/// area rather than the pitch from one row of text to the next.
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 const NOTE_CARET_ID: &str = "note-caret";
@@ -1961,10 +1951,6 @@ fn file_mode_class(active: bool) -> &'static str {
     }
 }
 
-/// Where in a line's own box a pointer is: how far past the gutter, and which column.
-///
-/// A negative offset means the gutter itself, which is what the caller tests to tell a click on
-/// the fold column from a click on text.
 fn column_in_line(
     at: ElementPoint,
     gutter: f64,
@@ -2027,10 +2013,6 @@ fn activate_note_cursor_centered(
     );
 }
 
-/// Open a block for editing with the caret on one of its lines.
-///
-/// The scroll happens a turn later because the caret it is aiming at does not exist yet: the
-/// render that draws the source line is what puts it in the document.
 fn set_note_cursor_active(
     block_index: usize,
     line: u32,
@@ -2051,11 +2033,6 @@ fn set_note_cursor_active(
     });
 }
 
-/// Which line of a block a pointer is over.
-///
-/// A list answers exactly, because the item the pointer went down on said so on its way past. Any
-/// other block is one run of text with no internal structure to ask, so how far down the box the
-/// pointer sits is the whole of what there is to go on.
 fn note_pointer_line(
     at: ElementPoint,
     height: f64,
@@ -2117,10 +2094,6 @@ fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
         .or_else(|| (!blocks.is_empty()).then_some(0))
 }
 
-/// Put the caret where a pointer landed in a run of rendered source, and take the keyboard.
-///
-/// Waits for the answer, which a pointer handler can afford to do: whether the gesture belongs to
-/// the page was settled before this was called, and never depended on where in the line it fell.
 fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint, extend: bool) {
     spawn(async move {
         let offset = TextRun::in_element(element_id)
@@ -2136,7 +2109,6 @@ fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint,
     });
 }
 
-/// The same, for a block whose source is one run rather than one run per line.
 fn place_note_block_caret(index: usize, start_line: u32, source: String, at: ClientPoint) {
     spawn(async move {
         let offset = TextRun::in_element(format!("note-live-block-{index}"))
@@ -2215,7 +2187,6 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
     }
 }
 
-/// The blinking caret overlaid on the rendered note.
 #[component]
 fn NoteCaret(width_class: String) -> Element {
     rsx! {
@@ -2294,7 +2265,6 @@ fn ExplorerToggleButton(pane: ExplorerPane, mode: Signal<Mode>) -> Element {
     }
 }
 
-/// A span of raw note source, split around the caret and any selection.
 #[component]
 fn NoteSourceRange(
     source: Vec<char>,
@@ -2324,7 +2294,6 @@ fn NoteSourceRange(
     }
 }
 
-/// Inline note nodes, recursing so a wrapped node keeps its own source range visible.
 #[component]
 fn NoteInlineNodes(
     source: Vec<char>,
@@ -2661,8 +2630,6 @@ fn NoteBlockView(
             selection,
         )
     };
-    // A list draws its own edited item, in place, because it is the only thing that knows where
-    // that item is. Every other block draws one overlay across the whole of itself.
     let list_edit = match edit_lines.first() {
         Some((line, raw, prefix)) if is_list => Some(ListEditLine {
             line: *line,
@@ -2914,12 +2881,6 @@ enum Preview {
     Error(String),
 }
 
-/// An image's bytes, as something an `<img>` can name.
-///
-/// A `data:` URL rather than an object URL. An object URL is a handle the document owns and has to
-/// be handed back, and every path that forgets leaks the whole image for as long as the page lives
-/// — which is what the three revoking call sites here were for. This costs a third more bytes
-/// through the render batch and nothing else.
 fn image_data_url(bytes: &[u8], path: &str) -> String {
     use base64::Engine;
 
@@ -3093,7 +3054,6 @@ fn apply_dir(
     dir_entries.set(entries);
 }
 
-/// A directory entry's thumbnail, or its type icon when there is none.
 #[component]
 fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
     let entry = &entry;
@@ -3106,7 +3066,6 @@ fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
     rsx! { TypeIcon { path: entry.path.to_string(), is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" } }
 }
 
-/// The right-hand preview pane for the selected entry.
 #[component]
 fn PreviewPane(preview: Preview) -> Element {
     let preview = &preview;
@@ -3191,19 +3150,10 @@ fn explorer_client_id() -> u64 {
     ((now_millis() as u64) << 12) ^ random_index(4096) as u64
 }
 
-/// Whether a sidebar of this width still leaves a readable column beside it.
-///
-/// The page's own width comes from an `onresize` on it rather than from a read: the question is
-/// asked while deciding what to render, and by then the answer has to already be known.
 fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
     page_width > 0 && NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
 }
 
-/// The explorer sidebar, as the page holds it.
-///
-/// Six signals that only ever travel together: whether it is showing, whether the user asked for
-/// it, how wide it and the page are, and the pair that tells the host's own copy of this state
-/// apart from an echo of what the page just sent.
 #[derive(Clone, Copy, PartialEq)]
 pub struct ExplorerPane {
     pub visible: Signal<bool>,
@@ -3219,7 +3169,6 @@ impl ExplorerPane {
         explorer_has_room((self.page_width)(), (self.width)())
     }
 
-    /// Hide it if the pane has become too narrow to hold it and a readable column both.
     fn sync(mut self) {
         let next = (self.preferred_visible)() && self.has_room();
         if (self.visible)() != next {
@@ -3258,10 +3207,6 @@ impl ExplorerPane {
         }
     }
 
-    /// Open it a turn from now, if by then there is room.
-    ///
-    /// A turn, because the caller is opening a file and the pane it is opening into may not have
-    /// been laid out yet — asking now would measure the pane the file came from.
     fn show_if_room(self, mode: Signal<Mode>) {
         spawn(async move {
             sleep_ms(0).await;
@@ -3457,12 +3402,6 @@ pub(crate) fn focus_file_input() {
     FocusClaim::new(INPUT_ID).request();
 }
 
-/// The box the file scrolls in: how big it is, where it is, and how far it has been scrolled.
-///
-/// Cached rather than read when wanted, because the pointer handlers that need it settle
-/// `prevent_default` before they return and cannot wait for an answer. Each part has an event that
-/// reports it — `onresize` for the size, `onscroll` for the offset — except the origin, which is
-/// asked for after each resize on the grounds that what moves this box is what resizes it.
 #[derive(Clone, Copy, Default, PartialEq)]
 struct ScrollBox {
     size: (f64, f64),
@@ -3470,12 +3409,6 @@ struct ScrollBox {
 }
 
 impl ScrollBox {
-    /// Tell the host how the file has to be laid out, if enough is known yet to say.
-    ///
-    /// Two elements answer for this and they answer separately — the measuring span when the font
-    /// finishes loading, this box when the pane changes size — so neither is a complete answer on
-    /// its own. Nothing goes out until both have arrived: a wrap width computed from a cell of
-    /// zero puts every line of the file on one row.
     fn announce(self, cell: (f64, f64), total_lines: u32, mut last: Signal<FileResizeEvent>) {
         let (cw, ch) = cell;
         if cw <= 0.0 || ch <= 0.0 || self.size.0 <= 0.0 {
@@ -3500,23 +3433,15 @@ impl ScrollBox {
     }
 }
 
-/// How wide the line-number gutter is, including the space between it and the text.
 fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
     gutter_width(total_lines) as f64 * char_width + 48.0
 }
 
-/// That box, the field that floats inside it, and the writes that are neither arithmetic nor CSS.
-///
-/// One type because the two elements are entangled: the field sits at the caret *within* the box,
-/// so a programmatic scroll has to let go of it first — an engine keeps a focused editable in view
-/// and would undo the scroll the moment it landed.
 #[derive(Clone, Copy)]
 struct FileViewport {
     element: Signal<Option<Rc<MountedData>>>,
     field: Signal<Option<Rc<MountedData>>>,
     geometry: Signal<ScrollBox>,
-    /// Its own signal rather than a field of the box, so that scrolling — which happens every
-    /// frame of a drag — does not wake everything watching the box's size.
     offset: Signal<(f64, f64)>,
 }
 
@@ -3535,7 +3460,6 @@ impl FileViewport {
         current.set(offset);
     }
 
-    /// The box changed size, which is also the only thing that moves it.
     fn resized(self, size: (f64, f64)) {
         let mut geometry = self.geometry;
         if geometry.peek().size == size {
@@ -3556,7 +3480,6 @@ impl FileViewport {
         current.set(Some(element));
     }
 
-    /// Re-read where the box is and how big it is. A question, so it answers a frame later.
     fn locate(self) {
         spawn(async move {
             let Some(element) = self.element.peek().clone() else {
@@ -3572,10 +3495,6 @@ impl FileViewport {
         });
     }
 
-    /// Scroll to an absolute offset, letting the field go first and taking it back after.
-    ///
-    /// A mode with no field has nothing to let go of, which is what keeps this from pulling focus
-    /// into a document that is only being read.
     fn scroll_to(self, top: f64) {
         spawn(async move {
             let Some(element) = self.element.peek().clone() else {
@@ -3606,7 +3525,6 @@ impl FileViewport {
         self.scroll_to(0.0);
     }
 
-    /// Scroll the least that brings a row of the file into view.
     fn reveal_row(self, row: u32, ch: f64) {
         let geometry = *self.geometry.peek();
         if ch <= 0.0 || geometry.size.1 <= 0.0 {
@@ -3632,10 +3550,6 @@ impl FileViewport {
         ));
     }
 
-    /// Which line and column of the file a point on screen is over.
-    ///
-    /// Counted from the top of the scrolled content rather than of the viewport, which is why this
-    /// needs the box and a handler sitting on one line does not.
     fn file_position(
         self,
         at: ClientPoint,
@@ -3671,14 +3585,6 @@ impl FileViewport {
     }
 }
 
-/// Where to scroll to when the caret moves in note mode.
-///
-/// Four candidates, progressively coarser, because the caret's own span exists only while a block
-/// is being edited and the block only while it is on screen. Which of them the document holds is
-/// the host's to find out — the page rendered them all and knows no more than that.
-///
-/// Nothing retries. The retry existed because the caret might not have been rendered yet, and a
-/// request is applied after the batch that renders it.
 struct NoteCaretAnchor([String; 4]);
 
 impl NoteCaretAnchor {
@@ -3708,10 +3614,6 @@ fn center_note_caret(block_index: usize, line: u32) {
     NoteCaretAnchor::of(block_index, line).center();
 }
 
-/// Hand the host what has been typed and empty the buffer it was typed into.
-///
-/// The field is a composition buffer rather than a value: an IME needs somewhere real to build a
-/// character, and what the page wants is the finished one.
 fn send_committed_text(text: String) {
     if text.is_empty() {
         return;
@@ -3732,11 +3634,6 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
     true
 }
 
-/// Where the host draws the native video overlay.
-///
-/// Reported rather than rendered: the frames belong to an `AVPlayer` the host puts over the page,
-/// so all the page contributes is the rectangle to put it in. Asked for again on every resize,
-/// since moving a pane is also resizing it.
 #[component]
 fn NativeVideoHost(path: String) -> Element {
     let mut element = use_signal(|| None::<Rc<MountedData>>);

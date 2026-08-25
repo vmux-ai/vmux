@@ -1,12 +1,6 @@
-//! The document a natively-hosted page loads instead of a wasm bundle.
-
 use dioxus_interpreter_js::NATIVE_JS;
 use dioxus_interpreter_js::unified_bindings::SLEDGEHAMMER_JS;
 
-/// The HTML served to a page whose components run in the host process.
-///
-/// It carries no wasm and no application script: the only JavaScript is the interpreter, waiting
-/// to be handed batches of edits. Everything the page displays arrives from [`crate::PageDom`].
 pub struct InterpreterShell {
     root_id: &'static str,
     base_uri: String,
@@ -17,8 +11,6 @@ pub struct InterpreterShell {
 }
 
 impl InterpreterShell {
-    /// `base_uri` is the page's own origin without a trailing slash — the interpreter appends
-    /// `/__events` to it, and a trailing slash would ask for `//__events`.
     pub fn new(root_id: &'static str, base_uri: impl Into<String>) -> Self {
         Self {
             root_id,
@@ -30,17 +22,11 @@ impl InterpreterShell {
         }
     }
 
-    /// Everything the page needs inside `<head>` — its `<base>`, stylesheets and inline rules.
-    ///
-    /// Taken whole rather than as a list of hrefs because a page's document chrome is the page's
-    /// business: this crate cannot know which sheet must come first, or that the root needs a
-    /// height before flex layout means anything.
     pub fn with_head(mut self, head: impl Into<String>) -> Self {
         self.head = head.into();
         self
     }
 
-    /// Attributes for `<html>`, verbatim.
     pub fn with_html_attributes(mut self, attributes: impl Into<String>) -> Self {
         self.html_attributes = attributes.into();
         self
@@ -51,7 +37,6 @@ impl InterpreterShell {
         self
     }
 
-    /// Classes for the element the page renders into.
     pub fn with_root_class(mut self, class: impl Into<String>) -> Self {
         self.root_class = class.into();
         self
@@ -67,13 +52,6 @@ impl InterpreterShell {
             root_class,
         } = self;
 
-        // The pump starts here rather than at document start because asking for a frame is what
-        // tells the host the page can take one, and an interpreter without a root cannot apply
-        // it. `onload` is the earliest point at which it has one.
-        //
-        // Deliberately no `waitForRequest`. That opens the WebSocket dioxus-desktop serves edits
-        // over; here the page fetches them itself, so calling it would leave a socket retrying
-        // against a port nothing is listening on.
         format!(
             r#"<!DOCTYPE html>
 <html {html_attributes}>
@@ -120,7 +98,6 @@ mod tests {
     fn the_shell_never_waits_on_an_edit_socket() {
         let shell = InterpreterShell::new("main", "vmux://layout").html();
 
-        // The interpreter class defines `waitForRequest`; what must not appear is a call to it.
         assert!(
             !shell.contains("interpreter.waitForRequest"),
             "the page fetches its own edits; calling it would retry against a port nothing binds"

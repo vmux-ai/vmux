@@ -5,11 +5,6 @@ use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
 use vmux_core::page::PageManifest;
 
-/// Owns what the command bar searches over: the snapshot resources every domain writes into,
-/// and the page list built once from the registered manifests.
-///
-/// Where [`WriteCommandBarSnapshots`] sits relative to the command bus is
-/// [`crate::CommandPlugin`]'s to say, since that orders it against reads and writes.
 pub struct CommandBarSnapshotPlugin;
 
 impl Plugin for CommandBarSnapshotPlugin {
@@ -27,20 +22,11 @@ impl Plugin for CommandBarSnapshotPlugin {
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
 
-/// The workspace as the launcher needs to see it.
-///
-/// Both halves come from the same walk of panes and stacks by last-activated time — where a choice
-/// would land, and the open tabs to list. That walk is the shape of the workspace and none of the
-/// launcher's business, so whoever owns it publishes the answer and the launcher reads it.
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarWorkspaceSnapshot {
-    /// The stack a choice lands in when the launcher did not open onto one of its own.
     pub stack: Option<Entity>,
-    /// The pane a choice lands in when there is no stack to put it in.
     pub pane: Option<Entity>,
-    /// The active tab's open stacks, already in wire shape.
     pub tabs: Vec<vmux_wire::command_bar::CommandBarTab>,
-    /// How many stacks exist in total, which decides whether the launcher offers "close".
     pub stack_count: usize,
 }
 
@@ -48,20 +34,11 @@ pub struct CommandBarWorkspaceSnapshot {
 pub struct CommandBarAgentsSnapshot {
     pub providers: Vec<AgentProviderSummary>,
     pub strategies: Vec<AgentStrategySummary>,
-    /// Installed registry ACP agents and their single-segment launch URLs.
     pub acp: Vec<AgentProviderSummary>,
-    /// Installed ACP and CLI agents, most recently used first.
     pub recent: Vec<AgentPromptTarget>,
 }
 
 impl AgentPromptTarget {
-    /// Rank of each target's url, most recently used first.
-    ///
-    /// The snapshot records recency; turning it into the launcher's order is the contributing
-    /// crate's business, and this is the part of it that needs no knowledge of what an agent is.
-    ///
-    /// A url appearing twice keeps its first rank, since that is the more recent one and the later
-    /// occurrence would otherwise push the agent down the launcher.
     pub fn recency_ranks(targets: &[Self]) -> HashMap<String, usize> {
         let mut ranks = HashMap::new();
         for (rank, target) in targets.iter().enumerate() {
@@ -71,16 +48,6 @@ impl AgentPromptTarget {
     }
 }
 
-/// What other crates add to the command bar.
-///
-/// The command bar lists pages and commands; it does not know what any of them are for. Whoever
-/// owns a capability spawns it as an entity and handles it when it is chosen, so the command bar
-/// stays a launcher rather than growing a branch per feature.
-///
-/// One entity per row is what lets more than one crate contribute. The list used to be a resource
-/// every contributor overwrote wholesale, so a second one silently erased the first every frame.
-/// A contributor now despawns only the entities it spawned, which it recognises by its own private
-/// marker component — this type never needs to know who owns what.
 #[derive(SystemParam)]
 pub struct Contributions<'w, 's> {
     pages: Query<'w, 's, &'static ContributedPage>,
@@ -89,26 +56,16 @@ pub struct Contributions<'w, 's> {
 }
 
 impl Contributions<'_, '_> {
-    /// Contributed pages, most preferred first.
-    ///
-    /// Entity iteration order carries no meaning, so preference is [`ContributedPage::rank`] and
-    /// ties break by id. Rank orders one contributor's own pages; between two contributors the id
-    /// is all there is to go on, which is arbitrary but stable.
     pub fn pages(&self) -> Vec<&ContributedPage> {
         let mut pages: Vec<&ContributedPage> = self.pages.iter().collect();
         pages.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
         pages
     }
 
-    /// Contributed command rows, in no particular order.
     pub fn commands(&self) -> impl Iterator<Item = &ContributedCommand> {
         self.commands.iter()
     }
 
-    /// Where a prompt should go: `requested` when that page is listed, else the most preferred.
-    ///
-    /// `None` means nothing accepts a prompt, which a caller has to refuse rather than substitute
-    /// for — opening something other than what was asked for would be worse than doing nothing.
     pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
         if let Some(requested) = requested
             && self.pages.iter().any(|entry| entry.page.url == requested)
@@ -120,30 +77,22 @@ impl Contributions<'_, '_> {
         Some(first.page.url.clone())
     }
 
-    /// The page a contributed id names.
     pub fn page_url(&self, id: &str) -> Option<String> {
         let entry = self.pages.iter().find(|entry| entry.id == id)?;
         Some(entry.page.url.clone())
     }
 
-    /// Whether a contributor resolves this url itself.
     pub fn claims_url(&self, url: &str) -> bool {
         self.claimed.iter().any(|claimed| claimed.0 == url)
     }
 }
 
-/// Matches a contribution entity of any kind whose row was spawned or edited.
 type ContributionTouched = Or<(
     Changed<ContributedPage>,
     Changed<ContributedCommand>,
     Changed<ClaimedUrl>,
 )>;
 
-/// Whether the contributed rows changed since the reading system last ran, despawns included.
-///
-/// Split from [`Contributions`] because reading despawns needs `&mut` and every other reader only
-/// wants to look. Both halves are needed: a republish arrives as spawns, but the last row going
-/// away is a despawn and nothing else.
 #[derive(SystemParam)]
 pub struct ContributionsChanged<'w, 's> {
     touched: Query<'w, 's, (), ContributionTouched>,
@@ -153,10 +102,6 @@ pub struct ContributionsChanged<'w, 's> {
 }
 
 impl ContributionsChanged<'_, '_> {
-    /// True when a row was spawned, edited or despawned.
-    ///
-    /// Every removal reader is drained even once the answer is known, so a despawn this frame
-    /// cannot be reported again as a change next frame.
     pub fn any(&mut self) -> bool {
         let removed =
             self.pages.read().count() + self.commands.read().count() + self.claimed.read().count();
@@ -164,45 +109,30 @@ impl ContributionsChanged<'_, '_> {
     }
 }
 
-/// One contributed page: something the command bar can list, open, and send a prompt to.
 #[derive(Component, Clone, Debug)]
 pub struct ContributedPage {
-    /// Echoed back when this page is chosen by id rather than by url. Opaque to the command bar.
     pub id: String,
     pub page: CommandBarPage,
-    /// Preference among this contributor's pages, lowest first.
     pub rank: usize,
 }
 
-/// One contributed command-bar row.
 #[derive(Component, Clone, Debug)]
 pub struct ContributedCommand {
-    /// Echoed back by the command bar when this row is chosen. Opaque to it.
     pub id: String,
-    /// Fluent message naming the row, with its arguments. Not a rendered string: the contributor
-    /// has no locale, and the command bar does.
     pub message_id: String,
     pub args: Vec<(String, String)>,
 }
 
-/// A url a contributor resolves itself instead of naming a page to open.
-///
-/// Opening one of these as an ordinary url would land on nothing: they stand for a choice the
-/// contributor has to make — "the default one" — not for a page that exists yet.
 #[derive(Component, Clone, Debug)]
 pub struct ClaimedUrl(pub String);
 
-/// Agent identity used for recent-first launcher ordering.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum AgentPromptTarget {
-    /// Built-in terminal CLI.
     Cli(AgentKind),
-    /// Registry-driven ACP agent.
     Acp { id: String },
 }
 
 impl AgentPromptTarget {
-    /// The launch URL this target resolves to.
     pub fn url(&self) -> String {
         match self {
             Self::Cli(kind) => format!("{}cli", kind.cli_url_prefix()),
@@ -216,7 +146,6 @@ pub struct AgentProviderSummary {
     pub id: String,
     pub name: String,
     pub url: String,
-    /// Optional icon URL (e.g. an ACP-registry agent's SVG); empty = fall back to a default icon.
     pub icon: String,
 }
 
@@ -243,12 +172,6 @@ pub struct SpaceSummary {
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarTerminalsSnapshot {
-    /// The pane already running each terminal row, keyed by the url that row carries.
-    ///
-    /// Keyed by url rather than by pid so that choosing a terminal is a lookup. The command bar
-    /// would otherwise have to parse a pid back out of the url, which means knowing how
-    /// `vmux_terminal` builds one — and being wrong about it silently spawns a second terminal
-    /// instead of going to the one the user picked.
     pub running: HashMap<String, Entity>,
     pub agent_session_to_entity: HashMap<(AgentKind, String), Entity>,
     pub terminal_page_url: String,
@@ -259,11 +182,6 @@ pub struct CommandBarPagesSnapshot {
     pub pages: Vec<RegisteredPage>,
 }
 
-/// A page the command bar lists, with the parts of its manifest that only resolve per locale.
-///
-/// The title and the superseded command stay unresolved here because the snapshot is built once at
-/// startup and the locale can change after it. Whoever renders the payload holds the locale and
-/// finishes the job.
 #[derive(Clone, Debug)]
 pub struct RegisteredPage {
     pub page: CommandBarPage,
@@ -271,8 +189,6 @@ pub struct RegisteredPage {
     pub replaces_command: Option<&'static str>,
 }
 
-/// Command-bar "current work" data: working dirs of open terminal/agent panes and
-/// recently-opened `file://` entries. Populated by updater systems in `vmux_layout`.
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarWorkSnapshot {
     pub work_dirs: Vec<CommandBarWorkDir>,
@@ -332,10 +248,6 @@ mod tests {
             }
         }
 
-        /// Spawn these rows, then ask where a prompt would go.
-        ///
-        /// Spawns rather than handing [`Contributions`] a list, so the prompt tests run against
-        /// the entities the command bar actually reads.
         fn prompt_url_among(pages: Vec<Self>, requested: Option<&str>) -> Option<String> {
             let mut world = World::new();
             for page in pages {
@@ -372,8 +284,6 @@ mod tests {
         );
     }
 
-    /// A request names a page; honouring one that is no longer listed would send the prompt
-    /// somewhere the user did not ask for, so it falls back to the preferred page instead.
     #[test]
     fn prompt_honours_a_listed_request_and_ignores_a_stale_one() {
         let pages = || {
@@ -393,7 +303,6 @@ mod tests {
         );
     }
 
-    /// Nothing accepting a prompt has to be refused rather than substituted for.
     #[test]
     fn prompt_refuses_when_no_page_accepts_one() {
         assert_eq!(ContributedPage::prompt_url_among(Vec::new(), None), None);
@@ -415,10 +324,6 @@ mod tests {
         }
     }
 
-    /// Republishing is scoped to the rows the contributor spawned.
-    ///
-    /// The shape this replaced was a resource each contributor overwrote, so the second one to run
-    /// each frame erased the first. Only one crate ever contributed, which is why it never showed.
     #[test]
     fn one_contributor_rebuilding_leaves_the_others_rows() {
         let mut world = World::new();

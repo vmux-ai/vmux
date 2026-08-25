@@ -11,8 +11,6 @@ use vmux_agent::{
 use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 
-/// Records the app for the agent: starts and stops captures, enforces the duration cap, and
-/// drains finished recordings back to the requester.
 pub(crate) struct RecordingPlugin;
 
 impl Plugin for RecordingPlugin {
@@ -46,8 +44,6 @@ pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
 Privacy & Security > Screen Recording, then call record_start again.";
 
-/// Carries finalize outcomes from off-thread (stop/auto-stop) back to Bevy.
-/// `request_id == None` means an auto-stop (no pending query to answer).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct RecordOutcome {
     pub request_id: Option<[u8; 16]>,
@@ -67,8 +63,6 @@ impl Default for RecordingBridge {
     }
 }
 
-/// Recording lifecycle state, mirrored from the capture layer so the tray can
-/// react. Single source of truth for the tray icon + menu.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RecordingStatus {
     #[default]
@@ -77,7 +71,6 @@ pub(crate) enum RecordingStatus {
     Paused,
 }
 
-/// Human-driven recording controls issued from the tray menu.
 #[derive(Message, Clone, Copy, Debug)]
 pub(crate) enum RecordingControl {
     Pause,
@@ -101,8 +94,6 @@ fn handle_recording_control(
                 *status = RecordingStatus::Recording;
             }
             RecordingControl::Done => {
-                // Finalizes to the default dir; `drain_recordings` flips the
-                // status back to Idle once the outcome arrives.
                 capture::done();
             }
         }
@@ -117,8 +108,6 @@ fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartRes
     }
 }
 
-/// Resolve dir/name into final mp4 + optional gif paths. `default_dir` is used
-/// when `dir` is not given (the configured/default output directory).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn resolve_output_paths(
     dir: Option<&str>,
@@ -138,8 +127,6 @@ pub(crate) fn resolve_output_paths(
     (mp4, gif_path)
 }
 
-/// Whether a frame at `elapsed_ms` should be sampled into the GIF given the
-/// last sampled timestamp and target fps.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn should_sample_gif_frame(
     elapsed_ms: u64,
@@ -153,7 +140,6 @@ pub(crate) fn should_sample_gif_frame(
     }
 }
 
-/// BGRA (ScreenCaptureKit native) -> RGBA (image/gif crates).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; bgra.len()];
@@ -167,18 +153,12 @@ pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Long-edge cap for encoded recordings. Keeps text legible while spreading the
-/// bitrate over far fewer pixels than a raw retina capture.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const RECORDING_MAX_EDGE: u32 = 1280;
 
-/// Fixed average H.264 bitrate (bits/s) for recordings. Tuned for legible screen
-/// content at the downscaled resolution; file size scales with duration
-/// (~1-2 MB/min for typical low-motion screen capture).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const RECORDING_BITRATE_BPS: i32 = 800_000;
 
-/// Cap the long edge at `max_edge`, never upscaling.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn downscale_to(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
     let long = w.max(h);

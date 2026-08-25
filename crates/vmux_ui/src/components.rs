@@ -50,11 +50,6 @@ pub use text::{UiText, UiTextSize, UiTextTone};
 mod naming_policy {
     use std::path::Path;
 
-    /// A `#[component]` is written as an element — `Foo {}` — so its name has to read like one.
-    /// Rust's own lints cannot say this: every page carries `#![allow(non_snake_case)]` to permit
-    /// the convention in the first place, which switches off the only check in the area and makes
-    /// a lower-case component compile silently. The convention is the oracle, so the scan is the
-    /// only way to hold it.
     #[test]
     fn every_component_is_named_like_an_element() {
         let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -75,12 +70,6 @@ mod naming_policy {
         );
     }
 
-    /// A function returning `Element` renders UI, so it is a component and must say so.
-    ///
-    /// The naming check above cannot see these: a helper never claimed to be a component, so
-    /// there is nothing to check the name of. That is exactly how 47 of them accumulated. The
-    /// cost is not cosmetic — a helper is inlined into its caller's scope, so it re-runs whenever
-    /// the caller does and can never skip on unchanged inputs.
     #[test]
     fn nothing_returns_an_element_without_being_a_component() {
         let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -88,7 +77,6 @@ mod naming_policy {
             .expect("crates dir");
         let mut offenders = Vec::new();
         walk_rs_files(crates_dir, &mut |path, source| {
-            // This file quotes offending code in its own fixtures.
             if path.ends_with("components.rs") {
                 return;
             }
@@ -104,7 +92,6 @@ mod naming_policy {
         );
     }
 
-    /// Functions whose signature returns `Element` and that carry no `#[component]` above them.
     fn element_fns_without_component(source: &str) -> Vec<(usize, String)> {
         let lines: Vec<&str> = source.lines().collect();
         let mut found = Vec::new();
@@ -119,7 +106,6 @@ mod naming_policy {
             let Some(rest) = rest else {
                 continue;
             };
-            // The return type may sit on this line or after a wrapped parameter list.
             let signature: String = lines[index..lines.len().min(index + 14)].join("\n");
             let Some(head) = signature.split_once('{').map(|(head, _)| head) else {
                 continue;
@@ -151,7 +137,6 @@ mod naming_policy {
         found
     }
 
-    /// Names of `#[component]`-annotated functions, with the line the name sits on.
     fn component_names(source: &str) -> Vec<(usize, String)> {
         let lines: Vec<&str> = source.lines().collect();
         let mut found = Vec::new();
@@ -159,8 +144,6 @@ mod naming_policy {
             if line.trim() != "#[component]" {
                 continue;
             }
-            // Attributes and doc comments both sit between the marker and the signature, and
-            // several components in this crate put the doc comment second.
             let Some((offset, signature)) =
                 lines[index + 1..]
                     .iter()
@@ -205,7 +188,6 @@ mod naming_policy {
         }
     }
 
-    /// The scan has to actually see a violation, or it passes for the wrong reason.
     #[test]
     fn the_scan_catches_a_lower_case_component() {
         let source = "#[component]\nfn my_widget() -> Element { rsx! {} }\n";
@@ -215,8 +197,6 @@ mod naming_policy {
         assert!(!found[0].1.starts_with(char::is_uppercase));
     }
 
-    /// Attributes and doc comments both sit between the marker and the signature. Missing either
-    /// makes the scan skip the component entirely, so it would pass by seeing nothing.
     #[test]
     fn the_scan_looks_past_attributes_and_doc_comments() {
         for between in ["#[allow(non_snake_case)]", "/// Doc.", "// Note."] {

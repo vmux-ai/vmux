@@ -1,5 +1,3 @@
-//! Filesystem mutations used by Explorer context-menu actions.
-
 use std::path::{Component, Path, PathBuf};
 
 fn checked_name(name: &str) -> Result<&str, String> {

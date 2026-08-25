@@ -1,29 +1,10 @@
-//! Guards the one thing rkyv makes dangerous about a remote link.
-//!
-//! rkyv encodes enum variants *positionally*. On the local socket that is harmless because both
-//! sides ship together and the daemon respawns on an identity mismatch. A phone updates on its
-//! own schedule, so reordering `SharedMessage` or `AgentAction` — or inserting a variant anywhere
-//! but the end — silently reinterprets messages already in flight rather than failing.
-//!
-//! The frozen bytes below are the encoding of each variant under the current layout, truncated past
-//! the point where every field offset has been written. Appending a variant leaves them all
-//! intact; reordering an enum shifts a discriminant, and reordering fields within a variant moves
-//! the offsets after it. Either turns this red.
-//!
-//! Regenerating these to make the test pass is a wire-format break. The diff is meant to make
-//! that obvious enough that nobody does it by accident — bump the ALPN in `vmux_remote::quic`
-//! alongside it, so a peer built against the old layout is refused during the TLS handshake
-//! rather than left to decode the wrong variant.
-
 use vmux_wire::protocol::{
     AgentAction, AgentAttachment, ApprovalDecision, ClientMessage, SharedAgentCommand,
     SharedMessage,
 };
 
-/// Bytes compared per variant. Long enough to cover the last field offset any variant writes.
 const FROZEN_PREFIX: usize = 48;
 
-/// Every variant in declaration order, with the current encoding of a minimal instance.
 #[rustfmt::skip]
 const FROZEN: [(&str, &str); 7] = [
     ("Agent/Attach",    "200000000000000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
@@ -60,8 +41,6 @@ fn samples() -> Vec<SharedMessage> {
     ]
 }
 
-/// Matches without a wildcard, so a new variant fails to compile until someone appends it here
-/// and to `FROZEN` — which is the moment to notice the wire format is changing.
 fn name_of(message: &SharedMessage) -> &'static str {
     match message {
         SharedMessage::Agent { action, .. } => match action {
@@ -106,8 +85,6 @@ fn every_shared_variant_still_encodes_to_its_frozen_bytes() {
     );
 }
 
-/// The frozen bytes are a prefix, so this covers what they cannot: a full frame still decodes to
-/// the same variant carrying the same payload.
 #[test]
 fn a_frame_round_trips_with_its_payload_intact() {
     let bytes = encode(SharedMessage::agent(

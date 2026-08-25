@@ -42,9 +42,6 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
     }
 }
 
-/// Nearest ancestor directory containing a `.git` entry, starting from `start`
-/// (or its parent when `start` is a file). Falls back to the containing
-/// directory when no git root is found.
 pub fn project_root(start: &Path) -> std::path::PathBuf {
     project_root_with_knowledge(
         start,

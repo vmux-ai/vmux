@@ -1,24 +1,13 @@
-//! The event leg: base64 JSON in, a verdict out while the page waits.
-//!
-//! What happened. What it happened *to* is [`event_selection`](crate::webview::event_selection), which
-//! rides the same request.
-
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use dioxus_html::HtmlEvent;
 use serde::Serialize;
 
-/// One user interaction, as the interpreter sends it.
 pub struct EventRequest(HtmlEvent);
 
 impl EventRequest {
-    /// The request header carrying the event.
-    ///
-    /// It travels as a header rather than a body because the page sends it with a synchronous
-    /// `XMLHttpRequest`, and `send()` on one of those does not reliably carry a body.
     pub const HEADER: &'static str = "dioxus-data";
 
-    /// Decode the header value: base64, then JSON.
     pub fn from_header(value: &str) -> Result<Self, EventRequestError> {
         let json = STANDARD
             .decode(value)
@@ -33,7 +22,6 @@ impl EventRequest {
     }
 }
 
-/// Why an event could not be read.
 #[derive(Debug)]
 pub enum EventRequestError {
     NotBase64,
@@ -51,7 +39,6 @@ impl std::fmt::Display for EventRequestError {
 
 impl std::error::Error for EventRequestError {}
 
-/// What the page is told once its handlers have run.
 #[derive(Serialize)]
 pub struct EventOutcome {
     #[serde(rename = "preventDefault")]
@@ -63,10 +50,6 @@ impl EventOutcome {
         Self { prevent_default }
     }
 
-    /// The answer for an event that could not be read.
-    ///
-    /// Letting the browser act is the safer of the two: a page that is merely unresponsive can
-    /// still be closed, whereas one that swallows every default action cannot.
     pub fn unreadable() -> Self {
         Self::new(false)
     }
@@ -75,7 +58,6 @@ impl EventOutcome {
         self.prevent_default
     }
 
-    /// The JSON body the page parses out of the response.
     pub fn response_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_else(|_| br#"{"preventDefault":false}"#.to_vec())
     }

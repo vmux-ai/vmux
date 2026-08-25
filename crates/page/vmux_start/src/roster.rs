@@ -1,14 +1,3 @@
-//! The launcher's model on a phone: what the paired Mac has, and the payload the page reads.
-//!
-//! The desktop builds the same payload out of its own world — spaces, panes, webview entities —
-//! in [`host`](crate::host). None of those exist over a relay, so the two projections share their
-//! *output* and nothing else. That output is [`CommandBarOpenEvent`], which already lives in
-//! `vmux_wire` because both ends had to agree on it anyway.
-//!
-//! What this deliberately does not have is a way to reach the link. The app fetches the roster and
-//! writes it here; this only reads. A plugin in a page crate that could call the phone's `Api`
-//! would invert the layering — the app depends on the page, never the other way round.
-
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_wire::command_bar::{CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId};
@@ -18,7 +7,6 @@ use crate::event::START_COMMAND_BAR_OPEN_EVENT;
 use vmux_wire::icon::PageIcon;
 use vmux_wire::room::{RemoteAgent, RemoteSession};
 
-/// Keeps [`Launcher`] current with whatever the app last heard from the Mac.
 pub struct StartRosterPlugin;
 
 impl Plugin for StartRosterPlugin {
@@ -40,33 +28,23 @@ impl Plugin for StartRosterPlugin {
     }
 }
 
-/// When [`Launcher`] is rebuilt, so the emit ordered after it carries what this turn produced
-/// rather than what the last one did.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct LauncherProjection;
 
-/// What the paired Mac last said it had. Written by the app, read by nothing else.
 #[derive(Resource, Default, PartialEq)]
 pub struct Roster {
     pub sessions: Vec<RemoteSession>,
     pub agents: Vec<RemoteAgent>,
 }
 
-/// The launcher payload, as the page expects to be told it.
 #[derive(Resource, Default)]
 pub struct Launcher(pub CommandBarOpenEvent);
 
 impl Launcher {
-    /// Describe the Mac the way the shared launcher expects to be told about it.
-    ///
-    /// Sessions become the open-stack rows and agents the prompt targets, which is the same shape
-    /// the desktop contributes — so the launcher ranks, filters and renders them without knowing
-    /// one list came over a relay.
     fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
         launcher.0 = Self::of(&roster);
     }
 
-    /// Hand the rebuilt launcher to whichever page is listening for it.
     fn emit(launcher: Res<Launcher>, mut emits: MessageWriter<PageEmit>) {
         let Some(emit) = PageEmit::of(START_COMMAND_BAR_OPEN_EVENT, &launcher.0) else {
             return;
@@ -82,7 +60,6 @@ impl Launcher {
                 title: session.name.clone(),
                 url: format!("vmux://agent/{sid}", sid = session.sid),
                 pane_id: 0,
-                // What comes back on activation, so it has to index the list this was built from.
                 tab_index: index as u32,
                 is_active: false,
                 location: vmux_ui::i18n::translate_with(
@@ -110,8 +87,6 @@ impl Launcher {
             });
         }
         CommandBarOpenEvent {
-            // Documented as the start page's live-refresh id: reusing it is what stops each
-            // refresh reading as a reopen and clobbering what is being typed.
             open_id: OpenId::NONE,
             tabs,
             pages,
@@ -126,7 +101,6 @@ mod tests {
     use vmux_wire::room::{RemoteStatus, RoomId};
 
     impl Roster {
-        /// One session and one agent, enough to tell the two halves of the payload apart.
         fn of_one() -> Self {
             Self {
                 sessions: vec![Self::session("api")],
@@ -139,7 +113,6 @@ mod tests {
             }
         }
 
-        /// Several sessions, so an index that addresses the wrong one has somewhere to show.
         fn of_sessions(names: &[&str]) -> Self {
             Self {
                 sessions: names.iter().map(|name| Self::session(name)).collect(),
@@ -163,7 +136,6 @@ mod tests {
         }
     }
 
-    /// A world running the plugin, so what is asserted is what the schedule produced.
     struct Started(App);
 
     impl Started {
@@ -184,9 +156,6 @@ mod tests {
         }
     }
 
-    /// The launcher hands an activated row back by index alone, so the list it was built from is
-    /// the only thing that can name the session again. A row whose index stops addressing its own
-    /// session opens the wrong conversation — silently, and only for whoever has two of them.
     #[test]
     fn every_session_is_addressed_by_the_index_it_comes_back_as() {
         let roster = Roster::of_sessions(&["alpha", "beta", "gamma"]);
@@ -218,9 +187,6 @@ mod tests {
         );
     }
 
-    /// An agent has to arrive as something the launcher will send a prompt to. Contributed without
-    /// this flag it renders as an ordinary row that opens a url, and the phone has no browser to
-    /// open one in — so the agent would be listed and unreachable.
     #[test]
     fn an_agent_becomes_a_prompt_target() {
         let started = Started::with(Roster::of_one());
@@ -231,8 +197,6 @@ mod tests {
         assert_eq!(pages[0].url, "vmux://agent/claude");
     }
 
-    /// Every rebuild reuses the one id documented as "not a reopen". A real id here would reset
-    /// the palette's input on each refresh, deleting whatever was half-typed.
     #[test]
     fn a_refresh_does_not_read_as_a_reopen() {
         let started = Started::with(Roster::of_one());

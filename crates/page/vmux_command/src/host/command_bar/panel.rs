@@ -17,20 +17,9 @@ impl Plugin for CommandBarPanelPlugin {
     }
 }
 
-/// The command bar panel in the layout page holds a focused DOM field.
-///
-/// Sits on the webview that renders the panel, exactly like the bookmark field's own active marker,
-/// and feeds the same "the layout page owns the keyboard" rule: `KeyboardOwner` moves to the
-/// layout shell, OSR focus follows it, and AppKit first responder stays with winit so keys route
-/// winit -> Bevy -> `send_key_event` -> the focused element.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarPanelActive;
 
-/// Tells the bar's overlay entity that the panel is its surface right now.
-///
-/// Every question the host asks about the bar is asked of the overlay entity: is it open, does it
-/// own input, should Escape dismiss it. The overlay's own node stays hidden while the panel is up,
-/// so without this each of those answers is wrong about a bar the user is looking at.
 fn mark_command_bar_shown_inline(
     panel_active: Query<(), With<CommandBarPanelActive>>,
     bar_q: Query<(Entity, Has<OverlayShownInline>), With<CommandBar>>,
@@ -75,8 +64,6 @@ mod tests {
         app
     }
 
-    /// The panel must release the keyboard as reliably as it takes it: a stuck marker leaves the
-    /// layout shell owning `KeyboardOwner` and no pane can ever get it back.
     #[test]
     fn active_event_round_trips_the_marker() {
         let mut app = app();

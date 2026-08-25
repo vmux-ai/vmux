@@ -1,10 +1,3 @@
-//! What a page says back, over wry's string IPC.
-//!
-//! The other direction from [`route`](crate::webview::route): that is the page asking the host for
-//! something, this is the page telling it something. The wire is text, because that is all
-//! `window.ipc` carries — which is why anything with a shape rides a request over `vmux://`
-//! instead, and why what is left here keeps shrinking.
-
 use std::rc::Rc;
 
 use tracing::{error, info, warn};
@@ -13,20 +6,16 @@ use crate::page::NativePage;
 use crate::webview::embed::{Outbox, Wake};
 use crate::webview::measurement::{Measured, PendingReads};
 
-/// One page-to-host message, decoded.
 enum PageReport<'a> {
-    /// A console line, which stays here rather than riding a request precisely because it is worth
-    /// most when the page is broken: a log coupled to the frame loop goes silent with it.
-    Console { level: &'a str, text: &'a str },
-    /// What an element measured, against the token that asked. `None` when the page found no
-    /// element to measure.
+    Console {
+        level: &'a str,
+        text: &'a str,
+    },
     Measured {
         token: u64,
         measured: Option<Measured>,
     },
-    /// A link the shim held back rather than let it navigate the document away.
     Link(&'a str),
-    /// A payload a page emitted, still base64 as the shim sent it.
     Emitted(&'a str),
 }
 
@@ -52,7 +41,6 @@ impl<'a> PageReport<'a> {
         Self::Emitted(body)
     }
 
-    /// The four numbers, or `None` for the empty list a page sends when it found no element.
     fn numbers(values: &str) -> Option<Measured> {
         let mut measured = [0.0; 4];
         let mut counted = 0;
@@ -66,11 +54,6 @@ impl<'a> PageReport<'a> {
     }
 }
 
-/// The page's messages, delivered to whatever answers for each.
-///
-/// A page emits through an `ArrayBuffer`; wry's IPC carries text, so the shim base64s the same
-/// `BinIpcEnvelope` bytes and this undoes it. The envelope framing is left alone, because the host
-/// matches its id with `bin_ipc_event_id::<E>()` and that has to keep agreeing.
 pub(crate) struct PageMessage {
     outbox: Rc<dyn Outbox>,
     name: &'static str,
@@ -102,13 +85,6 @@ impl PageMessage {
         }
     }
 
-    /// A link that went nowhere.
-    ///
-    /// The shim lets a fragment through to the engine and holds everything else, because a native
-    /// page's document is the one its `VirtualDom` is mounted against and navigating it away ends
-    /// the page. Nothing opens the held ones. A link that should go somewhere is a button that
-    /// emits an event the host answers — `MdInline::WikiLink` already is one — so this says which
-    /// page still renders an `<a>` expecting the engine to do it.
     fn link(&self, href: &str) {
         warn!(
             "{}: no link is followed from a page hosted here, {href} went nowhere",
@@ -116,13 +92,11 @@ impl PageMessage {
         );
     }
 
-    /// Resolve whatever asked, then wake: a task that can now run is a render nobody has scheduled.
     fn measured(&self, token: u64, measured: Option<Measured>) {
         self.reads.answer(token, measured);
         self.waker.wake();
     }
 
-    /// The page's console, under the name of the page that wrote it.
     fn log(&self, level: &str, text: &str) {
         let name = self.name;
         match level {
@@ -161,7 +135,6 @@ mod tests {
     use super::*;
 
     impl PageReport<'_> {
-        /// The decoded report, flattened to something an assertion can name.
         fn described(body: &str) -> String {
             match PageReport::of(body) {
                 PageReport::Console { level, text } => format!("console {level} {text}"),
@@ -175,12 +148,6 @@ mod tests {
         }
     }
 
-    /// Every kind arrives as the same untagged string, so a body taken for the wrong one is silent:
-    /// a log read as a payload is a base64 error in place of the message that explains the crash,
-    /// and a message split on the wrong colon loses everything after the first one.
-    ///
-    /// A measurement short of four numbers must read as an absent element rather than as zeros,
-    /// which would scroll a page to the top instead of refusing.
     #[test]
     fn each_report_decodes_from_the_string_the_shim_posts() {
         let decoded: Vec<String> = [

@@ -1,9 +1,3 @@
-//! Telling the launcher what the workspace looks like.
-//!
-//! `focused_stack` and `gather_command_bar_tabs` both walk the active tab's panes and stacks by
-//! last-activated time. That is the shape of the workspace, so the launcher used to borrow six
-//! queries and both walks to answer two questions. It reads a snapshot now, and this fills it.
-
 use bevy::prelude::*;
 use vmux_command::snapshot::{
     CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,

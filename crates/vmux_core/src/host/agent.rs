@@ -6,13 +6,6 @@ use bevy::prelude::*;
 use crate::terminal::TerminalKind;
 pub use vmux_wire::agent::AgentKind;
 
-/// Reasoning-effort levels selectable for an agent, keyed by agent key — an ACP agent id
-/// (`"claude"`) or a CLI key (`"cli:claude"`, `"cli:codex"`). Ordered low→high for display.
-/// Empty means the agent exposes no effort knob vmux can drive, and the selector is hidden.
-///
-/// Only keys vmux actually wires are listed: ACP `claude` (forwarded through the adapter's
-/// `claudeCode.options` session meta) and the CLI `claude`/`codex` launch flags. ACP `codex`
-/// and `gemini` return empty until their runtimes expose an effort control.
 pub fn effort_levels(agent_key: &str) -> &'static [&'static str] {
     match agent_key {
         "claude" | "cli:claude" => &["low", "medium", "high", "max"],
@@ -62,15 +55,10 @@ pub struct SpawnAgentInStackRequest {
     pub cwd: PathBuf,
     pub session_id: Option<String>,
     pub stack: Entity,
-    /// Optional prompt to deliver into the agent once its TUI is ready. `None`
-    /// opens the agent with no pre-filled prompt.
     pub initial_prompt: Option<String>,
     pub initial_attachments: Vec<vmux_wire::protocol::AgentAttachment>,
 }
 
-/// Swap the agent session shown on `stack` in place: tear down the current session and
-/// re-attach `target_url` (an ACP or CLI agent url) with the given `cwd`. Same tab position.
-/// Used by `/resume` (pick a past session) and the ACP↔CLI runtime handoff (`/cli`).
 #[derive(Debug, Clone)]
 pub struct StackSessionHandoff {
     pub source_agent: String,
@@ -134,9 +122,6 @@ pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>
     }
 }
 
-/// `vmux://agent/<id>` (single segment) → an ACP agent id. Two or more segments are the
-/// provider-direct page form ([`parse_page_agent_url`]), so ACP claims the single-segment
-/// space without collision.
 pub fn parse_acp_agent_url(url: &str) -> Option<String> {
     let body = url.strip_prefix("vmux://agent/")?;
     let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
@@ -210,7 +195,6 @@ mod tests {
             effort_levels("cli:codex"),
             ["minimal", "low", "medium", "high"]
         );
-        // ACP codex/gemini and unknown agents have no vmux-driven effort control yet.
         assert!(effort_levels("codex").is_empty());
         assert!(effort_levels("gemini").is_empty());
         assert!(effort_levels("vibe").is_empty());

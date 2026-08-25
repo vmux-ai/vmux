@@ -1,8 +1,3 @@
-//! Fluent-backed translation.
-//!
-//! [`Locale`] owns every lookup that depends on which language is in play; [`translate`] and
-//! [`translate_with`] are the ambient shorthand a page reaches for inside `rsx!`.
-
 use crate::i18n_catalogs::{AVAILABLE_LOCALES, EMBEDDED_CATALOGS};
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use std::cell::RefCell;
@@ -20,30 +15,18 @@ thread_local! {
     static EXTERNAL_CATALOGS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
 }
 
-/// Look `id` up in the locale this thread is currently rendering in.
-///
-/// This and [`translate_with`] are the module's deliberate exceptions to behaviour hanging off a
-/// type: they derive nothing from a value, they read ambient thread-local state, and they are the
-/// entry point every `rsx!` block in the workspace calls. Spelling each of those sites
-/// `Locale::current().translate(id)` would name the same thing at more length.
 pub fn translate(id: &str) -> String {
     Locale::current().translate(id)
 }
 
-/// [`translate`] with Fluent arguments, and the same exception for the same reason.
 pub fn translate_with(id: &str, args: &[(&str, TranslationValue<'_>)]) -> String {
     Locale::current().translate_with(id, args)
 }
 
-/// A canonical BCP-47 language tag together with the catalog it resolves messages against.
-///
-/// Construction always normalizes, so the tag is parseable and in canonical case for the whole
-/// life of the value.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Locale(String);
 
 impl Locale {
-    /// The locale the host platform reports, falling back to [`DEFAULT_LOCALE`].
     pub fn preferred() -> Self {
         let Some(tag) = platform_locale() else {
             return Self::from(DEFAULT_LOCALE);
@@ -51,8 +34,6 @@ impl Locale {
         Self::from(tag.as_str())
     }
 
-    /// Resolve an explicit override from settings, where an empty tag and the sentinels `system`,
-    /// `auto` and `device` all mean "follow the platform".
     pub fn requested(override_locale: Option<&str>) -> Self {
         let Some(tag) = override_locale else {
             return Self::preferred();
@@ -64,17 +45,14 @@ impl Locale {
         Self::from(tag)
     }
 
-    /// The locale [`translate`] resolves against on this thread.
     pub fn current() -> Self {
         CURRENT_LOCALE.with_borrow(Clone::clone)
     }
 
-    /// Every locale whose catalog is compiled into the binary.
     pub fn available() -> impl Iterator<Item = Self> {
         AVAILABLE_LOCALES.iter().map(|tag| Self::from(*tag))
     }
 
-    /// Make this the locale [`translate`] resolves against on this thread.
     pub fn make_current(&self) {
         CURRENT_LOCALE.with_borrow_mut(|current| *current = self.clone());
     }
@@ -87,7 +65,6 @@ impl Locale {
         self.0
     }
 
-    /// The direction this locale's script runs in, for the `dir` attribute and RTL layout.
     pub fn direction(&self) -> CharacterDirection {
         let Some(identifier) = self.identifier() else {
             return CharacterDirection::LTR;
@@ -95,8 +72,6 @@ impl Locale {
         identifier.character_direction()
     }
 
-    /// The autonym — the language's name written in itself, for a language picker. Falls back to
-    /// the tag when no catalog declares one.
     pub fn name(&self) -> &str {
         self.embedded_source()
             .and_then(|source| {
@@ -113,8 +88,6 @@ impl Locale {
         self.translate_with(id, &[])
     }
 
-    /// Format `id` with Fluent arguments, falling back to [`DEFAULT_LOCALE`] and then to `id`
-    /// itself when the message is missing.
     pub fn translate_with(&self, id: &str, args: &[(&str, TranslationValue<'_>)]) -> String {
         let mut fluent_args = FluentArgs::new();
         for (name, value) in args {
@@ -137,7 +110,6 @@ impl Locale {
         id.to_string()
     }
 
-    /// Install a Fluent catalog for this locale at runtime, overriding any embedded one.
     pub fn register_catalog(&self, source: &str) -> Result<(), String> {
         let bundle = self.bundle_from_source(source)?;
         EXTERNAL_CATALOGS.with_borrow_mut(|catalogs| {
@@ -153,8 +125,6 @@ impl Locale {
         Self(DEFAULT_LOCALE.to_string())
     }
 
-    /// The locale whose catalog actually backs this one: an exact match wins over the bare
-    /// language, a runtime catalog over an embedded one, and English over nothing.
     fn catalog(&self) -> Self {
         let Some(identifier) = self.identifier() else {
             return Self::default_locale();
@@ -233,8 +203,6 @@ impl Locale {
 }
 
 impl From<&str> for Locale {
-    /// Accepts what an OS or a config file hands over — `en_US.UTF-8`, `fr@euro`, `JA-jp` — and
-    /// canonicalizes it, falling back to [`DEFAULT_LOCALE`] when nothing parses.
     fn from(tag: &str) -> Self {
         let tag = tag
             .split(['.', '@'])

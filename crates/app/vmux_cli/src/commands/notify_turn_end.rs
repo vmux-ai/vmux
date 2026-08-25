@@ -5,9 +5,6 @@ use vmux_client::protocol::{
     AGENT_COMMAND_TIMEOUT, AgentCommand, AgentRequestId, ClientMessage, ProcessId, ServiceMessage,
 };
 
-/// Fired from the CLI agent's `Stop` hook at turn-end: pings the daemon so the GUI raises
-/// `AgentAttention` for this agent, which drives the follow-pane auto-tidy and the done-dot.
-/// The hook payload on stdin is drained and ignored — only the `anchor` matters.
 pub async fn run(anchor: Option<String>) -> io::Result<()> {
     let anchor = match anchor {
         Some(raw) => raw.parse::<ProcessId>().ok(),

@@ -1,11 +1,3 @@
-//! Everything the reader types into, and everything that describes the turn it will start.
-//!
-//! [`ChatDock`] is the whole input region, not just the text field: the menus a draft opens sit
-//! above the prompt, the footer under it, and all of them read and write the same draft. The
-//! controls split three ways below — [`options`] for what the turn runs as, [`workspace`] for
-//! where it runs, [`menu`] for what the draft summons — which is the same three groups a smaller
-//! screen has to decide what to keep.
-
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
 use self::options::{AccessPill, ChatEffortMenu, ChatModelMenu, ChatModelPill};
 use self::workspace::WorkspacePills;
@@ -21,8 +13,6 @@ use vmux_ui::components::composer::PromptComposer;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-/// Everything docked below the transcript: the pickers the draft opens, anything the agent is
-/// waiting on an answer to, the queue, and the prompt itself.
 #[component]
 pub(super) fn ChatDock(chat: Chat) -> Element {
     rsx! {
@@ -48,7 +38,6 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
     }
 }
 
-/// The prompt box, wired to the draft and to everything a keystroke in it can mean.
 #[component]
 fn ChatComposer(chat: Chat) -> Element {
     let accent = agent_accent(&chat.agent());
@@ -89,7 +78,6 @@ fn ChatComposer(chat: Chat) -> Element {
     }
 }
 
-/// The strip under the prompt: what the turn will run as on the left, how it is going on the right.
 #[component]
 fn ComposerFooter(chat: Chat) -> Element {
     rsx! {
@@ -110,19 +98,12 @@ fn ComposerFooter(chat: Chat) -> Element {
     }
 }
 
-/// What the agent is doing right now, and how much is still outstanding.
-///
-/// Takes the numbers rather than the [`Chat`] holding them, because the phone reaches the same
-/// state over QUIC instead of bin events and would otherwise need its own copy of this — which
-/// is how the two clients drifted apart on tool names before [`crate::activity`] existed.
 #[component]
 pub fn ComposerStatus(
     status: String,
     active_subagents: usize,
     active_tasks: usize,
-    /// Prompts waiting behind the running one. Always zero where there is no queue.
-    #[props(default)]
-    queued_count: usize,
+    #[props(default)] queued_count: usize,
 ) -> Element {
     let run_label = match status.as_str() {
         "streaming" => "Running",

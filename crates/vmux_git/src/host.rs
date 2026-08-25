@@ -1,6 +1,3 @@
-//! The git engine on the desktop side: background jobs, diff parsing, syntax highlighting
-//! and worktrees, bridged to the `files://` editor page.
-
 pub mod highlight;
 pub mod job;
 pub mod parse;
@@ -24,8 +21,6 @@ use crate::event::{
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
-/// Wires the git bridge: runs each git request on a background thread and drains completed
-/// results back to the originating webview.
 pub struct GitPlugin;
 
 impl Plugin for GitPlugin {

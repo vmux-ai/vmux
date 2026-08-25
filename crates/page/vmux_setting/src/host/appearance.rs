@@ -4,7 +4,6 @@ use bevy::window::{WindowTheme, WindowThemeChanged};
 
 use crate::ColorScheme;
 
-/// Resolves the app's light/dark scheme from the setting and the OS appearance.
 pub struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
@@ -19,18 +18,15 @@ impl Plugin for AppearancePlugin {
     }
 }
 
-/// Concrete light/dark choice after resolving [`ColorScheme`] against the OS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolvedScheme {
     Light,
     Dark,
 }
 
-/// The OS appearance as last observed by the host. `None` until known.
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct SystemAppearance(pub Option<ResolvedScheme>);
 
-/// The resolved app scheme driving host-generated colors (editor, terminal).
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedColorScheme(pub ResolvedScheme);
 
@@ -40,12 +36,9 @@ impl Default for ResolvedColorScheme {
     }
 }
 
-/// Sent whenever the resolved scheme changes.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct ColorSchemeChanged(pub ResolvedScheme);
 
-/// Pure resolution: explicit Light/Dark win; Device follows the OS, defaulting
-/// to Dark when the OS appearance is unknown.
 pub fn resolve(mode: ColorScheme, system: Option<ResolvedScheme>) -> ResolvedScheme {
     match mode {
         ColorScheme::Light => ResolvedScheme::Light,
@@ -54,7 +47,6 @@ pub fn resolve(mode: ColorScheme, system: Option<ResolvedScheme>) -> ResolvedSch
     }
 }
 
-/// Track winit OS theme changes into [`SystemAppearance`].
 fn track_window_theme(
     mut reader: MessageReader<WindowThemeChanged>,
     mut system: ResMut<SystemAppearance>,
@@ -70,7 +62,6 @@ fn track_window_theme(
     }
 }
 
-/// Recompute [`ResolvedColorScheme`] from the setting + OS; emit on change.
 fn update_resolved_color_scheme(
     settings: Res<crate::AppSettings>,
     system: Res<SystemAppearance>,

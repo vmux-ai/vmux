@@ -1,5 +1,3 @@
-//! Implementation of `vmux service ...` subcommands.
-
 #[cfg(target_os = "macos")]
 use std::path::Path;
 use std::time::Duration;
@@ -19,8 +17,6 @@ pub struct StatusInfo {
 }
 
 impl StatusInfo {
-    /// The `vmux service status` report, one field per line. Anything the daemon did not answer
-    /// for reads as `-`.
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("profile     {}\n", self.profile));

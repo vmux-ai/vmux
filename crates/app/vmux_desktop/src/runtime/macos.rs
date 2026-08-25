@@ -1,7 +1,3 @@
-//! macOS runtime: AppKit event monitors that keep the winit loop awake, native window
-//! activation, and the live-resize/render-demand state they publish back to
-//! [`super::sync_winit_power_mode`].
-
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,7 +6,6 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
-/// The macOS half of [`super::RuntimePlugin`]: installs the AppKit monitors winit does not own, and gates rendering on demand.
 pub(super) struct RuntimePlatformPlugin;
 
 impl Plugin for RuntimePlatformPlugin {
@@ -116,12 +111,6 @@ fn activate_native_window(window_entity: Entity) {
     });
 }
 
-/// Re-assert app activation + window key status, returning `true` once it has taken effect.
-///
-/// `activateIgnoringOtherApps` is asynchronous: the app does not report active until a later
-/// runloop tick, so a single one-shot at reveal does not stick — the window shows but the app
-/// stays in the background, and keystrokes (including menu key-equivalents) go nowhere until a
-/// click activates the app. Callers retry this each frame until it returns `true`.
 pub(crate) fn ensure_native_window_active(window_entity: Entity) -> bool {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSApp, NSView};
@@ -155,11 +144,8 @@ pub(crate) fn ensure_native_window_active(window_entity: Entity) -> bool {
     })
 }
 
-/// Stop re-asserting boot activation after this long, so a degenerate case cannot wake the loop
-/// forever.
 const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
 
-/// Bring the app to the foreground (app level only — no window). Returns `true` once active.
 fn activate_app() -> bool {
     use objc2_app_kit::NSApp;
 
@@ -175,10 +161,6 @@ fn activate_app() -> bool {
     false
 }
 
-/// When launched from a terminal, the launching app stays frontmost and macOS takes ~1-2s to honor
-/// our activation request. Start asking the moment boot begins so that latency overlaps the splash
-/// wait — by the time the window reveals the app is already active and becoming key is instant,
-/// instead of the user watching the UI for a second before keys register.
 fn activate_app_during_boot(
     mut confirmed: Local<bool>,
     mut started_at: Local<Option<Instant>>,
@@ -472,9 +454,6 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
     }
 }
 
-/// Track macOS live-resize so [`super::foreground_winit_settings`] can pace the loop at ~60Hz
-/// during the drag. `NSWindow` posts these notifications once per drag; the blocks set
-/// [`IN_LIVE_RESIZE`] and wake the loop so the reactive mode switches immediately.
 fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{
         NSWindowDidEndLiveResizeNotification, NSWindowWillStartLiveResizeNotification,
@@ -551,13 +530,10 @@ fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
     }
 }
 
-/// Whether an `NSWindow` live-resize drag is in flight.
 pub(super) fn live_resize_active() -> bool {
     IN_LIVE_RESIZE.load(Ordering::Relaxed)
 }
 
-/// Whether the pointer sits over native CEF content that owns it, so winit should stop
-/// waking on window events.
 pub(super) fn native_pointer_inside() -> bool {
     vmux_browser::NativeLayout::pointer_is_inside()
         || NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)

@@ -1,6 +1,3 @@
-//! File viewer and editor page: loading, editing, syntax highlighting, file watching,
-//! image preview, and LSP integration as a Dioxus page.
-
 pub mod page_model;
 
 #[cfg(ui)]

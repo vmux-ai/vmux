@@ -1,5 +1,3 @@
-//! Space storage and the plugin that drives it, on the desktop side.
-
 pub mod cwd;
 mod key;
 pub mod plugin;

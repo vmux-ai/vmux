@@ -1,9 +1,3 @@
-//! What typing in the prompt summons over it: files behind `@`, commands behind `/`, and the
-//! earlier sessions behind `/resume`.
-//!
-//! All three are the same gesture — keep typing to narrow, arrow to pick — and all three read the
-//! one selection index the keyboard handler drives, so they move together.
-
 use crate::event::SlashCommandEntry;
 use crate::format::composer::ResumeMenuState;
 use crate::page::state::Chat;
@@ -12,7 +6,6 @@ use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-/// Files and folders matching the `@`-mention being typed.
 #[component]
 pub(super) fn MediaMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
@@ -35,7 +28,6 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
     }
 }
 
-/// The slash commands matching what has been typed after the `/`.
 #[component]
 pub(super) fn CommandMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
@@ -59,7 +51,6 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
     }
 }
 
-/// vmux's own commands describe themselves; an agent's own description stands.
 fn slash_command_description(command: &SlashCommandEntry) -> String {
     match command.name.as_str() {
         "upload" => translate("agent-slash-attach-files"),
@@ -70,7 +61,6 @@ fn slash_command_description(command: &SlashCommandEntry) -> String {
     }
 }
 
-/// Earlier sessions this agent can pick back up.
 #[component]
 pub(super) fn ResumeMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;

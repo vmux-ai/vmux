@@ -1,10 +1,5 @@
-//! Extension-based media classification shared by the editor backend and the
-//! `file://` page: decides whether a path is an image, video, audio, or PDF and
-//! what MIME type to serve it as.
-
 use serde::{Deserialize, Serialize};
 
-/// The kind of media a `file://` path resolves to.
 #[derive(
     Debug,
     Clone,
@@ -18,13 +13,9 @@ use serde::{Deserialize, Serialize};
     rkyv::Deserialize,
 )]
 pub enum MediaKind {
-    /// Raster or vector image rendered with `<img>`.
     Image,
-    /// Video rendered with `<video controls>`.
     Video,
-    /// Audio rendered with `<audio controls>`.
     Audio,
-    /// PDF shown via an info card (no inline render in v1).
     Pdf,
 }
 
@@ -36,7 +27,6 @@ fn ext_of(path: &str) -> String {
     }
 }
 
-/// MIME type for a media path, or `None` if the extension is not recognized media.
 pub fn media_mime(path: &str) -> Option<&'static str> {
     Some(match ext_of(path).as_str() {
         "png" => "image/png",
@@ -60,7 +50,6 @@ pub fn media_mime(path: &str) -> Option<&'static str> {
     })
 }
 
-/// Classify a path into a [`MediaKind`], or `None` if not media.
 pub fn media_kind(path: &str) -> Option<MediaKind> {
     Some(match ext_of(path).as_str() {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => {
@@ -73,15 +62,10 @@ pub fn media_kind(path: &str) -> Option<MediaKind> {
     })
 }
 
-/// Whether a path is a proprietary-codec video container (H.264/HEVC in mp4/mov)
-/// that a codec-less CEF build can't decode in `<video>`. macOS plays these through
-/// a native `AVPlayer` overlay instead; open containers (webm/ogv) stay in `<video>`.
 pub fn is_proprietary_video(path: &str) -> bool {
     matches!(ext_of(path).as_str(), "mp4" | "m4v" | "mov")
 }
 
-/// MIME type for an image path only (used by the dir-browser thumbnail path,
-/// which renders raster previews and must not treat video/audio/pdf as images).
 pub fn image_mime(path: &str) -> Option<&'static str> {
     match media_kind(path) {
         Some(MediaKind::Image) => media_mime(path),

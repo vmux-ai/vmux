@@ -1,5 +1,3 @@
-//! The window and layout shell: spaces, tabs, panes, stacks, focus ring, header and
-//! side-sheet, command-bar input, and the single CEF layout webview that composes every page.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,

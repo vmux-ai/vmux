@@ -7,22 +7,11 @@ use vmux_ui::i18n::translate;
 
 use crate::page_model::{heading_class, span_style, table_align_style};
 
-/// The caret drawn into a source line. Named so the page can scroll to it.
 pub const NOTE_CARET_ID: &str = "note-caret";
 
-/// Which list item a pointer last went down on.
-///
-/// A list's items are rendered here, recursively, while the gesture that opens a block for editing
-/// is handled on the block. Rather than have the block hunt back down the tree for which item was
-/// hit — which is what a `closest()` walk was doing — the item that knows says so on the way past.
 #[derive(Clone, Copy)]
 pub struct ListLineHit(pub Signal<Option<u32>>);
 
-/// The source of the list item the caret is in, and how to draw it.
-///
-/// Drawn over the rendered item rather than instead of it, so the list keeps the height it had and
-/// does not jump as the markers appear. Positioned by `inset-0` within the item, because the item
-/// is the only thing that knows where it is and nothing here can measure that.
 #[derive(Clone, PartialEq)]
 pub struct ListEditLine {
     pub line: u32,
@@ -30,10 +19,6 @@ pub struct ListEditLine {
     pub caret_width_class: String,
 }
 
-/// One run of a source line styled the same all the way through.
-///
-/// A line is cut at the caret and at the selection's edges, so every piece is either wholly
-/// selected or wholly not, and the caret falls between two of them rather than inside one.
 #[derive(Clone, PartialEq)]
 pub struct NoteLineChunk {
     pub text: String,
@@ -87,7 +72,6 @@ impl NoteLineChunk {
     }
 }
 
-/// The raw source of one line, with the caret and the selection drawn into it.
 #[component]
 pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> Element {
     rsx! {
@@ -123,10 +107,6 @@ fn hidden_class(class: &'static str, hidden: bool) -> String {
     }
 }
 
-/// One markdown block, recursing into the blocks and inlines it contains.
-///
-/// `hidden_list_line` blanks the source line the caret is editing, so the raw markdown shows
-/// through in its place without the rendered copy jumping.
 #[component]
 pub fn MdBlockView(
     block: MdBlock,
@@ -205,7 +185,6 @@ pub fn MdBlockView(
     }
 }
 
-/// An ordered or bulleted list, whose items hold blocks of their own.
 #[component]
 fn MdList(
     ordered: bool,
@@ -274,7 +253,6 @@ fn MdList(
     }
 }
 
-/// The source of one list item, over the rendered copy it is replacing.
 #[component]
 fn ListSourceOverlay(
     edit: ListEditLine,
@@ -314,7 +292,6 @@ fn ListSourceOverlay(
     }
 }
 
-/// A markdown table, with its per-column alignment.
 #[component]
 fn MdTable(
     aligns: Vec<MdTableAlign>,
@@ -368,7 +345,6 @@ fn MdTable(
     }
 }
 
-/// A run of inline markdown nodes.
 #[component]
 fn MdInlines(inlines: Vec<MdInline>) -> Element {
     rsx! {
@@ -378,7 +354,6 @@ fn MdInlines(inlines: Vec<MdInline>) -> Element {
     }
 }
 
-/// One inline markdown node, recursing into the nodes it wraps.
 #[component]
 fn MdInlineView(inline: MdInline, inline_key: usize) -> Element {
     let key = inline_key;

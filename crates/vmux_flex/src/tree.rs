@@ -1,5 +1,3 @@
-//! The taffy tree the ECS hierarchy is mirrored into.
-
 use bevy::ecs::entity::EntityHashMap;
 use bevy::prelude::*;
 use taffy::TaffyTree;
@@ -7,10 +5,6 @@ use taffy::style_helpers;
 
 use crate::node::{AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, Val};
 
-/// What lengths are resolved against for one frame.
-///
-/// One per frame for the whole tree, not one per node: the shell has a single window, so there is
-/// nothing for a second context to describe.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutContext {
     pub scale_factor: f32,
@@ -73,7 +67,6 @@ impl LayoutContext {
                 width: self.dimension(node.min_width),
                 height: self.dimension(node.min_height),
             },
-            // taffy's `gap` is (main, cross) as (width, height), so the column gap is the width.
             gap: taffy::Size {
                 width: self.length_percentage(node.column_gap),
                 height: self.length_percentage(node.row_gap),
@@ -90,7 +83,6 @@ impl LayoutContext {
         }
     }
 
-    /// `Auto` has no meaning for padding or a gap, and collapses to zero.
     fn length_percentage(&self, value: Val) -> taffy::LengthPercentage {
         match value {
             Val::Auto => style_helpers::length(0.0),
@@ -104,35 +96,26 @@ impl LayoutContext {
     }
 }
 
-/// `TaffyTree` is not `Send` because a `CompactLength` can carry a pointer to a `calc` expression.
-///
-/// That only happens with taffy's `calc` feature, which this crate's manifest pins off and explains
-/// why. `bevy_ui` carries the identical newtype and justification.
 struct TaffyCell(TaffyTree<()>);
 
 #[expect(
     unsafe_code,
     reason = "TaffyTree is Send as long as the calc feature is off"
 )]
-// SAFETY: taffy is thread-unsafe only through `calc`, which this crate does not enable.
 unsafe impl Send for TaffyCell {}
 
 #[expect(
     unsafe_code,
     reason = "TaffyTree is Sync as long as the calc feature is off"
 )]
-// SAFETY: taffy is thread-unsafe only through `calc`, which this crate does not enable.
 unsafe impl Sync for TaffyCell {}
 
-/// A taffy node standing in for one ECS entity, and the implicit viewport wrapping it if it is a
-/// root.
 #[derive(Clone, Copy)]
 struct FlexNode {
     id: taffy::NodeId,
     viewport: Option<taffy::NodeId>,
 }
 
-/// The taffy tree, and the mapping back to the entities it mirrors.
 #[derive(Resource, Default)]
 pub struct FlexTree {
     taffy: TaffyCell,
@@ -151,7 +134,6 @@ impl FlexTree {
         self.entities.contains_key(&entity)
     }
 
-    /// Create or restyle the taffy node standing in for `entity`.
     pub fn upsert(&mut self, context: &LayoutContext, entity: Entity, node: &Node) {
         let style = context.style_for(node);
         match self.entities.get(&entity) {
@@ -181,7 +163,6 @@ impl FlexTree {
         let _ = self.taffy.0.set_children(parent.id, &ids);
     }
 
-    /// Drop the node for `entity`, and the viewport wrapping it if it had one.
     pub fn remove(&mut self, entity: Entity) {
         let Some(node) = self.entities.remove(&entity) else {
             return;
@@ -192,7 +173,6 @@ impl FlexTree {
         let _ = self.taffy.0.remove(node.id);
     }
 
-    /// Release a root's viewport wrapper without dropping the node — it has become someone's child.
     pub fn detach_viewport(&mut self, entity: Entity) {
         let Some(node) = self.entities.get_mut(&entity) else {
             return;
@@ -209,11 +189,6 @@ impl FlexTree {
             .is_some_and(|node| node.viewport.is_some())
     }
 
-    /// Lay `entity` out as a root, against the whole render target.
-    ///
-    /// The root is wrapped in an implicit grid node filling the target rather than handed to taffy
-    /// directly, because taffy's root path is a different algorithm: it ignores the root's own
-    /// inset and pins its x to zero. Wrapping keeps a root laying out exactly as a child would.
     pub fn compute(&mut self, context: &LayoutContext, entity: Entity) {
         let Some(node) = self.entities.get(&entity).copied() else {
             return;
@@ -256,7 +231,6 @@ impl FlexTree {
         self.taffy.0.layout(node.id).ok()
     }
 
-    /// The context the tree was last styled against, so a scale-factor change can be noticed.
     pub fn context(&self) -> Option<LayoutContext> {
         self.context
     }

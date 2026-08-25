@@ -1,8 +1,3 @@
-//! Starting an agent process, and noticing when one goes away.
-//!
-//! These are the last step of opening a page: the stack already knows where it runs, and this
-//! turns that into a live process, an attached webview, or an error card on the stack that asked.
-
 use bevy::prelude::*;
 use vmux_command::WriteAppCommands;
 use vmux_core::KeyboardOwner;
@@ -123,10 +118,6 @@ pub fn detect_agent_session_process_exit(
             .remove::<PendingAgentSession>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();
-        // A vibe agent terminal that exits should close its pane entirely, not
-        // linger as a shell/terminal. The terminal is a child of a stack, which
-        // is a child of a pane; mark that pane for a no-dialog force close. If
-        // the pane can't be resolved, fall back to converting to a terminal.
         let pane = child_of
             .get(entity)
             .ok()
@@ -479,9 +470,6 @@ mod tests {
     use super::*;
     use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
 
-    /// Restarting rewrites the launch a terminal will be re-fed from. Run it after the terminal
-    /// crate has already flushed its service messages and the old anchor goes out on the wire, so
-    /// the schedule is asked directly rather than trusted to the order this plugin is added in.
     #[test]
     fn agent_restart_runs_before_terminal_service_messages() {
         let mut app = App::new();

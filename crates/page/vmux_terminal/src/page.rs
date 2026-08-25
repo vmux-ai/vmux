@@ -19,14 +19,8 @@ use vmux_ui::hooks::{send, use_key_claim, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 
-/// ID for the outermost terminal container div.
 const CONTAINER_ID: &str = "term-container";
 
-/// How many rows of how many columns the measuring span holds.
-///
-/// Both dimensions come off one element: the width divides out to a character, and the height to a
-/// line box — which is what a single-line span could not give, since its box is the font's content
-/// area and the row pitch is the line height around it.
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 
@@ -36,26 +30,14 @@ struct TerminalRowState {
     cursor: Option<TermCursor>,
 }
 
-/// How big a character is and how big the box holding them is.
-///
-/// Two elements answer for this and they answer separately: the container when the pane changes
-/// size, the measuring span when the font finishes loading. Either can arrive first, and neither
-/// is a complete answer, which is why the pty hears nothing until both have.
 #[derive(Clone, Copy, Default, PartialEq)]
 struct Viewport {
-    /// One character: its advance width, and the pitch from one row to the next.
     cell: (f64, f64),
-    /// The scrolling element's own border box.
     client: (f64, f64),
-    /// Where that box starts, which is what turns a pointer's coordinates into a cell.
     origin: (f64, f64),
 }
 
 impl Viewport {
-    /// Which cell a pointer at these viewport coordinates is over.
-    ///
-    /// Rows are counted from the top of the visible box rather than of the scrollback, because
-    /// that is the frame the terminal's own mouse protocol reports in.
     fn cell_at(&self, at: ClientPoint, padding: f64) -> Option<(u16, u16)> {
         let (cw, ch) = self.cell;
         if cw <= 0.0 || ch <= 0.0 {
@@ -82,9 +64,6 @@ impl Viewport {
         self.announce(padding);
     }
 
-    /// The padding is subtracted from the value the page itself wrote rather than read back off
-    /// the element: it sits on the scrolling child, whose box is the content's height, not the
-    /// viewport's.
     fn announce(&self, padding: f64) {
         let (cw, ch) = self.cell;
         if cw <= 0.0 || ch <= 0.0 || self.client.1 <= 0.0 {
@@ -321,9 +300,7 @@ pub fn Page() -> Element {
         });
     };
 
-    // Last emitted mouse cell position for move-event throttling.
     let mut last_mouse_cell = use_signal(|| (-1i32, -1i32));
-    // Accumulated wheel delta (pixels) not yet converted into scroll notches.
     let mut wheel_accum = use_signal(|| 0.0f64);
 
     let theme_style = {
@@ -339,7 +316,6 @@ pub fn Page() -> Element {
                     s.push_str(&format!("--ansi-{i}:rgb({r},{g},{b});"));
                 }
                 if !t.font_family.is_empty() {
-                    // Always include bundled Nerd Font as fallback for PUA glyphs
                     s.push_str(&format!(
                         "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
                         t.font_family
@@ -359,9 +335,6 @@ pub fn Page() -> Element {
 
     let padding = theme().map(|t| t.padding).unwrap_or(4.0) as f64;
 
-    // Include measured cell dimensions as CSS custom properties so they
-    // survive Dioxus style re-renders and are available for row height,
-    // cursor, and selection overlay positioning.
     let (cw, ch) = viewport().cell;
     let cell_style = if cw > 0.0 && ch > 0.0 {
         format!("--cw:{cw}px;--ch:{ch}px;")
@@ -407,9 +380,6 @@ pub fn Page() -> Element {
                 viewport
                     .write()
                     .container_resized((size.width, size.height), padding);
-                // Resizing a pane is also the only thing that moves one, so this is where the
-                // origin is worth re-reading — and it is a question, so it answers a frame later
-                // rather than here.
                 locate_container();
             },
 
@@ -491,8 +461,6 @@ pub fn Page() -> Element {
                 let visible = e.client_height() as f64;
                 let vis_first = (((scrolled - padding) / ch).floor()).max(0.0) as u32;
                 let vis_rows = (visible / ch).ceil() as u32 + 1;
-                // Within a row of the bottom counts as following, so that output arriving while
-                // the user sits at the end keeps them there rather than stranding them a line up.
                 let follow = e.scroll_height() as f64 - scrolled - visible <= ch.max(2.0) + 1.0;
                 if follow != *following.peek() {
                     following.set(follow);
@@ -635,8 +603,6 @@ pub fn Page() -> Element {
 
             style { ".vmux-link:hover{{border-bottom:2px solid var(--primary)}}" }
 
-            // Absolutely positioned so it is out of flow and, being blockified by that, something
-            // a resize observer will report on at all — it skips inline elements.
             span {
                 style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
                 onresize: move |e: Event<ResizeData>| {
@@ -687,8 +653,6 @@ pub fn Page() -> Element {
     }
 }
 
-// Tailwind safelist -- these classes are generated dynamically via format!() and
-// must appear as literal strings for Tailwind's content scanner to detect them.
 #[rustfmt::skip]
 const _TW_SAFELIST: &[&str] = &[
     "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
@@ -768,11 +732,6 @@ fn TerminalRow(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Mouse helpers
-// ---------------------------------------------------------------------------
-
-/// Map Dioxus trigger_button to terminal protocol button number.
 fn trigger_button_id(e: &Event<MouseData>) -> u8 {
     match e.trigger_button() {
         Some(MouseButton::Primary) => 0,
@@ -782,7 +741,6 @@ fn trigger_button_id(e: &Event<MouseData>) -> u8 {
     }
 }
 
-/// Determine which button is held during a mousemove (for drag events).
 fn held_button_id(e: &Event<MouseData>) -> u8 {
     let held = e.held_buttons();
     if held.contains(MouseButton::Primary) {
@@ -796,7 +754,6 @@ fn held_button_id(e: &Event<MouseData>) -> u8 {
     }
 }
 
-/// Convert Dioxus modifier flags to our MOD_* bitmask.
 fn modifier_bits(mods: Modifiers) -> u8 {
     let mut m = 0u8;
     if mods.contains(Modifiers::CONTROL) {
@@ -814,7 +771,6 @@ fn modifier_bits(mods: Modifiers) -> u8 {
     m
 }
 
-/// Emit a TermMouseEvent to the Bevy host via the CEF bridge.
 fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
     let _ = send(&TermMouseEvent {
         button,
@@ -826,11 +782,6 @@ fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, movi
     });
 }
 
-// ---------------------------------------------------------------------------
-// Span rendering
-// ---------------------------------------------------------------------------
-
-/// One run of same-styled cells in a terminal row, splitting around the cursor.
 #[component]
 fn TermSpanView(
     span: TermSpan,
@@ -921,11 +872,6 @@ fn span_char_offset_for_col(span: &TermSpan, col: u16) -> usize {
     offset
 }
 
-/// Compute the selected column range for a given row, if any.
-/// Returns Some((start_col, end_col_exclusive)) or None.
-///
-/// Normalizes the selection so it works regardless of drag direction
-/// (start may be after end in either axis).
 fn row_selection_cols(
     selection: &Option<TermSelectionRange>,
     row_idx: usize,
@@ -938,8 +884,6 @@ fn row_selection_cols(
     if row < lo_row || row > hi_row {
         return None;
     }
-    // Normalize cols: for block selections per-axis; for linear selections
-    // by row-major (start_row, start_col) order so start always comes first.
     let (sr, sc, er, ec) = if sel.is_block {
         (
             lo_row,

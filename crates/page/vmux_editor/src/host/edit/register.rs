@@ -1,16 +1,13 @@
 use std::collections::BTreeMap;
 
-/// How a register's text is reinserted by a put.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RegisterKind {
     #[default]
     Charwise,
     Linewise,
-    /// A rectangle: each line of the text is one row of the block.
     Blockwise,
 }
 
-/// Text captured by a yank or delete, tagged with the shape it should be put back in.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RegisterValue {
     pub text: String,
@@ -37,10 +34,6 @@ pub const UNNAMED: char = '"';
 pub const BLACKHOLE: char = '_';
 pub const SMALL_DELETE: char = '-';
 
-/// Vim's register file: unnamed, named `a`-`z`, numbered `0`-`9`, and the small-delete register.
-///
-/// `clipboard_shadow` records the text vmux last pushed to the system clipboard so the host can
-/// tell an external copy from its own, and avoid clobbering a linewise register on every put.
 #[derive(Default)]
 pub struct Registers {
     slots: BTreeMap<char, RegisterValue>,
@@ -65,12 +58,10 @@ impl Registers {
         self.slots.insert(name, value);
     }
 
-    /// Replace the unnamed register without disturbing the numbered ring.
     pub fn set_unnamed(&mut self, value: RegisterValue) {
         self.slots.insert(UNNAMED, value);
     }
 
-    /// Store a yank: unnamed plus `"0`, or the requested register. An uppercase name appends.
     pub fn write_yank(&mut self, name: Option<char>, value: RegisterValue) {
         if name == Some(BLACKHOLE) {
             return;
@@ -86,7 +77,6 @@ impl Registers {
         self.slots.insert(UNNAMED, value);
     }
 
-    /// Store a delete: unnamed plus either the numbered ring (linewise or multi-line) or `"-`.
     pub fn write_delete(&mut self, name: Option<char>, value: RegisterValue) {
         if name == Some(BLACKHOLE) {
             return;

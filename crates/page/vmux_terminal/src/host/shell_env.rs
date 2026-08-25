@@ -1,20 +1,3 @@
-//! Capture the user's login-shell environment so agent processes inherit it.
-//!
-//! A vmux terminal runs the user's shell, which sources its config (`env.nu`,
-//! `.zshrc`, …) and thus has the user's exported vars (API keys, etc.). An
-//! *agent* (vibe/claude/codex) is launched as a bare executable, so it only
-//! inherits the daemon's environment — which is missing those vars when the
-//! daemon was started by launchd rather than from a shell. We capture the login
-//! shell's exported environment once and merge it into agent spawns.
-//!
-//! The capture runs the shell **under a pty**, in login + interactive mode, and
-//! reads the environment back between two sentinels. The pty matters: real shell
-//! configs routinely call commands that need a controlling terminal (e.g.
-//! `$env.GPG_TTY = (tty)` in `env.nu`, `tput`/`[[ -t 0 ]]` guards in `.zshrc`).
-//! Without a pty those abort or skip, dropping every export that follows. Each
-//! shell sources its own config files, so this works for zsh, bash, fish, and
-//! nushell alike.
-
 use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
@@ -25,18 +8,11 @@ use std::time::Duration;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
-/// Markers the capture command prints around `/usr/bin/env` output so we can
-/// recover the environment from a pty stream that also carries shell banners,
-/// prompts, and control sequences. The random suffix avoids colliding with a
-/// real environment value.
 const ENV_BEGIN: &str = "__VMUX_LOGIN_ENV_BEGIN_7Qz9__";
 const ENV_END: &str = "__VMUX_LOGIN_ENV_END_7Qz9__";
 
-/// How long to wait for the login shell to source its config and dump the
-/// environment before giving up (a misbehaving config could block forever).
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The environment the user's login shell exports, captured once per process.
 pub fn login_shell_env(shell: &str) -> &'static [(String, String)] {
     static CACHE: OnceLock<Vec<(String, String)>> = OnceLock::new();
     CACHE
@@ -44,24 +20,15 @@ pub fn login_shell_env(shell: &str) -> &'static [(String, String)] {
         .as_slice()
 }
 
-/// Merge the login-shell env into `env` (shell values win), then drop duplicate
-/// keys keeping the last. Use when spawning an agent so it gets the same
-/// environment a terminal would, regardless of how the daemon was launched.
 pub fn merge_login_shell_env(env: &mut Vec<(String, String)>, shell: &str) {
     env.extend(login_shell_env(shell).iter().cloned());
     dedup_env_keep_last(env);
 }
 
-/// Run the login shell under a pty so it sources its config (where exports
-/// live), then dump the environment it hands to child processes. Returns empty
-/// on any failure (callers keep their env).
 fn capture_login_shell_env(shell: &str) -> Vec<(String, String)> {
     capture_via_pty(shell).unwrap_or_default()
 }
 
-/// Spawn `shell` on a pty with the per-shell capture arguments, read its output
-/// until EOF (or the timeout elapses), and parse the environment dumped between
-/// the sentinels. `None` on any spawn/read failure or timeout.
 fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
     let args = shell_capture_args(shell);
 
@@ -119,11 +86,6 @@ fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
     Some(extract_env_between_sentinels(&bytes))
 }
 
-/// Per-shell arguments that source the shell's config and print the environment
-/// fenced by [`ENV_BEGIN`]/[`ENV_END`]. nushell does not load `env.nu`/`config.nu`
-/// with a bare `-c`, so it is pointed at them explicitly (`-l` if the paths can't
-/// be resolved); POSIX-style shells and fish need `-l -i` to source their login +
-/// interactive config.
 fn shell_capture_args(shell: &str) -> Vec<String> {
     let base = Path::new(shell)
         .file_name()
@@ -157,9 +119,6 @@ fn shell_capture_args(shell: &str) -> Vec<String> {
     }
 }
 
-/// Resolve nushell's active `env.nu` and `config.nu` paths via `$nu.env-path` /
-/// `$nu.config-path` (parse-time constants, so a bare `-c` suffices and sources
-/// nothing). `None` if either path can't be read.
 fn resolve_nu_config_paths(shell: &str) -> Option<(String, String)> {
     let output = Command::new(shell)
         .args(["-c", "[$nu.env-path $nu.config-path] | to text"])
@@ -177,10 +136,6 @@ fn resolve_nu_config_paths(shell: &str) -> Option<(String, String)> {
     Some((env_path, config_path))
 }
 
-/// Collect the `KEY=VALUE` lines that appear between [`ENV_BEGIN`] and
-/// [`ENV_END`] in pty output, ignoring banners/prompts/control sequences outside
-/// the fence. Marker detection is substring-based so a prompt printed on the
-/// same line as the marker doesn't hide it.
 fn extract_env_between_sentinels(bytes: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(bytes);
     let mut started = false;
@@ -201,8 +156,6 @@ fn extract_env_between_sentinels(bytes: &[u8]) -> Vec<(String, String)> {
     parse_env(body.as_bytes())
 }
 
-/// Parse `KEY=VALUE` lines from `env` output. Splits on the first `=` and skips
-/// lines without one (e.g. wrapped multi-line values).
 fn parse_env(bytes: &[u8]) -> Vec<(String, String)> {
     String::from_utf8_lossy(bytes)
         .lines()
@@ -212,7 +165,6 @@ fn parse_env(bytes: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Keep only the last occurrence of each key, preserving order.
 fn dedup_env_keep_last(env: &mut Vec<(String, String)>) {
     let mut seen = HashSet::new();
     let mut deduped = Vec::with_capacity(env.len());
@@ -244,11 +196,9 @@ mod tests {
 
     #[test]
     fn merge_overrides_existing_keys_keeping_order() {
-        // Simulate a base env (daemon) merged with a login env via dedup.
         let mut env = vec![
             ("VIBE_MCP_SERVERS".to_string(), "[...]".to_string()),
             ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), "stale".to_string()),
-            // login env appended (would come from login_shell_env):
             ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), "fresh".to_string()),
             ("PATH".to_string(), "/login/bin".to_string()),
         ];

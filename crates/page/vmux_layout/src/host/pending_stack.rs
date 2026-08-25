@@ -1,13 +1,3 @@
-//! Disposing of an empty stack a launcher never used.
-//!
-//! Opening the launcher on an empty pane hands it a fresh stack to fill. Dismissing without picking
-//! anything has to undo that, and it is more than a despawn: Cmd+T creates a whole tab to hold the
-//! one stack, so abandoning it should take the tab too, and which of the two happened decides where
-//! the keyboard goes back to.
-//!
-//! All of that is workspace shape, so the launcher only reports
-//! [`PendingStackAbandoned`](vmux_core::launcher::PendingStackAbandoned) and this answers it.
-
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_core::KeyboardOwner;
@@ -55,8 +45,6 @@ fn discard_abandoned_pending_stacks(
             &stack_q,
             &mut commands,
         );
-        // Only the despawn is conditional. Closing the tab takes the stack with it, but it does
-        // not put the keyboard back, and the pane the launcher came from still wants it.
         if !closed_tab {
             commands.entity(event.stack).despawn();
         }
@@ -74,7 +62,6 @@ fn discard_abandoned_pending_stacks(
     }
 }
 
-/// Hands the keyboard to the content page in a stack, skipping the header and side sheet.
 fn restore_keyboard_to_stack(
     mut requests: MessageReader<RestoreKeyboardToStack>,
     all_children: Query<&Children>,
@@ -100,8 +87,6 @@ fn restore_keyboard_to_stack(
     }
 }
 
-/// Activates the whole chain - stack, pane, tab, space - rather than just the pane, so switching
-/// to a page in another tab actually moves the active-tab marker.
 fn focus_chosen_stack_in_pane(
     mut chosen: MessageReader<StackInPaneChosen>,
     leaf_panes: Query<Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>,
@@ -125,10 +110,6 @@ fn focus_chosen_stack_in_pane(
 }
 
 impl Tab {
-    /// Despawns the tab holding `stack` when that stack is the only thing in it, and hands the
-    /// active marker to a sibling. Reports whether it did.
-    ///
-    /// Refuses when the tab is the last one: a workspace with no tabs has nothing to show.
     fn close_if_only_holds(
         stack: Entity,
         tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
@@ -245,8 +226,6 @@ mod tests {
         }
     }
 
-    /// Cmd+T makes a tab just to hold the stack the launcher opens on, so walking away from the
-    /// launcher has to take the tab with it — otherwise every dismissed Cmd+T leaves an empty tab.
     #[test]
     fn abandoning_the_only_stack_in_a_tab_closes_the_tab() {
         let mut workspace = Workspace::new();
@@ -275,8 +254,6 @@ mod tests {
         assert!(workspace.exists(tab));
     }
 
-    /// Closing the last tab would leave a workspace with nothing to show, so the stack goes and
-    /// the tab stays.
     #[test]
     fn abandoning_the_only_stack_in_the_only_tab_keeps_the_tab() {
         let mut workspace = Workspace::new();

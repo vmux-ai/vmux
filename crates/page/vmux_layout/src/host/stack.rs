@@ -48,9 +48,6 @@ impl Plugin for StackPlugin {
     }
 }
 
-/// Cached result of `focused_stack()`, computed once per frame in `Update`
-/// after all command handlers. Read by push/sync systems to avoid redundant
-/// tree walks.
 #[derive(Resource, Default)]
 pub struct FocusedStack {
     pub tab: Option<Entity>,
@@ -58,16 +55,12 @@ pub struct FocusedStack {
     pub stack: Option<Entity>,
 }
 
-/// Marker: tab is waiting for close confirmation dialog.
 #[derive(Component)]
 pub struct PendingStackClose;
 
-/// Marker: close was confirmed, skip dialog next time.
 #[derive(Component)]
 pub struct CloseConfirmed;
 
-/// Close (despawn) a specific stack entity. Used by agent auto-tidy. Ignored if
-/// it is the only stack in its pane, so tidy can never empty (and collapse) a pane.
 #[derive(Message, Clone, Copy)]
 pub struct CloseStackRequest {
     pub stack: Entity,
@@ -111,14 +104,12 @@ pub struct Stack {
     pub scroll_y: f32,
 }
 
-/// Returns the entity with the highest `LastActivatedAt` timestamp.
 pub fn active_among<'a>(
     entities: impl Iterator<Item = (Entity, &'a LastActivatedAt)>,
 ) -> Option<Entity> {
     entities.max_by_key(|(_, ts)| ts.0).map(|(e, _)| e)
 }
 
-/// Recursively collects leaf panes (panes without PaneSplit) under `root`.
 pub fn collect_leaf_panes(
     root: Entity,
     all_children: &Query<&Children>,
@@ -146,7 +137,6 @@ pub fn active_pane_in_tab(
     active_among(panes.iter().filter_map(|&e| pane_ts.get(e).ok()))
 }
 
-/// Find the active tab (max LastActivatedAt) in a pane.
 pub fn active_stack_in_pane(
     pane: Entity,
     pane_children: &Query<&Children, With<Pane>>,
@@ -178,11 +168,6 @@ impl ActiveTabParam<'_, '_> {
         if scoped.is_some() {
             return scoped;
         }
-        // No active tab is scoped to an active space — e.g. on a fresh start
-        // before the default tab is adopted into / marked active within its
-        // space. Fall back to the global most-recently-active tab so callers
-        // (notably `open_startup_url_if_no_stacks`) don't treat the layout as
-        // empty and respawn startup content every frame.
         active_among(self.tabs.iter())
     }
 }
@@ -212,10 +197,6 @@ fn compute_focused_stack(
     let tab = active_tab_param.get();
     let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
     let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
-    // Only write when the focus actually changed. An unconditional `ResMut` write
-    // marks `FocusedStack` changed every frame, which made `sync_live_start_pages`
-    // re-emit the `vmux://start` payload every frame — re-rendering the launcher
-    // input and eating keystrokes.
     if cached.tab != tab || cached.pane != pane || cached.stack != stack {
         cached.tab = tab;
         cached.pane = pane;
@@ -790,9 +771,6 @@ mod tests {
             Some(stack),
             "focus should resolve to the only stack"
         );
-        // With stable focus, `FocusedStack` must NOT be marked changed every frame
-        // (an unconditional ResMut write drove `sync_live_start_pages` to re-emit
-        // the vmux://start payload every frame and eat keystrokes).
         let log = &app.world().resource::<ChangeLog>().0;
         assert_eq!(
             log.last(),
@@ -1529,9 +1507,6 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         let main = app.world_mut().spawn(crate::window::Main).id();
-        // An active space exists, but the only tab isn't scoped to it — the
-        // fresh-start state where the default tab is parented under Main before
-        // it is adopted into / marked active within its space.
         app.world_mut()
             .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)));
         let tab = app

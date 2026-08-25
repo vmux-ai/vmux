@@ -93,9 +93,6 @@ impl LayoutStateEvent {
         self.header_open
     }
 
-    /// Left padding on the tab row to keep tab pills clear of the macOS
-    /// traffic lights. Only needed when the side sheet is closed (when
-    /// open, the side sheet covers the traffic-lights region).
     pub fn tab_row_pad_left(&self) -> f32 {
         if self.side_sheet_open {
             8.0
@@ -128,28 +125,16 @@ fn default_window_pad() -> f32 {
 pub const HEADER_HEIGHT_PX: f32 = 84.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
-/// Left padding (px) reserved on the tab row for the macOS traffic
-/// lights when the side sheet is closed.
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 
-/// Vertical space the CEF shell reserves in the layout above the pane.
-/// The CEF shell puts tabs at the very top (traffic lights sit on the
-/// left of the tab row, in the reserved padding) so no extra titlebar
-/// strip is needed.
 pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
-/// Default window edge padding (px). Overridable via `settings.layout.window.padding`.
 pub const WINDOW_PAD_PX: f32 = 8.0;
 
-/// Default page bg color for terminal-like stacks (terminals, processes,
-/// agent CLIs). Matches catppuccin-mocha `base` so the CEF URL row
-/// blends with the terminal surface below it.
 pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 
-/// Gap (px) between split panes inside a tab.
 pub const PANE_GAP_PX: f32 = 4.0;
 
-/// Default side-sheet width (px).
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 
 #[cfg(test)]
@@ -543,8 +528,6 @@ pub struct RemoteCommandEvent {
 )]
 pub struct RemoteCopyEvent;
 
-/// The active tab's working directory + live git status, auto-detected from git. Rendered as the
-/// git-integration section of the side-sheet's first card.
 #[derive(
     Clone,
     Debug,
@@ -559,14 +542,11 @@ pub struct RemoteCopyEvent;
 pub struct TabBoundary {
     pub effective_dir: String,
     pub source: String,
-    /// The effective dir is inside a git repository.
     pub is_git_repo: bool,
     pub is_worktree: bool,
     pub branch: String,
     pub base_ref: String,
-    /// Uncommitted working-tree changes.
     pub uncommitted: u32,
-    /// Commits ahead of upstream.
     pub ahead: u32,
     pub pane_count: u32,
 }

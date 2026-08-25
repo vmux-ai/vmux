@@ -34,12 +34,7 @@ pub struct KeyInput {
 pub trait Keymap: Send + Sync {
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand>;
     fn mode(&self) -> EditMode;
-    /// Report text that reached the buffer without passing through [`Keymap::handle`].
-    ///
-    /// Insert-mode characters arrive over the IME path, so a keymap that replays input — for
-    /// dot-repeat or macros — only sees a whole change if the host reports them here.
     fn record_text(&mut self, _text: &str) {}
-    /// The `:`, `/`, or `?` prompt currently being typed, prompt character included.
     fn command_line(&self) -> Option<String> {
         None
     }

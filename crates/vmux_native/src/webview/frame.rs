@@ -1,24 +1,7 @@
-//! Everything the host has for a page this frame, in the one body that answers its standing
-//! request.
-//!
-//! wry offers exactly one primitive that carries bytes and can answer: the custom protocol.
-//! `evaluate_script` takes a string, so a batch would go base64 through a string literal; IPC is
-//! one-way and also a string; a socket wants a bound port per page. So the transport is that one
-//! protocol, and the only thing left to decide is how many round trips a frame costs. This is the
-//! answer: one.
-//!
-//! The requests come first because their length is what says where the edits begin — the edits are
-//! the rest of the body, and never carry a length of their own.
-//!
-//! ```text
-//! [u32 le: requests length][requests json][edits]
-//! ```
-
 use tracing::error;
 
 use crate::webview::dom_request::DomRequest;
 
-/// One answer to the page: the batch to apply, and what to do to the elements it produces.
 pub(crate) struct PageFrame {
     requests: Vec<DomRequest>,
     edits: Vec<u8>,
@@ -51,10 +34,6 @@ impl PageFrame {
 mod tests {
     use super::*;
 
-    /// The prefix is the only thing telling the page where the edits start, and getting it wrong is
-    /// silent: the interpreter would be handed json bytes as a batch, or a batch missing its head.
-    ///
-    /// Decoded here the way the shim decodes it, which is the oracle — not the encoder restated.
     #[test]
     fn the_length_prefix_locates_the_edits_the_page_has_to_run() {
         let edits = vec![9u8, 8, 7, 0, 255];
@@ -74,7 +53,6 @@ mod tests {
         assert_eq!(&body[4 + length..], &edits);
     }
 
-    /// A frame with no requests still frames, so the page reads one shape rather than two.
     #[test]
     fn a_frame_carrying_only_edits_still_says_where_they_start() {
         let body = PageFrame::new(Vec::new(), vec![1u8, 2, 3]).into_body();

@@ -1,44 +1,23 @@
-//! Moving the caret in a text field, and reading what an event found selected.
-
-/// The caret in one text field, addressed by element id and measured in UTF-8 bytes.
-///
-/// Dioxus can control a field's value but has no API for its caret or selection, so every
-/// programmatic move — a readline chord, accepting a completion, revealing a URL ready to
-/// overtype — has to reach the host. Byte offsets in and out: the DOM's UTF-16 code units stop
-/// here, because mixing the two units is how a caret ends up beside the wrong character.
-///
-/// Instructions only. Reading is [`EventSelection`] — a different question with a different
-/// lifetime, since an instruction is good whenever it is issued and an answer only for the event
-/// it arrived with.
 #[derive(Clone, Copy)]
 pub struct TextCaret {
     element_id: &'static str,
 }
 
 impl TextCaret {
-    /// The caret in the field with this id.
     pub fn in_field(element_id: &'static str) -> Self {
         Self { element_id }
     }
 }
 
-/// What was selected when the event now being dispatched was raised.
-///
-/// Meaningful only inside a handler, and the only reading of a selection a handler can do. A key
-/// handler settles `prevent_default` before it returns, so it cannot await an answer; off the web
-/// the values therefore travel on the event's own request rather than being asked for.
 pub struct EventSelection;
 
 impl EventSelection {
-    /// Where the caret was in this field, ignoring anything selected past it.
     pub fn caret_in(element_id: &str) -> usize {
         Self::in_field(element_id).0
     }
 }
 
 impl EventSelection {
-    /// What the event's own request carried, which is `(0, 0)` when the event came from anywhere
-    /// but this field — where the web path also lands for a field that is gone.
     pub fn in_field(element_id: &str) -> (usize, usize) {
         crate::transport::Host::event_field_selection(element_id)
     }
@@ -49,30 +28,23 @@ impl EventSelection {
 }
 
 impl TextCaret {
-    /// Asks the host, which queues it for the page to apply behind the next frame.
     pub fn place(self, byte: usize) {
         crate::transport::Host::place_caret(self.element_id, byte);
     }
 
-    /// Asks the host, which may have a document even though this target has no `web_sys`.
     pub fn select_all(self) {
         crate::transport::Host::select_element_text(self.element_id);
     }
 
-    /// Asks the host. See [`Self::select_all`].
     pub fn clear(self) {
         crate::transport::Host::clear_element_text(self.element_id);
     }
 
-    /// Asks the host. See [`Self::select_all`].
     pub fn select_all_from_start_next_frame(self) {
         crate::transport::Host::offer_element_text(self.element_id);
     }
 }
 
-/// Largest char boundary of `s` at or before `i`, so a DOM text offset never slices a UTF-8
-/// string mid-character — which panics the wasm UI rather than merely misplacing the caret.
-/// `str::floor_char_boundary` is still unstable.
 pub fn floor_char_boundary(s: &str, mut i: usize) -> usize {
     if i >= s.len() {
         return s.len();
@@ -83,8 +55,6 @@ pub fn floor_char_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
-/// Convert a UTF-16 code-unit offset — the unit DOM `selection_start` and `set_selection_range`
-/// speak — to a UTF-8 byte offset into `s`. Offsets past the end clamp to `s.len()`.
 pub fn utf16_offset_to_byte(s: &str, utf16_offset: u32) -> usize {
     let mut units = 0u32;
     for (byte, ch) in s.char_indices() {
@@ -96,7 +66,6 @@ pub fn utf16_offset_to_byte(s: &str, utf16_offset: u32) -> usize {
     s.len()
 }
 
-/// The inverse of [`utf16_offset_to_byte`]. Offsets past the end clamp to the UTF-16 length.
 pub fn byte_offset_to_utf16(s: &str, byte_offset: usize) -> u32 {
     let mut units = 0u32;
     for (byte, ch) in s.char_indices() {
@@ -108,9 +77,6 @@ pub fn byte_offset_to_utf16(s: &str, byte_offset: usize) -> u32 {
     units
 }
 
-/// New horizontal `scroll_left` that keeps a caret at pixel offset `caret_px` visible in a field
-/// of width `client_width` currently scrolled to `scroll_left`, preserving `margin` px at
-/// whichever edge the caret approaches. `None` when the caret is already visible.
 pub fn caret_scroll_left(
     caret_px: f64,
     client_width: f64,
@@ -143,16 +109,13 @@ mod tests {
 
     #[test]
     fn caret_past_right_edge_scrolls_right_to_reveal_it() {
-        // Long URL, caret at end (500px) in a 200px box scrolled to 0.
         let s = caret_scroll_left(500.0, 200.0, 0.0, 12.0).expect("should scroll");
         assert!((s - (500.0 - 200.0 + 12.0)).abs() < 0.001, "got {s}");
-        // Caret now sits inside the revealed range.
         assert!(s < 500.0 && 500.0 <= s + 200.0);
     }
 
     #[test]
     fn caret_before_left_edge_scrolls_left() {
-        // Caret at 40px while scrolled to 300px must pull the view back.
         let s = caret_scroll_left(40.0, 200.0, 300.0, 12.0).expect("should scroll");
         assert!((s - (40.0 - 12.0)).abs() < 0.001, "got {s}");
     }
@@ -177,22 +140,20 @@ mod tests {
 
     #[test]
     fn utf16_offset_maps_to_bytes_across_multibyte_chars() {
-        // "é" is 1 UTF-16 unit but 2 UTF-8 bytes; "本" is 1 unit, 3 bytes.
         let s = "aé本b";
         assert_eq!(utf16_offset_to_byte(s, 0), 0);
-        assert_eq!(utf16_offset_to_byte(s, 1), 1); // after 'a'
-        assert_eq!(utf16_offset_to_byte(s, 2), 3); // after 'é'
-        assert_eq!(utf16_offset_to_byte(s, 3), 6); // after '本'
-        assert_eq!(utf16_offset_to_byte(s, 4), 7); // after 'b'
+        assert_eq!(utf16_offset_to_byte(s, 1), 1);
+        assert_eq!(utf16_offset_to_byte(s, 2), 3);
+        assert_eq!(utf16_offset_to_byte(s, 3), 6);
+        assert_eq!(utf16_offset_to_byte(s, 4), 7);
     }
 
     #[test]
     fn utf16_offset_handles_surrogate_pairs_and_overflow() {
-        // "😀" is a surrogate pair: 2 UTF-16 units, 4 UTF-8 bytes.
         let s = "x😀y";
-        assert_eq!(utf16_offset_to_byte(s, 1), 1); // after 'x'
-        assert_eq!(utf16_offset_to_byte(s, 3), 5); // after full emoji (1 + 4)
-        assert_eq!(utf16_offset_to_byte(s, 99), s.len()); // past end clamps
+        assert_eq!(utf16_offset_to_byte(s, 1), 1);
+        assert_eq!(utf16_offset_to_byte(s, 3), 5);
+        assert_eq!(utf16_offset_to_byte(s, 99), s.len());
     }
 
     #[test]

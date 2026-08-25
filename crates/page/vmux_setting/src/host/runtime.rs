@@ -12,8 +12,6 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-/// Loads settings from disk before the window opens, then keeps the file and the in-memory
-/// [`AppSettings`] in step: debounced saves out, watcher-driven reloads back in.
 pub struct SettingsRuntimePlugin;
 
 impl Plugin for SettingsRuntimePlugin {
@@ -137,15 +135,10 @@ fn default_word_wrap_column() -> u16 {
     80
 }
 
-/// Default Explorer panel width in pixels when unset.
 pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
-/// Explorer panel width bounds, enforced on both live resize and load.
 pub const EXPLORER_MIN_WIDTH: u32 = 160;
 pub const EXPLORER_MAX_WIDTH: u32 = 600;
 
-/// Persisted Explorer (file tree) panel chrome. Absent fields fall back to
-/// [`ExplorerSettings::visible`]/[`ExplorerSettings::width`] defaults — never
-/// auto-seeded so a sparse settings file stays minimal.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ExplorerSettings {
     #[serde(default)]
@@ -184,9 +177,6 @@ pub struct LspServerOverride {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RecordingSettings {
-    /// Output directory for screenshots and screen recordings. Absent falls back
-    /// to the active runtime profile's recording directory (see
-    /// [`vmux_core::profile::recording_dir`]).
     #[serde(default)]
     pub output_dir: Option<String>,
 }
@@ -203,37 +193,23 @@ pub struct SpaceOverrides {
 pub struct AgentSettings {
     #[serde(default)]
     pub app_providers: Vec<AppProviderSettings>,
-    /// Allow agents to override vmux run-terminal placement with mode, direction, or beside.
     #[serde(default)]
     pub allow_run_placement_override: bool,
-    /// When true (default), an agent reading/editing a file opens it in a
-    /// `file://` follow-pane beside that agent.
     #[serde(default = "default_true")]
     pub follow_files: bool,
-    /// When true (default), an agent finishing a turn tidies clean file previews
-    /// in its follow-pane, keeping changed files and the pane's active preview.
     #[serde(default = "default_true")]
     pub tidy_files: bool,
-    /// Only tidy when the follow-pane holds more than this many file previews.
     #[serde(default = "default_tidy_files_max")]
     pub tidy_files_max: usize,
-    /// When true, tidy without the confirm dialog. Set by the "Always tidy" button.
     #[serde(default)]
     pub tidy_files_auto: bool,
-    /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
     #[serde(default = "default_acp_agents")]
     pub acp: Vec<AcpAgentConfig>,
-    /// Default reasoning-effort level per agent, keyed by agent key (ACP agent id, or
-    /// `cli:<segment>` for a CLI agent). Applied when a session/process is launched — the
-    /// underlying agents fix effort at start, so this is a launch-time default, not a live
-    /// switch. Empty / missing = leave the agent's own default.
     #[serde(default)]
     pub effort: std::collections::BTreeMap<String, String>,
 }
 
 impl AgentSettings {
-    /// The launch-time reasoning-effort level for `key` (ACP agent id or `cli:<segment>`),
-    /// or `None` when unset or blank.
     pub fn effort_for(&self, key: &str) -> Option<&str> {
         self.effort
             .get(key)
@@ -269,15 +245,10 @@ fn default_tidy_files_max() -> usize {
     5
 }
 
-/// One external ACP agent the host can spawn. Identity is `id`; the binary is
-/// `command` + `args` (e.g. `npx -y @zed-industries/claude-code-acp@latest`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AcpAgentConfig {
     pub id: String,
     pub name: String,
-    /// Explicit escape-hatch command run when the agent is absent from (or unresolvable via) the
-    /// ACP registry. Empty means "registry-resolved, no override" — an entry may exist solely to
-    /// carry `version`.
     #[serde(default)]
     pub command: String,
     #[serde(default)]
@@ -286,8 +257,6 @@ pub struct AcpAgentConfig {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub cwd: Option<std::path::PathBuf>,
-    /// Pin the registry package to this version (`npx -y <pkg>@<version>` / `uvx <pkg>@<version>`).
-    /// `None` installs the latest.
     #[serde(default)]
     pub version: Option<String>,
 }
@@ -418,7 +387,6 @@ pub fn resolve_tab_workspace_dir(
     }
 }
 
-/// Which configured level supplied a resolved startup directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirSource {
     Tab,
@@ -426,10 +394,6 @@ pub enum DirSource {
     Global,
 }
 
-/// Resolve the working directory for a tab: `tab_dir → per-space override → global`.
-///
-/// Each candidate is trimmed and skipped unless it names an existing directory, so an invalid
-/// value cascades to the next level. No configured directory resolves to `None`.
 pub fn resolve_startup_dir_for_tab(
     settings: &AppSettings,
     space_id: &str,
@@ -438,7 +402,6 @@ pub fn resolve_startup_dir_for_tab(
     resolve_startup_dir_for_tab_with_source(settings, space_id, tab_dir).map(|(path, _)| path)
 }
 
-/// Like [`resolve_startup_dir_for_tab`], but also reports which level supplied the value.
 pub fn resolve_startup_dir_for_tab_with_source(
     settings: &AppSettings,
     space_id: &str,
@@ -510,8 +473,6 @@ fn default_auto_update() -> bool {
 pub struct ShortcutEntry {
     pub command: String,
     pub binding: ShortcutDef,
-    /// Context keys that must hold for this binding to apply, e.g. `chat && !chat.approval`.
-    /// Absent means everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
 }
@@ -524,12 +485,6 @@ pub enum ShortcutDef {
 }
 
 impl ShortcutSettings {
-    /// The compiled-in bindings with this file's say applied.
-    ///
-    /// A configured leader replaces the prefix of every default chord, so rebinding it moves the
-    /// whole family at once rather than leaving the defaults on `Ctrl+g` and the overrides
-    /// somewhere else. When the leader will not parse, the defaults stand and only bindings that
-    /// name their keys outright are added — a `Leader(..)` entry has nothing to hang off.
     pub fn keymap(&self) -> vmux_command::shortcut::Keymap {
         use vmux_command::shortcut::{Binding, Keymap, Source, When};
 
@@ -740,11 +695,9 @@ fn default_terminal_font_family() -> String {
 
 impl TerminalSettings {
     pub fn resolve_theme(&self, name: &str) -> TerminalTheme {
-        // Check explicit themes
         if let Some(t) = self.themes.iter().find(|t| t.name == name) {
             return t.clone();
         }
-        // Fallback: build from legacy fields or defaults
         TerminalTheme {
             name: name.to_string(),
             color_scheme: default_color_scheme(),
@@ -831,8 +784,6 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
 }
 
 fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
-    // IMPLICIT_SOME lets a sparse file write `browser: (..)` instead of
-    // `browser: Some((..))` for the optional override sections.
     ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str::<PartialAppSettings>(text)
@@ -844,8 +795,6 @@ pub fn read_settings_from_disk() -> AppSettings {
 }
 
 fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
-    // Resolve the active settings file: per-build override (~/.vmux/<profile>/
-    // settings.ron) if present, else the shared ~/.vmux/settings.ron.
     let path = vmux_core::profile::settings_path();
     let parent_ready = path
         .parent()
@@ -877,7 +826,6 @@ pub fn load_settings(mut commands: Commands) {
     sync_layout_resources(&mut commands, &settings);
     commands.insert_resource(settings);
 
-    // Start file watcher
     if let Some(path) = config_path {
         let (tx, rx) = mpsc::channel();
         let watch_path = path.clone();
@@ -998,9 +946,6 @@ fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
         .map_err(|e| format!("RON serialize failed: {e}"))
 }
 
-/// Serialize only the top-level sections that differ from the embedded defaults,
-/// so the on-disk `settings.ron` stays minimal (omitted sections fall back to
-/// the embedded defaults on load via `merge_over_embedded`).
 fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     let default = load_embedded_settings();
     let cur =
@@ -1346,9 +1291,6 @@ fn settings_content_hash(bytes: &[u8]) -> u64 {
 
 const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
 
-/// Request that the current in-memory settings be persisted to disk after a short
-/// quiet period. Coalesces bursts of rapid edits (e.g. holding `cmd+`) into a single
-/// write, keeping the main loop free of synchronous disk I/O per keystroke.
 #[derive(Message, Debug, Clone)]
 pub struct SettingsSaveRequest;
 
@@ -2001,8 +1943,6 @@ mod tests {
     fn parse_settings_merges_sparse_over_embedded() {
         let s = parse_settings(r#"(browser: (startup_url: "https://x.example"))"#).unwrap();
         assert_eq!(s.browser.startup_url, "https://x.example");
-        // omitted sections come from the embedded defaults, NOT the plainer serde
-        // field defaults (embedded leader is "b"; serde default would be "g").
         assert_eq!(s.shortcuts.leader.key, "b");
         assert_eq!(s.layout.radius, 8.0);
     }
@@ -2032,10 +1972,8 @@ mod tests {
         .unwrap();
         assert!(ron.contains("browser"));
         assert!(ron.contains("https://x.example"));
-        // untouched heavy sections stay out of the file
         assert!(!ron.contains("shortcuts"));
         assert!(!ron.contains("themes"));
-        // and reload merges them back from the embedded defaults
         let reloaded = parse_settings(&ron).unwrap();
         assert_eq!(reloaded.browser.startup_url, "https://x.example");
         assert_eq!(reloaded.shortcuts.leader.key, "b");

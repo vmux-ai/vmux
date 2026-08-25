@@ -1,10 +1,3 @@
-//! Everything that only exists on a desktop: the PTY, the shell, and the Bevy plugin that
-//! drives them.
-//!
-//! One gate for the lot, rather than an attribute on each declaration. The crate's public paths
-//! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_terminal::plugin` still
-//! resolves from outside and `crate::plugin` still resolves from within.
-
 pub mod component;
 pub mod contract;
 pub mod launch;

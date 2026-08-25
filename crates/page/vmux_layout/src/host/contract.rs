@@ -1,11 +1,3 @@
-//! The layout types other crates are allowed to depend on.
-//!
-//! A crate that sends `NewTabRequest` or reads `ActivePanes` needs those registered before its
-//! own systems run, but pulling in the plugin that owns them — `TabPlugin`, `PanePlugin` — drags
-//! along thousands of lines of unrelated behaviour. [`LayoutContractPlugin`] is the declaration
-//! on its own: no systems, no observers, nothing but the `add_message` and `init_resource` calls
-//! that make the contract exist.
-
 use bevy::prelude::*;
 
 use crate::active_panes::{ActivatePane, ActivePanes};
@@ -24,17 +16,6 @@ use crate::{
     PendingLaunch,
 };
 
-/// Registers every layout message and resource that crates outside `vmux_layout` send, read or
-/// spawn into.
-///
-/// [`LayoutPlugin`](crate::plugin::LayoutPlugin) adds this, so a full app is unaffected. Add it
-/// directly from a plugin that talks to the layout without hosting it — `AgentSessionPlugin` and
-/// the settings and spaces domains all do — instead of restating the registrations locally, which
-/// leaves the owning crate unable to rename or retire a type.
-///
-/// Adding it more than once is deliberate and safe: `add_message` and `init_resource` both skip a
-/// type that is already present, and [`Plugin::is_unique`] is `false` so repeated composition does
-/// not trip Bevy's duplicate-plugin check.
 pub struct LayoutContractPlugin;
 
 impl Plugin for LayoutContractPlugin {

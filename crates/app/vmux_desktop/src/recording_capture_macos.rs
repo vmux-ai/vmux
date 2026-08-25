@@ -32,16 +32,13 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vmux_agent::RecordStartResponse;
 
-const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241; // 'BGRA' fourcc
+const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241;
 
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
-/// objc/dispatch retained handles are not auto-`Send`. We move them between the
-/// main thread and SCStream's serial queue / completion threads, with access
-/// guarded by `RecordingState`'s mutexes and SCStream's serial output queue.
 struct SendCell<T>(T);
 unsafe impl<T> Send for SendCell<T> {}
 unsafe impl<T> Sync for SendCell<T> {}
@@ -56,15 +53,9 @@ struct EncodeState {
     start: Instant,
     last_gif_ms: Option<u64>,
     gif_tx: Option<Sender<GifMsg>>,
-    /// Count of pixel buffers successfully appended. Zero at finalize means the
-    /// capture produced no frames (the writer never started a session).
     appended: u64,
-    /// Paused state. While paused, frames are dropped (mp4 + gif) and the gap is
-    /// folded into `pts_offset` on resume for a seamless (cut) timeline.
     paused: bool,
-    /// PTS of the frame at which the current pause began.
     pause_anchor: Option<CMTime>,
-    /// Accumulated paused duration subtracted from every appended frame's PTS.
     pts_offset: CMTime,
 }
 
@@ -73,14 +64,10 @@ struct RecordingState {
     encode: Mutex<EncodeState>,
     gif_join: Mutex<Option<JoinHandle<()>>>,
     _queue: SendCell<DispatchRetained<DispatchQueue>>,
-    /// The SCStream output delegate, retained for the recording's lifetime.
-    /// SCStream does not strongly retain it, so without this it would dealloc
-    /// and stop delivering sample buffers.
     _delegate: Mutex<Option<SendCell<Retained<StreamOutput>>>>,
     temp_mp4: PathBuf,
     temp_gif: Option<PathBuf>,
     gif: bool,
-    /// Configured/default output directory used when stop provides no explicit dir.
     default_dir: PathBuf,
     deadline: Instant,
     out: Mutex<FinalizeTarget>,
@@ -143,15 +130,11 @@ fn handle_sample(state: &Arc<RecordingState>, sample: &CMSampleBuffer) {
     let mut enc = state.encode.lock().unwrap();
 
     if enc.paused {
-        // Drop frames while paused; remember where the pause began so the gap
-        // can be removed on resume.
         if enc.pause_anchor.is_none() {
             enc.pause_anchor = Some(pts);
         }
         return;
     }
-    // Resuming after a pause: fold the paused span into the running offset so the
-    // output timeline is continuous (a seamless cut, no frozen gap).
     if let Some(anchor) = enc.pause_anchor.take() {
         let gap = unsafe { pts.subtract(anchor) };
         enc.pts_offset = unsafe { enc.pts_offset.add(gap) };
@@ -412,9 +395,6 @@ pub(crate) fn start(
     });
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
 
-    // Wait for the capture to actually start (or fail) so the agent sees real
-    // errors instead of a false "started". 8s covers the SCK content fetch +
-    // startCapture, comfortably under the broker query timeout.
     match done_rx.recv_timeout(Duration::from_secs(8)) {
         Ok(Ok(())) => RecordStartResponse {
             request_id,
@@ -468,8 +448,6 @@ fn setup_stream(
         config.setMinimumFrameInterval(CMTime::new(1, 60));
         config.setShowsCursor(true);
         config.setQueueDepth(6);
-        // For pane recording, capture only the crop sub-region. sourceRect is in
-        // points (logical, top-left origin); our CropRect is physical px.
         if let Some(c) = crop {
             config.setSourceRect(CGRect::new(
                 CGPoint::new(c.x as f64 / scale, c.y as f64 / scale),
@@ -542,8 +520,6 @@ fn setup_stream(
     *state.stream.lock().unwrap() = Some(SendCell(stream.clone()));
     *state._delegate.lock().unwrap() = Some(SendCell(delegate));
 
-    // Only mark the session active once capture has actually started, and report
-    // any startCapture error back to `start` instead of swallowing it.
     let start_state = state.clone();
     let start_block = RcBlock::new(move |e: *mut NSError| {
         if e.is_null() {
@@ -604,8 +580,6 @@ pub(crate) fn resume() {
     }
 }
 
-/// Finalize an in-progress recording to the default dir (no explicit dir/name),
-/// driven from the tray. Mirrors the auto-stop path (`request_id == None`).
 pub(crate) fn done() {
     let Some(state) = active().lock().unwrap().clone() else {
         return;
@@ -647,8 +621,6 @@ fn finish_writer(state: Arc<RecordingState>) {
         let _ = join.join();
     }
     if appended == 0 {
-        // No frames captured: the writer never started a session, so calling
-        // finishWriting would hang. Abandon it and report a clear error.
         deliver(
             state,
             Err(

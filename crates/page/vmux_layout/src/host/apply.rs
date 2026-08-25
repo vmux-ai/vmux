@@ -1,9 +1,3 @@
-//! Turning a reconciled layout into spawned panes and stacks.
-//!
-//! The peer of `reconcile`, which plans the change: that half is pure and compiles everywhere,
-//! while this one needs Bevy and an ECS world the browser bundle has neither of, so it is gated
-//! as a whole.
-
 use std::collections::HashMap;
 use std::collections::HashSet as ApplyHashSet;
 
@@ -191,12 +185,7 @@ pub fn apply_with_existing(
 
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
-    // Resolve (or create) each tab's entity once and keep the pairing, so the
-    // structure pass reparents existing nodes into NEW tabs too (e.g. moving a
-    // stack to a brand-new tab) — not only into tabs that already have an id.
     let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
-    // The container existing tabs hang off, so new tabs can be spawned as their
-    // siblings (the tab strip only shows same-parent, same-space siblings).
     let tab_parent: Option<Entity> = snapshot
         .tabs
         .iter()
@@ -218,10 +207,6 @@ pub fn apply_with_existing(
                         CreatedAt::now(),
                     ))
                     .id();
-                // Match canonical tab creation: parent the new tab to the same
-                // container as existing tabs and tag it with the active space.
-                // Otherwise the sibling-grouped, space-scoped tab strip filters it
-                // out and it never shows, even though it exists in the tree.
                 if let Some(parent) = tab_parent {
                     world.entity_mut(entity).insert(ChildOf(parent));
                 }
@@ -243,11 +228,6 @@ pub fn apply_with_existing(
     for tab in &snapshot.tabs {
         apply_tab(world, tab);
     }
-    // Honor the snapshot's active tab: make it the most-recently-activated tab so
-    // the timestamp-based active-tab selection (windowed-browser visibility, focus
-    // ring) follows `is_active` instead of defaulting to whichever tab was just
-    // spawned — otherwise a newly created tab steals "active" and its windowed
-    // browser covers the layout.
     if let Some((_, active_entity)) = materialized.iter().find(|(t, _)| t.is_active) {
         let newest = materialized
             .iter()
@@ -422,9 +402,6 @@ fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<S
     }
 }
 
-/// Existing ids the reconcile diff may add/remove. Scoped to the active space's
-/// tab subtrees so `update_layout` can never despawn another space's content.
-/// When there is no active space, all tabs are included (global behavior).
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     let mut active_space_q =
         world.query_filtered::<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>();
@@ -1082,7 +1059,6 @@ mod tests {
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app.world_mut().spawn(ChildOf(pane)).id();
 
-        // Move the existing stack out of its pane into a brand-new tab (id: None).
         let snap = LayoutSnapshot {
             tabs: vec![
                 proto::Tab {
@@ -1155,7 +1131,6 @@ mod tests {
             .id();
         let active_pane = app.world_mut().spawn((Pane, ChildOf(active_tab))).id();
 
-        // Keep the existing tab (is_active) and add a NEW tab that must NOT steal active.
         let snap = LayoutSnapshot {
             tabs: vec![
                 proto::Tab {

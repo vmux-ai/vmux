@@ -35,10 +35,6 @@ impl CliAgentStrategy for VibeStrategy {
     }
 
     fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        // vmux launches vibe non-interactively, so the folder-trust prompt can't
-        // be answered. Without trust, vibe runs restricted and ignores the user
-        // config (falling back to default models). `--trust` trusts the working
-        // directory for this invocation (vibe's documented automation flag).
         let mut args = vec!["--trust".to_string()];
         for tool in VIBE_WEB_TOOLS {
             args.push("--disabled-tools".to_string());
@@ -162,13 +158,6 @@ fn vibe_hooks_path() -> PathBuf {
     vibe_home().join("hooks.toml")
 }
 
-/// Idempotently register vmux-managed hooks in `~/.vibe/hooks.toml`: an
-/// `after_tool` hook that pings vmux on file read/edit, and a `post_agent_turn`
-/// hook that pings vmux at turn-end (drives follow-pane auto-tidy + the
-/// done-dot). Both commands no-op without `VMUX_ANCHOR`, so manual vibe use is
-/// unaffected. Adds each named hook if absent and reconciles its command in
-/// place when stale (e.g. after the vmux binary moves) — never clobbers
-/// user-authored hooks.
 fn ensure_vibe_hooks(vmux_command: &str) {
     write_vmux_hooks(&vibe_hooks_path(), vmux_command);
 }
@@ -191,7 +180,6 @@ fn write_vmux_hooks(path: &Path, vmux_command: &str) {
         Some("re:^(read|edit|write)$"),
         &format!("{vmux_command} notify-file-touch"),
     );
-    // `post_agent_turn` is not a tool hook, so vibe rejects `match`/`strict` on it.
     upsert_vmux_hook(
         hooks,
         VMUX_TURN_END_HOOK_NAME,

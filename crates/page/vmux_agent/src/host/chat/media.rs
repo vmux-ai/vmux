@@ -1,8 +1,3 @@
-//! Attachments the composer picks up: files, pasted images, and the media browser behind them.
-//!
-//! Thumbnailing and mime sniffing are slow enough to want the IO pool, so each request spawns a
-//! task and a drain system ships the result to the webview when it lands.
-
 use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -14,7 +9,6 @@ use vmux_chat::event::{
     ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
 };
 
-/// Everything the chat page does with files a user hands it.
 pub(super) struct ChatMediaPlugin;
 
 impl Plugin for ChatMediaPlugin {

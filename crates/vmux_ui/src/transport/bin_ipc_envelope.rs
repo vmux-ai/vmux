@@ -1,22 +1,8 @@
-//! The framing a page adds on the way out.
-//!
-//! Page→host is a single buffer — magic, id length, id, payload — because the CEF bridge carries
-//! one `ArrayBuffer` per call and the id has to ride along inside it. Host→page needs no envelope:
-//! that direction already has a string id of its own. The asymmetry is load-bearing, and the
-//! client handler in `bevy_cef_core` decodes exactly this shape.
-
-/// One page→host message, framed.
 pub struct BinIpcEnvelope(Vec<u8>);
 
 impl BinIpcEnvelope {
-    /// Marks a buffer as carrying its event id in front of the payload.
     pub const MAGIC: &'static [u8] = b"vmux-bin-ipc-v1\0";
 
-    /// Frame `payload` under `id`.
-    ///
-    /// # Panics
-    ///
-    /// If `id` is longer than `u32::MAX` bytes, which no type name ever is.
     pub fn new(id: &str, payload: &[u8]) -> Self {
         let id_bytes = id.as_bytes();
         let id_len = u32::try_from(id_bytes.len()).expect("bin ipc id too long");
@@ -33,10 +19,6 @@ impl BinIpcEnvelope {
         &self.0
     }
 
-    /// Recover the id and payload, or `None` if `bytes` is not this framing.
-    ///
-    /// CEF's client handler decodes the envelope inside the render process, where this crate
-    /// cannot reach; the wry host has no such handler and decodes here instead.
     pub fn decode(bytes: &[u8]) -> Option<(String, Vec<u8>)> {
         let id_len_start = Self::MAGIC.len();
         let id_start = id_len_start + 4;

@@ -1,6 +1,3 @@
-//! Internal procedural-macro crate: derive macros that generate command-bar, shortcut,
-//! MCP-tool, and OS-menu boilerplate from enums.
-
 mod expand;
 mod named_fields;
 mod string_id;
@@ -10,13 +7,6 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
 
-/// Turn a `String` newtype into an id type: the shared derives, `new`, `as_str`, `From` and
-/// `Display`.
-///
-/// ```ignore
-/// #[string_id]
-/// pub struct RoomId(pub String);
-/// ```
 #[proc_macro_attribute]
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -26,21 +16,6 @@ pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
-/// Generate `VARIANT_NAMES`, every variant of the enum named in declaration order.
-///
-/// For a policy test that pins a surface to an exact set: the enumeration is derived so a new
-/// variant cannot be missed, while the list it is compared against stays hand-written so widening
-/// the surface still costs somebody a deliberate edit.
-///
-/// ```ignore
-/// #[derive(VariantNames)]
-/// enum Surface {
-///     First,
-///     Second,
-/// }
-///
-/// assert_eq!(Surface::VARIANT_NAMES, ["First", "Second"]);
-/// ```
 #[proc_macro_derive(VariantNames)]
 pub fn derive_variant_names(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -665,10 +640,6 @@ fn impl_leaf_shortcuts(
             continue;
         }
 
-        // Menu accelerators are global shortcuts too: register them in the decide map so they fire
-        // even when a non-CEF view (terminal/layout) holds first responder and the macOS menu
-        // key-equivalent is swallowed by winit. Skip when the variant already declares an explicit
-        // direct shortcut (avoids a duplicate combo).
         if let (Some(accel), Some(menu_id)) = (&menu_props.accel, &menu_props.id) {
             let has_explicit_direct = bind_props
                 .bindings
@@ -913,10 +884,6 @@ fn parse_key_combo_tokens(
     })
 }
 
-/// Parse a muda menu accelerator (e.g. `"super+shift+n"`, `"super+["`) into a [`KeyCombo`] token
-/// stream so menu accelerators can also be registered as global shortcuts. Returns `None` for any
-/// accelerator that isn't a single-character key the shortcut layer understands, so unconvertible
-/// accelerators stay menu-only instead of breaking the build.
 fn accel_to_combo_tokens(accel: &str) -> Option<proc_macro2::TokenStream> {
     let mut ctrl = false;
     let mut shift = false;
@@ -962,17 +929,12 @@ enum Binding {
     Chord(String),
 }
 
-/// One `#[shortcut(...)]` binding together with the `when` clause declared beside it.
-///
-/// The clause is read per attribute rather than per variant, so one command can be reachable
-/// unconditionally by one key and only on a named surface by another.
 struct ScopedBinding {
     binding: Binding,
     when: Option<String>,
 }
 
 impl ScopedBinding {
-    /// A `when` clause as the tokens the generated binding carries.
     fn when_tokens(when: Option<&String>) -> proc_macro2::TokenStream {
         match when {
             Some(clause) => quote! { crate::shortcut::When::parse(#clause) },
@@ -1058,10 +1020,6 @@ impl BindProps {
         })
     }
 }
-
-// ---------------------------------------------------------------------------
-// CommandBar derive
-// ---------------------------------------------------------------------------
 
 fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
@@ -1770,8 +1728,6 @@ fn impl_mcp_tool_root(
     })
 }
 
-/// Convert muda accelerator format to display symbols.
-/// e.g. "super+shift+r" → "⌘⇧R", "super+alt+i" → "⌘⌥I"
 fn accel_to_display(accel: &str) -> String {
     let parts: Vec<&str> = accel.split('+').map(|p| p.trim()).collect();
     let mut out = String::new();
@@ -1779,21 +1735,20 @@ fn accel_to_display(accel: &str) -> String {
 
     for part in &parts {
         match *part {
-            "super" => out.push('\u{2318}'), // ⌘
-            "shift" => out.push('\u{21e7}'), // ⇧
-            "alt" => out.push('\u{2325}'),   // ⌥
+            "super" => out.push('\u{2318}'),
+            "shift" => out.push('\u{21e7}'),
+            "alt" => out.push('\u{2325}'),
             "ctrl" => out.push('^'),
             other => key = other,
         }
     }
 
-    // Capitalise the key for display
     match key {
-        "tab" => out.push('\u{21e5}'),   // ⇥
-        "space" => out.push('\u{2423}'), // ␣
-        "enter" => out.push('\u{21a9}'), // ↩
+        "tab" => out.push('\u{21e5}'),
+        "space" => out.push('\u{2423}'),
+        "enter" => out.push('\u{21a9}'),
         "escape" => out.push_str("Esc"),
-        "delete" => out.push('\u{232b}'), // ⌫
+        "delete" => out.push('\u{232b}'),
         "[" => out.push('['),
         "]" => out.push(']'),
         "=" => out.push('='),

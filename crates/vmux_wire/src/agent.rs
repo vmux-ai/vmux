@@ -1,5 +1,3 @@
-//! The built-in CLI agents, named on both sides of the wire.
-
 use crate::avatar::{AvatarSpec, agent_color};
 
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
@@ -57,7 +55,6 @@ impl AgentKind {
         [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
     }
 
-    /// How this agent is drawn without a picture.
     pub fn avatar(self) -> AvatarSpec {
         AvatarSpec {
             initials: match self {
@@ -71,7 +68,6 @@ impl AgentKind {
     }
 }
 
-/// Whether an agent page can replace the launcher inside its existing webview.
 pub fn supports_inline_agent_transition(url: &str) -> bool {
     let Some(path) = url.strip_prefix("vmux://agent/") else {
         return false;

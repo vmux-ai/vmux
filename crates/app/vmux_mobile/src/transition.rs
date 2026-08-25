@@ -1,19 +1,3 @@
-//! Opening a session as a native sheet rather than a page swap.
-//!
-//! Dioxus has no notion of native modal presentation, so this is UIKit directly: the app's one
-//! webview is reparented into a `UIViewController` presented as a page sheet. The webview never
-//! changes — only which controller owns it — so the sheet animates over the list with the grabber,
-//! corner radius and swipe-down a native screen would have, while the content is still the same
-//! Dioxus tree.
-//!
-//! Closing is the awkward half. Handing the webview back to the root controller repaints it as the
-//! list, and dismissing before that paint lands shows a frame of the wrong screen. So the sheet
-//! keeps a snapshot of what it looked like, and the real dismissal waits two animation frames.
-//!
-//! So [`NativeSheet::close`] hands back a guard the caller finishes after switching the page,
-//! where [`NativeSheet::open`] needs no such step: the sheet rises over content that is still
-//! valid until it covers it.
-
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::RefCell;
@@ -32,7 +16,6 @@ mod platform {
         static SHEET: RefCell<Option<NativeSheet>> = const { RefCell::new(None) };
     }
 
-    /// The views a sheet moves between, and the modal currently holding them.
     pub struct NativeSheet {
         root_controller: Retained<UIViewController>,
         root_view: Retained<UIView>,
@@ -40,15 +23,12 @@ mod platform {
         presented: Option<Retained<UIViewController>>,
     }
 
-    /// Adopt the window's views. Everything else is a no-op until this has run.
     pub fn install(window: &dioxus::mobile::DesktopContext) {
         let controller: *mut UIViewController = window.window.ui_view_controller().cast();
         let root: *mut UIView = window.window.ui_view().cast();
         let webview = window.webview.webview();
         let web: &UIView = &webview;
 
-        // The only unsafe here: adopting three pointers UIKit owns for the app's whole life. Held
-        // as strong references afterwards, so nothing downstream has to reason about them.
         let adopted = unsafe {
             (
                 Retained::retain(controller),
@@ -72,7 +52,6 @@ mod platform {
     }
 
     impl NativeSheet {
-        /// Present the webview as a sheet. Does nothing if one is already up.
         pub fn open() {
             SHEET.with_borrow_mut(|sheet| {
                 let Some(sheet) = sheet.as_mut() else {
@@ -94,9 +73,6 @@ mod platform {
             });
         }
 
-        /// Hand the webview back to the root controller, leaving the sheet showing a snapshot.
-        ///
-        /// The dismissal itself is deferred to the guard: the list has to paint first.
         pub fn close() -> Dismissing {
             Dismissing(SHEET.with_borrow_mut(|sheet| {
                 let sheet = sheet.as_mut()?;
@@ -124,7 +100,6 @@ mod platform {
         }
     }
 
-    /// A sheet showing a snapshot, waiting for the list underneath to paint.
     pub struct Dismissing(Option<Retained<UIViewController>>);
 
     impl Dismissing {
@@ -157,21 +132,11 @@ mod platform {
         );
     }
 
-    /// Roughly three frames at 60Hz, to let the list behind the sheet draw before it descends.
-    ///
-    /// A guess, and knowingly so. The thing being waited for is a WebKit paint, which happens in
-    /// another process — `CATransaction` and a main-queue hop both return before it, so neither
-    /// answers the question. The webview itself could (a double `requestAnimationFrame` is exact)
-    /// but that means evaluating script from Rust, which this app does not do.
-    ///
-    /// Being early costs one frame of the session showing behind the descending snapshot. Being
-    /// late costs nothing visible, so the value errs long.
     async fn wait_for_paint() {
         vmux_ui::platform::sleep_ms(48).await;
     }
 }
 
-/// Everywhere else a session is just a page swap, so the sheet is inert.
 #[cfg(not(target_os = "ios"))]
 mod platform {
     pub struct NativeSheet;

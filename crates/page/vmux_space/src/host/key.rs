@@ -1,13 +1,3 @@
-//! Handing a resolved spaces key back to the page that pressed it.
-//!
-//! The spaces page decides nothing about its own keyboard any more: it publishes the context key
-//! `spaces`, hands over whatever the core claimed, and waits to be told what the press meant. This
-//! is the return leg — the only part of a spaces shortcut that lives on the host.
-//!
-//! It reads [`CommandIssued`] rather than [`vmux_command::AppCommand`] because it has to answer
-//! *that* page. A broadcast command names no webview, and the spaces page can be showing in more
-//! than one stack, so the wrong one would move its selection.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_command::{AppCommand, CommandIssued, LayoutCommand, ReadAppCommands};
@@ -43,7 +33,6 @@ mod tests {
     use vmux_command::SpaceCommand;
     use vmux_wire::space::SpaceKey;
 
-    /// What the plugin pushed back to a page, which is its only observable.
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
 
@@ -79,9 +68,6 @@ mod tests {
         }
     }
 
-    /// A spaces key goes back to the page that pressed it and to no other, which is the whole
-    /// reason this reads the caller-stamped bus instead of the broadcast one. Two spaces pages can
-    /// hold two different selections, and `Delete` answering both would destroy the wrong space.
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
@@ -107,8 +93,6 @@ mod tests {
         );
     }
 
-    /// `Open` is how the page gets on screen, answered by the host that spawns the webview. Echoing
-    /// it would push a verb the page has no way to perform.
     #[test]
     fn opening_the_page_is_not_echoed_to_it() {
         let mut app = Echo::app();
@@ -123,8 +107,6 @@ mod tests {
         assert!(app.world().resource::<Echoed>().0.is_empty());
     }
 
-    /// Every other command on the bus belongs to someone else. Echoing one would push a payload no
-    /// spaces page can decode.
     #[test]
     fn a_command_that_is_not_a_space_key_is_left_alone() {
         let mut app = Echo::app();

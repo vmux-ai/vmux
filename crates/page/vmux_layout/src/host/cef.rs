@@ -150,15 +150,6 @@ impl Browser {
         )
     }
 
-    /// A pane whose page runs in the host process, with no CEF browser behind it.
-    ///
-    /// The same shape as [`Self::new_with_title`] minus the two components that say "CEF owns
-    /// this": without `WebviewSource` no browser is created for it, and `HostsPage` is how every
-    /// reader that used to ask "is there a page here?" by looking for a source still gets a true
-    /// answer.
-    ///
-    /// `PageMetadata` is complete here rather than filled in later, because the CEF callback that
-    /// would supply a title and icon never fires for a page CEF is not rendering.
     pub fn native_page(url: &str, title: &str) -> impl Bundle {
         (
             Self,
@@ -185,23 +176,9 @@ impl Browser {
     }
 }
 
-/// The layout's entity, carrying no CEF browser.
-///
-/// Everything CEF needs to serve a page — `Browser`, `WebviewSource`, the material, the size — is
-/// deliberately absent, because a windowed CEF browser cannot be transparent on macOS
-/// ([CEF #2315]) and the layout is the one page that must be. A wry `WKWebView` serves it instead.
-///
-/// The entity itself stays, and keeps its name: every host system in this crate queries
-/// `With<LayoutCef>`, and the page still receives host events under this id — `can_emit_to` is
-/// what decouples that from CEF owning a browser.
-///
-/// [CEF #2315]: https://bitbucket.org/chromiumembedded/cef/issues/2315
 pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
         LayoutCef,
-        // No `WebviewSource`: this page's components run in the host process. The marker is how
-        // anything that used to ask "is there a page here?" by looking for a source still gets a
-        // true answer.
         vmux_core::host::page::HostsPage,
         vmux_core::launcher::RendersLauncherPanel,
         HostWindow(host_window),

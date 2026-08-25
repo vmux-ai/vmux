@@ -1,26 +1,16 @@
-//! The daemon executable: where it is, and whether the one already running is still it.
-
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::paths::ServicePaths;
 
-/// The `vmux_service` executable, resolved as a sibling of whoever asked.
-///
-/// The daemon and its clients both resolve it the same way — for the daemon `current_exe` *is* the
-/// daemon, for the GUI and CLI it sits alongside them — so an identity check compares the same
-/// file on both sides instead of two paths that merely ought to agree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonBinary(PathBuf);
 
 impl DaemonBinary {
-    /// The daemon this process would start, resolved from the running executable.
     pub fn current() -> std::io::Result<Self> {
         Ok(Self::beside(&std::env::current_exe()?))
     }
 
-    /// The daemon that belongs with `exe`: `exe` itself when it is already the daemon, the bundled
-    /// login item when `exe` lives in a `.app`, and a plain sibling otherwise.
     pub fn beside(exe: &Path) -> Self {
         if matches!(
             exe.file_name().and_then(|n| n.to_str()),
@@ -47,22 +37,18 @@ impl DaemonBinary {
         Self(path)
     }
 
-    /// Where it lives.
     pub fn path(&self) -> &Path {
         &self.0
     }
 
-    /// Where it lives, for a caller that needs to keep the path.
     pub fn into_path(self) -> PathBuf {
         self.0
     }
 
-    /// Fingerprint the file on disk right now.
     pub fn identity(&self) -> std::io::Result<DaemonIdentity> {
         DaemonIdentity::of(&self.0)
     }
 
-    /// Write this binary's identity into the per-profile identity file.
     pub fn record_identity(&self) -> std::io::Result<()> {
         std::fs::write(
             ServicePaths::current().identity(),
@@ -71,15 +57,10 @@ impl DaemonBinary {
     }
 }
 
-/// A fingerprint of the daemon binary: its canonical path, its size, and when it was last written.
-///
-/// Recorded beside the socket so a client can tell whether the daemon already running is the one
-/// it would have started, or a leftover from a previous build that has to be replaced.
 #[derive(Clone, Debug)]
 pub struct DaemonIdentity(String);
 
 impl DaemonIdentity {
-    /// Fingerprint the file at `path`.
     pub fn of(path: &Path) -> std::io::Result<Self> {
         let path = std::fs::canonicalize(path)?;
         let metadata = std::fs::metadata(&path)?;
@@ -95,18 +76,14 @@ impl DaemonIdentity {
         )))
     }
 
-    /// Take one back off disk, as the identity file spells it.
     pub fn recorded(text: &str) -> Self {
         Self(text.to_string())
     }
 
-    /// Whether two fingerprints describe the same binary. Trailing whitespace from the file is not
-    /// part of the answer.
     pub fn matches(&self, other: &Self) -> bool {
         self.0.trim() == other.0.trim()
     }
 
-    /// The recorded form, as written to the identity file.
     pub fn as_str(&self) -> &str {
         &self.0
     }

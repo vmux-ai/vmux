@@ -1,22 +1,13 @@
 use vte::{Parser, Perform};
 
-/// vmux-private OSC code emitted by the agent `run` wrapper to signal command
-/// completion invisibly: `ESC ] 6973 ; <token> ; <exit> BEL`.
-///
-/// Distinct from OSC `133` so it never disturbs the OSC 133 command lifecycle
-/// (which drives the vibe "armed" pane). The token travels inline with the exact
-/// command, so completion is correlated per-run without a seq baseline.
 pub const VMUX_RUN_OSC: &str = "6973";
 
-/// A completed `run`, parsed from a [`VMUX_RUN_OSC`] escape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunMarker {
     pub token: String,
     pub exit: i32,
 }
 
-/// Scans a PTY byte stream for [`VMUX_RUN_OSC`] completion escapes, reassembling
-/// sequences split across feeds.
 pub struct RunMarkerScanner {
     parser: Parser,
 }

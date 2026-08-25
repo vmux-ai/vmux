@@ -1,17 +1,6 @@
-//! The example prompt that types itself into an empty composer.
-//!
-//! The animation is a pure state machine — [`PromptTypewriter`] — with one platform-shaped hole:
-//! it needs a random index to move on to and cannot pick one itself. [`crate::platform`] fills
-//! that in, along with the timer that ticks it, so the component itself is the same everywhere.
-
 #[cfg(ui)]
 pub use component::PromptGhost;
 
-/// One example prompt being typed out, and how far through it the animation is.
-///
-/// [`advance`](Self::advance) is the whole animation, and the candidate index it takes is
-/// everything it needs from the outside — so the state stays plain, total and testable on any
-/// target, and `js_sys::Math::random` stays at the edge that has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PromptTypewriter {
     examples: &'static [&'static str],
@@ -20,10 +9,8 @@ pub struct PromptTypewriter {
 }
 
 impl PromptTypewriter {
-    /// How long a finished line holds before the next one starts, in ticks.
     const PAUSE_TICKS: usize = 40;
 
-    /// Start on `candidate`, clamped into range.
     pub fn new(examples: &'static [&'static str], candidate: usize) -> Self {
         Self {
             examples,
@@ -32,18 +19,12 @@ impl PromptTypewriter {
         }
     }
 
-    /// The prefix to render this tick.
     pub fn shown(&self) -> String {
         let example = self.example();
         let full = example.chars().count();
         example.chars().take(self.typed.min(full)).collect()
     }
 
-    /// One tick: another character, or — once the finished line has held for [`Self::PAUSE_TICKS`]
-    /// — the start of `candidate`.
-    ///
-    /// `candidate` is taken every tick and used only on the one that wraps, which keeps this a
-    /// function of its arguments rather than of a generator the caller has to thread through.
     pub fn advance(&mut self, candidate: usize) {
         let full = self.example().chars().count();
         if self.typed < full + Self::PAUSE_TICKS {
@@ -58,7 +39,6 @@ impl PromptTypewriter {
         self.examples[self.index]
     }
 
-    /// Never the line already showing, so a reroll visibly changes something.
     fn distinct_index(len: usize, current: Option<usize>, candidate: usize) -> usize {
         if len <= 1 {
             return 0;
@@ -139,7 +119,6 @@ mod component {
 
     const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
 
-    /// One character typed, or one fortieth of the hold at the end of a line.
     const TICK_MS: u32 = 50;
 
     #[component]
@@ -152,9 +131,6 @@ mod component {
         let mut typewriter =
             use_signal(|| PromptTypewriter::new(examples, random_index(examples.len())));
 
-        // A future rather than an interval, which is what lets the whole teardown go: dioxus drops
-        // this when the component unmounts, where a `setInterval` had to be cancelled by hand and
-        // its closure kept alive until it was.
         use_future(move || async move {
             loop {
                 sleep_ms(TICK_MS).await;

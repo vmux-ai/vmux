@@ -224,8 +224,6 @@ fn toggle_label(any_visible: bool, locale: &Locale) -> String {
     }
 }
 
-/// The locale the tray labels resolve against, with any user-supplied catalog for it installed
-/// first so the labels pick it up.
 fn tray_locale(settings: &AppSettings) -> Locale {
     let locale = Locale::requested(Some(&settings.appearance.locale));
     let directory = vmux_core::profile::config_dir().join("locales");
@@ -258,8 +256,6 @@ fn load_tray_icon_recording() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid recording rgba")
 }
 
-/// A solid red dot — the universal "recording" indicator. Shown with template
-/// mode off so the red is preserved.
 #[cfg(feature = "recording")]
 fn tray_icon_recording_rgba() -> Vec<u8> {
     let mut rgba = Vec::with_capacity(16 * 16 * 4);

@@ -1,12 +1,8 @@
-//! Per-file fold persistence: a RON map of absolute path to collapsed header
-//! lines, stored under the profile data directory.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// On-disk fold state for all files, keyed by canonical absolute path.
 #[derive(Default, Serialize, Deserialize)]
 pub struct FoldStore {
     pub files: HashMap<String, Vec<u32>>,
@@ -24,7 +20,6 @@ fn key(path: &Path) -> String {
 }
 
 impl FoldStore {
-    /// Load the store from disk, or an empty store if absent/corrupt.
     pub fn load() -> Self {
         let Ok(text) = std::fs::read_to_string(store_path()) else {
             return Self::default();
@@ -32,12 +27,10 @@ impl FoldStore {
         ron::from_str(&text).unwrap_or_default()
     }
 
-    /// Collapsed header lines saved for `path`.
     pub fn get(&self, path: &Path) -> Vec<u32> {
         self.files.get(&key(path)).cloned().unwrap_or_default()
     }
 
-    /// Record collapsed header lines for `path`; an empty list removes the entry.
     pub fn set(&mut self, path: &Path, collapsed: &[u32]) {
         let k = key(path);
         if collapsed.is_empty() {
@@ -49,7 +42,6 @@ impl FoldStore {
         }
     }
 
-    /// Persist the store to disk atomically.
     pub fn save(&self) {
         let path = store_path();
         if let Some(dir) = path.parent() {

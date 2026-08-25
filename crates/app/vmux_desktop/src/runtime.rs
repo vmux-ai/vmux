@@ -53,12 +53,6 @@ pub enum LifecycleEvent {
     QuitVmux,
 }
 
-/// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
-/// Player mode's free camera consumes `AccumulatedMouseMotion`.
-///
-/// At rest window events wake rendering except while native CEF content owns the pointer. Native
-/// hover and scroll then use explicit monitor wakes instead of rendering once per raw macOS pointer
-/// event. During live resize the 16ms timer caps rendering near 60Hz.
 pub(crate) fn foreground_winit_settings(
     live_resize: bool,
     native_pointer_inside: bool,
@@ -138,11 +132,6 @@ fn cef_wake_interval(
     }
 }
 
-/// Keep the winit loop ticking while any webview is mid-reveal. Native pages don't wake Bevy (no OSR
-/// paints) and browse mode disables raw device events, so the 2-frame reveal counter
-/// ([`vmux_layout::PendingWebviewReveal`]) would otherwise stall at ~1 tick/s — newly split or opened
-/// panes take seconds to appear. Route the missing wake explicitly (see AGENTS.md). Self-terminating:
-/// once all reveals complete the query is empty and we stop waking.
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<(), With<vmux_layout::PendingWebviewReveal>>,
@@ -234,8 +223,6 @@ mod tests {
                 continue;
             }
             walk_rs_files(&dir, &mut |path, source| {
-                // This file spells the banned pattern out in its own failure message, and is also
-                // where the sanctioned Reactive setup lives.
                 if path.ends_with("runtime.rs") {
                     return;
                 }
@@ -303,13 +290,9 @@ mod tests {
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
-        // At rest, window-event wakes are on so the layout mesh + camera respond to window events;
-        // device-event wakes stay off in browse mode.
         assert!(!react_to_device_events);
         assert!(react_to_window_events);
 
-        // During a live resize, the loop is paced by a ~16ms timer (window-event reaction off) to cap
-        // the render rate to ~60Hz instead of the 120Hz display refresh.
         let UpdateMode::Reactive {
             wait: resize_wait,
             react_to_window_events: resize_window,
@@ -380,9 +363,6 @@ mod tests {
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
     }
 
-    /// Every system the platform half of the runtime registers, by schedule. Asked of a real
-    /// `App` rather than read out of the source, so moving a system between plugins cannot
-    /// leave this passing while the system is no longer scheduled.
     fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
         use bevy::ecs::schedule::{NodeId, Schedules};
 

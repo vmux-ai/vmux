@@ -15,7 +15,6 @@ use vmux_core::event::{
 };
 use vmux_core::extension::store;
 
-/// The `vmux://extensions/` view, marked so this module's systems find it without matching urls.
 #[derive(Component, Default)]
 pub struct Extensions;
 

@@ -36,18 +36,6 @@ fn default_pubkey_from_env(runtime: Option<String>, build_time: Option<&'static 
         .unwrap_or_default()
 }
 
-/// Auto-updater for Vmux. Checks a remote endpoint for new versions,
-/// downloads the signed `.app` bundle, and replaces the current one in-place.
-/// The update takes effect on the next launch.
-///
-/// ```rust,ignore
-/// let updater = VmuxUpdater::builder()
-///     .endpoint("https://example.com/updates.json")
-///     .pubkey("<minisign-public-key>")
-///     .initial_delay(Duration::from_secs(5))
-///     .poll_interval(Duration::from_secs(3600))
-///     .build();
-/// ```
 #[derive(Clone, Debug)]
 pub struct VmuxUpdater {
     endpoint: String,
@@ -61,7 +49,6 @@ impl VmuxUpdater {
         VmuxUpdaterBuilder::default()
     }
 
-    /// Convert into a Bevy plugin.
     pub fn plugin(self) -> UpdatePlugin {
         UpdatePlugin { updater: self }
     }
@@ -116,8 +103,6 @@ impl VmuxUpdaterBuilder {
         }
     }
 }
-
-// --- Bevy Plugin ---
 
 pub struct UpdatePlugin {
     updater: VmuxUpdater,

@@ -23,8 +23,6 @@ use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 
-/// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
-/// and answers [`StartDataRequest`] with the shared command-bar payload.
 pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
@@ -46,10 +44,6 @@ impl Plugin for StartPlugin {
                     begin_requested_inline_transition,
                 ),
             );
-        // Without this an in-place navigation to the URL takes the plain-navigate branch and asks
-        // a CEF browser to load it, which for a natively-hosted page means loading nothing. Every
-        // route to the launcher — typed, bookmarked, or the startup url — comes through
-        // `handle_native_page_open` instead.
         vmux_core::register_host_spawn(app, "start");
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
@@ -64,9 +58,6 @@ impl Plugin for StartPlugin {
     }
 }
 
-/// Marks a live `vmux://start/` page that has received the current launcher payload.
-/// Cleared implicitly by re-pushing whenever a launcher snapshot changes, so a page that
-/// becomes ready after snapshots were populated still gets the data.
 #[derive(Component)]
 struct StartWorkSynced;
 
@@ -272,17 +263,6 @@ fn drain_start_workspace_pickers(
     }
 }
 
-/// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs,
-/// recent files, agent order, spaces, and pages auto-update without a reopen. Pushes to a ready
-/// start page when a launcher snapshot changed this frame, or when newly ready and not yet synced
-/// (covers panes that spawn before the start page's CEF is ready). Uses [`OpenId::NONE`],
-/// which does not reset the palette's input/selection.
-///
-/// Found by `PageMetadata` rather than `WebviewSource`, for the reason given on
-/// [`mark_start_pages_as_launcher_hosts`]: the launcher runs in this process and has no source, so
-/// the old query matched nothing and the payload it was built from went out once and never again.
-/// `KeyboardOwner` still applies — `Browser::native_page` keeps the `Browser` marker the
-/// keyboard router looks for.
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
@@ -381,8 +361,6 @@ fn sync_live_start_pages(
                 &StartFocusInput,
             ));
         }
-        // The start page can be despawned this frame (e.g. selecting an agent opens in-place over
-        // it) before this command applies — `try_insert` skips silently instead of panicking.
         commands.entity(e).try_insert(StartWorkSynced);
     }
 }
@@ -406,8 +384,6 @@ fn should_focus_start_sync(
     keyboard_target && (!synced || keyboard_target_added || focus_changed)
 }
 
-/// Answer the `vmux://start/` page's on-mount [`StartDataRequest`] with the shared
-/// command-bar launcher payload (opening selections in place).
 fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
     keyboard_targets: Query<(), With<KeyboardOwner>>,
@@ -449,7 +425,6 @@ fn on_start_data_request(
     }
 }
 
-/// Build the launcher payload shared by the on-mount data feed and warm-spare refresh.
 fn build_start_payload(
     tab_gather: &TabGatherParams,
     spaces_snapshot: &CommandBarSpacesSnapshot,
@@ -494,16 +469,6 @@ fn build_start_payload(
     payload
 }
 
-/// Claims [`HostsLauncher`] for every start page, so the command bar can ask what a page can do
-/// instead of comparing its URL.
-///
-/// Read from `PageMetadata` rather than `WebviewSource`: a natively-hosted launcher has no source,
-/// because no CEF browser is fetching anything for it, and one that never claimed this marker would
-/// go quiet — no focus request, and nothing for the command bar to recognise.
-///
-/// `try_insert`, because a launcher is replaced by whatever the user picks from it: choosing an
-/// agent clears the stack's children in the same frame this ran, and a plain `insert` applied
-/// afterwards takes the whole app down with it.
 fn mark_start_pages_as_launcher_hosts(
     starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
     mut commands: Commands,

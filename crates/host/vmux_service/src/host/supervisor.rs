@@ -1,6 +1,3 @@
-//! Replace a running daemon: graceful Shutdown over the socket,
-//! escalate to SIGTERM, finally SIGKILL.
-
 use std::time::{Duration, Instant};
 
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -41,11 +38,6 @@ pub fn send_signal(pid: i32, sig: i32) -> std::io::Result<()> {
     }
 }
 
-/// Replace the running daemon for the given pid.
-///
-/// `send_shutdown` performs the IPC Shutdown round-trip.
-/// `Ok` means acknowledged or connection closed; `Err` means unreachable
-/// (falls through to SIGTERM).
 pub fn replace_running<F>(pid: i32, send_shutdown: F) -> ReplaceOutcome
 where
     F: FnOnce() -> std::io::Result<()>,
@@ -71,7 +63,6 @@ where
     ReplaceOutcome::SigkillExit
 }
 
-/// Best-effort cleanup of stale runtime files for the current profile.
 pub fn clean_runtime_files() {
     let paths = crate::ServicePaths::current();
     let _ = std::fs::remove_file(paths.socket());

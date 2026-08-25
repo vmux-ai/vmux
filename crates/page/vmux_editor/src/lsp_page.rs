@@ -103,7 +103,6 @@ pub fn Page() -> Element {
     }
 }
 
-/// One language package row.
 #[component]
 fn PackageRow(
     package: LspPackage,
@@ -206,7 +205,6 @@ fn localized_status(status: LspPkgStatus) -> String {
     translate(id)
 }
 
-/// The install or remove control for a language package.
 #[component]
 fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> Element {
     let name = name.as_str();

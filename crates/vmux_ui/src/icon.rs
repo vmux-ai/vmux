@@ -1,10 +1,5 @@
 pub use wasm::{BuiltinIconView, LineIconView, PageIconView};
 
-/// The stroked glyphs any page may draw, independent of what a caller means by them.
-///
-/// A feature names the *meaning* ("the agent read a file") and maps it to one of these; the
-/// glyph itself stays here so the same outline is not redrawn per crate. Anything carrying a
-/// feature's own semantics — a brand logo, a tinted wrapper, an emoji — is not a [`LineIcon`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
     AlertCircle,
@@ -33,7 +28,6 @@ pub enum LineIcon {
 }
 
 impl LineIcon {
-    /// The SVG path data drawn inside the glyph's 24x24 box.
     pub fn paths(self) -> &'static [&'static str] {
         match self {
             Self::AlertCircle => &[
@@ -142,7 +136,6 @@ mod wasm {
     use dioxus::prelude::*;
     use vmux_wire::icon::{BuiltinIcon, PageIcon};
 
-    /// One of the shared stroked glyphs, at whatever size `class` gives it.
     #[component]
     pub fn LineIconView(icon: LineIcon, class: String) -> Element {
         rsx! {
@@ -154,7 +147,6 @@ mod wasm {
         }
     }
 
-    /// The glyph for a builtin page kind.
     #[component]
     pub fn BuiltinIconView(icon: BuiltinIcon, class: String) -> Element {
         match icon {
@@ -219,7 +211,6 @@ mod wasm {
         }
     }
 
-    /// A vendor logo, which is a filled path rather than a stroked one.
     #[component]
     fn BrandGlyph(class: String, d: String) -> Element {
         rsx! {

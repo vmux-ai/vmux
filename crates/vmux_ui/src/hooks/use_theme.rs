@@ -4,7 +4,6 @@ use crate::theme::{THEME_EVENT, ThemeEvent};
 use crate::transport::Host;
 use dioxus::prelude::*;
 
-/// Listens for [`ThemeEvent`] from the host and applies CSS custom properties.
 pub fn use_theme() -> Signal<String> {
     let mut locale = use_signal(|| Locale::preferred().into_string());
     apply_locale(&Locale::from(locale().as_str()));

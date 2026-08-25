@@ -77,9 +77,6 @@ pub struct ChatMediaEntry {
 }
 
 impl ChatMediaEntry {
-    /// How this entry is written into a prompt after an `@`.
-    ///
-    /// Percent-encoded, because a space would otherwise end the token the composer is matching.
     pub fn reference(&self) -> String {
         let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
         if self.parent == "~" {
@@ -93,7 +90,6 @@ impl ChatMediaEntry {
         }
     }
 
-    /// How this entry is shown to a reader — the same path, unencoded.
     pub fn display_path(&self) -> String {
         if self.parent == "~" {
             format!("~/{}", self.name)

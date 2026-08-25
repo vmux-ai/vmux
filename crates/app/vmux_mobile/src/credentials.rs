@@ -1,19 +1,7 @@
-//! Where a pairing is kept between launches.
-//!
-//! A file in the app's own container, not the webview's local storage. The old version reached
-//! `window.localStorage` by building a JavaScript string and evaluating it — the token and the
-//! certificate fingerprint went out through a script interpolation, which is the wrong shape for
-//! a secret regardless of whose data it is.
-//!
-//! The keychain is where this really belongs, and would survive a reinstall and stay out of
-//! backups. That needs `objc2-security` and a `SecItem` dictionary; this is the same sandbox
-//! localStorage already lived in, minus the script.
-
 use std::path::PathBuf;
 
 use crate::Credentials;
 
-/// The pairing this device holds, if it has one.
 pub struct StoredCredentials;
 
 impl StoredCredentials {
@@ -41,7 +29,6 @@ impl StoredCredentials {
         let _ = std::fs::remove_file(path);
     }
 
-    /// `$HOME` is the app's sandbox container on iOS, and an ordinary home directory elsewhere.
     fn path() -> Option<PathBuf> {
         let home = std::env::var_os("HOME")?;
         Some(
@@ -52,10 +39,6 @@ impl StoredCredentials {
     }
 }
 
-/// Written at `0600` from the start rather than narrowed afterwards.
-///
-/// `fs::write` creates with the process umask and only then gets chmod'd, which leaves a window.
-/// Recreated rather than truncated, because `mode` only applies when the file is created.
 fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     let _ = std::fs::remove_file(path);
     #[cfg(unix)]

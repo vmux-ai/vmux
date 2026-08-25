@@ -3,60 +3,45 @@ use dioxus_primitives::tabs::{self, TabContentProps, TabListProps, TabTriggerPro
 
 use crate::util::merge_class;
 
-/// The props for the [`Tabs`] component.
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {
-    /// The class of the tabs component.
     #[props(default)]
     pub class: String,
 
-    /// The controlled value of the active tab.
     pub value: ReadSignal<Option<String>>,
 
-    /// The default active tab value when uncontrolled.
     #[props(default)]
     pub default_value: String,
 
-    /// Callback fired when the active tab changes.
     #[props(default)]
     pub on_value_change: Callback<String>,
 
-    /// Whether the tabs are disabled.
     #[props(default)]
     pub disabled: ReadSignal<bool>,
 
-    /// Whether the tabs are horizontal.
     #[props(default)]
     pub horizontal: ReadSignal<bool>,
 
-    /// Whether focus should loop around when reaching the end.
     #[props(default = ReadSignal::new(Signal::new(true)))]
     pub roving_loop: ReadSignal<bool>,
 
-    /// The variant of the tabs component.
     #[props(default)]
     pub variant: TabsVariant,
 
-    /// Additional attributes to apply to the tabs element.
     #[props(extends = GlobalAttributes)]
     pub attributes: Vec<Attribute>,
 
-    /// The children of the tabs component.
     pub children: Element,
 }
 
-/// The variant of the tabs component.
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum TabsVariant {
-    /// The default variant.
     #[default]
     Default,
-    /// The ghost variant.
     Ghost,
 }
 
 impl TabsVariant {
-    /// Convert the variant to a string for use in class names
     fn to_class(self) -> &'static str {
         match self {
             TabsVariant::Default => "default",

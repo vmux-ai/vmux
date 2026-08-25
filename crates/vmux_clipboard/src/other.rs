@@ -1,6 +1,3 @@
-//! Platforms with no clipboard integration: writes are logged and dropped, and
-//! every read comes back empty.
-
 use tracing::warn;
 
 impl super::Clipboard {

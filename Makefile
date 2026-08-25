@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -229,11 +229,6 @@ cleanup-local:
 # Website
 build-website-css:
 	cd website && tailwindcss -i tailwind.input.css -o public/style.css --minify
-	rm -rf website/public/api && mkdir -p website/public/api && cp docs/api/*.json website/public/api/
-
-# Regenerate the committed API model from in-code rustdoc (nightly).
-api-docs:
-	cd vmux_docs && cargo run -- --out ../docs/api
 
 website: build-website-css
 	@cd website && { \

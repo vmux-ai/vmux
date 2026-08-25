@@ -1,9 +1,3 @@
-//! Commands an agent asks the app to run, and the policy deciding whether it may.
-//!
-//! Every MCP tool call lands here as an [`AgentCommandRequest`]. An agent-originated command is
-//! held to a narrower set than a user-originated one — anything that moves focus is refused, so a
-//! background agent cannot steal the window out from under whoever is typing.
-
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -219,9 +213,6 @@ pub(super) fn handle_agent_tool_calls(
     }
 }
 
-/// Flatten the launcher's agent registry into the shape a remote client can consume.
-///
-/// ACP agents first, then CLI providers, matching the order the desktop launcher lists them.
 pub(crate) fn remote_agents(
     snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
 ) -> Vec<vmux_wire::room::RemoteAgent> {
@@ -248,8 +239,6 @@ pub(crate) fn remote_agents(
         .collect()
 }
 
-/// Focus and the agent registry, bundled because `handle_agent_commands` is at Bevy's
-/// system-parameter limit.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct DesktopContext<'w, 's> {
     focus: Res<'w, FocusedStack>,
@@ -629,7 +618,6 @@ pub(super) fn handle_agent_commands(
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }
             }
-            // Answered where the state lives: the roster in vmux_team, the models in chat_page.
             ServiceAgentCommand::Shared(SharedAgentCommand::ListTeam)
             | ServiceAgentCommand::Shared(SharedAgentCommand::ListModels { .. })
             | ServiceAgentCommand::Shared(SharedAgentCommand::SelectModel { .. })
@@ -701,8 +689,6 @@ mod tests {
         )
         .expect("apply ok");
         assert_eq!(settings.browser.startup_url, "https://example.com/custom");
-        // sparse RON includes only sections that differ from the embedded
-        // defaults; this override differs, so it appears.
         assert!(ron_bytes.contains("https://example.com/custom"));
     }
 

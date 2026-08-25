@@ -1,5 +1,3 @@
-//! Shared component types and reflection registration used across all vmux crates.
-
 pub mod agent_setup;
 pub mod dom_snapshot;
 pub mod editor;

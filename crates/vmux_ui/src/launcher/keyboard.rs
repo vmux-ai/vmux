@@ -1,13 +1,5 @@
-//! Which Ctrl chords the command-bar input claims, and what each one does to the text.
-//!
-//! The caret mechanics these compute against — byte/UTF-16 conversion, boundary clamping,
-//! caret-follow scrolling — are [`crate::caret`]'s, because they are facts about a text field
-//! rather than about this keymap.
-
 use crate::caret::floor_char_boundary;
 
-/// A readline edit the command-bar input performs on itself, named for the motion rather than
-/// the chord that triggers it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtrlEditAction {
     Home,
@@ -20,15 +12,10 @@ pub enum CtrlEditAction {
     DeleteToBeginning,
 }
 
-/// What the command bar does with a Ctrl chord it sees before the browser acts on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtrlKeyCapture {
-    /// Not ours; let it through untouched.
     Ignore,
-    /// Edit the text ourselves, because Chromium's own readline emulation would otherwise
-    /// move a caret we are trying to keep authoritative.
     Edit(CtrlEditAction),
-    /// Ours, but handled by the page's own key handler; only suppress the browser default.
     PassToDioxus,
 }
 
@@ -47,7 +34,6 @@ pub fn ctrl_key_capture_for_code(code: &str) -> CtrlKeyCapture {
     }
 }
 
-/// The text and caret a readline edit produces. `caret` is a UTF-8 byte offset into `value`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edited {
     pub value: String,
@@ -55,14 +41,6 @@ pub struct Edited {
 }
 
 impl CtrlEditAction {
-    /// Apply this edit to `value`, with the caret at UTF-8 byte offset `caret`.
-    ///
-    /// `ghost` is the inline completion offered past the end of the text, which [`Self::End`]
-    /// accepts and every other action ignores.
-    ///
-    /// The deletions read the caret alone and ignore any selection, which is how the command bar
-    /// has always behaved: Ctrl+W with text selected removes the word before the selection rather
-    /// than the selection itself.
     pub fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
         let caret = floor_char_boundary(value, caret);
         let kept = |caret| Edited {
@@ -109,9 +87,6 @@ impl CtrlEditAction {
     }
 }
 
-/// Where Ctrl+W stops: back over the spaces immediately behind the caret, then back over the
-/// run of non-spaces before those. The character right at the caret is always consumed, so the
-/// chord never does nothing when there is text to its left.
 fn word_start_before(value: &str, caret: usize) -> usize {
     let bytes = value.as_bytes();
     let mut i = caret.saturating_sub(1);
@@ -128,8 +103,6 @@ fn word_start_before(value: &str, caret: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// The whole Ctrl map in one place: which chords the command bar edits itself, which it
-    /// merely suppresses so its own key handler sees them, and that everything else is left alone.
     #[test]
     fn every_ctrl_chord_is_edited_passed_on_or_ignored() {
         let edits = [
@@ -167,8 +140,6 @@ mod tests {
         }
     }
 
-    /// `(action, value, caret, expected value, expected caret)` over one ASCII string, so the
-    /// whole readline set is pinned in one place rather than one test per chord.
     #[test]
     fn ctrl_edits_move_and_cut_as_readline_does() {
         let cases = [
@@ -210,12 +181,8 @@ mod tests {
         assert_eq!(CtrlEditAction::Forward.apply("foo", 3, "").caret, 3);
     }
 
-    /// The caret arrives as a byte offset, so an edit next to a multi-byte character must act on
-    /// the character the caret is actually beside. Passing a UTF-16 offset through unconverted
-    /// deleted the wrong character here.
     #[test]
     fn edits_next_to_multibyte_characters_act_on_the_right_one() {
-        // "aé本b": 'a'@0, 'é'@1..3, '本'@3..6, 'b'@6..7.
         let s = "aé本b";
         assert_eq!(CtrlEditAction::Delete.apply(s, 6, "").value, "aé本");
         assert_eq!(CtrlEditAction::Delete.apply(s, 3, "").value, "aéb");
@@ -226,8 +193,6 @@ mod tests {
         assert_eq!(CtrlEditAction::Forward.apply(s, 3, "").caret, 6);
     }
 
-    /// A caret landing inside a character is pulled back to its start rather than panicking the
-    /// slice, so a stale offset degrades to a misplaced caret.
     #[test]
     fn a_caret_inside_a_character_is_pulled_to_its_start() {
         let inside = CtrlEditAction::Delete.apply("aé本b", 4, "");
@@ -241,7 +206,6 @@ mod tests {
         assert_eq!(accepted.value, "git.com/vmux");
         assert_eq!(accepted.caret, 12);
 
-        // Only End reads the ghost.
         assert_eq!(
             CtrlEditAction::Home.apply("git.co", 6, "m/vmux").value,
             "git.co"

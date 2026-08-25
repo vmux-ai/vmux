@@ -230,7 +230,6 @@ pub fn GitFooter(
     message: ReadSignal<String>,
     leading: Element,
     always_visible: bool,
-    /// Right-aligned status-bar items (e.g. the editor's LSP indicator).
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);

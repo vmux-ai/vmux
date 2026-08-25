@@ -12,13 +12,10 @@ pub struct AgentInstallRunRequest {
     pub agent: String,
 }
 
-/// Bin-event id for native → page prerequisite status pushes.
 pub const AGENT_SETUP_PREREQ_EVENT: &str = "agent_setup_prereq";
 
-/// Bin-event id for native → page install-result pushes.
 pub const AGENT_SETUP_RESULT_EVENT: &str = "agent_setup_result";
 
-/// Page → native: asks whether `agent` needs a prerequisite installed first.
 #[derive(
     Clone,
     Debug,
@@ -33,7 +30,6 @@ pub struct AgentSetupPrereqRequest {
     pub agent: String,
 }
 
-/// Native → page: whether Homebrew must be installed before the agent.
 #[derive(
     Clone,
     Debug,
@@ -48,7 +44,6 @@ pub struct AgentSetupPrereqStatus {
     pub needs_homebrew: bool,
 }
 
-/// Native → page: terminal install finished. `ok == false` drives the Retry state.
 #[derive(
     Clone,
     Debug,

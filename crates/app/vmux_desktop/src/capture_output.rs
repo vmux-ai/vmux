@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use vmux_setting::AppSettings;
 
-/// Resolves the configured screenshot and recording output directory.
 pub(crate) fn output_dir(settings: &AppSettings) -> PathBuf {
     settings
         .recording

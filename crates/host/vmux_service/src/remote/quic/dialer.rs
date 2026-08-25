@@ -1,13 +1,3 @@
-//! Registering this desktop with the relay, and serving the phones it sends back.
-//!
-//! The desktop is behind NAT, so it dials out and holds the connection open rather than waiting
-//! to be reached. The relay allocates it a UDP port, tells phones to use it through the pairing
-//! link, and tunnels their packets back over this same connection as DATAGRAM frames.
-//!
-//! Those packets belong to a QUIC session that terminates here, not at the relay. The inner
-//! endpoint below is what terminates it — same certificate, same `admit()`, same dispatch as a
-//! phone dialling us directly would have reached.
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -22,18 +12,10 @@ use super::super::server::RemoteState;
 use crate::RemotePaths;
 use crate::pairing::Relay;
 
-/// Smallest inner packet size QUIC allows. A tunnel that cannot carry this cannot carry a
-/// handshake, so coming up would only produce an unreachable desktop.
 const MIN_INNER_MTU: usize = 1200;
 
-/// Headroom for the inner endpoint's own framing inside an outer DATAGRAM frame.
 const TUNNEL_OVERHEAD: usize = 64;
 
-/// Dial the relay, and keep dialling it for as long as this task is allowed to run.
-///
-/// Nothing here decides whether Remote should be reachable — [`super::Supervisor`] does, by
-/// running this task or not. Aborting it is the way out, which every guard below is written to
-/// survive.
 pub fn spawn(state: RemoteState, liveness: watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut backoff = Backoff::new();
@@ -45,21 +27,13 @@ pub fn spawn(state: RemoteState, liveness: watch::Receiver<bool>) -> tokio::task
     })
 }
 
-/// One registration with the relay: the control connection this desktop dialled out on, and the
-/// port the relay allocated behind it.
 struct Registration {
     control: quinn::Connection,
-    /// Held for its [`Drop`], which withdraws the pairing link when the session ends.
     _registered: RegisteredDevice,
     since: Instant,
 }
 
 impl Registration {
-    /// Dial, register, serve every phone the relay tunnels back, and say how it ended.
-    ///
-    /// The certificate is loaded per attempt rather than once for the process, so a desktop with
-    /// Remote off writes none at all, and a failure to write one is reported and retried through
-    /// the same backoff as every other reason a session never got started.
     async fn hold(state: &RemoteState, liveness: &watch::Receiver<bool>) -> SessionEnd {
         let identity = match super::ensure_identity() {
             Ok(identity) => identity,
@@ -73,11 +47,6 @@ impl Registration {
         }
     }
 
-    /// Dial the relay's control port and claim the port it hands back.
-    ///
-    /// Every failure here names the address that was tried. A relay URL left over from an older
-    /// build points at a port nothing listens on, and over UDP that is indistinguishable from a
-    /// slow network — without the address in the message the only symptom is a bare timeout.
     async fn open(token: &str) -> Result<Self, String> {
         let relay = Relay::configured();
         let device_id = ensure_device_id().map_err(|error| error.to_string())?;
@@ -107,7 +76,6 @@ impl Registration {
         })
     }
 
-    /// Serve tunnelled phones until the control connection drops.
     async fn serve(
         self,
         state: &RemoteState,
@@ -138,7 +106,6 @@ impl Registration {
         self.ended(reason)
     }
 
-    /// End the session, which gives up the allocated port along with it.
     fn ended(self, reason: impl Into<String>) -> SessionEnd {
         SessionEnd::Registered {
             held: self.since.elapsed(),
@@ -147,27 +114,14 @@ impl Registration {
     }
 }
 
-/// How a relay session ended, and how far it got.
-///
-/// A session always ends in a failure — the control connection closing is the ordinary way out —
-/// so the useful distinction is not success against error but whether it ever registered.
 enum SessionEnd {
-    /// No registration was established: name resolution, the dial, the handshake or the hello
-    /// failed, so the relay is holding no port for this desktop.
     Unregistered(String),
-    /// The relay accepted the registration, and it stood for `held` before it ended.
     Registered { held: Duration, reason: String },
 }
 
 impl SessionEnd {
-    /// How long a registration has to stand before it counts as evidence the relay is healthy.
-    ///
-    /// Registering is not enough on its own: a relay being redeployed can accept a registration
-    /// and tear it down moments later, and treating that as success would put every desktop back
-    /// to a dial per second — the stampede [`Backoff`] exists to prevent.
     const STABLE: Duration = Duration::from_secs(60);
 
-    /// Whether the next dial can go straight out rather than backing off further.
     fn proves_the_relay_is_up(&self) -> bool {
         match self {
             Self::Unregistered(_) => false,
@@ -189,11 +143,6 @@ impl SessionEnd {
     }
 }
 
-/// How long to wait before dialling the relay again.
-///
-/// Doubling rather than a flat delay: a relay that is down stays down for minutes, and the old
-/// HTTP client's fixed two seconds meant a redeploy took a dial per instance per two seconds from
-/// every desktop at once.
 struct Backoff {
     delay: Duration,
 }
@@ -206,11 +155,6 @@ impl Backoff {
         Self { delay: Self::FIRST }
     }
 
-    /// How long to wait after `ended`, folding it into the sequence.
-    ///
-    /// A session that stood long enough to prove the relay is up starts the sequence over, so a
-    /// desktop that was connected for hours reconnects in a second instead of inheriting the cap
-    /// from however many attempts it took to get connected in the first place.
     fn after(&mut self, ended: &SessionEnd) -> Duration {
         if ended.proves_the_relay_is_up() {
             self.delay = Self::FIRST;
@@ -221,31 +165,17 @@ impl Backoff {
     }
 }
 
-/// This desktop's device id, recorded for as long as the registration holds.
-///
-/// The pairing link is built from this file, and its absence is what tells every reader the
-/// desktop is not registered — so a link is never offered for a session the relay would not
-/// route to. Removing it on drop is what keeps that true.
-///
-/// Turning Remote off aborts the dialer, which drops this along with everything else the task
-/// held, so the switch withdraws the registration without anything having to remember to.
 pub(super) struct RegisteredDevice {
     path: PathBuf,
 }
 
 impl RegisteredDevice {
-    /// Record `device_id` as registered, replacing whatever the last session left behind.
     fn claim(device_id: &DeviceId) -> std::io::Result<Self> {
         let path = RemotePaths::current().relay_registration();
         super::super::write_private(&path, device_id.as_str())?;
         Ok(Self { path })
     }
 
-    /// Forget a registration recorded by a previous process.
-    ///
-    /// [`Drop`] covers a session this process owned; a daemon that was killed never got to run it,
-    /// so the file is cleared once at startup before anything can read it as live. That has to
-    /// happen whether or not Remote is on, since the stale value is readable either way.
     pub(super) fn release_stale() {
         Self::remove(&RemotePaths::current().relay_registration());
     }
@@ -269,10 +199,8 @@ impl Drop for RegisteredDevice {
     }
 }
 
-/// Frames on the relay setup exchange. Bounded well under anything a setup could need.
 const SETUP: FrameStream = FrameStream::new(16 * 1024);
 
-/// Send the setup and wait for the relay to admit it.
 async fn register(
     control: &quinn::Connection,
     device_id: &DeviceId,
@@ -304,9 +232,6 @@ async fn register(
     Ok(())
 }
 
-/// The relay's QUIC control port, resolved.
-///
-/// The URL names the HTTPS endpoint; QUIC listens on the same host and port number over UDP.
 async fn resolve(relay_url: &str) -> Result<std::net::SocketAddr, String> {
     let parsed = url::Url::parse(relay_url).map_err(|error| format!("relay url: {error}"))?;
     let host = parsed.host_str().ok_or("relay url has no host")?;
@@ -322,16 +247,6 @@ fn host_of(relay_url: &str) -> Result<String, String> {
         .to_string())
 }
 
-/// This desktop's identity to the relay, minted once and kept.
-///
-/// [`RemotePaths::relay_device`], not [`RemotePaths::relay_registration`]. The two look
-/// interchangeable and are opposites: the first is who this desktop is, the second is a claim that
-/// lives only as long as a registration holds, which [`RegisteredDevice`] deletes on drop and again
-/// at startup. Reading identity out of the claim meant every dropped control connection erased it
-/// and the next dial minted a new id — a phone paired minutes earlier was then addressing a
-/// desktop that no longer answered to that name, with nothing to say so but a link that never came
-/// up. `vmux_desktop` already mints into `relay_device` "so both agree before the first
-/// registration"; this is the half that did not.
 fn ensure_device_id() -> std::io::Result<DeviceId> {
     let path = RemotePaths::current().relay_device();
     if let Ok(existing) = std::fs::read_to_string(&path) {
@@ -363,7 +278,6 @@ mod tests {
     }
 
     impl Backoff {
-        /// The delays a fresh backoff produces over `rounds` sessions that all end the same way.
         fn delays(ended: impl Fn() -> SessionEnd, rounds: usize) -> Vec<u64> {
             let mut backoff = Self::new();
             let mut seconds = Vec::new();
@@ -374,8 +288,6 @@ mod tests {
         }
     }
 
-    /// A relay that cannot be reached at all has to be dialled less and less often, or every
-    /// desktop in the fleet hammers it in lockstep while it is down.
     #[test]
     fn a_relay_that_is_never_reached_widens_up_to_the_cap() {
         assert_eq!(
@@ -384,8 +296,6 @@ mod tests {
         );
     }
 
-    /// The bug this guards: a session is only ever reported as an error, so nothing used to reset
-    /// the delay and a registration that stood for twelve minutes still came back capped.
     #[test]
     fn a_session_that_stood_restarts_the_sequence() {
         let mut backoff = Backoff::new();
@@ -399,8 +309,6 @@ mod tests {
         );
     }
 
-    /// Registering is not proof on its own. A relay mid-redeploy accepts a registration and drops
-    /// it moments later, so resetting on that alone would restore the per-second stampede.
     #[test]
     fn a_registration_that_flaps_keeps_backing_off() {
         let flapping = || SessionEnd::held_for(Duration::from_millis(200));
@@ -409,7 +317,6 @@ mod tests {
     }
 
     impl RegisteredDevice {
-        /// A registration recorded under `path`, so a test never writes into the user's profile.
         fn recorded_at(path: &Path) -> Self {
             std::fs::write(path, "device-1").expect("write registration");
             Self {
@@ -418,9 +325,6 @@ mod tests {
         }
     }
 
-    /// The relay drops the registration when the session ends, so the recorded one must not
-    /// outlive it — a pairing link built from a stale registration names a desktop the relay
-    /// would refuse to route to.
     #[test]
     fn the_recorded_registration_does_not_outlive_its_session() {
         let directory = tempfile::tempdir().expect("temp dir");
@@ -436,10 +340,6 @@ mod tests {
         );
     }
 
-    /// Switching Remote off takes the dialer down by aborting it, which is not a path a guard runs
-    /// on by default anywhere — a future that is never polled again is simply dropped. If that
-    /// drop did not reach here, disabling Remote would leave the relay holding a port for a
-    /// desktop that no longer answers.
     #[tokio::test]
     async fn aborting_the_dialer_withdraws_the_registration() {
         let directory = tempfile::tempdir().expect("temp dir");

@@ -89,13 +89,9 @@ impl Plugin for PanePlugin {
     }
 }
 
-/// Marker: pane is waiting for close confirmation dialog.
 #[derive(Component)]
 pub struct PendingPaneClose;
 
-/// Marker: close this pane immediately, without a confirmation dialog. Used when
-/// the pane's process has already exited (e.g. an agent CLI quit), so there is
-/// nothing to confirm and the pane should be removed + the split collapsed.
 #[derive(Component)]
 pub struct ForcePaneClose;
 
@@ -140,7 +136,6 @@ fn clear_zoom_on_pane_removal(
     }
 }
 
-/// Signals that the cursor should be warped to the active pane once layout is computed.
 #[derive(Resource, Default)]
 pub struct PendingCursorWarp {
     pub target: Option<Entity>,
@@ -402,8 +397,6 @@ pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32) {
     node.row_gap = gaps.row_gap;
 }
 
-/// Temporary component inserted on a PaneSplit entity while the user is
-/// dragging the gap between two of its children.
 #[derive(Component)]
 pub struct PaneDrag {
     prev_child: Entity,
@@ -470,8 +463,6 @@ pub(crate) fn set_pane_split_direction(
     }
 }
 
-/// Compute clamped flex_grow values after a resize delta.
-/// Returns (new_pane_grow, new_sibling_grow).
 fn compute_resize(pane_grow: f32, sib_grow: f32, delta: f32, parent_len: f32) -> (f32, f32) {
     let total = pane_grow + sib_grow;
     let mut pg = pane_grow + delta;
@@ -853,7 +844,6 @@ fn handle_pane_commands(
                     (child_in_split, sibs[idx - 1])
                 };
 
-                // Read current values
                 let parent_len;
                 let pane_grow;
                 let sib_grow;
@@ -940,17 +930,6 @@ fn split_leaf_into_two_parts(
     (pane1, p2)
 }
 
-/// Return a fresh empty leaf pane beside `anchor`, to host an agent-spawned
-/// terminal. When `anchor` is still a leaf (`already_split == false`), it is
-/// split in two via [`split_leaf_into_two`] (its stacks move into the first
-/// child, the returned pane is the second). When `anchor` is already a split —
-/// either from a previous frame, or from an earlier call in the *same* command
-/// buffer — the new leaf is appended as another child of that split.
-///
-/// Calling [`split_leaf_into_two`] repeatedly on the same leaf within one
-/// command buffer (e.g. several agent `run`s dispatched in one tick) would wrap
-/// it again on each call and orphan an empty `pane1` every time; routing the
-/// 2nd+ split through here keeps the result a clean N-ary split with no empties.
 pub fn split_or_extend(
     commands: &mut Commands,
     anchor: Entity,
@@ -2069,7 +2048,6 @@ fn poll_cursor_pane_focus(
         return;
     };
 
-    // Check if already the active pane
     let current_active = active_among(leaf_panes.iter().filter_map(|(e, _)| pane_ts.get(e).ok()));
     if current_active == Some(target) {
         intent.target = None;
@@ -2217,7 +2195,6 @@ fn pane_gap_drag_resize(
     };
     let cursor = Vec2::new(cursor_pos.x, cursor_pos.y);
 
-    // --- Handle active drag ---
     if let Ok((split_entity, drag, split)) = active_drags.single() {
         if mouse.pressed(MouseButton::Left) {
             let pos_along = match split.direction {
@@ -2261,7 +2238,6 @@ fn pane_gap_drag_resize(
         return;
     }
 
-    // --- Hover detection + drag initiation ---
     'outer: for (split_entity, split, children) in &splits {
         let sibs: Vec<Entity> = children.iter().collect();
         for i in 0..sibs.len().saturating_sub(1) {
@@ -2381,8 +2357,6 @@ fn show_close_dialog() -> bool {
     matches!(result, rfd::MessageDialogResult::Yes)
 }
 
-/// Exclusive system: processes pending pane close confirmations by showing
-/// native dialogs on the main thread.
 fn process_pending_pane_closes(world: &mut World) {
     let pending: Vec<Entity> = world
         .query_filtered::<Entity, (With<PendingPaneClose>, With<Pane>)>()
@@ -2425,11 +2399,6 @@ fn process_pending_pane_closes(world: &mut World) {
     }
 }
 
-/// Exclusive system: force-close panes marked [`ForcePaneClose`] with no
-/// confirmation dialog. Mirrors [`process_pending_pane_closes`] (activate the
-/// pane + its tab, mark `CloseConfirmed`, dispatch `PaneCommand::Close`) but
-/// skips the prompt, since the process has already exited. Being exclusive, the
-/// activation lands before the dispatched command is read.
 fn process_force_pane_closes(world: &mut World) {
     let pending: Vec<Entity> = world
         .query_filtered::<Entity, (With<ForcePaneClose>, With<Pane>)>()
@@ -4467,9 +4436,6 @@ mod tests {
 
     #[test]
     fn select_right_picks_most_recently_active_among_overlapping_neighbors() {
-        // Layout: A (left, full height), B (top-right), C (bottom-right).
-        // From A, both B and C overlap on Y. Expect: navigate to whichever was
-        // active most recently (B in this test).
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -4521,14 +4487,11 @@ mod tests {
             Vec2::new(793.0, 442.0),
         );
 
-        // Sanity: ensure ComputedNode is set for B and C
         let _ = app.world().get::<ComputedNode>(b).unwrap();
 
-        // Activate C first, then B (B is the most recently active right-side pane).
         app.world_mut().entity_mut(c).insert(LastActivatedAt::now());
         std::thread::sleep(std::time::Duration::from_millis(2));
         app.world_mut().entity_mut(b).insert(LastActivatedAt::now());
-        // Then activate A so it's the current pane.
         std::thread::sleep(std::time::Duration::from_millis(2));
         app.world_mut().entity_mut(a).insert(LastActivatedAt::now());
 
@@ -4554,8 +4517,6 @@ mod tests {
 
     #[test]
     fn select_left_picks_full_height_neighbor_from_sub_split_pane() {
-        // Layout: A on left (full height), B top-right, C bottom-right.
-        // From B, pressing 'h' should navigate to A (their bounding boxes overlap on Y).
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -4578,8 +4539,6 @@ mod tests {
                 ChildOf(tab),
             ))
             .id();
-        // Realistic layout with gaps (8px pane gap, 4px window padding):
-        // A: left, full height (791x892)
         let a = place_pane(
             &mut app,
             split_v,
@@ -4596,14 +4555,12 @@ mod tests {
                 ChildOf(split_v),
             ))
             .id();
-        // B: top-right, half height (793x442)
         let b = place_pane(
             &mut app,
             split_h,
             Vec2::new(1199.5, 225.0),
             Vec2::new(793.0, 442.0),
         );
-        // C: bottom-right, half height (793x442)
         let _c = place_pane(
             &mut app,
             split_h,
@@ -4612,7 +4569,6 @@ mod tests {
         );
 
         let _ = (a, b);
-        // sanity: ensure ComputedNode is set
         let _ = app.world().get::<ComputedNode>(b).unwrap();
 
         app.world_mut().entity_mut(a).insert(LastActivatedAt(1));
@@ -4671,13 +4627,11 @@ mod tests {
             Vec2::new(800.0, 900.0),
         );
 
-        // make `right` the active pane
         app.world_mut()
             .entity_mut(right)
             .insert(LastActivatedAt::now());
         std::thread::sleep(std::time::Duration::from_millis(2));
 
-        // sanity: ensure ComputedNode is set as expected
         assert_eq!(
             app.world().get::<ComputedNode>(right).unwrap().size,
             Vec2::new(800.0, 900.0)
@@ -5863,8 +5817,6 @@ mod tests {
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor)))
             .id();
 
-        // Two agent runs splitting the same anchor in ONE command buffer: the
-        // first really splits, the second extends the now-split anchor.
         let (p2a, p2b) = app
             .world_mut()
             .run_system_once(move |mut commands: Commands| {
@@ -6020,8 +5972,6 @@ mod tests {
         app.world_mut()
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
 
-        // Three open_page calls in one tick, all anchored to the same pane (as
-        // the agent does for "open a few terminals beside me").
         for direction in [
             PaneDirection::Right,
             PaneDirection::Bottom,

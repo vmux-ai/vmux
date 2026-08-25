@@ -73,7 +73,6 @@ impl Plugin for WindowLayoutPlugin {
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
-/// Below every named layer: what a webview gets when it belongs to none of them.
 pub const WEBVIEW_Z_BASE: f32 = 0.01;
 pub const WEBVIEW_Z_MAIN: f32 = 0.018;
 pub const WEBVIEW_Z_FOCUS_RING: f32 = 0.02;
@@ -97,16 +96,10 @@ pub struct WindowMaterial;
 
 pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
 
-/// What shows through where no webview covers the window.
-///
-/// This was `bevy_camera::ClearColor`, which only ever meant anything to a renderer clearing a
-/// framebuffer. Nothing clears anything here — the value is read by the native cover view and
-/// written when the glass effect toggles, so it is app state and belongs to the app.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct WindowBackground(pub Color);
 
 impl Default for WindowBackground {
-    /// Transparent on macOS, where AppKit composites the glass behind the window.
     fn default() -> Self {
         if cfg!(target_os = "macos") {
             Self(Color::NONE)
@@ -116,7 +109,6 @@ impl Default for WindowBackground {
     }
 }
 
-/// Handle `WindowCommand` events (e.g. minimize via Cmd+M).
 fn handle_window_commands(
     mut reader: MessageReader<AppCommand>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -153,9 +145,6 @@ pub struct MainColumn;
 #[derive(Component)]
 pub struct WindowSurface;
 
-/// Persisted primary-window geometry, saved as a singleton entity in `store.ron`.
-/// `position`/`size` always describe the windowed frame, even while `fullscreen`,
-/// so exiting fullscreen lands on a sane frame.
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::window"]
@@ -262,8 +251,6 @@ fn setup(
         ChildOf(main_column),
     ));
 
-    // Right & Bottom side sheets remain absolute overlays (slide-in semantics);
-    // they're not part of the natural flex layout.
     commands.spawn((
         SideSheet,
         SideSheetPosition::Right,
@@ -487,11 +474,6 @@ pub fn spawn_requested_tab_layouts(
     }
 }
 
-/// Re-applies layout-affecting settings (window padding, row gap, side sheet
-/// insets and width) to existing nodes whenever `LayoutSettings` changes (e.g.
-/// after settings.ron hot-reload). Without this, edits to the file produce a
-/// "Settings reloaded" log but no visual change because `setup` only reads
-/// settings once at Startup.
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
     hidden: Option<Res<crate::toggle::LayoutHidden>>,
@@ -518,9 +500,6 @@ fn sync_window_layout_to_settings(
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
     let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0);
 
-    // Root window: padding + flex-row column gap. Top and left are flush
-    // with the window so the CEF shell / pane meet the system edge; right
-    // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
         node.padding = UiRect {
             top: Val::Px(if full_padding { pad_top } else { 0.0 }),
@@ -531,21 +510,13 @@ fn sync_window_layout_to_settings(
         node.column_gap = Val::Px(gap);
     }
 
-    // MainColumn row_gap (between Header and Main pane container) is
-    // managed by sync_main_column_gap_to_pane_count, which keeps it 0
-    // when the active tab has a single pane and switches to the window
-    // padding when split. Don't override here.
     let _ = main_column_q.single_mut();
 
-    // Side sheet width resource: initialise from settings on first run.
     if sheet_width.0 <= 0.0 {
         sheet_width.0 = cfg_width;
     }
     let live_width = sheet_width.0;
 
-    // Left sheet is a flex child — only its width tracks settings.
-    // Right & Bottom sheets remain absolute overlays — their insets follow
-    // the window padding.
     for (pos, mut node) in &mut sheet_q {
         match pos {
             SideSheetPosition::Left => {
@@ -565,10 +536,6 @@ fn sync_window_layout_to_settings(
     }
 }
 
-/// Keep MainColumn's row_gap at 0 when the active tab has a single pane
-/// (so the url row sits flush against the pane content) and switch to the
-/// window's top padding when it's split (so the panes get a visible gap
-/// below the url bar, matching their outer padding).
 fn sync_main_column_gap_to_pane_count(
     focus: Res<crate::stack::FocusedStack>,
     settings: Res<LayoutSettings>,
@@ -764,10 +731,6 @@ mod tests {
         assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
     }
 
-    /// A windowed CEF browser paints an opaque root on macOS and the layout is the one page that
-    /// must be see-through, so wry serves it instead. Handing the entity a `WebviewSource` again
-    /// is all it would take to undo that silently: it resolves to `ResolvedWebviewUri`, which is
-    /// the only thing CEF waits for before going and creating a browser.
     #[test]
     fn layout_shell_never_asks_cef_for_a_browser() {
         let mut app = setup_window_app();
@@ -1061,9 +1024,6 @@ mod tests {
 
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
-        // Fresh start: a space exists but isn't Active yet (ensure_active runs in
-        // Update, after this Startup). The default tab must still be adopted into
-        // the space so it becomes active + visible — not orphaned under Main.
         let space = app.world_mut().spawn(crate::space::Space).id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,

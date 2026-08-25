@@ -1,8 +1,3 @@
-//! The phone half of the remote API.
-//!
-//! Every call the app makes of the desktop goes through [`Api`], which speaks the shared
-//! subset of the protocol over QUIC. Nothing here is iOS-specific; the transport is.
-
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,7 +26,6 @@ pub(crate) struct Api {
 
 pub(crate) enum ApiError {
     Unauthorized,
-    /// No such session on the Mac. Asking again will not conjure one.
     NotFound,
     Message(String),
 }
@@ -47,10 +41,6 @@ impl std::fmt::Display for ApiError {
 }
 
 impl Api {
-    /// Fails when the pairing carries no certificate fingerprint.
-    ///
-    /// There is nothing to fall back to: the Mac is reached by pinning that certificate, so a
-    /// pairing without one names a desktop this build cannot dial. Re-pairing is the only fix.
     pub(crate) fn new(credentials: Credentials) -> Result<Self, ApiError> {
         let Some(endpoint) = credentials.endpoint() else {
             return Err(ApiError::Message(translate(
@@ -62,12 +52,10 @@ impl Api {
         })
     }
 
-    /// Drop any live QUIC connection so the next call redials.
     pub(crate) async fn reset_transport(&self) {
         self.quic.reset().await;
     }
 
-    /// Close the connection, for a client being replaced or cleared.
     pub(crate) fn close(&self) {
         self.quic.close();
     }
@@ -86,7 +74,6 @@ impl Api {
         }
     }
 
-    /// The models this session can run, and its current effort level.
     pub(crate) async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
         broker_json(
             &self.quic,
@@ -97,7 +84,6 @@ impl Api {
         .await
     }
 
-    /// Switch the session to another of its models.
     pub(crate) async fn select_model(&self, sid: &str, model_id: &str) -> Result<(), ApiError> {
         self.command(SharedAgentCommand::SelectModel {
             sid: sid.to_string(),
@@ -106,7 +92,6 @@ impl Api {
         .await
     }
 
-    /// Set how hard the session's agent is asked to think. An empty level restores its default.
     pub(crate) async fn set_effort(&self, sid: &str, level: &str) -> Result<(), ApiError> {
         self.command(SharedAgentCommand::SetEffort {
             sid: sid.to_string(),
@@ -127,12 +112,10 @@ impl Api {
         broker_json(&self.quic, SharedAgentCommand::ListTeam).await
     }
 
-    /// Subscribe to a session's events.
     pub(crate) async fn subscribe(&self, sid: &str) -> Result<crate::quic::Subscription, ApiError> {
         self.quic.subscribe(sid).await.map_err(Into::into)
     }
 
-    /// Submit a prompt to a running session.
     pub(crate) async fn send_prompt(
         &self,
         sid: &str,
@@ -149,7 +132,6 @@ impl Api {
         self.applied(self.quic.request(message).await)
     }
 
-    /// Open a new chat on the desktop.
     pub(crate) async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
         let command = SharedAgentCommand::NewAgentChat {
             client_op_id: request.client_op_id.clone(),
@@ -163,13 +145,11 @@ impl Api {
         )
     }
 
-    /// Interrupt the session's in-flight turn.
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
         let message = SharedMessage::agent(sid, AgentAction::Cancel);
         self.applied(self.quic.request(message).await)
     }
 
-    /// Answer a pending tool approval.
     pub(crate) async fn approve(
         &self,
         sid: &str,
@@ -185,8 +165,6 @@ impl Api {
         self.applied(self.quic.request(message).await)
     }
 
-    /// A replay is success, not failure: the desktop recognised the op and declined to run it
-    /// twice, which is exactly what the idempotency key is for.
     pub(crate) fn applied(
         &self,
         outcome: Result<SharedResponse, crate::quic::QuicError>,
@@ -221,10 +199,6 @@ impl Api {
     }
 }
 
-/// Project a shared event onto the shape the pages already render.
-///
-/// The desktop used to do this before serialising to SSE. Doing it here instead keeps the wire
-/// typed — `RemoteEvent` is now a rendering concern of this app, not a thing any peer sends.
 pub(crate) fn remote_event_from_shared(
     event: vmux_wire::protocol::SharedEvent,
 ) -> Option<RemoteEvent> {
@@ -262,16 +236,12 @@ pub(crate) fn remote_event_from_shared(
             })
         }
         Shared::Session { session } => Some(RemoteEvent::Session { session }),
-        // The daemon resolves these into Session before they reach a client; reaching here means
-        // an older desktop that predates that, and there is nothing renderable to derive.
         Shared::AcpAgentInfo { .. }
         | Shared::AcpWorkspaceChanged { .. }
         | Shared::AcpModelInfo { .. } => None,
     }
 }
 
-/// GUI-held state comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
-/// than re-typed on the wire — the shape belongs to the page that renders it.
 async fn broker_json<T: serde::de::DeserializeOwned>(
     quic: &crate::quic::QuicApi,
     command: SharedAgentCommand,

@@ -46,7 +46,6 @@ pub fn Page() -> Element {
     }
 }
 
-/// One installed agent, with its version and install controls.
 #[component]
 fn AgentRow(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
@@ -80,10 +79,6 @@ fn AgentRow(agent: AgentEntry, catalog: Catalog) -> Element {
     }
 }
 
-/// A version-pin control, shown only for npx/uvx agents (native binaries can't be pinned). Renders
-/// a dropdown of published versions when they've been fetched, else a free-text fallback (so it
-/// still works before the fetch lands or when the registry can't be queried).
-/// The pinned-version field, for runtimes that support pinning.
 #[component]
 fn AgentVersionInput(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
@@ -102,8 +97,6 @@ fn AgentVersionInput(agent: AgentEntry, catalog: Catalog) -> Element {
             }
         };
     }
-    // "latest" tracks npm's latest dist-tag: the newest *released* version. Prereleases (semver
-    // build suffix, e.g. `-prerelease.5`) are not what `@latest` installs, so skip them here.
     let latest = agent
         .available_versions
         .iter()
@@ -134,7 +127,6 @@ fn AgentVersionInput(agent: AgentEntry, catalog: Catalog) -> Element {
     }
 }
 
-/// The controls on the right of an agent row.
 #[component]
 fn AgentActions(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
@@ -147,7 +139,6 @@ fn AgentActions(agent: AgentEntry, catalog: Catalog) -> Element {
     }
 }
 
-/// Install, apply and uninstall, according to what the agent needs.
 #[component]
 fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
@@ -160,8 +151,6 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
     let update_version = agent.pinned_version.clone();
     let install_version = agent.pinned_version.clone();
     let apply_version = agent.pinned_version.clone();
-    // Agents that render a version selector don't need a redundant "Installed" label next to it,
-    // but they do need an explicit way to apply a version change after picking one.
     let has_version_selector =
         agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     match agent.status.as_str() {
@@ -245,7 +234,6 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
 use crate::event::{AGENTS_CATALOG_EVENT, AgentsCatalog, AgentsCatalogRequest};
 use crate::vibe::setup::event::{AGENT_SETUP_RESULT_EVENT, AgentSetupResult};
 
-/// Every installed agent, the search narrowing them, and whether the first fetch has landed.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Catalog {
     agents: Signal<Vec<AgentEntry>>,
@@ -253,7 +241,6 @@ pub struct Catalog {
     pub loaded: Signal<bool>,
 }
 
-/// Fetch the catalog and keep it in step with install results.
 fn use_catalog() -> Catalog {
     let locale = use_theme();
     let catalog = Catalog {
@@ -269,8 +256,6 @@ fn use_catalog() -> Catalog {
         loaded.set(true);
     });
 
-    // An install reports its own result, so the row is moved before the refetch lands rather than
-    // sitting on "installing" for a round trip.
     let _installed = use_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |result| {
         let id = format!("cli:{}", result.agent);
         if result.ok {
@@ -290,7 +275,6 @@ fn use_catalog() -> Catalog {
 }
 
 impl Catalog {
-    /// Ask the host to send the catalog.
     pub fn request() {
         let _ = send(&AgentsCatalogRequest {});
     }
@@ -299,7 +283,6 @@ impl Catalog {
         (self.agents)()
     }
 
-    /// The entries the current search leaves visible.
     pub fn matching(&self) -> Vec<AgentEntry> {
         let query = (self.query)();
         (self.agents)()
@@ -308,7 +291,6 @@ impl Catalog {
             .collect()
     }
 
-    /// Move one row to a new state, without waiting for a refetch to confirm it.
     pub fn set_status(&self, id: &str, status: &str, detail: &str) {
         let mut agents = self.agents;
         agents.with_mut(|list| {

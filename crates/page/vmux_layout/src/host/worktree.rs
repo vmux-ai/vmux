@@ -1,5 +1,3 @@
-//! Per-tab managed worktree lifecycle and directory rebinding.
-
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -89,7 +87,6 @@ pub struct TabDirectoryObserved {
     pub kind: TabDirectoryObservationKind,
 }
 
-/// Sanitize a tab name into a filesystem/branch-safe slug (lowercase alnum, `-` separators).
 pub fn sanitize_slug(name: &str) -> String {
     let mut slug = String::new();
     let mut prev_dash = false;
@@ -110,7 +107,6 @@ pub fn sanitize_slug(name: &str) -> String {
     }
 }
 
-/// Whether a tab name is an automatically assigned placeholder.
 pub fn is_generated_tab_name(name: &str) -> bool {
     name.is_empty()
         || name.strip_prefix("Tab ").is_some_and(|suffix| {
@@ -118,7 +114,6 @@ pub fn is_generated_tab_name(name: &str) -> bool {
         })
 }
 
-/// Prefer the selected project name over a generated tab label when naming a worktree.
 pub fn tab_worktree_slug_hint(tab_name: &str, project_dir: &Path) -> String {
     if is_generated_tab_name(tab_name) {
         project_dir
@@ -288,8 +283,6 @@ fn add_managed_worktree(
     activation
 }
 
-/// Create a globally stored managed worktree while preserving `base_dir`'s repository-relative
-/// directory.
 pub fn create_worktree_blocking(
     base_dir: &Path,
     slug_hint: &str,
@@ -316,7 +309,6 @@ pub fn create_worktree_blocking(
     )
 }
 
-/// Create a globally stored managed worktree on an exact user-selected branch name.
 pub fn create_worktree_for_branch_blocking(
     base_dir: &Path,
     branch: &str,

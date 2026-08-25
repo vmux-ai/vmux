@@ -124,8 +124,6 @@ pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
     }
 }
 
-/// Repo-relative paths of every changed entry in `git status --porcelain=v2`
-/// output — one per `1 `/`2 `/`u `/`? ` line (untracked files included).
 pub fn changed_paths(out: &str) -> HashSet<String> {
     let mut set = HashSet::new();
     for line in out.lines() {

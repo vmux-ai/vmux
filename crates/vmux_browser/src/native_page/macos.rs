@@ -1,5 +1,3 @@
-//! Hosting native pages where there is a `WKWebView` to host them in.
-
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -40,7 +38,6 @@ impl Plugin for NativePagesMacosPlugin {
                 .chain()
                 .after(crate::present::sync_windowed_frames),
         )
-        // After the CEF route has had its say, or it re-focuses a pane in the same frame.
         .add_systems(
             PostUpdate,
             focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
@@ -49,15 +46,9 @@ impl Plugin for NativePagesMacosPlugin {
     }
 }
 
-/// The pages this process is painting, one per entity.
-///
-/// A `NonSend` resource rather than a component, which is where this would rather live: a component
-/// must be `Send + Sync` and a `wry::WebView` is neither. The entity is the key instead, so the two
-/// stay in step by lookup rather than by storage.
 #[derive(Default)]
 struct HostedPages(HashMap<Entity, HostedPage>);
 
-/// One page's view, and where it was told to put it.
 struct HostedPage {
     surface: WebView,
     placement: Placement,
@@ -68,7 +59,6 @@ impl HostedPages {
         self.0.get(&page)
     }
 
-    /// The entity of the page placed as the window's chrome, if one is running.
     fn layout(&self) -> Option<Entity> {
         for (entity, hosted) in self.0.iter() {
             if hosted.placement == Placement::Layout {
@@ -80,10 +70,6 @@ impl HostedPages {
     }
 }
 
-/// Build a view for every registered page that asks for one and has not got one yet.
-///
-/// Exclusive because building needs the winit window and the app's channels at once, and because
-/// the views are `NonSend`.
 fn open_native_pages(world: &mut World) {
     let registered = world.resource::<NativePages>().0.clone();
     let mut wanted = Vec::new();
@@ -121,8 +107,6 @@ fn open_native_pages(world: &mut World) {
     }
 
     for (entity, page, placement, read_instance) in wanted {
-        // Off screen until the placement pass says where it goes, rather than briefly at the
-        // origin.
         let bounds = wry::Rect {
             position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: wry::dpi::LogicalSize::new(1.0, 1.0).into(),
@@ -175,10 +159,6 @@ fn open_native_pages(world: &mut World) {
     }
 }
 
-/// Move each view to where its placement puts it, and retire the ones whose page is gone.
-///
-/// Retirement is by sweep rather than by hook: a stack is cleared with `try_despawn`, which no
-/// observer here hears, so the only reliable question is whether the entity still exists.
 fn place_native_pages(
     hosted: Option<NonSendMut<HostedPages>>,
     frames: Res<PaneFrames>,
@@ -214,14 +194,6 @@ fn render_native_pages(hosted: Option<NonSend<HostedPages>>) {
     }
 }
 
-/// Hand first responder to the page the focus intent named.
-///
-/// Every frame rather than on the edge, because focus is taken away by routes with their own
-/// schedules, and having lost it looks exactly like never having had it.
-///
-/// Nothing resigns it here: leaving it to nobody is a state the app is never otherwise in, and CEF
-/// then declines to reclaim. A pane takes it back through `set_windowed_focus` instead, which
-/// `apply_windowed_host_focus` forces on the way out of these intents.
 fn focus_native_page(
     hosted: Option<NonSend<HostedPages>>,
     intent: Res<crate::host_focus::HostFocusIntent>,
@@ -240,11 +212,6 @@ fn focus_native_page(
     page.surface.take_first_responder();
 }
 
-/// Deliver every host→page event aimed at a page running here.
-///
-/// `bevy_cef`'s own observer still runs and finds no browser for these entities, so it is this that
-/// carries the payload the rest of the way — straight to the listener the page registered, with no
-/// base64 and no JS shim, because the page is in this process.
 fn forward_host_emit(host_emit: On<BinHostEmitEvent>, hosted: Option<NonSend<HostedPages>>) {
     let Some(hosted) = hosted else {
         return;
@@ -255,11 +222,6 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, hosted: Option<NonSend<Hos
     page.surface.deliver(&host_emit.id, &host_emit.payload);
 }
 
-/// Make `prefers-color-scheme` inside every view answer with the app's setting.
-///
-/// The `theme` event alone is not enough. CEF has a colour-scheme override of its own, which
-/// `sync_appearance_to_cef` drives, so a CEF page's media queries already agreed with the setting;
-/// a `WKWebView` inherits its `NSAppearance` from the window and has no such thing.
 fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<AppSettings>) {
     let Some(hosted) = hosted else {
         return;
@@ -280,30 +242,10 @@ fn appearance_of(mode: ColorScheme) -> Appearance {
 }
 
 impl Placement {
-    /// Whether the view is painted over everything else drawn into the window.
-    ///
-    /// Painting only, and that is the distinction this pair exists to keep: which view AppKit
-    /// hands a click to is [`Self::pointer_order`], and the two were one predicate until a layout
-    /// painted in front turned out to be swallowing every scroll aimed at the pane behind it.
     fn paints_in_front(self) -> bool {
         matches!(self, Self::Layout | Self::Modal)
     }
 
-    /// Which end of the subview array the view is put back at every frame, if either.
-    ///
-    /// A pane opening puts its view last, which is the end `hitTest:` resolves from — so a page
-    /// with an opinion about the pointer has to state it again after every one.
-    ///
-    /// The layout's opinion is the back. It fills the window, but `pointer-events: none` covers
-    /// all of it bar the header and the side sheet, and neither of those overlaps a pane: the
-    /// pane's rectangle starts below the header and within its span. `hitTest:` has never heard of
-    /// that CSS rule, so a layout left in front answers for the whole window and the pane under it
-    /// never sees a wheel — WebKit forwards an unclaimed click up the responder chain but keeps
-    /// the scroll, having its own machinery for it.
-    ///
-    /// `capturing` is the exception, and the reason this cannot simply be the placement. A context
-    /// menu or the command bar panel extends past every published region and dismisses on an
-    /// outside click, so while one is up the layout does have to be asked first.
     fn pointer_order(self, capturing: bool) -> Option<SiblingOrder> {
         match self {
             Self::Layout if !capturing => Some(SiblingOrder::Back),
@@ -312,12 +254,8 @@ impl Placement {
         }
     }
 
-    /// The entities whose page this is, and which therefore want a view.
     fn claim(self, world: &mut World, page: &NativePage) -> Vec<Entity> {
         match self {
-            // The layout has no `PageMetadata` to be matched on. Its entity is spawned by the
-            // shell before any page exists and named by a marker instead, and it is the id every
-            // `BinReceive` observer in `vmux_layout` is already registered against.
             Self::Layout => world
                 .query_filtered::<Entity, With<LayoutCef>>()
                 .iter(world)
@@ -338,11 +276,6 @@ impl Placement {
         }
     }
 
-    /// Where the view goes this frame, or `None` while it is not on screen.
-    ///
-    /// A pane the frame sync skipped is one that is not showing: the sync leaves it out rather
-    /// than giving it an empty rectangle, so a view left alone would sit at whatever rectangle it
-    /// last had.
     fn bounds(
         self,
         entity: Entity,
@@ -350,8 +283,6 @@ impl Placement {
         frames: &PaneFrames,
     ) -> Option<wry::Rect> {
         match self {
-            // Full window, because the chrome this renders *is* the window's chrome — a smaller
-            // box could only ever be sampled over whatever pane happened to be behind it.
             Self::Layout => {
                 let window = window?;
                 Some(wry::Rect {
@@ -370,10 +301,6 @@ impl Placement {
     }
 }
 
-/// The app's half of every native page: the channels a view reaches back through.
-///
-/// Gathered once and asked for an [`Embedding`] per page, because all three belong to the app
-/// rather than to any one page — what makes an embedding a page's own is the entity it addresses.
 #[derive(Clone)]
 struct PageEmbedder {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
@@ -382,10 +309,6 @@ struct PageEmbedder {
 }
 
 impl PageEmbedder {
-    /// Read the app's channels out of the world.
-    ///
-    /// The error names the one that is missing, because a view that silently never builds looks
-    /// exactly like one that built and rendered nothing.
     fn of(world: &mut World) -> Result<Self, &'static str> {
         let Some(requester) = world.get_resource::<Requester>().cloned() else {
             return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
@@ -401,7 +324,6 @@ impl PageEmbedder {
         })
     }
 
-    /// What one page's view is handed when it is built.
     fn embed(&self, entity: Entity, url: &str) -> Embedding {
         Embedding {
             outbox: Rc::new(PageOutbox {
@@ -418,11 +340,6 @@ impl PageEmbedder {
     }
 }
 
-/// Asks winit for a frame, because a page just gave itself something to render.
-///
-/// The app renders on demand — `UpdateMode::Reactive` with a one-second wait — so every source of
-/// work has to say so. A page hosted here has three winit cannot see: an IPC ack, a DOM event
-/// answered on the protocol thread, and a host emit running a listener.
 #[derive(Clone)]
 struct PageWaker(Option<EventLoopProxy<WinitUserEvent>>);
 
@@ -441,12 +358,6 @@ impl vmux_native::Wake for PageWaker {
     }
 }
 
-/// Where a natively-hosted page's emitted bytes go: onto the channel every existing `BinReceive`
-/// observer already reads.
-///
-/// A page in the wasm bundle reaches the host by base64-ing an envelope through `window.ipc`,
-/// which the IPC handler decodes back into a [`BinIpcEventRaw`]. Running in this process the
-/// payload is already bytes and the entity is already known, so it goes straight on.
 struct PageOutbox {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
     webview: Entity,
@@ -455,8 +366,6 @@ struct PageOutbox {
 
 impl vmux_native::Outbox for PageOutbox {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-        // Unbounded, so this never blocks — which is what lets an event handler call it while the
-        // page waits on a synchronous reply.
         self.bin_ipc
             .send_blocking(BinIpcEventRaw {
                 webview: self.webview,
@@ -468,22 +377,12 @@ impl vmux_native::Outbox for PageOutbox {
     }
 }
 
-/// `vmux://` assets, resolved by the same Bevy systems that answer them for CEF.
-///
-/// CEF's scheme handler only forwards a [`CefRequest`] down a channel and waits for a
-/// [`CefResponse`], so resolution was never CEF-specific and this sends the same request.
 struct PageAssets {
     requester: Requester,
-    /// The reply is produced by a Bevy system, and the app renders on demand — so a request that
-    /// does not ask for a frame waits out the reactive timeout before anything looks at it. A
-    /// page opening from idle asks for its shell, its stylesheets and its fonts in a burst, and
-    /// each one paid that wait in turn.
     waker: PageWaker,
 }
 
 impl vmux_native::Assets for PageAssets {
-    /// The reply is handed to a thread rather than answered here: it comes from a Bevy system, and
-    /// this runs on the main thread, so blocking would stop the schedule that produces it.
     fn fetch(&self, url: &str, reply: AssetReply) {
         let uri = asset_load_path_from_request_url(url);
         if uri.is_empty() {
@@ -519,8 +418,6 @@ impl vmux_native::Assets for PageAssets {
     }
 }
 
-/// A view that silently never builds looks exactly like a view that built and rendered nothing,
-/// which is how an early run of this was misread. Say why it has not built yet, once.
 fn report_waiting(reason: &str) {
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -534,8 +431,6 @@ fn report_waiting(reason: &str) {
 mod tests {
     use super::{Placement, SiblingOrder};
 
-    /// Painting in front and being asked for the pointer first are the same flag until they are
-    /// not, and collapsing them back is how a pane stops scrolling.
     #[test]
     fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {
         assert_eq!(

@@ -1,8 +1,3 @@
-//! The desktop application: the top-level binary and [`VmuxPlugin`] that wire every crate
-//! together, plus macOS-native integrations (glass/blur, event tap, native focus, tray,
-//! menu, recording, persistence).
-
-// Bevy systems inherently use many parameters and complex query types.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -62,8 +57,6 @@ use bevy::window::{
 use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
 use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
 
-/// The top-level aggregator: adds `DefaultPlugins` and the four plugin groups — core,
-/// layout, features, browser, and desktop — that make up the app.
 pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
@@ -99,8 +92,6 @@ impl Plugin for VmuxPlugin {
     }
 }
 
-/// First-launch window size (logical px) when no geometry is persisted in
-/// `store.ron`. Restored geometry overrides this after load.
 const DEFAULT_WINDOW_WIDTH: u32 = 1280;
 const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 

@@ -18,11 +18,6 @@ mod platform;
 #[path = "host_focus/other.rs"]
 mod platform;
 
-/// Decides which surface owns keyboard first-responder for the active page, and hands it over.
-///
-/// Applying the intent runs after the active windowed page has been shown and raised
-/// (`sync_windowed_frames`, `sync_windowed_command_bar`); otherwise `set_focus` lands on a
-/// hidden or back view and never sticks.
 pub(crate) struct HostFocusPlugin;
 
 impl Plugin for HostFocusPlugin {
@@ -44,7 +39,6 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
     terminal_focused || overlay_open
 }
 
-/// Publishes whether a page will answer Escape itself, for the native key monitor to read.
 fn publish_native_page_owns_escape(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
@@ -55,34 +49,15 @@ fn publish_native_page_owns_escape(
     ));
 }
 
-/// Which surface should own keyboard first-responder for the active page in User (browse) mode.
-///
-/// Every page is drawn in a view that can receive an `NSEvent`, so the answer is always "the view
-/// the active page is drawn in". The variants differ in how first responder is handed over, which
-/// is not the same call for a `WKWebView` this process owns and a CEF child view it does not.
-/// Handing it over has to be active: a view that holds it keeps it, and would otherwise black out
-/// the keyboard for whatever the user switched to.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
-    /// Active page is a windowed web page; give this webview native first-responder.
     Windowed(Entity),
-    /// The layout's own chrome holds the keyboard, and a `WKWebView` of its own draws it.
     LayoutView,
-    /// Active page runs in this process and paints into a `WKWebView` of its own.
-    ///
-    /// Distinct from [`Self::Windowed`] for the reason that makes this whole variant necessary:
-    /// `Windowed` is applied through `Browsers::set_windowed_focus`, which asks CEF to focus a
-    /// browser it has never heard of and silently does nothing. The keyboard would land nowhere.
     NativePane(Entity),
-    /// No page is active — the winit host window must own first-responder.
     #[default]
     WinitHost,
 }
 
-/// A terminal used to be the exception, taking [`HostFocusIntent::WinitHost`] so its keys could
-/// travel winit -> Bevy -> pty. That held while it was an offscreen browser with no view of its
-/// own to receive an `NSEvent`. It has a `WKWebView` now, like every other page, and returning
-/// `WinitHost` here is what starved its own DOM key handler.
 pub(crate) fn host_focus_intent(
     active_webview: Option<Entity>,
     is_native: bool,
@@ -126,17 +101,8 @@ pub(crate) fn compute_host_focus_intent(
         },
     ) {
         if shown_inline {
-            // The overlay says it is open, but its own webview is not what is drawn — the layout
-            // page renders it. Reading `windowed` here and focusing that webview hands the
-            // keyboard to a surface nobody can see, and takes the responder off the one that is
-            // showing the field.
             HostFocusIntent::LayoutView
         } else if windowed {
-            // A windowed command bar hosts a real DOM text field, so Chromium must receive the
-            // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no
-            // DOM key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor
-            // before the event reaches the view, so dismiss still works while the bar holds first
-            // responder.
             HostFocusIntent::Windowed(modal)
         } else {
             HostFocusIntent::WinitHost
@@ -173,9 +139,6 @@ fn windowed_focus_action(
 ) -> Option<Entity> {
     match intent {
         HostFocusIntent::Windowed(webview) if has_browser => {
-            // `has_native_focus` is CEF's belief about its own view. AppKit does not tell it when
-            // the chrome takes first responder, so after that it still answers "yes" and the pane
-            // is never re-focused — leaving the keyboard with nobody.
             let should_focus = reclaiming
                 || has_native_focus
                     .map(|has_focus| !has_focus)
@@ -250,10 +213,6 @@ mod tests {
     }
 
     #[test]
-    /// A terminal is a native page like any other, and its own DOM handler is what reaches the
-    /// pty — so it has to be handed first responder. This asserted `WinitHost` for as long as a
-    /// terminal was an offscreen browser with no view to hand it to, and went on asserting it
-    /// afterwards, which is what hid the starved key path.
     fn terminal_child_of_active_stack_intends_its_own_view() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
@@ -302,8 +261,6 @@ mod tests {
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
 
-    /// A windowed modal hosts a real DOM text field, so Chromium has to receive the keystrokes
-    /// itself — `send_key_event` forwarding produces no DOM key events for a windowed browser.
     #[test]
     fn open_windowed_command_bar_takes_native_focus() {
         let mut app = app();
@@ -331,8 +288,6 @@ mod tests {
         assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
     }
 
-    /// Focus must move to the bar the moment it owns input, not when its surface is revealed —
-    /// otherwise keys typed during the reveal frames land in the page behind it.
     #[test]
     fn revealing_windowed_command_bar_keeps_focus_off_the_page() {
         let mut app = app();
@@ -420,7 +375,6 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((LayoutCef, CommandBarPanelActive));
-        // The overlay's own webview: open, windowed, and drawn nowhere.
         app.world_mut().spawn((
             WindowOverlay,
             Node::default(),
@@ -561,8 +515,6 @@ mod tests {
         assert_eq!(focused, Some(next));
     }
 
-    /// CEF keeps answering "I have focus" after the chrome took first responder out from under it,
-    /// so coming back from the chrome has to focus the pane regardless of what CEF believes.
     #[test]
     fn leaving_the_layout_view_refocuses_the_pane_despite_cef_claiming_focus() {
         let webview = Entity::from_bits(1);

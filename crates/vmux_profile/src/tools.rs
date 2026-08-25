@@ -1,5 +1,3 @@
-//! Declarative local-tool manifest and Stow-style dotfile links.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -8,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 const MANIFEST_VERSION: u32 = 1;
 
-/// Desired package and dotfile state stored in `tools.toml`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolsManifest {
     #[serde(default = "manifest_version")]
@@ -33,14 +30,12 @@ impl Default for ToolsManifest {
 }
 
 impl ToolsManifest {
-    /// Returns whether a provider package is managed by the manifest.
     pub fn contains(&self, provider: &str, name: &str) -> bool {
         self.packages
             .get(provider)
             .is_some_and(|packages| packages.iter().any(|package| package == name))
     }
 
-    /// Adds or removes a provider package and normalizes ordering.
     pub fn set_package(&mut self, provider: &str, name: &str, enabled: bool) {
         if enabled {
             let packages = self.packages.entry(provider.to_string()).or_default();
@@ -56,7 +51,6 @@ impl ToolsManifest {
         self.normalize();
     }
 
-    /// Enables or disables a Stow-style dotfile package.
     pub fn set_dotfile_package(&mut self, name: &str, enabled: bool) {
         if enabled {
             if !self.dotfiles.packages.iter().any(|package| package == name) {
@@ -82,7 +76,6 @@ impl ToolsManifest {
     }
 }
 
-/// MCP servers vmux injects into agents it launches.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpManifest {
     #[serde(default)]
@@ -95,7 +88,6 @@ impl McpManifest {
     }
 }
 
-/// Portable MCP server definition normalized from Claude, Codex, or Vibe config.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerManifest {
     pub transport: McpTransport,
@@ -118,7 +110,6 @@ pub struct McpServerManifest {
 }
 
 impl McpServerManifest {
-    /// Resolves direct and environment-backed headers for clients that require literal values.
     pub fn resolved_headers(&self) -> BTreeMap<String, String> {
         let mut headers = self.headers.clone();
         for (name, variable) in &self.header_env {
@@ -135,7 +126,6 @@ impl McpServerManifest {
     }
 }
 
-/// Transport shared by supported MCP client config formats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum McpTransport {
@@ -145,14 +135,12 @@ pub enum McpTransport {
     Sse,
 }
 
-/// Package names parsed from one Brewfile.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrewfileImport {
     pub formulae: Vec<String>,
     pub casks: Vec<String>,
 }
 
-/// Enabled package directories under the Tools dotfile root.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DotfilesManifest {
     #[serde(default)]
@@ -165,7 +153,6 @@ impl DotfilesManifest {
     }
 }
 
-/// Current relationship between one Tools source and its home target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DotfileLinkState {
     Linked,
@@ -173,7 +160,6 @@ pub enum DotfileLinkState {
     Conflict,
 }
 
-/// Planned source-to-home link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DotfileLink {
     pub source: PathBuf,
@@ -181,7 +167,6 @@ pub struct DotfileLink {
     pub state: DotfileLinkState,
 }
 
-/// Complete non-mutating plan for one dotfile package.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DotfilePlan {
     pub package: String,
@@ -189,7 +174,6 @@ pub struct DotfilePlan {
 }
 
 impl DotfilePlan {
-    /// Number of targets already linked to the expected source.
     pub fn linked(&self) -> usize {
         self.links
             .iter()
@@ -197,7 +181,6 @@ impl DotfilePlan {
             .count()
     }
 
-    /// Number of absent targets that Apply would create.
     pub fn missing(&self) -> usize {
         self.links
             .iter()
@@ -205,7 +188,6 @@ impl DotfilePlan {
             .count()
     }
 
-    /// Number of targets blocking Apply.
     pub fn conflicts(&self) -> usize {
         self.links
             .iter()
@@ -214,22 +196,18 @@ impl DotfilePlan {
     }
 }
 
-/// Profile-agnostic Tools directory under `~/.vmux`.
 pub fn root_dir() -> PathBuf {
     super::config_dir().join("tools")
 }
 
-/// Desired-state manifest path.
 pub fn manifest_path() -> PathBuf {
     root_dir().join("tools.toml")
 }
 
-/// Homebrew desired state managed by Tools.
 pub fn brewfile_path() -> PathBuf {
     root_dir().join("Brewfile")
 }
 
-/// Root of Stow-style package directories.
 pub fn dotfiles_dir() -> PathBuf {
     root_dir().join("dotfiles")
 }
@@ -276,7 +254,6 @@ fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String>
     }
 }
 
-/// Loads the user Tools manifest, returning an empty in-memory manifest when absent.
 pub fn load_manifest() -> Result<ToolsManifest, String> {
     migrate_legacy_storage()?;
     let mut manifest = load_manifest_from(&manifest_path())?;
@@ -289,7 +266,6 @@ pub fn load_manifest() -> Result<ToolsManifest, String> {
     Ok(manifest)
 }
 
-/// Loads and validates a Tools manifest from an explicit path.
 pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
     if !path.is_file() {
         return Ok(ToolsManifest::default());
@@ -306,14 +282,12 @@ pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
     Ok(manifest)
 }
 
-/// Atomically writes the normalized user Tools manifest.
 pub fn write_manifest(manifest: &ToolsManifest) -> Result<(), String> {
     migrate_legacy_storage()?;
     write_manifest_to(&manifest_path(), manifest)?;
     write_managed_brewfile(manifest)
 }
 
-/// Atomically writes a normalized Tools manifest to an explicit path.
 pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
     let mut manifest = manifest.clone();
     manifest.version = MANIFEST_VERSION;
@@ -326,7 +300,6 @@ pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), St
     std::fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
-/// Imports formulae and casks from a Brewfile into the Tools manifest.
 pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
     migrate_legacy_storage()?;
     let source_path = expand_user_path(path)?;
@@ -339,7 +312,6 @@ pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
     Ok(imported)
 }
 
-/// Imports a Brewfile into an explicit Tools manifest.
 pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
     let path = expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -354,7 +326,6 @@ pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, u
     Ok((formulae, casks))
 }
 
-/// Parses the Homebrew formula and cask declarations understood by `brew bundle`.
 pub fn parse_brewfile(source: &str) -> BrewfileImport {
     let mut import = BrewfileImport::default();
     for line in source.lines() {
@@ -452,13 +423,11 @@ fn merge_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String
     }
 }
 
-/// Imports dependency names from a package.json as global npm desired state.
 pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
     migrate_legacy_storage()?;
     import_npm_manifest_to(path, &manifest_path())
 }
 
-/// Imports a package.json into an explicit Tools manifest.
 pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
     let path = expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -472,7 +441,6 @@ pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize
     Ok(imported)
 }
 
-/// Parses installable dependency names from package.json.
 pub fn parse_npm_manifest(source: &str) -> Result<Vec<String>, String> {
     let document: serde_json::Value =
         serde_json::from_str(source).map_err(|error| error.to_string())?;
@@ -486,7 +454,6 @@ pub fn parse_npm_manifest(source: &str) -> Result<Vec<String>, String> {
     Ok(packages)
 }
 
-/// One MCP server discovered in one or more external client configs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiscoveredMcpServer {
     pub definition: McpServerManifest,
@@ -494,7 +461,6 @@ pub struct DiscoveredMcpServer {
     pub conflict: bool,
 }
 
-/// Default global MCP config files supported by Tools import.
 pub fn default_mcp_config_paths() -> Vec<PathBuf> {
     let home = home_dir();
     [
@@ -508,7 +474,6 @@ pub fn default_mcp_config_paths() -> Vec<PathBuf> {
     .collect()
 }
 
-/// Discovers MCP servers from the user's global Claude, Codex, and Vibe configs.
 pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
     let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
     let mut errors = Vec::new();
@@ -540,13 +505,11 @@ pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<Str
     (discovered, errors)
 }
 
-/// Imports MCP servers from one Claude, Codex, or Vibe config.
 pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
     migrate_legacy_storage()?;
     import_mcp_config_to(path, &manifest_path())
 }
 
-/// Imports MCP servers into an explicit Tools manifest.
 pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
     let path = expand_user_path(path)?;
     let servers = parse_mcp_config_file(&path)?;
@@ -566,7 +529,6 @@ pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, 
     Ok(imported)
 }
 
-/// Imports every unambiguous MCP server found in the default global configs.
 pub fn import_default_mcp_configs() -> Result<usize, String> {
     let (discovered, errors) = discover_mcp_servers();
     if !errors.is_empty() {
@@ -596,7 +558,6 @@ pub fn import_default_mcp_configs() -> Result<usize, String> {
     Ok(imported)
 }
 
-/// Imports one unambiguous MCP server discovered in the default global configs.
 pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
     let (discovered, errors) = discover_mcp_servers();
     if !errors.is_empty() {
@@ -618,13 +579,11 @@ pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
     write_manifest(&manifest)
 }
 
-/// Parses MCP server definitions from a Claude JSON or Codex/Vibe TOML config.
 pub fn parse_mcp_config_file(path: &Path) -> Result<BTreeMap<String, McpServerManifest>, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     parse_mcp_config(&source)
 }
 
-/// Parses MCP server definitions from JSON or TOML config text.
 pub fn parse_mcp_config(source: &str) -> Result<BTreeMap<String, McpServerManifest>, String> {
     if let Ok(document) = serde_json::from_str::<serde_json::Value>(source) {
         return parse_json_mcp_document(&document);
@@ -633,13 +592,11 @@ pub fn parse_mcp_config(source: &str) -> Result<BTreeMap<String, McpServerManife
     parse_toml_mcp_document(&document)
 }
 
-/// Copies package directories from an existing Stow root into Tools ownership.
 pub fn import_dotfiles(path: &Path) -> Result<usize, String> {
     migrate_legacy_storage()?;
     import_dotfiles_to(path, &dotfiles_dir(), &manifest_path())
 }
 
-/// Copies package directories into explicit Tools roots.
 pub fn import_dotfiles_to(
     path: &Path,
     dotfiles_root: &Path,
@@ -720,13 +677,11 @@ pub fn import_dotfiles_to(
     Ok(packages.len())
 }
 
-/// Lists valid dotfile package directories.
 pub fn dotfile_packages() -> Result<Vec<String>, String> {
     migrate_legacy_storage()?;
     Ok(dotfile_packages_in(&dotfiles_dir()))
 }
 
-/// Lists valid dotfile package directories below an explicit root.
 pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
     let mut packages = std::fs::read_dir(root)
         .into_iter()
@@ -740,13 +695,11 @@ pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
     packages
 }
 
-/// Builds a non-mutating link plan for one user dotfile package.
 pub fn plan_dotfile_package(package: &str) -> Result<DotfilePlan, String> {
     migrate_legacy_storage()?;
     plan_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
-/// Builds a non-mutating link plan with explicit roots.
 pub fn plan_dotfile_package_in(
     dotfiles_root: &Path,
     home: &Path,
@@ -779,13 +732,11 @@ pub fn plan_dotfile_package_in(
     })
 }
 
-/// Applies one user dotfile package transactionally.
 pub fn apply_dotfile_package(package: &str) -> Result<usize, String> {
     migrate_legacy_storage()?;
     apply_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
-/// Applies one dotfile package with explicit roots.
 pub fn apply_dotfile_package_in(
     dotfiles_root: &Path,
     home: &Path,
@@ -826,13 +777,11 @@ fn apply_dotfile_plan(plan: &DotfilePlan) -> Result<Vec<PathBuf>, String> {
     Ok(created)
 }
 
-/// Removes links owned by one user dotfile package.
 pub fn unlink_dotfile_package(package: &str) -> Result<usize, String> {
     migrate_legacy_storage()?;
     unlink_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
-/// Disables one dotfile package and removes its links as one rollback-capable operation.
 pub fn disable_and_unlink_dotfile_package(package: &str) -> Result<usize, String> {
     migrate_legacy_storage()?;
     disable_and_unlink_dotfile_package_in(&manifest_path(), &dotfiles_dir(), &home_dir(), package)
@@ -891,7 +840,6 @@ fn restore_dotfile_links(links: &[DotfileLink]) -> Result<(), String> {
     }
 }
 
-/// Removes links owned by one dotfile package with explicit roots.
 pub fn unlink_dotfile_package_in(
     dotfiles_root: &Path,
     home: &Path,
@@ -910,7 +858,6 @@ pub fn unlink_dotfile_package_in(
     Ok(removed)
 }
 
-/// Applies every enabled dotfile package after a complete conflict preflight.
 pub fn apply_enabled_dotfiles(manifest: &ToolsManifest) -> Result<usize, String> {
     migrate_legacy_storage()?;
     apply_enabled_dotfiles_in(manifest, &dotfiles_dir(), &home_dir())
@@ -947,7 +894,6 @@ fn apply_enabled_dotfiles_in(
     Ok(created.len())
 }
 
-/// Moves a home file into a package, links it back, and enables the package.
 pub fn adopt_dotfile(path: &Path, package: &str) -> Result<PathBuf, String> {
     migrate_legacy_storage()?;
     adopt_dotfile_in(
@@ -959,7 +905,6 @@ pub fn adopt_dotfile(path: &Path, package: &str) -> Result<PathBuf, String> {
     )
 }
 
-/// Adopts a home file using explicit Tools and manifest paths.
 pub fn adopt_dotfile_in(
     dotfiles_root: &Path,
     home: &Path,
@@ -1350,7 +1295,6 @@ fn relative_path(from: &Path, to: &Path) -> PathBuf {
     relative
 }
 
-/// Returns the manifest's desired package set for one provider.
 pub fn managed_package_set(manifest: &ToolsManifest, provider: &str) -> BTreeSet<String> {
     manifest
         .packages

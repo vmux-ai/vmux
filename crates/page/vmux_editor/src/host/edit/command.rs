@@ -1,9 +1,5 @@
 pub use vmux_core::{CursorPos, EditMode, SelSpan};
 
-/// How an operator turns a motion's endpoint into a range.
-///
-/// Exclusive stops before the target character, inclusive covers it, and linewise expands the
-/// range to whole lines. Getting this wrong is what makes `de` and `dj` behave like `dw`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionKind {
     Exclusive,
@@ -74,9 +70,6 @@ impl Motion {
             | Motion::BigWordEndPrev
             | Motion::LastNonBlank
             | Motion::MatchPair => MotionKind::Inclusive,
-            // `resolve_motion` already returns the index of the line's `\n`, one past the last
-            // character. Counting that as inclusive steps over the newline, so `D` and Ctrl-K
-            // would join the following line.
             Motion::LineEnd => MotionKind::Exclusive,
             Motion::FindChar { forward, .. } if forward => MotionKind::Inclusive,
             _ => MotionKind::Exclusive,
@@ -85,10 +78,6 @@ impl Motion {
 }
 
 impl Motion {
-    /// Which end of an existing selection a plain move collapses to.
-    ///
-    /// `Some(true)` collapses to the start, `Some(false)` to the end, and `None` marks a motion
-    /// that targets an absolute position and should simply be resolved from the caret.
     pub fn collapse_to_start(self) -> Option<bool> {
         Some(match self {
             Motion::Left
@@ -124,7 +113,6 @@ impl Motion {
         })
     }
 
-    /// Whether landing here should record the previous position on the jump list.
     pub fn is_jump(self) -> bool {
         matches!(
             self,
@@ -142,7 +130,6 @@ impl Motion {
     }
 }
 
-/// Where `zz`, `zt`, and `zb` place the cursor's line in the viewport.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollPlacement {
     Top,
@@ -150,7 +137,6 @@ pub enum ScrollPlacement {
     Bottom,
 }
 
-/// A transformation applied to a range of text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operator {
     Delete,
@@ -169,7 +155,6 @@ impl Operator {
     }
 }
 
-/// What an operator acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Motion(Motion, usize),
@@ -183,7 +168,6 @@ pub enum EditCommand {
     Move(Motion),
     Select(Motion),
     InsertText(String),
-    /// Overtype at the caret for Replace mode, remembering what was covered so `Backspace` restores it.
     OvertypeText(String),
     ReplaceText(String),
     InsertNewline,
@@ -212,20 +196,16 @@ pub enum EditCommand {
     OpenLine {
         above: bool,
     },
-    /// Start a blockwise insert: remember the rectangle's rows and put the caret on its first row.
     BeginBlockInsert {
         after: bool,
     },
-    /// Replicate the text typed during a blockwise insert onto the block's remaining rows.
     FinishBlockInsert {
         text: String,
     },
-    /// Walk the undo tree by creation time rather than by branch, for `g-` and `g+`.
     UndoTime {
         forward: bool,
         count: usize,
     },
-    /// Add `delta` to the number at or after the caret on the current line.
     Increment(i64),
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),

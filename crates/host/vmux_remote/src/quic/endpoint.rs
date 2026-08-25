@@ -1,16 +1,3 @@
-//! Building the two ends of a QUIC connection, and deciding whether to trust the far one.
-//!
-//! QUIC has no cleartext mode, so the loopback and LAN paths that used to be plain HTTP now need
-//! a certificate. There is no CA that will sign for `192.168.1.4`, so the desktop mints its own
-//! ([`SelfSignedIdentity`]) and the pairing QR carries its fingerprint. The phone then trusts
-//! exactly that certificate and nothing else — narrower than the public CA set, and far narrower
-//! than the `danger_accept_invalid_certs(true)` this replaces, which accepted *any* certificate on
-//! a private address.
-//!
-//! The two sides are shaped differently on purpose. A listener is defined by the identity it
-//! presents, so it hangs off [`SelfSignedIdentity`]. A dialler is defined by whose certificate it
-//! will accept, so it hangs off [`Trust`].
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -22,56 +9,24 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 
 use super::{ALPN, PROBE_ALPN};
 
-/// How long a connection may sit idle before either end considers it dead.
-///
-/// Deliberately short. A backgrounded phone has its UDP socket torn down by the OS without a
-/// close frame, so the alternative to a timeout is a connection that looks alive forever.
 pub const MAX_IDLE_TIMEOUT_MS: u32 = 30_000;
 
-/// Keep-alive interval. Comfortably inside [`MAX_IDLE_TIMEOUT_MS`] so an idle-but-live connection
-/// is never mistaken for a dead one.
 pub const KEEP_ALIVE_MS: u64 = 10_000;
 
-/// Upper bound on buffered-but-unread bytes per connection.
-///
-/// The prompt-size check still runs in the dispatcher; this stops a hostile peer from making the
-/// daemon hold the bytes before that check is reached.
-///
-/// This is the *connection's* budget, shared by every stream on it. Per-stream backpressure is
-/// quinn's own `stream_receive_window`, deliberately left at its default: that is well under this
-/// number, so one stream cannot drain the whole connection's allowance before the others get a
-/// turn. An application frame cap sized at or above this constant would undo that, which is why
-/// [`MAX_REQUEST_BYTES`] is a fraction of it rather than its equal.
-///
-/// [`MAX_REQUEST_BYTES`]: https://docs.rs/vmux_service
 pub const RECEIVE_WINDOW: u32 = 8 * 1024 * 1024;
 
-/// Concurrent request streams one peer may open.
 pub const MAX_CONCURRENT_BIDI_STREAMS: u32 = 64;
 
-/// Concurrent unidirectional streams one peer may open, and there are none by design.
-///
-/// Nothing here calls `open_uni`. The session-events stream looks unidirectional but is a bidi
-/// stream the *client* opens, because the relay only routes streams a client opened — a
-/// desktop-initiated one would work on a direct connection and vanish through the relay, a
-/// difference that would not show up until someone tested off their own network.
-///
-/// So a uni stream is something no vmux build sends. Granting a budget for one only buys a stream
-/// nothing will ever drain, holding connection window while it waits.
 pub const MAX_CONCURRENT_UNI_STREAMS: u32 = 0;
 
-/// A self-signed identity for a desktop that no CA will vouch for.
 #[derive(Clone, Debug)]
 pub struct SelfSignedIdentity {
     pub certificate_pem: String,
     pub private_key_pem: String,
-    /// Lowercase hex SHA-256 over the certificate DER. This is what the pairing link carries and
-    /// what the client pins.
     pub fingerprint: String,
 }
 
 impl SelfSignedIdentity {
-    /// Mint a certificate covering the addresses a phone might reach this desktop on.
     pub fn generate(subject_alt_names: Vec<String>) -> Result<Self, String> {
         let certified = rcgen::generate_simple_self_signed(subject_alt_names)
             .map_err(|error| format!("certificate generation failed: {error}"))?;
@@ -82,7 +37,6 @@ impl SelfSignedIdentity {
         })
     }
 
-    /// Adopt an identity already on disk, deriving its fingerprint.
     pub fn from_pem(certificate_pem: String, private_key_pem: String) -> Result<Self, String> {
         let fingerprint = Self::fingerprint_of_pem(&certificate_pem)?;
         Ok(Self {
@@ -92,7 +46,6 @@ impl SelfSignedIdentity {
         })
     }
 
-    /// The fingerprint a PEM would be pinned by, without building an identity around it.
     pub fn fingerprint_of_pem(certificate_pem: &str) -> Result<String, String> {
         let certificate = rustls_pemfile::certs(&mut certificate_pem.as_bytes())
             .next()
@@ -101,12 +54,6 @@ impl SelfSignedIdentity {
         Ok(Self::fingerprint_of(&certificate))
     }
 
-    /// SHA-256 over the whole certificate DER, lowercase hex.
-    ///
-    /// The certificate rather than its SubjectPublicKeyInfo, because a verifier only ever sees the
-    /// peer's DER and extracting SPKI from it would mean parsing ASN.1 here. The cost is that
-    /// re-issuing invalidates every paired client — acceptable while re-pairing is a QR scan, and
-    /// the reason a stored certificate is reused instead of minted per launch.
     pub fn fingerprint_of(certificate: &CertificateDer<'_>) -> String {
         let digest = ring::digest::digest(&ring::digest::SHA256, certificate.as_ref());
         let mut hex = String::with_capacity(digest.as_ref().len() * 2);
@@ -117,24 +64,16 @@ impl SelfSignedIdentity {
         hex
     }
 
-    /// Bind a listener presenting this identity. Port 0 asks the OS to choose, which is what
-    /// tests want.
     pub fn listen(&self, address: SocketAddr) -> Result<Endpoint, String> {
         let config = self.server_config()?;
         Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
     }
 
-    /// Bind a listener that also completes [`PROBE_ALPN`] handshakes.
-    ///
-    /// Only the relay offers this. On a desktop it would be an unauthenticated way for anyone who
-    /// found the port to confirm someone is home, which is what pinning and the pairing token are
-    /// there to prevent.
     pub fn listen_answering_probes(&self, address: SocketAddr) -> Result<Endpoint, String> {
         let config = self.server_config_offering(vec![ALPN.to_vec(), PROBE_ALPN.to_vec()])?;
         Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
     }
 
-    /// The server half of the TLS configuration, for callers driving their own endpoint.
     pub fn server_config(&self) -> Result<ServerConfig, String> {
         self.server_config_offering(vec![ALPN.to_vec()])
     }
@@ -165,31 +104,13 @@ impl SelfSignedIdentity {
     }
 }
 
-/// Whose certificate a dialler is willing to accept.
 #[derive(Clone, Debug)]
 pub enum Trust {
-    /// Exactly one certificate, by fingerprint — a desktop no CA will vouch for.
-    ///
-    /// The hostname is not checked: the certificate is pinned outright, so the name adds nothing,
-    /// and a phone reaches the same desktop as `127.0.0.1`, a LAN address, or whatever the pairing
-    /// link recorded.
     Desktop { fingerprint: String },
-    /// A relay, verified by name against the public roots.
-    ///
-    /// Not pinned, because there is nothing stable to pin: the relay's certificate is renewed on
-    /// its own schedule, so a fingerprint captured at pairing time would start rejecting it
-    /// without warning. A relay on loopback or a private address is a development stack whose
-    /// certificate no public root signs, so nothing is verified there — the same allowance the
-    /// HTTP client made, and not reachable from anywhere an attacker could sit.
     Relay { host: String },
 }
 
 impl Trust {
-    /// Bind a client endpoint on an ephemeral local port, configured for this decision.
-    ///
-    /// `remote` decides which family the local socket binds. An IPv4 socket cannot dial an IPv6
-    /// peer, and `localhost` resolves to `::1` first on macOS, so binding a fixed family turns a
-    /// perfectly reachable peer into `invalid remote address`.
     pub fn endpoint(&self, remote: SocketAddr) -> Result<Endpoint, String> {
         let local: SocketAddr = if remote.is_ipv4() {
             (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
@@ -202,11 +123,6 @@ impl Trust {
         Ok(endpoint)
     }
 
-    /// A client endpoint over `socket` rather than a real UDP socket, for dialling through a
-    /// tunnel.
-    ///
-    /// `None` for the server config is what makes it client-only: the peer at the other end of a
-    /// tunnel is one desktop, and nothing dials back through it.
     pub fn endpoint_on(
         &self,
         socket: std::sync::Arc<dyn quinn::AsyncUdpSocket>,
@@ -222,11 +138,6 @@ impl Trust {
         Ok(endpoint)
     }
 
-    /// Complete a [`PROBE_ALPN`] handshake against `remote` and hang up.
-    ///
-    /// Returning `Ok` means the UDP port answered, the certificate verified, and the peer's accept
-    /// loop was running — the four things a deploy wants to know, none of which a TCP check on a
-    /// companion port can establish. Nothing is registered and nothing is sent.
     pub async fn probe(&self, remote: SocketAddr, server_name: &str) -> Result<(), String> {
         let local: SocketAddr = if remote.is_ipv4() {
             (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
@@ -247,8 +158,6 @@ impl Trust {
         Ok(())
     }
 
-    /// Whether a relay host can only be a development stack, and so has no publicly-signed
-    /// certificate to verify against.
     fn is_local_development_host(host: &str) -> bool {
         if host.eq_ignore_ascii_case("localhost") {
             return true;
@@ -299,11 +208,6 @@ impl Trust {
     }
 }
 
-/// Resolve `host:port`, preferring IPv4.
-///
-/// `localhost` resolves to `::1` before `127.0.0.1` on macOS, and a UDP port published by Docker
-/// answers on IPv4 only however it advertises itself — so taking the first result silently sends
-/// every packet somewhere that never replies. IPv6 is still used when it is all the host has.
 pub async fn resolve_preferring_ipv4(host: &str, port: u16) -> Result<SocketAddr, String> {
     let resolved: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
         .await
@@ -335,7 +239,6 @@ fn transport_config() -> Arc<TransportConfig> {
     Arc::new(transport)
 }
 
-/// Accepts anything. Only ever installed for a relay on a private address.
 #[derive(Debug)]
 struct AnyCertificate;
 
@@ -383,17 +286,12 @@ impl ServerCertVerifier for AnyCertificate {
     }
 }
 
-/// Accepts one specific certificate and refuses everything else.
 #[derive(Debug)]
 struct PinnedCertificate {
     expected: String,
 }
 
 impl PinnedCertificate {
-    /// Length-independent for equal-length inputs, which is all this compares: two hex digests.
-    ///
-    /// Written as a loop rather than a fold so the absence of an early exit is visible — the whole
-    /// point is that every byte is compared regardless of where the first difference falls.
     fn matches(&self, presented: &str) -> bool {
         let (left, right) = (presented.as_bytes(), self.expected.as_bytes());
         if left.len() != right.len() {
@@ -431,7 +329,6 @@ impl ServerCertVerifier for PinnedCertificate {
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        // TLS 1.3 only; reaching here means the peer negotiated something we did not offer.
         Err(rustls::Error::General("TLS 1.2 is not offered".to_string()))
     }
 
@@ -478,8 +375,6 @@ mod tests {
         );
     }
 
-    /// Reloading from disk has to produce the same fingerprint the pairing link recorded, or every
-    /// paired phone silently stops trusting the desktop after a restart.
     #[test]
     fn an_identity_reloaded_from_pem_keeps_its_fingerprint() {
         let minted = SelfSignedIdentity::generate(vec!["localhost".into()]).unwrap();
@@ -520,7 +415,6 @@ mod tests {
         .unwrap();
     }
 
-    /// A public relay must not fall into the verify-nothing branch meant for a dev stack.
     #[test]
     fn only_private_relay_hosts_skip_verification() {
         assert!(Trust::is_local_development_host("localhost"));

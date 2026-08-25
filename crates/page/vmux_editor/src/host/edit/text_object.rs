@@ -2,9 +2,6 @@ use std::ops::Range;
 
 use crate::edit::buffer::TextBuffer;
 
-/// Vim's three character classes: whitespace, keyword, and punctuation.
-///
-/// Word motions and word text objects both stop wherever this value changes.
 pub fn char_class(c: char) -> u8 {
     if c.is_whitespace() {
         0
@@ -196,7 +193,6 @@ fn paragraph(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>
     (start < end).then_some(start..end)
 }
 
-/// The innermost `open`/`close` pair containing `head`, walked outward `count` times.
 fn enclosing_pair(
     buf: &TextBuffer,
     head: usize,
@@ -258,7 +254,6 @@ fn matching_pair(buf: &TextBuffer, head: usize, open: char, close: char) -> Opti
     None
 }
 
-/// The quoted span on the cursor's line that contains or follows the cursor.
 fn quoted(buf: &TextBuffer, head: usize, q: char) -> Option<(usize, usize)> {
     let (line, _) = buf.char_to_coords(head);
     let base = buf.line_to_char(line);
@@ -287,7 +282,6 @@ struct TagSpan {
     inner: Range<usize>,
 }
 
-/// The innermost `<name>`…`</name>` pair containing `head`.
 fn tag(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
     let len = buf.len_chars();
     let mut stack: Vec<(String, usize, usize)> = Vec::new();

@@ -1,9 +1,3 @@
-//! Making the webviews match the layout Bevy just computed.
-//!
-//! Everything here runs in one chain between `LayoutSystems::Layout` and the standard material
-//! render: geometry, visibility, focus and the native frames of windowed webviews all read the
-//! same finished layout, so the order is load-bearing rather than incidental.
-
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
@@ -66,21 +60,12 @@ impl Plugin for PresentPlugin {
     }
 }
 
-/// The layout page owns the keyboard whenever one of its own DOM surfaces has focus — the bookmark
-/// field, a context menu, or the command bar panel. One rule rather than a special case per
-/// surface, since every consumer has to agree or the keyboard lands somewhere else.
 pub(crate) type LayoutKeyboardCapture = Or<(
     With<BookmarkTextInputActive>,
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
 )>;
 
-/// The layout shell, when one of its DOM surfaces holds the keyboard.
-///
-/// Both readers have to name the same entity or the keyboard goes one way and first responder the
-/// other, so they share the filter rather than each spelling it out. `LayoutCef` is the shell
-/// whether or not CEF is behind it — `Browser` left it in the wry migration, which is how these two
-/// last drifted apart.
 pub(crate) type LayoutKeyboardHost = (With<LayoutCef>, LayoutKeyboardCapture);
 fn sync_keyboard_target(
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -103,14 +88,6 @@ fn sync_keyboard_target(
         return;
     }
 
-    // The layout has no CEF browser — its page runs in the host process and its view is handed
-    // keys by AppKit — so there is no target to give `KeyboardOwner` to. Taking it off every
-    // browser is the whole job: what must not happen is a pane still holding it and reading the
-    // keystrokes meant for the chrome.
-    //
-    // This used to look for the layout inside `content_q` and hand it the marker. That query is
-    // `With<Browser>`, which the layout has not had since it left CEF, so the comparison could
-    // never be true and the right thing happened only because the loop fell through to `else`.
     if layout_keyboard_q.single().is_ok() {
         for (browser_e, has_kb) in &content_q {
             if has_kb {
@@ -251,15 +228,12 @@ fn sync_children_to_ui(
             }
         }
 
-        // Check if this browser's parent tab is the active tab in its pane
         let is_active_stack = if parent != glass_entity && !is_cef_ui {
             active_stack_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
         } else {
             true
         };
 
-        // Keep rendering the previous tab behind while a new empty tab
-        // (without CEF content) is pending in the command bar flow.
         let is_previous_stack =
             pending_launch.stack.is_some() && pending_launch.previous_stack == Some(parent);
 
@@ -294,10 +268,6 @@ fn sync_children_to_ui(
                 WEBVIEW_Z_MAIN - 0.01
             }
         } else {
-            // A `Browser` parented straight to the window root, which only `overlay_adopt` does
-            // and only for a `WindowOverlay` — caught by the `modal` branch above. Reaching here
-            // means a new spawn site skipped the stack, so give it the floor rather than a
-            // stacking order nothing computes any more.
             WEBVIEW_Z_BASE
         };
         let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
@@ -309,9 +279,6 @@ fn sync_children_to_ui(
         };
         tf.translation = Vec3::new(tx + history_swipe_tx, ty, z);
 
-        // A windowed modal's node fills the whole layout area, but its native view is a small
-        // centred box that `sync_windowed_command_bar` sizes. Writing the node size here makes the
-        // page lay out at the full width inside that box, so the shell renders far too wide.
         if modal.is_some() && is_windowed {
             continue;
         }
@@ -323,10 +290,6 @@ fn sync_children_to_ui(
     }
 }
 
-/// Pick the focus-ring width + color for a windowed browser pane. The local
-/// user's ring (their accent) draws on their focused stack; each agent's ring
-/// (a distinct per-agent hue) draws on the agent's own active pane. User takes
-/// precedence when a pane is active for both.
 fn windowed_ring_for(
     stack: Entity,
     pane: Entity,
@@ -352,7 +315,6 @@ fn windowed_ring_for(
     (0.0, [user.r, user.g, user.b], None)
 }
 
-/// The agent's logo bitmap, decoded once and cached for the process lifetime.
 fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> {
     use std::sync::OnceLock;
     use vmux_core::agent::AgentKind;
@@ -367,8 +329,6 @@ fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> 
     cell.get_or_init(|| decode_premultiplied(png)).as_ref()
 }
 
-/// Stable per-kind tag the native layer caches on, so the badge image is only
-/// rebuilt when the owning agent's kind changes.
 fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
     use vmux_core::agent::AgentKind;
     match kind {
@@ -378,15 +338,10 @@ fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
     }
 }
 
-/// The agent's brand color (Claude clay / Codex green / Mistral purple), used as
-/// the badge circle fill behind its logo.
 fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
     hex_to_rgb(&kind.avatar().color).unwrap_or([0.5, 0.5, 0.5])
 }
 
-/// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
-/// by `sync_children_to_ui` (visible active pane has a real scale; inactive panes ~1e-6) to pick
-/// which native view to show. No-op for OSR webviews / non-macOS (`set_windowed_*` are no-ops).
 pub(crate) fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
@@ -531,40 +486,23 @@ pub(crate) struct WindowedFrameRect {
     pub(crate) height: f32,
 }
 
-/// What the frame sync has to remember between runs.
-///
-/// One `Local` rather than three: Bevy caps a system's parameters, and three separate slots of
-/// remembered state spend that budget on something that is one thing.
 #[derive(Default)]
 pub(crate) struct FrameSyncMemory {
-    /// The rectangle each page was last raised to, so an unchanged one is not raised again.
     raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
-    /// The pages visible on the previous run, which is how a page that has just become visible is
-    /// told apart from one that always was.
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,
 }
 
-/// Where each windowed page sits, in the units wry speaks.
-///
-/// `sync_windowed_frames` already answers this question for CEF, in physical pixels plus a separate
-/// scale, because that is what CEF's own API takes. A page hosted in this process needs the same
-/// rectangle in logical pixels — and deriving it a second time from `ComputedNode` is how two
-/// answers to one question start disagreeing about where a pane is.
-///
-/// A page with no entry is one the frame sync did not reach this run: hidden, or no longer a pane.
 #[derive(Resource, Default)]
 pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
 
 impl PaneFrames {
-    /// Filled on every target, read only where there is a native page surface to place.
     #[cfg(target_os = "macos")]
     pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
         self.0.get(&page).copied()
     }
 }
 
-/// One page's rectangle in logical pixels.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct PaneFrame {
     pub(crate) left: f32,
@@ -574,7 +512,6 @@ pub(crate) struct PaneFrame {
 }
 
 impl PaneFrame {
-    /// `frame` is physical, as everything downstream of `ComputedNode` is.
     fn of(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
         if !scale.is_finite() || scale <= 0.0 {
             return None;
@@ -798,9 +735,6 @@ fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
     browsers.set_windowed_hidden(&entity, true);
 }
 
-/// The surface exists but must stay off screen — either prewarmed before any open, or revealing
-/// while the page paints. Both keep the native view alive and parked outside the window so it can
-/// still hold first responder.
 fn command_bar_windowed_view_should_render_hidden(
     display: Display,
     visibility: Visibility,
@@ -906,8 +840,6 @@ pub(crate) fn sync_windowed_command_bar(
             hide_windowed_command_bar(&browsers, entity);
             return;
         };
-        // A revealing bar already owns input, so keep the renderer focused; only a prewarmed,
-        // never-opened surface gets unfocused here.
         if !owns_input {
             browsers.set_windowed_focus(&entity, false);
         }
@@ -955,13 +887,8 @@ pub(crate) fn sync_windowed_command_bar(
         Vec2::new(frame.width_px / scale, frame.height_px / scale),
         scale,
     );
-    // A windowed CEF view cannot be transparent, so the page's own `rounded-2xl` leaves opaque
-    // square corners behind it. Clip the outer view instead. This only touches the outermost
-    // `CefBrowserHostView` layer, unlike `set_windowed_z_position`, which reorders that layer among
-    // its siblings and leaves the view painting nothing but its background.
     browsers.set_windowed_corner_radius(&entity, COMMAND_BAR_NATIVE_RADIUS_PX * scale, scale, true);
     browsers.set_windowed_hidden(&entity, false);
-    // Frontmost sibling wins AppKit hit-testing; the raise is a no-op once it already is.
     browsers.raise_windowed_to_front(&entity);
     browsers.set_windowed_focus(&entity, true);
     if !*was_open || native_size_changed.contains(entity) {
@@ -1020,9 +947,6 @@ fn sync_cef_webview_resize_after_ui(
     mut window_resized: MessageReader<WindowResized>,
     mut first_run: Local<Option<std::time::Instant>>,
 ) {
-    // Force-resize all CEF browsers (tabs, terminals, side sheets, modals) on
-    // window resize so backgrounded surfaces also repaint at the new size
-    // instead of showing a stale frame until they become active.
     let force = window_resized.read().count() > 0;
     if force {
         last_entries.clear();
@@ -1207,8 +1131,6 @@ fn sync_osr_webview_focus(
                 if pane_is_leaf {
                     is_active =
                         active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
-                    // Keep previous tab's webview visible while an empty new tab is
-                    // pending (user is picking content in the command bar).
                     is_prev = pending_launch.stack.is_some()
                         && pending_launch.previous_stack == Some(parent);
                 }
@@ -1318,10 +1240,6 @@ fn should_show_osr_webview(
 mod tests {
     use super::*;
 
-    /// The precedence the doc comment states, and the reason it exists: a pane can be the
-    /// user's focus and an agent's active pane at once, and the user's ring has to win or they
-    /// cannot see where they are. Three focus-ring source-scan tests were dropped in 3b73c8ce
-    /// without leaving anything behind; this covers the decision they were circling.
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
         use vmux_layout::active_panes::{ActivePanes, ActiveStack, ProfileId};
@@ -1355,7 +1273,6 @@ mod tests {
             "and it is not the user's colour"
         );
 
-        // Same pane, now also the user's focus: the user's ring takes it over.
         let focused = FocusedStack {
             stack: Some(stack),
             ..Default::default()
@@ -1366,7 +1283,6 @@ mod tests {
         assert_eq!(rgb, [user.r, user.g, user.b]);
         assert_eq!(kind, None, "no agent badge on the user's own ring");
 
-        // A single visible pane has nothing to disambiguate, so no ring at all.
         let (width, _, _) = windowed_ring_for(
             stack,
             pane,
@@ -1775,8 +1691,6 @@ mod tests {
         assert!((frame.height_px - 440.0).abs() < 0.01);
     }
 
-    /// One test, because every case here mutates the process-wide published route and the test
-    /// runner is multi-threaded.
     #[test]
     fn published_route_is_the_only_source_of_command_bar_hit_state() {
         let frame = CommandBarWindowedFrame {

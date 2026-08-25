@@ -45,21 +45,6 @@ pub enum AppCommand {
     File(FileKeyCommand),
 }
 
-/// What a key press means while the file page has the keyboard.
-///
-/// Hidden leaves for the same reason the chat page's are: the explorer toggle has a button beside
-/// it and the panel verbs only exist while a panel is open, but every one of them is worth
-/// rebinding, and a command is the only thing `settings.json` can name.
-///
-/// The two contexts a file page publishes are `files` — always, while the page is up — and
-/// `files.panel`, when the completion popup or the references list is showing. One key for both
-/// panels: which of them a verb lands in is the page's own precedence, decided in the tick the key
-/// arrives, and the keymap has no reason to know there are two.
-///
-/// Nothing here is a text-editing key. The modal keymap in `vmux_editor` owns those, resolves the
-/// same keystroke on the host, and answers first — see [`crate::page_key::ScopedKeys`] for how the
-/// two compose. Keeping the families disjoint is what stops `Escape` leaving insert mode *and*
-/// closing a panel on one press.
 #[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FileKeyCommand {
@@ -100,21 +85,6 @@ impl From<FileKeyCommand> for vmux_core::event::FileKey {
     }
 }
 
-/// What a key press means while a chat page has the keyboard.
-///
-/// Hidden leaves for the same reason the command bar's are: nothing here is worth picking out of a
-/// menu, but every one of it is worth rebinding, and a command is the only thing `settings.json`
-/// can name. Each carries a `when`, so `Enter` can submit a prompt in one place and answer a tool
-/// approval in another without either surface knowing the other exists.
-///
-/// The three contexts a chat page publishes are `chat`, `chat.list` — an approval, a
-/// multiple-choice question, or one of the four pickers is showing — and `chat.selector`, the
-/// pickers alone. The `when` clauses below are mutually exclusive rather than merely ordered, so
-/// which one answers a key is a property of the clauses a reader can check, not of the order the
-/// keymap happened to be assembled in.
-///
-/// The page performs them. It is the only side that knows which list the draft has opened and
-/// which row of it is highlighted, so the host resolves the key and hands the verb straight back.
 #[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChatKeyCommand {
@@ -170,15 +140,6 @@ impl From<ChatKeyCommand> for vmux_wire::chat::ChatKey {
     }
 }
 
-/// What a key press means while the command bar has the keyboard.
-///
-/// Every leaf is hidden: these are not things to pick out of a menu — the command bar is already
-/// open when they apply — but they are things to rebind, which is why they are commands at all
-/// rather than key tests inside the page. Each carries a `when` so it exists only on that surface;
-/// without one, `Escape` would dismiss the command bar from everywhere.
-///
-/// The page performs them. It is the only place that knows what its result list currently holds,
-/// so the host resolves the key and hands the answer straight back to the page that sent it.
 #[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandBarKeyCommand {
@@ -427,17 +388,6 @@ pub enum BookmarkCommand {
     NewFolder,
 }
 
-/// Opening the spaces page, and what a key press means once it has the keyboard.
-///
-/// `Open` is the one leaf that is not a key — it is how the page gets on screen. The rest are
-/// hidden for the same reason the chat page's are: the page is already showing when they apply, so
-/// they are not things to pick out of a menu, but they are things to rebind, and a command is the
-/// only thing `settings.json` can name.
-///
-/// Every key carries `when = "spaces"`, so it exists only while that page is up; without one,
-/// `Backspace` would delete a space from wherever it was pressed. The chords are the ones
-/// `vmux_ui`'s `MenuDirection::of` resolves locally, so a surface that answers its own navigation
-/// and one that comes through here cannot disagree about what `Ctrl+j` means.
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
@@ -464,10 +414,6 @@ pub enum SpaceCommand {
 }
 
 impl SpaceCommand {
-    /// The verb to hand back to the page, or `None` for a command the page does not perform.
-    ///
-    /// `Open` is answered by the host — it spawns the webview — so it is the one leaf with nowhere
-    /// to be echoed to.
     pub fn key(self) -> Option<vmux_wire::space::SpaceKey> {
         match self {
             Self::Open => None,
@@ -638,8 +584,6 @@ mod tests {
                     && !c.modifiers.shift && !c.modifiers.ctrl && !c.modifiers.alt)
             })
         };
-        // Accelerator-only menu commands must also reach the universal shortcut layer so they fire
-        // when a terminal/layout holds focus (winit swallows menu key-equivalents there).
         assert!(
             has_super(KeyCode::KeyT),
             "cmd+T (new tab) must be a global shortcut"
@@ -664,9 +608,6 @@ mod tests {
         );
     }
 
-    /// The command bar's keys are bare `Escape`, `Tab` and the arrows. Every one of them has to
-    /// reach the keymap carrying its surface, because a default that forgot its `when` would
-    /// dismiss the command bar — or eat Tab — from every surface in the app.
     #[test]
     fn every_command_bar_key_is_scoped_to_the_command_bar() {
         let unscoped: Vec<String> = AppCommand::default_shortcuts()
@@ -691,11 +632,6 @@ mod tests {
         );
     }
 
-    /// The whole reason a chat page publishes three context keys. `Enter` and `Escape` each mean
-    /// two things there and nothing at all anywhere else, and which one applies has to be decided
-    /// by the clauses rather than by the order the keymap happened to be assembled in — so every
-    /// pair below is mutually exclusive, and a dropped negation shows up here as two clauses
-    /// matching one context.
     #[test]
     fn enter_and_escape_mean_one_thing_per_chat_context() {
         let keymap = crate::shortcut::Keymap::defaults();
@@ -748,7 +684,6 @@ mod tests {
             chat(ChatKeyCommand::ListPrevious)
         );
 
-        // Bare Enter and Escape belong to nobody until a page says it is a chat page.
         assert_eq!(
             keymap.direct(&KeyCombo {
                 key: KeyCode::Enter,
@@ -760,13 +695,6 @@ mod tests {
         assert_eq!(resolved(&["terminal"], KeyCode::ArrowUp), None);
     }
 
-    /// One navigation convention, checked as the whole chord set on every surface that has a list.
-    ///
-    /// Arrows, the emacs pair, and the vim pair — the same table `vmux_ui`'s `MenuDirection::of`
-    /// resolves for the surfaces that have no page context to publish and so never reach this
-    /// keymap. Four surfaces had drifted into three different rules once already; a chord added to
-    /// one of these and forgotten on the other shows up here rather than as a key that works in the
-    /// command bar and does nothing in chat.
     #[test]
     fn every_list_surface_navigates_on_the_same_chords() {
         let keymap = crate::shortcut::Keymap::defaults();

@@ -1,12 +1,3 @@
-//! One element a page rendered, as the component that rendered it gets to hold it.
-//!
-//! Dioxus hands a mounted component `MountedData::new(())`, and `()` answers `NotSupported` to
-//! everything — so `onmounted` is inert until a renderer supplies a backing. This is that backing.
-//!
-//! Instructions resolve as soon as they are queued: the next frame carries them, and nothing the
-//! page could say afterwards would change the answer. The three questions go out the same way and
-//! wait, because an answer has to come back — see [`measurement`](crate::webview::measurement).
-
 use std::future::Future;
 use std::pin::Pin;
 
@@ -19,7 +10,6 @@ use crate::webview::measurement::{Measurement, PendingReads};
 
 type Answer<T> = Pin<Box<dyn Future<Output = MountedResult<T>>>>;
 
-/// The node the renderer assigned, and the two queues that reach the page holding it.
 pub(crate) struct Element {
     node: ElementId,
     requests: RequestQueue,
@@ -35,17 +25,12 @@ impl Element {
         }
     }
 
-    /// Queue one instruction and report it done.
-    ///
-    /// Done rather than pending, because a future that waited for the page to confirm would be a
-    /// round trip bought for a `()`.
     fn queued(&self, request: DomRequest) -> Answer<()> {
         self.requests.push(request);
 
         Box::pin(std::future::ready(Ok(())))
     }
 
-    /// Queue one question, and hand back what will hold its answer.
     fn asked(&self, what: Measure) -> Measurement {
         let measurement = self.reads.ask();
         self.requests.push(DomRequest::measure_node(

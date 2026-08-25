@@ -1,5 +1,3 @@
-//! Recording and querying visits, which only the desktop does.
-
 pub mod prune;
 pub mod query;
 pub mod spawn;
@@ -10,8 +8,6 @@ use vmux_core::host::page::NativelyHosted;
 
 pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
-/// Wires the history domain: visit spawning, change broadcasts, timed pruning, and
-/// history query, open, and suggestion bridges.
 pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {

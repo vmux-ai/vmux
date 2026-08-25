@@ -9,8 +9,6 @@ use vmux_wire::room::{
 use crate::acp::AcpSession;
 use crate::session::{AgentConversationTitle, AgentMessages, AgentSession};
 
-/// Projects each agent session into a collaborative room: members, a draft document, and one
-/// materialized event per message, kept in step with the session's transcript.
 pub struct RoomPlugin;
 
 impl Plugin for RoomPlugin {

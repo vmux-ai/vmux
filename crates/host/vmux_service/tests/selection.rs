@@ -47,7 +47,6 @@ fn new_process_with_size(cols: u16, rows: u16) -> TestProcess {
     }
 }
 
-/// Write input to the PTY and let the reader thread + VTE catch up.
 fn write_and_drain(process: &mut Process, bytes: &[u8]) {
     process.write_input(bytes);
     for _ in 0..50 {
@@ -76,7 +75,6 @@ fn extend_from_empty_anchors_a_single_cell() {
     let mut process = new_process();
     process.extend_selection_to(3, 1);
     let text = process.selection_text().unwrap_or_default();
-    // Single-cell selection on a blank cell == "" after trailing-space strip.
     assert!(text.chars().count() <= 1, "got {text:?}");
 }
 

@@ -22,7 +22,6 @@ use vmux_command::{
 };
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
-/// Wires the native application menu bar, including the bookmark context menu.
 pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
@@ -51,10 +50,6 @@ impl Plugin for OsMenuPlugin {
     }
 }
 
-/// When a menu key-equivalent last fired. ⌘W triggers the `stack_close` menu item *and* Chromium's
-/// built-in ⌘W (`performClose:` → `WindowCloseRequested`). The red traffic-light button is the only
-/// legitimate window close and never fires a menu event first, so we suppress a `CloseRequested`
-/// that lands right after a menu command.
 #[derive(Resource, Default)]
 pub(crate) struct LastMenuCommandAt(pub Option<std::time::Instant>);
 
@@ -64,9 +59,6 @@ pub(crate) struct LastStackCloseAt(pub Option<std::time::Instant>);
 #[derive(Resource, Default)]
 pub(crate) struct LastNativePageOpenAt(pub Option<std::time::Instant>);
 
-/// Tracks whether the app menu's Close item is currently enabled, so the sync system only touches the
-/// native item when the visible-window state actually flips. Starts `true` to match the menu item's
-/// build-time default (the primary window is visible at startup).
 #[derive(Resource)]
 pub(crate) struct CloseMenuItemEnabled(pub bool);
 
@@ -85,9 +77,6 @@ struct OsMenuResource {
     menu: Menu,
     locale: Locale,
     close_window: Option<MenuItem>,
-    /// Native `NSMenuItem`s for the Edit menu's standard editing actions
-    /// (Undo/Redo/Cut/Copy/Paste/Select All), retained so [`sync_edit_menu_items`]
-    /// can enable/disable them per focused pane.
     #[cfg(target_os = "macos")]
     edit_items: Vec<Retained<NSMenuItem>>,
 }
@@ -108,9 +97,6 @@ fn setup(world: &mut World) {
     #[cfg(target_os = "macos")]
     let edit_items = collect_edit_menu_items();
 
-    // Native CEF views hold keyboard focus, so app shortcuts arrive as menu key-equivalents.
-    // `forward_menu_events` only drains on a Bevy tick; with the loop idle that's ~1s late. Wake the
-    // loop from the menu handler so the command is processed this frame.
     let proxy = world
         .get_resource::<bevy::winit::EventLoopProxyWrapper>()
         .map(|w| (**w).clone());
@@ -211,17 +197,6 @@ fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
     })
 }
 
-/// CEF/Chromium on macOS routes web-content editing shortcuts (Select All, Cut, Copy, Paste, Undo,
-/// Redo) through the application's standard Edit menu — without it, cmd+A / cmd+C / cmd+V etc. do
-/// nothing in web text inputs (browser pages, command bar, editor inputs).
-///
-/// The predefined items use the standard responder-chain selectors (`copy:`/`paste:`/…). A focused
-/// page is always a CEF `NSView`, which *answers* those selectors, so `NSMenu`'s default
-/// auto-validation keeps the items enabled and `[NSApp.mainMenu performKeyEquivalent:]` consumes
-/// ⌘C/⌘V before the view's `keyDown:`. That is correct for browser pages, but it steals the
-/// keystrokes from terminal panes, whose own handlers (`vmux_terminal::on_term_key` /
-/// `handle_terminal_keyboard`) implement clipboard against the PTY. [`sync_edit_menu_items`]
-/// disables these items while a terminal is focused so the keys fall through to the page.
 fn append_standard_edit_menu(menu: &Menu) {
     use muda::{PredefinedMenuItem, Submenu};
 
@@ -242,14 +217,6 @@ fn append_standard_edit_menu(menu: &Menu) {
     let _ = menu.append(&edit);
 }
 
-/// Find the live Undo/Redo/Cut/Copy/Paste/Select All `NSMenuItem`s in the app's main menu and turn
-/// OFF the containing submenu's `autoenablesItems`, so [`sync_edit_menu_items`] can drive their
-/// enabled state directly. Without disabling auto-validation, AppKit would re-enable these standard
-/// editing selectors whenever a CEF view (which answers them) is first responder, defeating the gate.
-/// Undo/Redo are gated alongside the clipboard items so ⌘Z/⌘⇧Z also fall through to a focused
-/// terminal rather than being swallowed by the now-manually-managed submenu.
-///
-/// Must run on the main thread, after the menu is installed via `Menu::init_for_nsapp`.
 #[cfg(target_os = "macos")]
 fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -291,19 +258,11 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     items
 }
 
-/// Whether the standard Edit-menu items (Undo/Redo/Cut/Copy/Paste/Select All) should be enabled for
-/// the current focus.
-///
-/// They are disabled only when a terminal owns focus ([`HostFocusIntent::WinitHost`]) so ⌘C/⌘V/⌘X/⌘A
-/// (and ⌘Z) fall through to the terminal's own key handling. Web pages, the command bar, and the idle
-/// state keep the native items enabled.
 #[cfg(target_os = "macos")]
 fn edit_menu_items_enabled(intent: HostFocusIntent) -> bool {
     !matches!(intent, HostFocusIntent::WinitHost)
 }
 
-/// Drive the Edit-menu items' enabled state from [`HostFocusIntent`] so terminal panes receive their
-/// own ⌘C/⌘V/⌘Z while browser/web inputs keep native edit behavior.
 #[cfg(target_os = "macos")]
 fn sync_edit_menu_items(
     menu: Option<NonSend<OsMenuResource>>,
@@ -435,8 +394,6 @@ fn hide_window_on_close_request(
     last_native_page_open: Res<LastNativePageOpenAt>,
     last_tab_close: Option<Res<vmux_layout::tab::LastTabCloseAt>>,
 ) {
-    // ⌘W fires the `stack_close` menu item but Chromium's built-in ⌘W also requests a window close.
-    // Suppress a close that lands right after a menu command — the red button never does.
     let from_menu_key_equivalent = last_menu_command
         .0
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);

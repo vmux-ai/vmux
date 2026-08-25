@@ -2,14 +2,12 @@ use crate::edit::command::{EditCommand, EditMode, Motion, Operator, ScrollPlacem
 use crate::edit::text_object::{TextObject, TextObjectKind};
 use crate::keymap::{KeyInput, Keymap};
 
-/// Whether a pending `i`/`a` prefix selects the object's interior or includes its delimiters.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ObjectScope {
     Inner,
     Around,
 }
 
-/// What the key after `m`, `` ` ``, or `'` names.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MarkAction {
     Set,
@@ -17,17 +15,12 @@ enum MarkAction {
     GotoLine,
 }
 
-/// One unit of replayable input.
-///
-/// Dot-repeat and macros both work by replaying what the user typed, and insert-mode characters
-/// bypass the keymap over the IME path, so the stream has to carry both kinds of event.
 #[derive(Clone)]
 enum Recorded {
     Key(KeyInput),
     Text(String),
 }
 
-/// Whether a command changes buffer text, which is what `.` repeats. Yanks and motions do not.
 fn is_change(cmd: &EditCommand) -> bool {
     match cmd {
         EditCommand::Op { operator, .. } => *operator != Operator::Yank,
@@ -108,7 +101,6 @@ fn motion_for(key: &str) -> Option<Motion> {
     })
 }
 
-/// `f`, `F`, `t`, and `T` all take the next key as their target character.
 fn find_prefix(key: &str) -> Option<(bool, bool)> {
     Some(match key {
         "f" => (true, false),
@@ -119,7 +111,6 @@ fn find_prefix(key: &str) -> Option<(bool, bool)> {
     })
 }
 
-/// The operator a `g`-prefixed key introduces, and the key that doubles it (`guu`).
 fn g_operator(key: &str) -> Option<(Operator, char)> {
     Some(match key {
         "u" => (Operator::Lower, 'u'),
@@ -166,7 +157,6 @@ fn single_char(key: &str) -> Option<char> {
 }
 
 impl VimKeymap {
-    /// Build a keymap with the user's configured key mappings applied.
     pub fn with_mappings(specs: &[vmux_core::editor::KeyMapping], leader: &str) -> Self {
         Self {
             mappings: crate::keymap::mapping::Mappings::new(specs, leader),
@@ -178,7 +168,6 @@ impl VimKeymap {
         self.count.take().unwrap_or(1)
     }
 
-    /// Vim multiplies a count before the operator with one before the motion: `2d3w` is six words.
     fn take_operator_count(&mut self) -> usize {
         let outer = self.op_count.take().unwrap_or(1);
         let inner = self.count.take().unwrap_or(1);
@@ -201,14 +190,11 @@ impl VimKeymap {
         self.replace_pending = false;
         self.g_pending = false;
         self.z_pending = false;
-        // An abandoned prompt would otherwise keep eating every key with no way back.
         if self.ex.take().is_some() {
             self.mode = self.mode_before_ex;
         }
     }
 
-    /// No operator or prefix is half-typed. A pending count still counts as a command start,
-    /// because a count belongs to the command the next key names rather than to the previous one.
     fn is_command_start(&self) -> bool {
         self.pending_op.is_none()
             && self.pending_object.is_none()
@@ -222,13 +208,10 @@ impl VimKeymap {
             && !self.z_pending
     }
 
-    /// Nothing at all is half-typed, so no keys are owed to a command in progress.
     fn is_idle(&self) -> bool {
         self.is_command_start() && self.count.is_none() && self.op_count.is_none()
     }
 
-    /// A prefix is waiting to consume the next key as a literal argument — a register or mark
-    /// name, a text-object kind, a fold or `g` command — so it must not be read as a motion.
     fn awaits_literal_key(&self) -> bool {
         self.pending_object.is_some()
             || self.macro_pending.is_some()
@@ -239,10 +222,6 @@ impl VimKeymap {
             || self.z_pending
     }
 
-    /// Feed a key through the user's mappings.
-    ///
-    /// Returns `None` when the key should be handled normally, `Some` when the mapping layer
-    /// consumed it — either holding it as part of a longer sequence or expanding a match.
     fn route_through_mappings(&mut self, k: &KeyInput) -> Option<Vec<EditCommand>> {
         use crate::keymap::mapping::MatchResult;
         let mut pending = std::mem::take(&mut self.map_pending);
@@ -263,7 +242,6 @@ impl VimKeymap {
                 if pending.len() == 1 {
                     return None;
                 }
-                // The buffered prefix turned out not to be a mapping; replay it as typed.
                 let mut out = Vec::new();
                 for key in pending {
                     out.extend(self.handle_unmapped(&key));
@@ -273,7 +251,6 @@ impl VimKeymap {
         }
     }
 
-    /// Run one key through recording and dispatch, skipping the mapping layer.
     fn handle_unmapped(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         let was_replaying = self.replaying;
         self.replaying = true;
@@ -318,7 +295,6 @@ impl VimKeymap {
         }
     }
 
-    /// Route a resolved motion to the pending operator, a visual selection, or a plain move.
     fn motion_command(&mut self, m: Motion) -> Vec<EditCommand> {
         if let Some(operator) = self.pending_op.take() {
             let count = self.take_operator_count();
@@ -336,7 +312,6 @@ impl VimKeymap {
         std::iter::repeat_n(EditCommand::Move(m), n).collect()
     }
 
-    /// Consume the character `f`/`F`/`t`/`T` was waiting for, or drop the whole pending command.
     fn resolve_find(&mut self, forward: bool, till: bool, key: &str) -> Vec<EditCommand> {
         let Some(ch) = single_char(key) else {
             self.reset();
@@ -354,7 +329,6 @@ impl VimKeymap {
         self.motion_command(Motion::FindChar { ch, forward, till })
     }
 
-    /// Apply a pending operator to a motion, a text object, a doubled key (`dd`), or abandon it.
     fn operator_pending(&mut self, operator: Operator, key: &str) -> Vec<EditCommand> {
         if let Some(scope) = self.pending_object.take() {
             let count = self.take_operator_count();
@@ -800,8 +774,6 @@ impl VimKeymap {
             return self.repeat_find(key == ",");
         }
 
-        // Before `motion_for`, which maps bare `e`, `E` and `_` and would otherwise shadow the
-        // `g`-prefixed arms below and leave `g_pending` set. `normal` orders it the same way.
         if self.g_pending {
             self.g_pending = false;
             return match key {
@@ -1057,9 +1029,6 @@ impl VimKeymap {
         };
         match cmd {
             ExCommand::Write => vec![EditCommand::Save],
-            // Closing is a pane operation, and `EditCommand` has no way to ask for one — the
-            // editor cannot close the surface hosting it. `:wq` therefore saves without closing
-            // and `:q` does nothing. Wiring these needs a close command routed to the stack.
             ExCommand::WriteQuit => vec![EditCommand::Save],
             ExCommand::Quit { .. } => vec![],
             ExCommand::NoHighlight => vec![EditCommand::ClearSearchHighlight],
@@ -1134,7 +1103,6 @@ impl Keymap for VimKeymap {
 }
 
 impl VimKeymap {
-    /// Dispatch one key while maintaining the dot-repeat and macro records.
     fn record_and_dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         let stops_recording =
             self.macro_record.is_some() && k.key == "q" && self.mode == EditMode::Normal;
@@ -1169,7 +1137,6 @@ impl VimKeymap {
         cmds
     }
 
-    /// Interpret one key without any dot-repeat or macro bookkeeping.
     fn dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         let armed = self.insert_after_next;
         let mut cmds = self.dispatch_inner(k);
@@ -1537,8 +1504,6 @@ mod tests {
         );
     }
 
-    /// `motion_for` maps bare `e`, `E` and `_`, so a visual-mode `g` prefix has to be consumed
-    /// before the motion lookup or it resolves the wrong motion and leaves `g_pending` set.
     #[test]
     fn visual_g_prefixed_motions_are_not_shadowed() {
         let mut km = VimKeymap::default();
@@ -1557,7 +1522,6 @@ mod tests {
             run(&mut km, &["g", "_"]),
             vec![EditCommand::Select(Motion::LastNonBlank)]
         );
-        // The prefix must not leak into the next key.
         assert_eq!(
             run(&mut km, &["e"]),
             vec![EditCommand::Select(Motion::WordEnd)]

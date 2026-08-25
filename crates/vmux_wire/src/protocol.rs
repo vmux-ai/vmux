@@ -61,16 +61,10 @@ pub struct ManagedMcpServer {
     pub headers: Vec<(String, String)>,
 }
 
-/// How a spawned page is placed relative to its anchor pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum PlacementMode {
-    /// Default: don't spawn a new pane unless necessary. Reuse the agent's
-    /// existing terminal region (stack the new terminal into it); split one pane
-    /// off the agent only when no region exists yet.
     Auto,
-    /// New pane split off the anchor pane (X/Y), in the given direction.
     Split,
-    /// New stack added to the anchor pane itself (Z); the pane keeps its size.
     Stack,
 }
 
@@ -160,20 +154,9 @@ pub enum AgentCommand {
         command: String,
         direction: AgentPaneDirection,
         focus: bool,
-        /// Anchor a newly opened terminal next to this page (a terminal's
-        /// `ProcessId`); `None` anchors to the agent's own page. Ignored when
-        /// `terminal` is set (reuse).
         beside: Option<ProcessId>,
-        /// How a newly opened terminal is placed relative to its anchor pane
-        /// (split into a new pane, or stacked into the anchor pane). Ignored when
-        /// `terminal` is set.
         mode: PlacementMode,
-        /// Run in this existing terminal (its `ProcessId`); `None` opens a new
-        /// terminal beside the agent.
         terminal: Option<ProcessId>,
-        /// When set, the GUI appends a shell-aware completion print using this
-        /// token so the caller can detect command completion + exit code in the
-        /// terminal output. `None` keeps the legacy fire-and-forget behavior.
         done_marker: Option<String>,
     },
     Notify {
@@ -184,28 +167,16 @@ pub enum AgentCommand {
         anchor: ProcessId,
         path: String,
         line: Option<u32>,
-        /// 0-based start/end columns of the match on `line`, for highlighting
-        /// (e.g. a grep hit). `None` = no column highlight (plain open/scroll).
         col: Option<u32>,
         end_col: Option<u32>,
         kind: FileTouchKind,
     },
-    /// Create (or reuse) an isolated git worktree for the calling agent's tab and return its
-    /// path. Resolved to the tab via `anchor`. Appended at the end so rkyv's positional enum
-    /// discriminants stay stable for existing variants (the daemon is long-lived across GUI
-    /// updates, so shifting a discriminant would break wire compat mid-upgrade).
     CreateWorktree {
         anchor: ProcessId,
     },
-    /// The calling CLI agent finished a turn (fired from its `Stop` hook). Resolved to the agent
-    /// via `anchor`; the GUI raises `AgentAttention` so the follow-pane auto-tidy and the
-    /// done-dot fire at turn-end (the terminal bell only fires on idle/permission, not turn-end).
-    /// Appended at the end to keep rkyv's positional enum discriminants stable.
     TurnEnded {
         anchor: ProcessId,
     },
-    /// Run with caller-requested pane placement. Appended to keep existing rkyv variant layouts
-    /// and positional discriminants stable across daemon upgrades.
     RunWithPlacementOverride {
         anchor: ProcessId,
         command: String,
@@ -216,18 +187,12 @@ pub enum AgentCommand {
         terminal: Option<ProcessId>,
         done_marker: Option<String>,
     },
-    /// Replace the calling CLI session with its ACP runtime, preserving session id and cwd.
-    /// Appended to keep existing rkyv variant layouts and positional discriminants stable.
     ResumeInAcp {
         anchor: ProcessId,
     },
-    /// Ask the user to select a project directory for the calling agent's tab.
-    /// Appended to preserve existing positional enum discriminants.
     ChooseWorkspace {
         anchor: ProcessId,
     },
-    /// Create an isolated worktree on an exact user-selected branch.
-    /// Appended to preserve existing positional enum discriminants.
     CreateWorktreeOnBranch {
         anchor: ProcessId,
         branch: String,
@@ -240,43 +205,31 @@ pub enum AgentCommand {
         title: Option<String>,
         favicon_url: Option<String>,
     },
-    /// Show a native multiple-choice prompt and resume the same agent session with the answer.
-    /// Appended to preserve existing positional enum discriminants.
     RequestUserChoice {
         anchor: ProcessId,
         question: String,
         options: Vec<String>,
     },
-    /// Select a known project path, falling back to the native folder picker when it is invalid.
-    /// Appended to preserve existing positional enum discriminants.
     ChooseWorkspaceAtPath {
         anchor: ProcessId,
         path: String,
     },
-    /// Prepare a worktree immediately before mutation, reusing a known checkout when possible.
-    /// Appended to preserve existing positional enum discriminants.
     PrepareWorktree {
         anchor: ProcessId,
         path: Option<String>,
         task: Option<String>,
         create: bool,
     },
-    /// Forward global-search matches to the editor. Appended to preserve existing positional enum
-    /// discriminants.
     FileSearch {
         anchor: ProcessId,
         root: String,
         query: String,
         matches: Vec<FileSearchMatch>,
     },
-    /// Replace the generated conversation title. Appended to preserve existing positional enum
-    /// discriminants.
     SetConversationTitle {
         anchor: ProcessId,
         title: String,
     },
-    /// Write a user-approved Markdown note into the vmux Knowledge base.
-    /// Appended to preserve existing positional enum discriminants.
     WriteKnowledge {
         anchor: ProcessId,
         path: Option<String>,
@@ -294,16 +247,11 @@ pub enum AgentCommand {
         line: u32,
         limit: u32,
     },
-    /// The commands a remote peer may also issue. Appended last so the preceding positional
-    /// rkyv discriminants keep their existing values.
     Shared(SharedAgentCommand),
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Stop-recording round-trip bound. `finishWriting` after live encoding is
-/// fast, but a large clip's moov flush can take a few seconds. Comfortably
-/// under vibe's 60s MCP tool timeout.
 pub const RECORD_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -328,17 +276,12 @@ pub enum AgentQuery {
     ReadTerminal {
         process_id: ProcessId,
     },
-    /// Like `ReadTerminal` but returns the full scrollback history plus the
-    /// visible screen as plain text (used to capture a command's complete
-    /// output, not just the current viewport).
     ReadTerminalFull {
         process_id: ProcessId,
     },
     CommandExit {
         process_id: ProcessId,
     },
-    /// Last agent `run` completion for this process, correlated by the per-run
-    /// token carried in the service run-marker escape.
     RunCompletion {
         process_id: ProcessId,
     },
@@ -414,22 +357,14 @@ pub enum AgentQueryResult {
 )]
 pub enum ApprovalDecision {
     Allow,
-    /// The default, so that a payload that arrives malformed or half-built refuses the tool
-    /// rather than running it.
     #[default]
     Deny,
     AllowAlways,
 }
 
 impl ApprovalDecision {
-    /// The answers a client offers, in the order it lists and numbers them.
-    ///
-    /// Declaration order is not that order — `Deny` is declared second but offered last — so the
-    /// buttons and the number keys that pick between them both read the sequence from here rather
-    /// than each spelling it out and risking disagreement about what `2` means.
     pub const OFFERED: [Self; 3] = [Self::Allow, Self::AllowAlways, Self::Deny];
 
-    /// The answer at a zero-based position in [`Self::OFFERED`], or `None` past the end.
     pub fn for_index(index: usize) -> Option<Self> {
         Self::OFFERED.get(index).copied()
     }
@@ -439,8 +374,6 @@ impl ApprovalDecision {
 pub enum AgentRunStatus {
     Streaming,
     Idle,
-    /// The user interrupted the in-flight turn (Esc / Ctrl+C / Stop). Distinct from `Idle`
-    /// so the UI can mark the stopped turn and pause the queue instead of auto-advancing.
     Interrupted,
     Errored(String),
 }
@@ -540,7 +473,6 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
     }
 }
 
-/// A local file attached to an agent prompt.
 #[derive(
     Debug,
     Clone,
@@ -559,7 +491,6 @@ pub struct AgentAttachment {
     pub size: u64,
 }
 
-/// Messages sent from the GUI client to the service.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
@@ -666,7 +597,6 @@ pub enum ClientMessage {
     DetachPageAgent {
         sid: String,
     },
-    /// Select a model exposed by an ACP session's model configuration option.
     AcpSetModel {
         sid: String,
         request_id: u64,
@@ -681,7 +611,6 @@ pub enum ClientMessage {
         content: String,
         is_error: bool,
     },
-    /// Spawn an ACP (Agent Client Protocol) agent subprocess and start a session.
     SpawnAcpAgent {
         sid: String,
         agent_id: String,
@@ -689,33 +618,22 @@ pub enum ClientMessage {
         args: Vec<String>,
         env: Vec<(String, String)>,
         cwd: String,
-        /// Anchor that ties this agent's vmux_mcp tool calls back to its pane.
         anchor: ProcessId,
-        /// The `vmux mcp --anchor …` sidecar to hand the agent as an MCP server (scope C).
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
-        /// When set, resume this agent-assigned ACP session id via `session/load` instead of
-        /// starting a fresh session (gated on the agent's `loadSession` capability).
         resume_acp_session_id: Option<String>,
-        /// MCP servers imported into vmux Registry and managed for every launched agent.
         managed_mcp_servers: Vec<ManagedMcpServer>,
-        /// Launch-time reasoning-effort level for this session (agent-specific; e.g. Claude
-        /// forwards it through `claudeCode.options.effort`). `None` = the agent's own default.
         effort: Option<String>,
     },
     Status,
-    /// Update the host-side working directory used by an existing ACP session.
     RebindAcpWorkspace {
         sid: String,
         cwd: String,
     },
-    /// The operations a remote peer may also perform. Appended last so the preceding positional
-    /// rkyv discriminants keep their existing values.
     Shared(SharedMessage),
 }
 
 impl ClientMessage {
-    /// Address a prompt to a session.
     pub fn agent_input(
         sid: String,
         text: String,
@@ -749,12 +667,10 @@ pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String
     }
 }
 
-/// Returns the visible user prompt from a vmux private-context envelope.
 pub fn extract_display_prompt(prompt: &str) -> Option<&str> {
     split_private_context_prompt(prompt).map(|(_, display)| display)
 }
 
-/// Returns the private context and visible prompt from a vmux context envelope.
 pub fn split_private_context_prompt(prompt: &str) -> Option<(&str, &str)> {
     split_length_delimited_private_context(prompt).or_else(|| {
         let body = private_context_body(prompt)?;
@@ -763,7 +679,6 @@ pub fn split_private_context_prompt(prompt: &str) -> Option<(&str, &str)> {
     })
 }
 
-/// Returns whether text contains a complete vmux private-context envelope.
 pub fn has_private_context_envelope(prompt: &str) -> bool {
     private_context_body(prompt).is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
 }
@@ -790,90 +705,46 @@ fn split_length_delimited_private_context(prompt: &str) -> Option<(&str, &str)> 
     Some((context, display))
 }
 
-/// Vim-style visual/copy-mode action sent by the GUI to the service.
-///
-/// All movement keys (Left/Right/Up/Down/LineStart/LineEnd/PageUp/PageDown)
-/// reposition the copy-mode cursor. If visual selection is active, movement
-/// also extends the selection to the new cursor position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum CopyModeKey {
-    /// Move cursor one cell left (clamped to col 0).
     Left,
-    /// Move cursor one cell right (clamped to last column).
     Right,
-    /// Move cursor one row up (clamped to row 0).
     Up,
-    /// Move cursor one row down (clamped to last row).
     Down,
-    /// Jump cursor to column 0 of the current row.
     LineStart,
-    /// Jump cursor to the last column of the current row.
     LineEnd,
-    /// Jump cursor to the last non-blank cell of the current row (`g_`).
     LastNonBlank,
-    /// Jump cursor to the first non-blank cell of the current row (`^`).
     FirstNonBlank,
-    /// Move to the next vi word start (`w`).
     WordForward,
-    /// Move to the next whitespace-delimited WORD start (`W`).
     BigWordForward,
-    /// Move to the previous vi word start (`b`).
     WordBackward,
-    /// Move to the previous whitespace-delimited WORD start (`B`).
     BigWordBackward,
-    /// Move to the next vi word end (`e`).
     WordEndForward,
-    /// Move to the next whitespace-delimited WORD end (`E`).
     BigWordEndForward,
-    /// Move to the previous vi word end (`ge`).
     WordEndBackward,
-    /// Move to the previous whitespace-delimited WORD end (`gE`).
     BigWordEndBackward,
-    /// Move to the first visible row (`gg`).
     Top,
-    /// Move to the last visible row (`G`).
     Bottom,
-    /// Move to the top visible row (`H`).
     ScreenTop,
-    /// Move to the middle visible row (`M`).
     ScreenMiddle,
-    /// Move to the bottom visible row (`L`).
     ScreenBottom,
-    /// Move to the previous paragraph/blank-line boundary (`{`).
     PrevParagraph,
-    /// Move to the next paragraph/blank-line boundary (`}`).
     NextParagraph,
-    /// Find a character forward on the current line (`f{char}`).
     FindForward(char),
-    /// Find a character backward on the current line (`F{char}`).
     FindBackward(char),
-    /// Move until before a character forward on the current line (`t{char}`).
     TillForward(char),
-    /// Move until after a character backward on the current line (`T{char}`).
     TillBackward(char),
-    /// Repeat the last find/till motion (`;`).
     RepeatFind,
-    /// Repeat the last find/till motion in reverse (`,`).
     RepeatFindReverse,
-    /// Swap visual anchor and cursor (`o`).
     SwapSelectionEnds,
-    /// Move cursor up by half a screen.
     PageUp,
-    /// Move cursor down by half a screen.
     PageDown,
-    /// Re-anchor the selection at the current cursor position. Subsequent
-    /// movement keys extend the selection from this anchor.
     StartSelection,
-    /// Select full lines from the current cursor row. Subsequent movement
-    /// extends the linewise selection by row.
     StartLineSelection,
-    /// Return the current selection text and exit copy mode.
     Copy,
-    /// Discard any selection and exit copy mode.
     Exit,
 }
 
-/// Messages sent from the service to the GUI client.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum CommandLifecycleKind {
     Started,
@@ -971,7 +842,6 @@ pub enum ServiceMessage {
         name: String,
         args_json: String,
     },
-    /// An ACP agent created a terminal; the GUI spawns a visible pane bound to `process_id`.
     AcpTerminalCreated {
         sid: String,
         terminal_id: String,
@@ -980,7 +850,6 @@ pub enum ServiceMessage {
         args: Vec<String>,
         cwd: Option<String>,
     },
-    /// An ACP tool-call carries a proposed edit; the GUI shows it as a pending diff overlay.
     AcpProposedDiff {
         sid: String,
         call_id: String,
@@ -992,25 +861,19 @@ pub enum ServiceMessage {
         uptime_secs: u64,
         process_count: u32,
     },
-    /// The ACP agent's session was created (or loaded); carries the agent-assigned session id so
-    /// the GUI can persist it (in the pane url) for a later `session/load` resume.
     AcpSessionCreated {
         sid: String,
         acp_session_id: String,
     },
-    /// Completion of a model selection request, correlated by `request_id`.
     AcpModelSelectionResult {
         sid: String,
         request_id: u64,
         model_id: String,
         succeeded: bool,
     },
-    /// The events a remote peer may also receive. Appended last so the preceding positional
-    /// rkyv discriminants keep their existing values.
     Shared(SharedEvent),
 }
 
-/// One model exposed by an ACP session configuration selector.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AcpModelOption {
     pub id: String,
@@ -1018,7 +881,6 @@ pub struct AcpModelOption {
     pub description: Option<String>,
 }
 
-/// Metadata about a process, returned in ProcessList.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ProcessInfo {
     pub id: ProcessId,
@@ -1035,8 +897,6 @@ mod tests {
     use super::*;
     use crate::room::ClientOpId;
 
-    /// Reordering the variants would silently repoint the number keys — pressing `3` would stop
-    /// meaning deny — so the offered sequence is pinned independently of declaration order.
     #[test]
     fn deny_is_the_last_answer_offered_though_it_is_declared_second() {
         assert_eq!(
@@ -1080,9 +940,6 @@ mod tests {
         assert!(has_private_context_envelope(&echoed));
     }
 
-    /// The remote surface is exactly this set. A variant reaches a paired phone only by being
-    /// moved into `SharedMessage`, so widening it must be a deliberate edit here and not a
-    /// side effect of adding a variant to `ClientMessage`.
     #[test]
     fn shared_message_variants_are_the_whole_remote_surface() {
         assert_eq!(
@@ -1095,8 +952,6 @@ mod tests {
         );
     }
 
-    /// Companion gate to [`shared_message_variants_are_the_whole_remote_surface`], for the
-    /// commands a remote peer may issue.
     #[test]
     fn shared_agent_command_variants_are_the_whole_remote_surface() {
         assert_eq!(
@@ -1112,9 +967,6 @@ mod tests {
         );
     }
 
-    /// Companion gate to [`shared_message_variants_are_the_whole_remote_surface`], for the events
-    /// a remote peer may receive. Terminal output, proposed diffs and process lifecycle are
-    /// absent by design.
     #[test]
     fn shared_event_variants_are_the_whole_remote_surface() {
         assert_eq!(
@@ -1804,8 +1656,6 @@ mod tests {
         }
     }
 
-    /// One variant carries prompts with and without attachments, so the builder no longer picks
-    /// between two shapes — but it still has to route the attachments it was given.
     #[test]
     fn the_prompt_builder_addresses_the_session_and_keeps_attachments() {
         assert!(matches!(

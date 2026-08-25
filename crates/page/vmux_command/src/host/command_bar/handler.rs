@@ -141,8 +141,6 @@ pub struct PendingCommandBarReveal {
 }
 
 impl PendingCommandBarReveal {
-    /// True once a real open is in flight. The prewarm placeholder carries [`OpenId::NONE`], is
-    /// idle, and must not keep the event loop awake.
     pub fn is_active(&self) -> bool {
         self.open_id.is_open()
     }
@@ -490,7 +488,6 @@ fn command_bar_cancel_pending_stack_for_active_open(
     Some((stack, previous_stack))
 }
 
-/// The pages that host a launcher of their own, and the way to hand one the caret.
 #[derive(SystemParam)]
 struct LauncherHosts<'w, 's> {
     pages: Query<'w, 's, (), With<HostsLauncher>>,
@@ -524,10 +521,6 @@ fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<RendersLauncherPanel>>,
     all_children: Query<&Children>,
-    // Filtered to pages because a stack carries `PageMetadata` of its own; only the page showing
-    // inside it answers "what is open here". Either marker counts: a natively-hosted page has no
-    // `WebviewSource`, and matching on that alone left the bar reading an empty url for one — which
-    // reads the same as an empty pane, so it stopped offering to reuse the launcher in place.
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
     focus: Res<CommandBarWorkspaceSnapshot>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
@@ -570,9 +563,6 @@ fn handle_open_command_bar(
     let url_override = request.url_override;
     let space_switch = request.space_switch;
 
-    // `Cmd+K` on an open bar closes it, and that has to run the same cleanup as an explicit
-    // dismiss: a pending `Cmd+T` stack left alive is an orphan tab, and no browser reclaims
-    // `KeyboardOwner`.
     let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, space_switch);
 
     let mut active_stack_override = None;
@@ -594,7 +584,6 @@ fn handle_open_command_bar(
     if (should_dismiss || toggle_closes) && is_open {
         close_command_bar_panel(layout_e, &mut commands);
         let mut pending_launch = snapshot_params.p1();
-        // Discard empty tab created by a previous Cmd+T
         if let Some(stack_e) = pending_launch.stack.take() {
             abandoned.write(PendingStackAbandoned {
                 stack: stack_e,
@@ -609,8 +598,6 @@ fn handle_open_command_bar(
         return;
     }
 
-    // Navigation dismiss: close the panel only, leave empty tab for
-    // handle_tab_commands / on_pane_select to clean up.
     if should_dismiss_nav && is_open {
         close_command_bar_panel(layout_e, &mut commands);
         snapshot_params.p1().needs_open = false;
@@ -664,7 +651,6 @@ fn handle_open_command_bar(
         }
     }
 
-    // Gather current URL (empty for new tab mode)
     let current_url = if let Some(override_url) = url_override {
         override_url
     } else if is_new_stack {
@@ -713,11 +699,6 @@ fn handle_open_command_bar(
     ));
 }
 
-/// Asks the layout page to unmount the panel.
-///
-/// The host cannot clear `CommandBarPanelActive` itself: the page owns the marker and removes it
-/// on unmount, so clearing it here would hand the keyboard back to the pane a frame before the
-/// panel actually goes away.
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
     commands.trigger(BinHostEmitEvent::from_rkyv(
         layout,
@@ -734,17 +715,14 @@ struct CommandBarActionQueries<'w, 's> {
 }
 
 impl CommandBarActionQueries<'_, '_> {
-    /// The stack an action lands in when the command bar did not open an empty one for it.
     fn focused_stack(&self) -> Option<Entity> {
         self.focus.stack
     }
 
-    /// The pane an action lands in when there is no stack to put it in.
     fn focused_pane(&self) -> Option<Entity> {
         self.focus.pane
     }
 
-    /// The stack holding the start page that raised this action, which can transition in place.
     fn inline_transition_stack(&self, webview: Entity) -> Option<Entity> {
         if !self.launcher_hosts.contains(webview) {
             return None;
@@ -1041,7 +1019,7 @@ fn on_command_bar_action(
                         writer_params.p0().write(cmd);
                     }
                 }
-            } // end reattach else
+            }
         }
         CommandBarActionEvent::Command { id, open } => {
             let is_contributed = resource_params
@@ -1097,7 +1075,6 @@ fn on_command_bar_action(
                 });
                 writer_params.p0().write(cmd);
             }
-            // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(stack_e) = empty_stack {
                 abandoned_writer.write(PendingStackAbandoned {
                     stack: stack_e,
@@ -1155,7 +1132,6 @@ fn on_command_bar_action(
         }
     }
 
-    // Close command bar and restore keyboard
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
@@ -1365,7 +1341,6 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
             name.clone()
         };
 
-        // Absolute path so the file:// editor (and terminal cwd) can open it directly.
         let child = resolved_parent.join(&name);
         let full_path = if is_dir {
             format!("{}/", child.display())
@@ -1963,8 +1938,6 @@ mod tests {
         app.update();
     }
 
-    /// The panel lives in the layout page, so the payload has to reach the layout webview under the
-    /// layout-specific id. Addressing the modal instead leaves the bar permanently empty.
     #[test]
     fn opening_the_command_bar_pushes_the_payload_to_the_layout_page() {
         let mut app = panel_app();
@@ -1981,8 +1954,6 @@ mod tests {
         );
     }
 
-    /// `Cmd+K` while the panel is up must close it. The host cannot unmount the panel itself, so a
-    /// missing close event turns the toggle into a no-op and the bar can never be dismissed.
     #[test]
     fn toggling_an_open_command_bar_asks_the_page_to_close_it() {
         let mut app = panel_app();
@@ -2002,9 +1973,6 @@ mod tests {
         );
     }
 
-    /// `Cmd+T` then `Cmd+K` must discard the empty stack the first command staged. Closing by
-    /// toggle used to return before the dismiss cleanup, orphaning the tab and leaving no browser
-    /// holding `KeyboardOwner`.
     #[test]
     fn toggling_closed_discards_the_stack_a_pending_new_tab_staged() {
         let mut app = panel_app();
@@ -2029,8 +1997,6 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
         );
-        // Disposal is the workspace's: closing the tab the stack was staged in, and putting the
-        // keyboard back, are things only it can do. The bar's part is reporting that it walked away.
         let abandoned: Vec<Entity> = app
             .world_mut()
             .resource_mut::<Messages<PendingStackAbandoned>>()
@@ -2043,8 +2009,6 @@ mod tests {
         assert!(!ctx.needs_open);
     }
 
-    /// A space switch reopens rather than toggles, so the bar survives switching spaces from
-    /// inside it.
     #[test]
     fn space_switch_reopens_an_already_open_command_bar() {
         let mut app = panel_app();

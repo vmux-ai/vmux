@@ -1,9 +1,3 @@
-//! Commands an agent aims at itself: its own pane, its own tab, its own worktree.
-//!
-//! These are ordered and gated rather than dispatched as they arrive — a worktree has to exist
-//! before anything runs inside it, so a failed `create_worktree` blocks its siblings for that
-//! frame instead of letting them run against the wrong directory.
-
 use std::path::Path;
 
 use bevy::prelude::*;
@@ -231,9 +225,6 @@ pub(super) fn handle_agent_self_commands(
         .cloned()
         .unwrap_or_default()
         .0;
-    // Anchors split during this batch. Several `run`s dispatched in one tick all
-    // resolve to the same agent pane; the first splits it, the rest must extend
-    // that split rather than re-split the leaf (which would orphan empty panes).
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     let mut worktree_created_this_batch: std::collections::HashMap<Entity, String> =
         std::collections::HashMap::new();
@@ -409,7 +400,6 @@ pub(super) fn handle_agent_self_commands(
                             }
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
-                        // Resolve an explicit `beside` anchor up front (errors if stale).
                         let beside_pane = match beside {
                             Some(pid) => {
                                 match RunTerminal::new(*pid).pane(&term_pids, &ctx.child_of_q) {
@@ -1185,10 +1175,6 @@ mod tests {
     use super::*;
     use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
 
-    /// A `run` command writes a [`TerminalStackSpawnRequest`] that the terminal crate turns into a
-    /// pane in the same frame. Lose the edge and the spawn slips a frame behind the agent command
-    /// that asked for it, so the schedule is asked directly rather than trusted to the order this
-    /// plugin happens to be added in.
     #[test]
     fn agent_run_spawns_terminal_before_next_agent_command_frame() {
         let mut app = App::new();

@@ -5,11 +5,6 @@ pub use crate::history::{
 
 pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
-/// Which opening of the command bar a payload belongs to.
-///
-/// The host mints one per open and the page echoes it back, so both ends can tell a fresh open
-/// from a live data refresh of the one already on screen — the palette resets, acks and refocuses
-/// on the former and must leave the user's typing alone on the latter.
 #[derive(
     Clone,
     Copy,
@@ -28,34 +23,21 @@ pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 pub struct OpenId(pub u64);
 
 impl OpenId {
-    /// No open. The prewarmed command bar carries this until a real open replaces it, and the
-    /// start page's live refreshes keep it so they do not read as reopens.
     pub const NONE: Self = Self(0);
 
-    /// Whether this names a real open rather than [`OpenId::NONE`].
-    ///
-    /// Only a real open is worth acknowledging, revealing, or keeping the event loop awake for.
     pub const fn is_open(self) -> bool {
         self.0 != Self::NONE.0
     }
 
-    /// Whether a payload arriving under this id should replace what the palette is showing and
-    /// clear its input, given the `current` id on screen.
     pub const fn should_reset_input(self, current: Self) -> bool {
         !self.is_open() || current.0 != self.0
     }
 
-    /// Whether the palette should (re)focus and select-all its input, given the id it last
-    /// focused for.
-    ///
-    /// Only on a fresh (re)open. Live data refreshes (e.g. the start page's current-work
-    /// snapshot) reuse the same id and MUST NOT re-select, or they clobber in-progress typing.
     pub const fn should_refocus(self, last_focused: Self) -> bool {
         last_focused.0 != self.0
     }
 }
 
-/// Search provider used when command-bar input is not a URL or local path.
 #[derive(
     Clone,
     Copy,
@@ -111,7 +93,6 @@ impl SearchEngine {
         }
     }
 
-    /// Build a search result URL for `query`.
     pub fn search_url(self, query: &str) -> String {
         let query: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
         match self {
@@ -203,10 +184,6 @@ pub struct CommandBarPage {
     pub keywords: Vec<String>,
     pub icon: crate::icon::PageIcon,
     pub shortcut: String,
-    /// Whether typing a prompt and pressing Enter can send it here.
-    ///
-    /// Set by whoever contributed the page. The command bar offers these as prompt targets
-    /// without knowing what they are.
     #[serde(default)]
     pub prompt_target: bool,
 }
@@ -246,15 +223,10 @@ pub struct CommandBarTab {
     pub pane_id: u64,
     pub tab_index: u32,
     pub is_active: bool,
-    /// Human-readable location of this open page, `space / pane N / stack M`,
-    /// shown instead of a generic "Stack" badge.
     #[serde(default)]
     pub location: String,
 }
 
-/// A file or directory inside a current work dir (the cwd of an open terminal/agent
-/// pane), surfaced in the command bar's "current work" section so files can be opened
-/// via `file://` fast. `is_dir` selects the icon and open behavior.
 #[derive(
     Clone,
     Debug,
@@ -272,8 +244,6 @@ pub struct CommandBarWorkDir {
     pub is_dir: bool,
 }
 
-/// A recently-opened `file://` entry (from browser history), surfaced in the
-/// command bar's "current work" section. `url` is the `file://` URL to reopen.
 #[derive(
     Clone,
     Debug,
@@ -319,53 +289,33 @@ pub struct CommandBarCommandEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-/// What the user chose in the command bar.
-///
-/// One variant per kind of row, carrying only what that kind means. This was five fields and a
-/// string tag, where `attachments` and `target_url` meant something to prompts alone and nothing
-/// checked that the sender and the host agreed on the tag.
 pub enum CommandBarActionEvent {
-    /// Send a prompt to a page that accepts one.
-    ///
-    /// Carries no [`OpenTarget`](crate::open_target::OpenTarget): a prompt goes to the stack the
-    /// command bar opened or the focused one, and never to a target the user picked. The struct
-    /// this replaced carried the field for every action, so the palette filled one in here and the
-    /// host had always ignored it.
     Prompt {
         text: String,
-        /// The prompt target the user picked, when they picked one explicitly.
         target_url: Option<String>,
         attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
     },
-    /// Open a url, a path on disk, or a search for what was typed.
     Open {
         value: String,
         open: Option<crate::open_target::OpenTarget>,
     },
-    /// Go to the terminal already running this row, or start one.
-    ///
-    /// The value is either a terminal page url or a directory to start in. Which one it is is
-    /// `vmux_terminal`'s to answer, through `CommandBarTerminalsSnapshot::running`.
-    Terminal { value: String },
-    /// Run a command, claim a contributed row, or open a page named by id.
+    Terminal {
+        value: String,
+    },
     Command {
         id: String,
         open: Option<crate::open_target::OpenTarget>,
     },
-    /// Attach a space.
-    Space { id: String },
-    /// Focus a tab already open in a pane.
-    ///
-    /// Typed rather than a `"{pane}:{index}"` string, so a malformed pair cannot reach the host.
-    SwitchTab { pane: u64, index: usize },
-    /// Close the command bar without doing anything.
+    Space {
+        id: String,
+    },
+    SwitchTab {
+        pane: u64,
+        index: usize,
+    },
     Dismiss,
 }
 
-/// Page→host: the launcher's workspace picker chose a directory to work in.
-///
-/// Lives here rather than with the rest of the start page's vocabulary because the palette emits
-/// it, and the palette answers `vmux://command-bar/` as well as `vmux://start/`.
 #[derive(
     Clone,
     Debug,
@@ -383,7 +333,6 @@ pub struct StartSelectWorkspace {
 }
 
 impl CommandBarActionEvent {
-    /// Open what the user typed or picked, in the target they asked for.
     pub fn open(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
         Self::Open {
             value: value.to_string(),
@@ -391,10 +340,6 @@ impl CommandBarActionEvent {
         }
     }
 
-    /// Send a prompt, with whatever the composer had attached.
-    ///
-    /// An empty `target_url` means the user picked no target, which is not the same as picking one
-    /// that happens to be blank — the host falls back to the preferred page only for `None`.
     pub fn prompt(
         text: &str,
         target_url: &str,
@@ -432,17 +377,8 @@ impl CommandBarActionEvent {
 )]
 pub struct CommandBarReadyEvent;
 
-/// The event id [`CommandBarKey`] is pushed under.
 pub const COMMAND_BAR_KEY_EVENT: &str = "command-bar-key";
 
-/// What the keymap made of a key the command bar handed over, sent back to the page that sent it.
-///
-/// The page keeps the doing; only the deciding moved. It is the only side that knows what its
-/// result list holds right now, and a selection that moved on the host would have to be shipped
-/// back anyway — so what travels is the verb, once, in the direction that already has the state.
-///
-/// This is why the palette no longer names a key anywhere: `Ctrl+n` is a line in the keymap rather
-/// than a branch in a `keydown`, and rebinding it in `settings.json` needs no page to agree.
 #[derive(
     Clone,
     Copy,
@@ -501,15 +437,10 @@ pub struct CommandBarSizeEvent {
     pub shell_height: u32,
 }
 
-/// What the user has typed into the command bar.
-///
-/// The palette decides what Enter means from the text alone, so the rules live together here
-/// rather than beside whichever caller happens to need one of them.
 #[derive(Clone, Copy, Debug)]
 pub struct CommandBarQuery<'a>(pub &'a str);
 
 impl CommandBarQuery<'_> {
-    /// Whether Enter should navigate to what was typed rather than run the highlighted result.
     pub fn opens_typed_url_on_enter(
         &self,
         open_target: Option<crate::open_target::OpenTarget>,
@@ -523,7 +454,6 @@ impl CommandBarQuery<'_> {
             && looks_like_url(query)
     }
 
-    /// Whether this reads as a prompt for an agent rather than a command, a url or a path.
     pub fn is_start_prompt(&self) -> bool {
         let query = self.0.trim();
         !query.is_empty()
@@ -792,11 +722,8 @@ mod tests {
 
     #[test]
     fn command_bar_refocus_only_on_open_id_change() {
-        // Fresh open (open id changed) → focus + select-all.
         assert!(OpenId::NONE.should_refocus(OpenId(u64::MAX)));
         assert!(OpenId(8).should_refocus(OpenId(7)));
-        // Live refresh reuses the same open id → must NOT refocus (else it
-        // select-alls and clobbers in-progress typing on vmux://start).
         assert!(!OpenId::NONE.should_refocus(OpenId::NONE));
         assert!(!OpenId(7).should_refocus(OpenId(7)));
     }

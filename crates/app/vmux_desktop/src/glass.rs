@@ -31,8 +31,6 @@ impl Plugin for GlassPlugin {
     }
 }
 
-/// How long to keep re-asserting activation after reveal before giving up, so a degenerate case
-/// (activation never confirms) cannot wake the loop forever.
 const ACTIVATION_RETRY_BUDGET: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
@@ -153,9 +151,6 @@ fn reveal_window_after_layout_ready(
     state.revealed_at = Some(Instant::now());
 }
 
-/// After reveal, apply the persisted fullscreen intent once: enter native
-/// fullscreen if it was saved, then mark restore complete so geometry capture
-/// can begin. Consumes [`crate::window_state::PendingFullscreenRestore`].
 fn restore_fullscreen_after_reveal(
     state: NonSend<GlassState>,
     pending: Option<Res<crate::window_state::PendingFullscreenRestore>>,
@@ -195,9 +190,6 @@ fn should_attempt_activation(
     }
 }
 
-/// The reveal frame shows the window, but the app is still in the background (the splash is a
-/// nonactivating panel). Activation is async, so retry it each frame until the app is active and
-/// the window is key, waking the loop in between so the retry actually runs.
 fn ensure_window_active_after_reveal(
     mut state: NonSendMut<GlassState>,
     window: Query<Entity, With<bevy::window::PrimaryWindow>>,
@@ -217,8 +209,6 @@ fn ensure_window_active_after_reveal(
     }
 }
 
-/// Toggle native macOS fullscreen when the `ToggleFullscreen` command fires (Ctrl+Cmd+F).
-/// vmux hides the native window buttons, so this is the entry point into/out of fullscreen.
 fn handle_toggle_fullscreen_command(
     state: NonSend<GlassState>,
     mut reader: MessageReader<vmux_command::AppCommand>,

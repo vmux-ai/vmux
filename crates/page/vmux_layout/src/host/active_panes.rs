@@ -22,30 +22,20 @@ impl Plugin for ActivePanesPlugin {
     }
 }
 
-/// Identity of a participant whose focus the layout tracks. The local human
-/// drives OS keyboard focus; agents each get their own active pane and focus
-/// ring. Remote participants are a future variant feeding the same flow.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ProfileId {
     Local,
     Agent(String),
 }
 
-/// The tab/pane/stack a profile is currently focused on. Same shape as
-/// `FocusedStack`, but per profile.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct ActiveStack {
     pub tab: Option<Entity>,
     pub pane: Option<Entity>,
     pub stack: Option<Entity>,
-    /// The agent kind owning this pane, when the profile is an agent. Drives the
-    /// avatar badge on that agent's focus ring. `None` for the local human.
     pub kind: Option<vmux_core::agent::AgentKind>,
 }
 
-/// Per-profile active pane. `ProfileId::Local` mirrors `FocusedStack` every
-/// frame (so existing local-only consumers keep working); agent/remote entries
-/// are set via `ActivatePane`.
 #[derive(Resource, Default)]
 pub struct ActivePanes(pub HashMap<ProfileId, ActiveStack>);
 
@@ -54,16 +44,11 @@ impl ActivePanes {
         self.0.get(profile).copied()
     }
 
-    /// The local human's active pane — the single source of truth for "the
-    /// focused pane" (replaces the former global `FocusedStack`).
     pub fn local(&self) -> ActiveStack {
         self.0.get(&ProfileId::Local).copied().unwrap_or_default()
     }
 }
 
-/// A profile claims an active pane. Emitted by that profile's own actions: the
-/// local human's via `FocusedStack` mirroring, an agent's on navigate/click,
-/// and (future) a remote participant's over the network — the same message.
 #[derive(Message, Clone)]
 pub struct ActivatePane {
     pub profile: ProfileId,

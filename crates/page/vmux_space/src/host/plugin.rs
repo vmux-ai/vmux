@@ -13,8 +13,6 @@ use crate::event::{
 };
 use crate::spaces::{ActiveSpace, Spaces};
 
-/// Wires the spaces domain: space commands, active-space syncing, configured startup
-/// resolution, and the spaces list webview.
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
@@ -75,8 +73,6 @@ pub struct SaveSpaceRequest {
     pub path: PathBuf,
 }
 
-/// A space CRUD request from a non-web source (e.g. the agent/MCP). Relayed into
-/// the same `SpaceCommandEvent` flow the web spaces page uses.
 #[derive(Message, Clone)]
 pub struct SpaceCommandRequest {
     pub command: String,

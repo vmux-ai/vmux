@@ -20,8 +20,6 @@ use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, Widget
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
 use vmux_flex::prelude::*;
 
-/// Wires the settings webview: the warm page, the schema and value broadcasts it renders
-/// from, and the commands it sends back.
 pub struct SettingsViewPlugin;
 
 impl Plugin for SettingsViewPlugin {

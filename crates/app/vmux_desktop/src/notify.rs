@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use vmux_core::notify::OsNotify;
 
-/// Posts OS notifications, and asks the OS for permission to do so at startup.
 pub(crate) struct NotificationPlugin;
 
 impl Plugin for NotificationPlugin {

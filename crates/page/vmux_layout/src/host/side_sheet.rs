@@ -68,11 +68,9 @@ pub enum SideSheetPosition {
     Bottom,
 }
 
-/// Current width of the left side sheet (mutable during drag).
 #[derive(Resource)]
 pub struct SideSheetWidth(pub f32);
 
-/// Marker component for an active drag on the side sheet edge.
 #[derive(Component)]
 struct SideSheetDrag {
     start_cursor_x: f32,
@@ -125,7 +123,6 @@ fn side_sheet_drag_resize(
         return;
     }
 
-    // Hover detection on right edge of left side sheet
     for (pos, _, &rect) in &sheet_q {
         if *pos != SideSheetPosition::Left {
             continue;
@@ -157,7 +154,6 @@ fn sync_side_sheet_visibility(
     added: Query<Entity, (With<SideSheet>, Added<Open>)>,
     mut removed: RemovedComponents<Open>,
 ) {
-    // Determine if the left side sheet opened or closed
     let mut left_open: Option<bool> = None;
     for entity in &added {
         if let Ok((_, pos, _, _)) = side_sheet_q.get(entity)
@@ -176,7 +172,6 @@ fn sync_side_sheet_visibility(
 
     let Some(is_open) = left_open else { return };
 
-    // Initialize width from settings if not yet set
     if width_res.0 <= 0.0 {
         width_res.0 = crate::event::SIDE_SHEET_WIDTH_PX;
     }
@@ -197,12 +192,6 @@ fn sync_side_sheet_visibility(
     }
 }
 
-/// Show/hide macOS traffic-light buttons to match the side-sheet state.
-///
-/// Uses `Local<Option<bool>>` to track the last-applied state instead of
-/// change-detection (`Added` / `RemovedComponents`) so we never miss a
-/// toggle – e.g. when the side-sheet is restored from persistence during
-/// startup.
 #[cfg(target_os = "macos")]
 fn sync_window_buttons_visibility(
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
@@ -227,7 +216,6 @@ fn sync_window_buttons_visibility(
 
     WINIT_WINDOWS.with_borrow(|winit_windows| {
         let Some(winit_win) = winit_windows.get_window(entity) else {
-            // Window not yet created – reset so we retry next frame.
             warn!("sync_window_buttons: winit window not found, will retry");
             *last_open = None;
             return;
@@ -247,10 +235,6 @@ fn sync_window_buttons_visibility(
         unsafe {
             use objc_ffi::sel;
 
-            // On ARM64 Apple, variadic arguments are passed on the stack,
-            // but objc_msgSend reads them from registers.  We must cast
-            // objc_msgSend to a properly-typed non-variadic function pointer
-            // for each call signature.
             type MsgSendNoArgs =
                 unsafe extern "C" fn(*mut libc::c_void, *const libc::c_void) -> *mut libc::c_void;
             type MsgSendU64 = unsafe extern "C" fn(
@@ -271,7 +255,6 @@ fn sync_window_buttons_visibility(
                 return;
             }
             let hidden: libc::c_schar = if is_open { 0 } else { 1 };
-            // NSWindowButton values: Close=0, Miniaturize=1, Zoom=2
             for button_type in 0u64..=2 {
                 let button = send_u64(ns_window, sel("standardWindowButton:"), button_type);
                 if !button.is_null() {
@@ -284,8 +267,6 @@ fn sync_window_buttons_visibility(
 
 #[cfg(not(target_os = "macos"))]
 fn sync_window_buttons_visibility() {}
-
-// -- minimal objc runtime helpers (avoids adding objc2 as a direct dep) ------
 
 #[cfg(target_os = "macos")]
 mod objc_ffi {

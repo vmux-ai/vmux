@@ -12,8 +12,6 @@ use vmux_command::AppCommand;
 
 use crate::shortcut::{KeyCombo, Keymap, Modifiers};
 
-/// Installs the macOS NSEvent monitor that sees keys winit never delivers, and drains what it
-/// captured into app commands. Installation reads the keymap `init_shortcuts` builds.
 pub(crate) struct NativeKeyboardPlugin;
 
 impl Plugin for NativeKeyboardPlugin {
@@ -52,8 +50,6 @@ pub(crate) fn take_exit_fullscreen_request() -> bool {
     EXIT_FULLSCREEN_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
-/// Escape leaves fullscreen only when no page surface wants it — a focused terminal sends it to
-/// the PTY, and an open command bar closes on it.
 fn escape_exits_fullscreen(combo: &KeyCombo) -> bool {
     combo.is_bare_escape()
         && WINDOW_FULLSCREEN.load(Ordering::Relaxed)

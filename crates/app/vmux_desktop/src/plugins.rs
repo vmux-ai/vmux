@@ -1,9 +1,3 @@
-//! The plugin groups that [`crate::VmuxPlugin`] composes.
-//!
-//! Ordering constraint: `BrowserPlugin` snapshots every spawned `PageManifest` into
-//! `CefEmbeddedHosts` while it builds, so every group that registers a page — [`FeaturePlugins`]
-//! and `LayoutPlugin` — must be added before it.
-
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
     persistence::PersistencePlugin, remote::RemotePlugin, runtime::RuntimePlugin,
@@ -12,8 +6,6 @@ use crate::{
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 
-/// Foundation plugins: shared type registration, the page server, command routing, settings,
-/// and session persistence. Everything else assumes these are present.
 pub struct VmuxCorePlugins;
 
 impl PluginGroup for VmuxCorePlugins {
@@ -28,9 +20,6 @@ impl PluginGroup for VmuxCorePlugins {
     }
 }
 
-/// The OS-facing layer of the desktop app: window and display management, wake and render
-/// pacing, the native menu bar and tray, global shortcuts, permissions, phone pairing, and
-/// updates.
 pub struct DesktopPlugins;
 
 impl PluginGroup for DesktopPlugins {
@@ -60,13 +49,6 @@ impl PluginGroup for DesktopPlugins {
     }
 }
 
-/// The app's native window from launch onward: the light/dark seed and launch splash, boot
-/// phase tracking, the glass backdrop, geometry restore and capture, and relocating the
-/// window when its monitor disappears.
-///
-/// These are one unit rather than several because they already interlock — the splash and the
-/// glass reveal both read `SplashStatus`, the glass reveal is what marks the window geometry
-/// restored, and `WindowStatePlugin` takes over fullscreen when the glass path is compiled out.
 pub(crate) struct NativeWindowPlugin;
 
 impl Plugin for NativeWindowPlugin {
@@ -83,8 +65,6 @@ impl Plugin for NativeWindowPlugin {
     }
 }
 
-/// Captures the app for the agent: still screenshots and screen recordings. Either half can
-/// be compiled out, in which case its requests are rejected rather than silently dropped.
 struct MediaPlugin;
 
 impl Plugin for MediaPlugin {
@@ -103,8 +83,6 @@ impl Plugin for MediaPlugin {
     }
 }
 
-/// Checks for and installs releases, and restarts the app to apply them. Restart is also
-/// reachable on its own from the debug, extensions, and layout pages.
 struct UpdaterPlugin;
 
 impl Plugin for UpdaterPlugin {
@@ -119,12 +97,6 @@ impl Plugin for UpdaterPlugin {
     }
 }
 
-/// The user-facing feature domains, each owned by its crate. Every plugin here may register
-/// pages, so the group must be added before `BrowserPlugin`.
-///
-/// `KeyStrokePlugin` comes first and is owned by no domain: keystrokes reach several of these
-/// crates, and registering the shared type once here is what stops two of them registering it and
-/// delivering every key twice.
 pub struct FeaturePlugins;
 
 impl PluginGroup for FeaturePlugins {

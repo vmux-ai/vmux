@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-/// Stands in for [`crate::screenshot::ScreenshotPlugin`] when screenshots are compiled out,
-/// so requests are refused rather than silently dropped.
 #[cfg(not(feature = "screenshots"))]
 pub(crate) struct ScreenshotsDisabledPlugin;
 
@@ -15,8 +13,6 @@ impl Plugin for ScreenshotsDisabledPlugin {
     }
 }
 
-/// Stands in for [`crate::recording::RecordingPlugin`] when recording is compiled out, so
-/// start and stop requests are refused rather than silently dropped.
 #[cfg(not(feature = "recording"))]
 pub(crate) struct RecordingDisabledPlugin;
 
@@ -30,8 +26,6 @@ impl Plugin for RecordingDisabledPlugin {
     }
 }
 
-/// Stands in for the updater when it is compiled out: reports the check as unavailable
-/// instead of leaving it pending forever.
 #[cfg(not(feature = "updater"))]
 pub(crate) struct UpdaterDisabledPlugin;
 

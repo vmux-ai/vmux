@@ -1,9 +1,3 @@
-//! Choosing the directory an agent works in.
-//!
-//! A fresh agent has no project until someone picks one, so the pick is asynchronous: the agent is
-//! told to stop and wait, a picker or a path lookup runs on the IO pool, and the answer comes back
-//! as a continuation that resumes the same conversation.
-
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;

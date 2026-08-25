@@ -2,11 +2,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Type};
 
-/// Expand `#[string_id]` on a newtype over `String`.
-///
-/// An attribute rather than a derive so the thirteen derives every id needs are written once here
-/// instead of on each type, and rather than a `macro_rules!` that generates the struct too: this
-/// way `RoomId` is a real declaration that go-to-definition finds and a doc comment can describe.
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let docs = input
@@ -64,8 +59,6 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// The expansion replaces the body outright, so anything other than a `String` newtype would be
-/// silently discarded rather than rejected.
 fn reject_unless_string_newtype(input: &DeriveInput) -> syn::Result<()> {
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(

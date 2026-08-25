@@ -2,7 +2,6 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct RemoteArgs {
-    /// Revoke the old phone token before starting
     #[arg(long)]
     pub reset: bool,
 }
@@ -15,8 +14,6 @@ impl RemoteArgs {
         self.start_service()?;
         let token = vmux_client::RemoteToken::wait(Duration::from_secs(5))?;
         std::fs::write(vmux_client::RemotePaths::current().state(), b"enabled\n")?;
-        // Enabling has to come first: the port is the relay's answer to a registration the daemon
-        // only attempts once Remote is on, so asking before this write would always time out.
         let relay = vmux_client::pairing::Relay::from_env();
         relay.persist()?;
         let pairing_url = relay.wait_for_pairing(&token.0, Duration::from_secs(20))?;
@@ -40,8 +37,6 @@ impl RemoteArgs {
             let _ = std::fs::remove_file(remote.paired());
             let _ = std::fs::remove_file(remote.relay_device());
             let _ = std::fs::remove_file(remote.relay_url());
-            // The next device id is a different desktop as far as the relay is concerned, so a
-            // registration recorded for the old one would put someone else's id in a pairing link.
             let _ = std::fs::remove_file(remote.relay_registration());
         }
         agent.ensure_running(vmux_client::DaemonBinary::current()?.path())

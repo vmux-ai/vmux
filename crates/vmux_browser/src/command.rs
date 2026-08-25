@@ -1,9 +1,3 @@
-//! Acting on what the user asked for.
-//!
-//! App commands arrive through `ReadAppCommands`; the rest come from the layout page's own
-//! chrome as bin events — the header, the side sheet, and the two reload paths — and are handled
-//! as observers so they take effect in the frame they were sent.
-
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
@@ -420,10 +414,6 @@ mod tests {
     use vmux_layout::pane::Pane;
     use vmux_layout::stack::stack_bundle;
 
-    /// Closing a stack from the side sheet has to go through the stack command, so that
-    /// whatever else closing entails happens too. Hiding the window here instead would look
-    /// right and skip all of it. A deleted source-scan test used to assert this by reading
-    /// the match arm; this drives the event and reads the command.
     #[test]
     fn side_sheet_close_routes_through_the_stack_command() {
         let mut app = App::new();

@@ -1,8 +1,5 @@
 use bevy::prelude::*;
 
-/// Swap two same-type siblings within a parent's Children.
-/// `kind_positions` are indices into Children of entities matching the filter.
-/// `a` and `b` are indices into that filtered list.
 pub fn swap_siblings(
     commands: &mut Commands,
     parent: Entity,
@@ -32,7 +29,6 @@ pub fn swap_siblings(
     }
 }
 
-/// Find the index of `entity` within the filtered positions list.
 pub fn find_kind_index(
     entity: Entity,
     children: &Children,

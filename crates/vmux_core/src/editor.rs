@@ -49,10 +49,6 @@ impl EditMode {
     }
 }
 
-/// One `:map`-style binding from settings.
-///
-/// `mode` is the usual letter prefix (`n`, `i`, `v`, or a combination); an empty string means
-/// normal and visual, matching bare `:map`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct KeyMapping {
     #[serde(default)]

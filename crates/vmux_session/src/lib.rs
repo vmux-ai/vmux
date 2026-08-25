@@ -1,10 +1,3 @@
-//! The ECS model of an agent session: its descriptor, transcript, approval policy and prompt
-//! queue, plus the room each session projects into.
-//!
-//! Deliberately free of `bevy_cef` and of anything that renders, so the server can own this
-//! state whether or not a window exists. That seam is a crate boundary rather than a feature,
-//! because features unify per package across an invocation and would relink CEF into a headless
-//! build without failing anything.
 #![allow(clippy::type_complexity)]
 
 pub mod acp;

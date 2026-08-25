@@ -8,21 +8,16 @@ use vmux_service::message::Message;
 use crate::McpServerConfig;
 use crate::strategy::AgentStrategy;
 
-/// A resumable agent session discovered on disk. Runtime-agnostic: `(kind, sid, cwd)`
-/// identifies the conversation; how it is opened (ACP vs CLI) is a separate choice.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResumableSession {
     pub kind: AgentKind,
     pub sid: String,
     pub cwd: PathBuf,
     pub mtime: SystemTime,
-    /// First user message / summary, or a short sid fallback.
     pub title: String,
-    /// True when this kind's ACP and CLI runtimes share the session id.
     pub cross_runtime: bool,
 }
 
-/// Reads valid UTF-8 lines, skips isolated decode failures, and stops on other I/O errors.
 pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
     reader: R,
 ) -> impl Iterator<Item = String> {
@@ -39,16 +34,11 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
 pub trait CliAgentStrategy: AgentStrategy {
     fn sessions_root(&self) -> PathBuf;
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
-    /// Launch flags that pin the reasoning-effort `level` for this run, prepended ahead of
-    /// [`Self::build_args`] so any trailing `--resume`/`resume` stays last. `level` is already
-    /// validated against [`vmux_core::agent::effort_levels`]. Default: unsupported, no flags.
     fn effort_args(&self, _level: &str) -> Vec<String> {
         Vec::new()
     }
 
     fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)>;
-    /// Launch-time side effects (e.g. writing a managed hooks config file).
-    /// Runs once per spawn, after the MCP config is resolved. Default: nothing.
     fn prepare_launch(&self, _mcp: &McpServerConfig) {}
     fn discover_session(
         &self,
@@ -57,8 +47,6 @@ pub trait CliAgentStrategy: AgentStrategy {
         claimed: &HashSet<String>,
     ) -> Option<String>;
     fn detect_end_time(&self, session_id: &str) -> bool;
-    /// List this kind's resumable sessions from its on-disk store. Order is not required
-    /// (the collector sorts newest-first). Default: none.
     fn list_sessions(&self) -> Vec<ResumableSession> {
         Vec::new()
     }

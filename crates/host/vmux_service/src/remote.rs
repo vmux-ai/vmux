@@ -8,12 +8,6 @@ pub mod quic;
 #[cfg(host)]
 pub mod server;
 
-/// Write a secret at `0600` from the start rather than narrowing after.
-///
-/// `fs::write` creates with the process umask and only then gets chmod'd, leaving a window where
-/// another local user can read it. Recreated rather than truncated because `mode` only applies
-/// when the file is created, so writing over one left behind with wider permissions would keep
-/// them.
 #[cfg(host)]
 pub(crate) fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     let _ = std::fs::remove_file(path);

@@ -1,8 +1,3 @@
-//! Installing ACP agents from the registry into the vmux-managed runtime store,
-//! reusing the Mason download/extract/receipt primitives from `vmux_editor`. This module covers
-//! the `binary` distribution (native executable, no runtime); the `npx` (managed Node) and `uvx`
-//! (managed uv) paths land in later steps.
-
 use std::path::{Path, PathBuf};
 
 use vmux_core::event::InstallPhase;
@@ -10,9 +5,6 @@ use vmux_editor::lsp::{archive, download, store};
 
 use crate::acp_registry::{self, BinaryTarget, RegistryAgent};
 
-/// How to launch an installed agent: an absolute command plus its args/env, and an optional
-/// directory to prepend to the child's `PATH` (the managed runtime's `bin/`, so e.g. `npx` can
-/// find its `node`). `None` for self-contained native binaries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAgent {
     pub command: String,
@@ -21,11 +13,9 @@ pub struct ResolvedAgent {
     pub path_prepend: Option<String>,
 }
 
-/// Pinned managed runtime versions (manual bumps).
 const NODE_VERSION: &str = "22.11.0";
 const UV_VERSION: &str = "0.5.11";
 
-/// The vmux-managed agent store root.
 fn store_root() -> PathBuf {
     acp_registry::agents_dir()
 }
@@ -49,9 +39,6 @@ fn write_agent_receipt(
     .map_err(|e| e.to_string())
 }
 
-/// The package name without a trailing `@version`, keeping a leading scope `@`. The ACP registry
-/// may ship a version baked into the package (`@scope/name@1.1.9`); stripping it lets us re-pin
-/// cleanly instead of producing an invalid double spec (`@scope/name@1.1.9@1.1.8`).
 fn package_base(package: &str) -> &str {
     match package.rfind('@') {
         Some(at) if at > 0 => &package[..at],
@@ -59,9 +46,6 @@ fn package_base(package: &str) -> &str {
     }
 }
 
-/// The package argument for `npx`/`uvx`, optionally pinned to a version (`<package>@<version>`).
-/// A blank version means "latest" (the registry's package as-is, including any baked version); a
-/// pin replaces any baked version rather than appending to it.
 fn package_spec(package: &str, version: Option<&str>) -> String {
     match version.map(str::trim) {
         Some(v) if !v.is_empty() => format!("{}@{v}", package_base(package)),
@@ -69,8 +53,6 @@ fn package_spec(package: &str, version: Option<&str>) -> String {
     }
 }
 
-/// Final path component of a manifest `cmd` (`"./bin/agent"` → `"agent"`), used as the output
-/// name when extracting single-file archives (`.gz`/raw).
 fn cmd_basename(cmd: &str) -> &str {
     let rel = cmd.trim_start_matches("./").trim_start_matches(".\\");
     Path::new(rel)
@@ -79,7 +61,6 @@ fn cmd_basename(cmd: &str) -> &str {
         .unwrap_or(rel)
 }
 
-/// Last path segment of a URL (query/fragment stripped), used as the downloaded archive's filename.
 fn archive_filename(url: &str) -> &str {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     path.rsplit('/')
@@ -87,9 +68,6 @@ fn archive_filename(url: &str) -> &str {
         .unwrap_or("archive")
 }
 
-/// Absolute path of the agent's executable inside its extracted package dir. tar/zip archives
-/// unpack their whole tree (so `cmd` is relative to the root); `.gz`/raw yield a single file
-/// named by the `cmd` basename.
 fn resolved_cmd_path(pkgdir: &Path, target: &BinaryTarget, file: &str) -> PathBuf {
     let rel = target
         .cmd
@@ -103,9 +81,6 @@ fn resolved_cmd_path(pkgdir: &Path, target: &BinaryTarget, file: &str) -> PathBu
     }
 }
 
-/// Ensure a `binary`-distribution agent is installed (download + extract + chmod + receipt),
-/// then return how to launch it. Re-installs when the receipt is missing, the executable is
-/// gone, or the registry version has moved.
 fn ensure_binary_installed(
     agent: &RegistryAgent,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
@@ -137,8 +112,6 @@ fn ensure_binary_installed(
     })
 }
 
-/// Node's platform naming (differs from ACP targets). `None` on platforms we don't manage Node
-/// for yet (Windows uses `.zip` archives — deferred).
 fn node_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("darwin-arm64"),
@@ -149,7 +122,6 @@ fn node_target() -> Option<&'static str> {
     }
 }
 
-/// The managed Node `bin/` (with `node`/`npm`/`npx`), downloading the pinned Node if absent.
 fn ensure_node(
     root: &Path,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
@@ -189,8 +161,6 @@ fn ensure_node(
     Ok(bindir)
 }
 
-/// Ensure an `npx`-distribution agent can run: install the managed Node, then return an
-/// `npx -y <package> <args>` launch spec that resolves `node` via the managed `bin/`.
 fn ensure_npx_installed(
     agent: &RegistryAgent,
     version: Option<&str>,
@@ -220,7 +190,6 @@ fn ensure_npx_installed(
     })
 }
 
-/// uv's release target triple (Astral naming). `None` on platforms we don't manage uv for yet.
 fn uv_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
@@ -231,7 +200,6 @@ fn uv_target() -> Option<&'static str> {
     }
 }
 
-/// The managed uv dir (containing `uv`/`uvx`), downloading the pinned uv if absent.
 fn ensure_uv(
     root: &Path,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
@@ -280,8 +248,6 @@ fn ensure_uv(
     Ok(bindir)
 }
 
-/// Ensure a `uvx`-distribution agent can run: install the managed uv, then return a
-/// `uvx <package> <args>` launch spec that resolves `uv` via the managed dir.
 fn ensure_uvx_installed(
     agent: &RegistryAgent,
     version: Option<&str>,
@@ -311,7 +277,6 @@ fn ensure_uvx_installed(
     })
 }
 
-/// Managed Node `bin/` path (whether or not it is installed).
 fn node_bindir(root: &Path) -> Option<PathBuf> {
     let target = node_target()?;
     Some(
@@ -322,7 +287,6 @@ fn node_bindir(root: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Managed uv dir path (whether or not it is installed).
 fn uv_bindir(root: &Path) -> Option<PathBuf> {
     let target = uv_target()?;
     Some(
@@ -332,7 +296,6 @@ fn uv_bindir(root: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Whether the agent has its own receipt and any required managed runtime is present.
 pub fn is_agent_installed(agent: &RegistryAgent) -> bool {
     is_agent_installed_at(&store_root(), agent)
 }
@@ -352,7 +315,6 @@ fn is_agent_installed_at(root: &Path, agent: &RegistryAgent) -> bool {
     }
 }
 
-/// Whether a newer version is available for an installed native-binary agent.
 pub fn is_update_available(agent: &RegistryAgent) -> bool {
     matches!(agent.preferred_runtime(), acp_registry::Runtime::None)
         && store::read_receipt(&store_root(), &agent.id)
@@ -360,7 +322,6 @@ pub fn is_update_available(agent: &RegistryAgent) -> bool {
             .unwrap_or(false)
 }
 
-/// Remove an agent's receipt and native package. Shared npx/uvx runtimes remain installed.
 pub fn uninstall(id: &str) -> Result<(), String> {
     uninstall_at(&store_root(), id)
 }
@@ -369,8 +330,6 @@ fn uninstall_at(root: &Path, id: &str) -> Result<(), String> {
     store::remove(root, id).map_err(|e| e.to_string())
 }
 
-/// Map a vmux launcher id to its ACP-registry id where they differ (the built-in CLI ids vs.
-/// the registry slugs). Unknown ids pass through unchanged.
 pub fn registry_id_alias(id: &str) -> &str {
     match id {
         "claude" => "claude-acp",
@@ -390,8 +349,6 @@ pub(crate) fn agent_ids_match(left: &str, right: &str) -> bool {
     left == right || agent_url_id(left) == agent_url_id(right)
 }
 
-/// Resolve an agent by launcher id against the registry (cached, else fetched) and ensure it is
-/// installed, returning how to launch it. Runs on a background thread (blocking I/O).
 pub fn resolve_from_registry(
     agent_id: &str,
     version: Option<&str>,
@@ -414,9 +371,6 @@ pub fn resolve_from_registry(
     ensure_installed(&agent, version, emit)
 }
 
-/// Ensure any registry agent is installed and return how to launch it, preferring a native
-/// binary, then npx (managed Node), then uvx (managed uv). `version` pins the npx/uvx package
-/// (`<pkg>@<version>`); it is ignored for native binaries, which the registry ships single-versioned.
 pub fn ensure_installed(
     agent: &RegistryAgent,
     version: Option<&str>,
@@ -430,10 +384,6 @@ pub fn ensure_installed(
     }
 }
 
-/// Published versions for an agent's npx package, newest-first (capped). Best-effort: returns
-/// empty for native/uvx agents or when the registry can't be queried, so callers fall back to
-/// free-text entry. Reads metadata only — never downloads a tarball or a managed runtime, so it
-/// works even when a specific tarball is blocked by a registry security policy.
 pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
     match agent.preferred_runtime() {
         acp_registry::Runtime::Node => agent
@@ -446,8 +396,6 @@ pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
     }
 }
 
-/// `npm view <package> versions --json`, newest-first. Prefers the managed Node's `npm`, falling
-/// back to a `PATH` `npm`; uses the user's npm config (so it honors their registry/proxy).
 fn npm_versions(package: &str) -> Vec<String> {
     let npm = node_bindir(&store_root())
         .map(|bindir| bindir.join("npm"))
@@ -564,13 +512,11 @@ mod tests {
 
     #[test]
     fn package_spec_replaces_a_baked_registry_version() {
-        // The registry may ship a versioned package; pinning must replace, not append.
         assert_eq!(
             package_spec("@scope/pkg@1.1.9", Some("1.1.8")),
             "@scope/pkg@1.1.8"
         );
         assert_eq!(package_spec("pkg@1.1.9", Some("1.1.8")), "pkg@1.1.8");
-        // No pin keeps the registry's package (including its baked version) untouched.
         assert_eq!(package_spec("@scope/pkg@1.1.9", None), "@scope/pkg@1.1.9");
         assert_eq!(package_base("@scope/pkg"), "@scope/pkg");
     }

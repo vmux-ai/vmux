@@ -126,8 +126,6 @@ async fn route_agent_input(
         .input(&sid, crate::agent::SessionInput::User { text, attachments });
 }
 
-/// Acquire the manager lock and run `f` against the process if it exists.
-/// Returns Some(result) when the process was found, None otherwise.
 async fn with_process_mut<F, R>(
     manager: &Arc<Mutex<ProcessManager>>,
     id: ProcessId,
@@ -140,14 +138,6 @@ where
     mgr.processes.get_mut(&id).map(f)
 }
 
-// rkyv is used directly in the attach forwarder (can't use write_message! macro
-// inside a spawned task that doesn't return Result).
-
-/// Run the IPC server loop, accepting connections and dispatching messages.
-///
-/// `wake_tx` belongs to the caller because the headless runner parks on its receiver: PTY output
-/// is what tells the app there is something to do. Dropping every sender — which happens when
-/// this function returns — is how the runner learns the server is gone.
 pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<ProcessId>) {
     let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
     let input_writers = Arc::new(Mutex::new(HashMap::new()));
@@ -187,8 +177,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
                 let exited = mgr.poll_all();
                 let mut reaped = Vec::new();
                 for id in &exited {
-                    // ACP-native terminals keep their final grid until `terminal/release`; don't
-                    // reap them here.
                     let keep = mgr
                         .processes
                         .get(id)
@@ -332,7 +320,6 @@ async fn handle_client(
     let mut reader = BufReader::new(reader);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
-    // Track which processes this client is attached to, so we can forward patches.
     let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
@@ -344,15 +331,9 @@ async fn handle_client(
         Arc::clone(&pending_tool_calls),
     );
 
-    // Processes created by this client. The desktop is the sole owner of its
-    // terminals, so when it disconnects (including via a crash) these are reaped
-    // below — otherwise PTY children outlive the GUI and leak PTYs across runs.
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
     loop {
-        // Broken out of rather than propagated: the reap below is what stops a crashed desktop
-        // orphaning PTY children, and `?` here would step over it. A frame cut short is a
-        // disconnect that lost data, so it is reported and then treated as one.
         let msg: Option<ClientMessage> = match read_message!(&mut reader, ClientMessage) {
             Ok(msg) => msg,
             Err(error) => {
@@ -361,7 +342,7 @@ async fn handle_client(
             }
         };
         let Some(msg) = msg else {
-            break; // client disconnected
+            break;
         };
 
         match msg {
@@ -423,10 +404,6 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                // Dropped frames, not a dropped connection. The remote path treats
-                                // a lag as significant and resends a snapshot; this one resumed
-                                // mid-stream and said nothing, so whatever the GUI missed — a run
-                                // status among it — was simply gone.
                                 Err(broadcast::error::RecvError::Lagged(dropped)) => {
                                     tracing::warn!(
                                         dropped,
@@ -695,8 +672,6 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                // ReadTerminal is answered by the service directly (it owns the
-                // terminal state); other queries relay to the GUI.
                 let query = match query {
                     crate::protocol::AgentQuery::ReadTerminal { process_id } => {
                         let result = {
@@ -850,10 +825,6 @@ async fn handle_client(
                 }
             }
 
-            // Remote-only. The desktop reads the registries and the filesystem directly rather
-            // than asking the daemon, so these only ever arrive over a remote transport. Logged
-            // rather than ignored, because reaching here means a client is talking to the wrong
-            // endpoint and silence would make that impossible to see.
             ClientMessage::Shared(
                 SharedMessage::ListSessions
                 | SharedMessage::AgentCommand(_)
@@ -895,10 +866,6 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                // Dropped frames, not a dropped connection. The remote path treats
-                                // a lag as significant and resends a snapshot; this one resumed
-                                // mid-stream and said nothing, so whatever the GUI missed — a run
-                                // status among it — was simply gone.
                                 Err(broadcast::error::RecvError::Lagged(dropped)) => {
                                     tracing::warn!(
                                         dropped,
@@ -1065,7 +1032,6 @@ async fn handle_client(
                     resume_acp_session_id,
                     effort,
                 );
-                // ACP has no separate Attach message; forward this session's stream now.
                 let rx = acp_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = acp_manager.lock().await.snapshot(&sid) {
@@ -1100,10 +1066,6 @@ async fn handle_client(
                                         break;
                                     }
                                 }
-                                // Dropped frames, not a dropped connection. The remote path treats
-                                // a lag as significant and resends a snapshot; this one resumed
-                                // mid-stream and said nothing, so whatever the GUI missed — a run
-                                // status among it — was simply gone.
                                 Err(broadcast::error::RecvError::Lagged(dropped)) => {
                                     tracing::warn!(
                                         dropped,
@@ -1121,7 +1083,6 @@ async fn handle_client(
         }
     }
 
-    // Client disconnected — abort all patch forwarders
     for (_, handle) in attached.lock().await.drain() {
         handle.abort();
     }
@@ -1132,8 +1093,6 @@ async fn handle_client(
         handle.abort();
     }
 
-    // Reap the processes this client created so a disconnected/crashed desktop
-    // never orphans PTY children (which would exhaust the system PTY pool).
     if !created_processes.is_empty() {
         let mut mgr = manager.lock().await;
         for id in &created_processes {
@@ -1379,7 +1338,6 @@ mod tests {
             "child should be alive after CreateProcess"
         );
 
-        // Simulate a desktop crash: drop the client connection without Shutdown.
         drop(w);
         drop(r);
 
@@ -1390,7 +1348,6 @@ mod tests {
         })
         .await;
 
-        // Hygiene: ensure no leaked child regardless of outcome.
         unsafe {
             libc::kill(pid as i32, libc::SIGKILL);
         }
@@ -1404,9 +1361,6 @@ mod tests {
         );
     }
 
-    /// A desktop that dies mid-write leaves a length prefix promising bytes that never arrive.
-    /// The framing now calls that an error rather than a clean end, so the read loop has to break
-    /// on it instead of propagating — `?` would step over the reap and orphan the PTY child.
     #[tokio::test]
     async fn a_client_that_dies_mid_frame_still_has_its_processes_reaped() {
         use crate::protocol::ClientMessage;
@@ -1447,7 +1401,6 @@ mod tests {
             .expect("child process should report its pid");
         let identity = proc_identity(pid);
 
-        // A second frame that promises far more than it delivers, then the connection dies.
         tokio::io::AsyncWriteExt::write_all(&mut w, &1024u32.to_le_bytes())
             .await
             .expect("write prefix");

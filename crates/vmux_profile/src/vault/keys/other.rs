@@ -1,7 +1,3 @@
-//! Platforms with no OS key storage. Nothing persists a Vault key across runs, so
-//! the Vault stays locked until a passkey or recovery key seeds the session cache,
-//! and the key broker is unavailable.
-
 use zeroize::Zeroizing;
 
 use super::LOCKED;

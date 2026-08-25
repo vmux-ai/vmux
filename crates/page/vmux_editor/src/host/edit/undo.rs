@@ -2,31 +2,22 @@ use ropey::Rope;
 
 use crate::edit::command::Selection;
 
-/// One document state in the undo tree.
 #[derive(Clone)]
 struct Node {
     rope: Rope,
     selections: Vec<Selection>,
     rev: u64,
-    /// Creation order, which is what `g-` and `g+` walk.
     seq: u64,
     parent: Option<usize>,
     children: Vec<usize>,
 }
 
-/// A branching undo history.
-///
-/// Nodes hold the document *after* each change, and the node marked current is kept in sync with
-/// the live buffer lazily — the buffer is the source of truth until something navigates away.
-/// Undoing then making a new edit branches instead of discarding the redo path, which is what
-/// makes `g-`/`g+` able to reach states `Ctrl-r` cannot.
 pub struct UndoTree {
     nodes: Vec<Node>,
     current: usize,
     next_seq: u64,
 }
 
-/// The state to restore after navigating the tree.
 pub struct Restored {
     pub rope: Rope,
     pub selections: Vec<Selection>,
@@ -49,7 +40,6 @@ impl UndoTree {
         }
     }
 
-    /// Fold the live buffer back into the current node before reading history.
     fn sync(&mut self, rope: &Rope, selections: &[Selection], rev: u64) {
         let node = &mut self.nodes[self.current];
         node.rope = rope.clone();
@@ -57,7 +47,6 @@ impl UndoTree {
         node.rev = rev;
     }
 
-    /// Open a new state as a child of the current one.
     pub fn push(&mut self, rope: &Rope, selections: &[Selection], rev: u64) {
         self.sync(rope, selections, rev);
         let seq = self.next_seq;
@@ -94,12 +83,10 @@ impl UndoTree {
 
     pub fn redo(&mut self, rope: &Rope, selections: &[Selection], rev: u64) -> Option<Restored> {
         self.sync(rope, selections, rev);
-        // The newest branch is the one `Ctrl-r` follows.
         let child = *self.nodes[self.current].children.last()?;
         Some(self.restore(child))
     }
 
-    /// Move to the state created just before or just after the current one, ignoring branches.
     pub fn step_time(
         &mut self,
         rope: &Rope,
@@ -148,8 +135,6 @@ mod tests {
         vec![Selection::caret(0)]
     }
 
-    /// Mirrors how the editor drives the tree: `push` happens before the buffer changes, and the
-    /// live text is handed back in on every navigation.
     struct Doc {
         tree: UndoTree,
         text: String,

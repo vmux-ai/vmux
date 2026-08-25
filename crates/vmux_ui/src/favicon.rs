@@ -1,8 +1,3 @@
-//! Favicon URL resolution with multi-tier fallback.
-//!
-//! Pure helpers ([`favicon_src_for_url`] and friends) and the [`Favicon`] and [`GlobeIcon`]
-//! components all work on any target.
-
 pub fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
     let rest = s
@@ -33,10 +28,6 @@ pub fn agent_host(url: &str) -> Option<&'static str> {
 }
 
 pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
-    // Agent pages: prefer the recognizable brand favicon (claude.ai / chatgpt.com / …) over any
-    // passed icon, so an agent reads the same across tab, chat, roster, facepile, and launcher.
-    // Only `vmux://agent/<known>` urls match here; the passed icon (e.g. a registry icon) still
-    // serves unknown agents and real web pages below.
     if let Some(host) = agent_host(url) {
         return Some(format!(
             "https://www.google.com/s2/favicons?domain={host}&sz=64"
@@ -193,8 +184,6 @@ mod tests {
 
     #[test]
     fn favicon_src_prefers_agent_host_over_passed_icon() {
-        // A registry icon is passed, but a known agent url still resolves to the brand favicon
-        // so the agent reads consistently across every surface.
         assert_eq!(
             favicon_src_for_url("https://cdn.example/claude-acp.svg", "vmux://agent/claude"),
             Some("https://www.google.com/s2/favicons?domain=claude.ai&sz=64".to_string())

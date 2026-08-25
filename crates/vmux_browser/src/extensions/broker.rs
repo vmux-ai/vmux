@@ -18,8 +18,6 @@ use super::windows::{
     CloseExtensionWindowRequest, ExtensionWindows, UpdateHostWindowRequest, WindowEffect,
 };
 
-/// Serves the `chrome.*` API calls extensions make over the bridge, and pushes them the
-/// model events they subscribed to.
 pub(crate) struct ExtensionBrokerPlugin;
 
 impl Plugin for ExtensionBrokerPlugin {

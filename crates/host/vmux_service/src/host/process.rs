@@ -39,40 +39,19 @@ impl PtyInputWriter {
         }
     }
 
-    /// Whether the output that just arrived is the answer to something the user typed.
-    ///
-    /// True once per keystroke, and only when output actually arrived: a keystroke with nothing
-    /// to show for it yet has to leave the flag set for the poll that does see the echo.
     fn take_keystroke(&self, got_data: bool) -> bool {
         got_data && self.input_pending.swap(false, Ordering::AcqRel)
     }
 }
 
-/// How often the viewport may be sent, and what is allowed to jump the queue.
-///
-/// Output that redraws most of the screen is paced at [`HEAVY_OUTPUT_FRAME_INTERVAL`], because a
-/// client cannot display frames faster than that and each one costs it a re-render of every
-/// visible row. Sparse output ignores the pacing, since holding back one changed line saves
-/// nothing.
-///
-/// A keystroke ignores it too, so the first thing typed against a busy screen still lands at once
-/// — but only the first. Key repeat arrives several times per interval and a held key in a pager
-/// scrolls the whole screen on every one of them, so honouring each repeat asks for full repaints
-/// faster than they can be shown. The escape re-arms only once the keys stop coming, which is
-/// what separates pressing a key from holding one down.
 #[derive(Default)]
 struct ViewportPace {
-    /// Whether the last send redrew at least half the screen.
     heavy: bool,
     sent_at: Option<Instant>,
     keystroke_at: Option<Instant>,
 }
 
 impl ViewportPace {
-    /// Whether the viewport may be sent now. `flush` is the process ending, which always may.
-    ///
-    /// Records `keystroke` whether or not it is what let the send through, so that a key being
-    /// held cannot keep re-arming the escape it already used.
     fn admits(&mut self, now: Instant, flush: bool, keystroke: bool) -> bool {
         let escapes = keystroke && Self::interval_passed(self.keystroke_at, now);
         if keystroke {
@@ -81,7 +60,6 @@ impl ViewportPace {
         flush || escapes || !self.heavy || Self::interval_passed(self.sent_at, now)
     }
 
-    /// Record a send that redrew `changed_rows` of the screen's `rows`.
     fn sent(&mut self, now: Instant, changed_rows: usize, rows: u16) {
         self.sent_at = Some(now);
         self.heavy = changed_rows.saturating_mul(2) >= rows as usize;
@@ -246,7 +224,6 @@ impl Dimensions for PtyDimensions {
     }
 }
 
-/// A single terminal process managed by the service.
 pub struct Process {
     pub id: ProcessId,
     pub shell: String,
@@ -268,58 +245,31 @@ pub struct Process {
     pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     #[cfg(unix)]
     pty_reader_in_flight: Arc<AtomicBool>,
-    /// Broadcasts viewport patches to all attached GUI clients.
     patch_tx: broadcast::Sender<ServiceMessage>,
     line_hashes: Vec<u64>,
-    /// Document-row-keyed hash cache for the native-scroll window path.
     win_hashes: HashMap<u32, u64>,
-    /// Frontend window top (document row); ignored while `following`.
     view_top: u32,
-    /// Frontend pinned to the bottom → stream the bottom window autonomously.
     following: bool,
-    /// Last emitted (first_row, total_rows) for the window path (broadcast dedup).
     last_win: Option<(u32, u32)>,
-    /// Whether the previous sync used the passthrough (alt/copy) path.
     last_passthrough: bool,
-    /// Last broadcast cursor position (col, row). Used to broadcast a patch
-    /// when only the cursor moves (e.g. typing space over already-blank
-    /// cells produces no line-content change but the screen cursor must
-    /// still update).
     last_cursor: Option<(u16, u16)>,
-    /// Currently selected range (in viewport coords). None when no selection.
     selection: Option<TermSelectionRange>,
-    /// Last broadcast selection (used for change detection).
     last_selection: Option<TermSelectionRange>,
-    /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
     output_viewport_dirty: bool,
     viewport_pace: ViewportPace,
-    /// Last broadcast (mouse_capture, copy_mode, alt_screen) flags.
     last_terminal_mode: Option<(bool, bool, bool, bool)>,
-    /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
     copy_mode: Option<CopyModeState>,
-    /// Keep the process (and its final grid) in the manager after the child exits instead of
-    /// being reaped by the poll loop. Set for ACP-native terminals so `terminal/output` can read
-    /// the completed command's scrollback until the agent calls `terminal/release`.
     keep_after_exit: bool,
-    /// Set once the child has exited and all PTY output has been drained.
     exited: bool,
-    /// Set once `ProcessExited` has been broadcast for the child.
     exit_reported: bool,
-    /// The child's exit code, recorded when it exits. Surfaced to ACP `terminal/output`.
     exit_code: Option<i32>,
 }
 
-/// Per-process state held while the user is in copy mode.
 struct CopyModeState {
-    /// Cursor position in viewport coords (col, row).
     cursor: (u16, u16),
-    /// Selection anchor in viewport coords. Movement extends selection from
-    /// this anchor to the copy-mode cursor.
     anchor: (u16, u16),
-    /// Active visual mode. None means the cursor moves without selecting.
     visual: Option<CopyModeVisualMode>,
-    /// Last f/F/t/T search for ; and ,.
     last_find: Option<CopyModeFind>,
 }
 
@@ -361,8 +311,6 @@ enum CopyModeCharClass {
     Punct,
 }
 
-/// Word-character class for double-click word selection and tmux-style
-/// copy-mode word motions. A "word" is a maximal run of these characters.
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '.' | '/' | '-')
 }
@@ -659,18 +607,14 @@ impl Process {
         })
     }
 
-    /// Mark this process to survive child exit (ACP-native terminal). The poll loop must not reap
-    /// it; `terminal/release` removes it explicitly.
     pub fn set_keep_after_exit(&mut self) {
         self.keep_after_exit = true;
     }
 
-    /// Whether this process should survive child exit instead of being reaped.
     pub fn keep_after_exit(&self) -> bool {
         self.keep_after_exit
     }
 
-    /// The child's exit code once it has exited, else `None`.
     pub fn process_exit(&self) -> Option<i32> {
         self.exit_code
     }
@@ -683,9 +627,6 @@ impl Process {
         (self.command_ended_seq, self.last_command_exit)
     }
 
-    /// Last agent `run` completion `(token, exit)` parsed from a
-    /// [`crate::run_marker::VMUX_RUN_OSC`] escape. The token lets a blocking
-    /// `run` correlate the exit code to its own command.
     pub fn run_completion(&self) -> Option<(String, i32)> {
         self.last_run_completion.clone()
     }
@@ -715,16 +656,11 @@ impl Process {
         self.sync_viewport();
     }
 
-    /// Replace the selection. None clears it. Range is clamped to the
-    /// current viewport dimensions to defend against stale or buggy clients.
     pub fn set_selection(&mut self, range: Option<TermSelectionRange>) {
         self.selection = range.map(|r| self.clamp_range(r));
         self.sync_viewport();
     }
 
-    /// Extend the current selection's end point to (col, row). If no
-    /// selection exists, anchor at (col, row). Coordinates are clamped to
-    /// the current viewport.
     pub fn extend_selection_to(&mut self, col: u16, row: u16) {
         let (col, row) = self.clamp_point(col, row);
         let range = match self.selection.take() {
@@ -762,8 +698,6 @@ impl Process {
         r
     }
 
-    /// Select the word at (col, row). A "word" is a maximal run of
-    /// `[A-Za-z0-9_./-]` characters.
     pub fn select_word_at(&mut self, col: u16, row: u16) {
         let grid = self.term.grid();
         let num_cols = grid.columns();
@@ -802,7 +736,6 @@ impl Process {
         self.sync_viewport();
     }
 
-    /// Select the entire row from col 0 to the last non-blank cell.
     pub fn select_line_at(&mut self, row: u16) {
         let grid = self.term.grid();
         let num_cols = grid.columns();
@@ -828,14 +761,12 @@ impl Process {
         self.sync_viewport();
     }
 
-    /// Extract selected text. Lines joined by `\n`, trailing spaces stripped per line.
     pub fn selection_text(&self) -> Option<String> {
         let sel = self.selection.as_ref()?;
         let grid = self.term.grid();
         let num_cols = grid.columns();
         let offset = grid.display_offset() as i32;
 
-        // Normalize so (start_row, start_col) <= (end_row, end_col) row-major.
         let (sr, sc, er, ec) = if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
             (sel.start_row, sel.start_col, sel.end_row, sel.end_col)
         } else {
@@ -845,7 +776,6 @@ impl Process {
         let max_col = num_cols.saturating_sub(1);
         let top_line = grid.topmost_line().0;
         let bottom_line = grid.bottommost_line().0;
-        // Block selections require per-axis min/max independently of row order.
         let (block_lo, block_hi) = if sel.is_block {
             (
                 sel.start_col.min(sel.end_col) as usize,
@@ -896,8 +826,6 @@ impl Process {
         }
     }
 
-    /// Broadcast TerminalMode whenever mouse-capture, copy-mode, alt-screen, or
-    /// focus-reporting changes.
     fn maybe_broadcast_mode(&mut self) {
         use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
@@ -923,10 +851,6 @@ impl Process {
 
     pub fn enter_copy_mode(&mut self) {
         let grid = self.term.grid();
-        // Place the copy-mode cursor at the real PTY cursor, but clamped to
-        // the visible viewport. If the user has scrolled back, the PTY
-        // cursor sits off-screen; clamp to the bottom-most visible row so
-        // the first arrow keystroke moves a visible cursor.
         let max_col = self.cols.saturating_sub(1);
         let max_row = self.rows.saturating_sub(1);
         let cursor = (
@@ -957,7 +881,6 @@ impl Process {
         self.sync_viewport();
     }
 
-    /// Returns Some(text) if the key triggered a Copy action.
     pub fn copy_mode_key(&mut self, key: crate::protocol::CopyModeKey) -> Option<String> {
         use crate::protocol::CopyModeKey as K;
         let cols = self.cols;
@@ -1210,9 +1133,6 @@ impl Process {
         }
     }
 
-    /// Native-scroll intent from the frontend: set the window top / follow state
-    /// and re-serve the window. `display_offset` is untouched (window reads use
-    /// direct `Line` indexing).
     pub fn handle_scroll_window(&mut self, top_row: u32, follow: bool) {
         self.following = follow;
         self.view_top = top_row;
@@ -1509,7 +1429,6 @@ impl Process {
         self.line_hashes.clear();
         self.win_hashes.clear();
         self.last_win = None;
-        // Clamp copy-mode cursor + anchor to the new bounds.
         if let Some(cm) = self.copy_mode.as_mut() {
             let max_col = cols.saturating_sub(1);
             let max_row = rows.saturating_sub(1);
@@ -1544,11 +1463,7 @@ impl Process {
         }
     }
 
-    /// Drain PTY output, process through VTE, broadcast viewport patches.
-    /// Returns true if the child process has exited.
     pub fn poll(&mut self) -> bool {
-        // A kept-after-exit process (ACP terminal) stays in the manager with its final grid; skip
-        // re-processing and re-broadcasting `ProcessExited` on every subsequent tick.
         if self.exited {
             return false;
         }
@@ -1666,9 +1581,6 @@ impl Process {
         }
     }
 
-    /// Passthrough path (alt-screen / copy-mode): render the visible screen at
-    /// document rows `0..screen_lines` with `first_row = 0` and no native scroll.
-    /// Preserves the pre-native-scroll behavior for TUIs and copy-mode.
     fn sync_screen_relative(&mut self) -> usize {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
@@ -1692,8 +1604,6 @@ impl Process {
             }
         }
 
-        // If the buffer mutated under an active selection, the selection no
-        // longer points at the same characters. Clear it (browser-style).
         if self.copy_mode.is_none()
             && !full
             && let Some(sel) = self.selection
@@ -1717,7 +1627,6 @@ impl Process {
         let copy_mode = self.copy_mode.is_some();
         let copy_mode_changed = self.last_viewport_copy_mode != Some(copy_mode);
 
-        // Skip broadcast only when neither line content, cursor, mode, nor selection changed.
         if changed_lines.is_empty()
             && !full
             && !cursor_moved
@@ -1770,9 +1679,6 @@ impl Process {
         changed_rows
     }
 
-    /// Native-scroll path (primary screen, no copy-mode): serve a document-row
-    /// window around `view_top` (or the bottom when `following`) by direct grid
-    /// `Line` indexing. `display_offset` stays 0.
     fn sync_document_window(&mut self) -> usize {
         let grid = self.term.grid();
         let screen = grid.screen_lines();
@@ -1896,9 +1802,6 @@ impl Process {
         }
     }
 
-    /// Full terminal text: scrollback history plus the visible screen, joined by
-    /// `\n` with trailing spaces stripped per line and trailing blank lines
-    /// removed. Reads the rendered alacritty grid, so the text carries no ANSI.
     pub fn full_text(&self) -> String {
         let grid = self.term.grid();
         let num_cols = grid.columns();
@@ -1989,9 +1892,6 @@ impl ProcessManager {
         Ok((id, pid))
     }
 
-    /// Like [`create_process`](Self::create_process) but marks the process to survive child exit
-    /// (ACP-native terminal): the poll loop must not reap it, so `terminal/output` can read the
-    /// completed command's scrollback until `terminal/release`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_process_keep_alive(
         &mut self,
@@ -2010,9 +1910,6 @@ impl ProcessManager {
         Ok(created)
     }
 
-    /// Kill a process's child without removing it from the manager (keeps its final grid for ACP
-    /// `terminal/output`). Distinct from [`remove_process`](Self::remove_process), which also drops
-    /// it.
     pub fn kill_process(&mut self, id: &ProcessId) {
         if let Some(process) = self.processes.get_mut(id) {
             process.kill();
@@ -2046,8 +1943,6 @@ impl ProcessManager {
         self.processes.clear();
     }
 }
-
-// --- Grid helpers ---
 
 fn mix_row_hash(hash: &mut u64, value: u64) {
     *hash ^= value;
@@ -2259,9 +2154,6 @@ mod tests {
         assert!(pace.admits(now, false, true));
     }
 
-    /// Key repeat arrives several times per frame interval and a held key in a pager scrolls the
-    /// whole screen on each one, so the escape that keeps a single keystroke responsive must not
-    /// buy every repeat a full-viewport send.
     #[test]
     fn holding_a_key_is_paced_by_the_frame_interval() {
         let start = Instant::now();
@@ -2454,7 +2346,6 @@ mod tests {
         .expect("process should spawn");
 
         drain_process_output(&mut process, Duration::from_millis(300));
-        // Screen is 24 rows; printing ~60 lines scrolls FIRSTLINE into history.
         process.write_input(
             b"echo FIRSTLINE; for i in $(seq 1 60); do echo pad_$i; done; echo LASTLINE\r",
         );
@@ -2712,10 +2603,8 @@ mod tests {
         );
 
         let mut patches = process.subscribe();
-        // Scroll to the very top (document row 0), not following.
         process.handle_scroll_window(0, false);
 
-        // Native scroll must not move display_offset or write to the pty.
         assert_eq!(process.term.grid().display_offset(), 0);
         assert!(
             captured.lock().unwrap().is_empty(),
@@ -2915,15 +2804,12 @@ mod tests {
         }
         assert!(saw_exit, "process should have exited");
 
-        // Kept in the manager (not reaped by poll) with its exit code recorded.
         let process = mgr.processes.get(&id).expect("kept after exit");
         assert_eq!(process.process_exit(), Some(5));
 
-        // Further polls neither report the exit again nor drop the process.
         assert!(mgr.poll_all().is_empty());
         assert!(mgr.processes.contains_key(&id));
 
-        // Exactly one ProcessExited was broadcast.
         let mut exits = 0;
         while let Ok(msg) = rx.try_recv() {
             if matches!(msg, ServiceMessage::ProcessExited { .. }) {

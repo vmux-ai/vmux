@@ -1,12 +1,3 @@
-//! Reading and writing the knowledge vault on disk.
-//!
-//! Split from the parent so the wire types and markdown parsing stay compilable on web,
-//! where there is no filesystem to reach. Everything here is gated once, at the module.
-//!
-//! [`KnowledgeVault`] is the root every path is derived from, and [`KnowledgeVault::user`] opens
-//! the one under the active profile. Every path the vault hands out is derived from that root, so
-//! a test can run the same code against a temporary one.
-
 use super::{KnowledgePropertyKind, markdown_metadata};
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
@@ -19,22 +10,15 @@ const MEMORIES_PROMPT_MARKER: &str = "vmux Knowledge memories are user-owned con
 const KNOWLEDGE_SECTIONS: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 
-/// One knowledge vault: a root directory holding the sections a user's notes, skills and
-/// memories live under.
-///
-/// Every path the vault hands out is derived from `root`, so [`KnowledgeVault::at`] can point one
-/// at a temporary directory and exercise exactly the code the user's vault runs.
 pub struct KnowledgeVault {
     root: PathBuf,
 }
 
 impl KnowledgeVault {
-    /// The vault under the active profile's config directory.
     pub fn user() -> Self {
         Self::at(crate::profile::config_dir().join("knowledge"))
     }
 
-    /// A vault rooted anywhere.
     pub fn at(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
@@ -47,22 +31,14 @@ impl KnowledgeVault {
         self.root
     }
 
-    /// Where skills live.
     pub fn skills(&self) -> SkillsDir {
         SkillsDir(self.root.join("skills"))
     }
 
-    /// Where memories imported from external agents live.
     pub fn memories(&self) -> MemoriesDir {
         MemoriesDir(self.root.join("memories"))
     }
 
-    /// Write `content` as a markdown note titled `title`, at `path` when the caller named one and
-    /// under `projects/` otherwise.
-    ///
-    /// The note is private to the user, and every directory created on the way is too. A path
-    /// that is absolute, escapes the root, traverses a symlink, names a section the vault does
-    /// not have, or is not markdown is refused rather than followed.
     pub fn write_note(
         &self,
         path: Option<&str>,
@@ -112,10 +88,6 @@ impl KnowledgeVault {
         Ok(destination)
     }
 
-    /// Create every directory `note` sits under, returning the canonical parent of the file.
-    ///
-    /// Each level is checked before it is descended into and canonicalized after, so a symlink
-    /// planted mid-path cannot redirect the write outside the vault.
     fn create_parents(&self, note: &NotePath) -> Result<PathBuf, String> {
         if std::fs::symlink_metadata(&self.root)
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -158,17 +130,12 @@ impl KnowledgeVault {
     }
 }
 
-/// A vault-relative note path, already validated: `<section>/…/<name>.md`, built only from plain
-/// components so nothing in it can climb out of the vault.
 struct NotePath {
-    /// Directories between the vault root and the file, outermost first. The first is the
-    /// vault section.
     parents: Vec<OsString>,
     file_name: OsString,
 }
 
 impl NotePath {
-    /// The path the caller asked for, or one derived from `title` under `projects/`.
     fn parse(requested: Option<&str>, title: &str) -> Result<Self, String> {
         let relative = match requested.map(str::trim).filter(|path| !path.is_empty()) {
             Some(path) => PathBuf::from(path),
@@ -215,12 +182,9 @@ impl NotePath {
     }
 }
 
-/// A file-name slug derived from a note title.
 struct NoteSlug(String);
 
 impl NoteSlug {
-    /// Lower-case alphanumerics joined by dashes, capped at 80 characters. A title with nothing
-    /// usable left becomes `note`, so the file always has a name.
     fn of(title: &str) -> Self {
         let mut slug = String::new();
         let mut separator = false;
@@ -252,14 +216,12 @@ impl std::fmt::Display for NoteSlug {
     }
 }
 
-/// A path judged by its extension.
 #[derive(Clone, Copy)]
 struct MarkdownPath<'a>(&'a Path);
 
 impl MarkdownPath<'_> {
     const EXTENSIONS: [&'static str; 3] = ["md", "markdown", "mdx"];
 
-    /// Whether this names a note the vault reads or writes.
     fn is_note(self) -> bool {
         let Some(extension) = self.0.extension().and_then(|value| value.to_str()) else {
             return false;
@@ -273,10 +235,6 @@ impl MarkdownPath<'_> {
     }
 }
 
-/// The permissions the vault keeps on what it creates.
-///
-/// It holds a user's private notes and the memories imported from their local agents, so nothing
-/// it writes is left readable by another account.
 #[derive(Clone, Copy)]
 enum Privacy {
     Directory,
@@ -284,7 +242,6 @@ enum Privacy {
 }
 
 impl Privacy {
-    /// Tighten `path` to this level.
     #[cfg(unix)]
     fn apply(self, path: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
@@ -296,18 +253,15 @@ impl Privacy {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
     }
 
-    /// A no-op off unix, where there is no mode to set.
     #[cfg(not(unix))]
     fn apply(self, _path: &Path) -> io::Result<()> {
         Ok(())
     }
 }
 
-/// The vault's `skills/` directory: one sub-directory per skill, each holding a `SKILL.md`.
 pub struct SkillsDir(PathBuf);
 
 impl SkillsDir {
-    /// A skills directory anywhere.
     pub fn at(path: impl Into<PathBuf>) -> Self {
         Self(path.into())
     }
@@ -316,10 +270,6 @@ impl SkillsDir {
         self.0
     }
 
-    /// The directories directly under the root that hold a `SKILL.md`, sorted by path.
-    ///
-    /// A symlinked entry is skipped: a skill the vault publishes to external agents has to be a
-    /// real directory inside it, or the link would decide what those agents load.
     pub fn skills(&self) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(&self.0) else {
             return Vec::new();
@@ -341,7 +291,6 @@ impl SkillsDir {
         skills
     }
 
-    /// The `SKILL.md` of every configured skill.
     pub fn skill_files(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         for skill in self.skills() {
@@ -350,11 +299,6 @@ impl SkillsDir {
         files
     }
 
-    /// The prompt section inlining every skill body, up to the embed budget.
-    ///
-    /// Bodies go in whole rather than as a catalog of paths, so the agent applies them without
-    /// spending a tool call re-reading files it was just handed. One oversized skill is skipped
-    /// instead of ending the section, so a later small one still makes it in.
     pub fn prompt(&self) -> String {
         let mut files = SkillTree(&self.0).files();
         files.truncate(MAX_SKILLS);
@@ -393,12 +337,10 @@ impl SkillsDir {
     }
 }
 
-/// Every `SKILL.md` reachable below one directory.
 #[derive(Clone, Copy)]
 struct SkillTree<'a>(&'a Path);
 
 impl SkillTree<'_> {
-    /// The files, sorted, so the prompt they build is stable across runs.
     fn files(self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         self.walk(&mut files);
@@ -433,7 +375,6 @@ impl SkillTree<'_> {
     }
 }
 
-/// The vault's `memories/` directory: markdown migrated out of the user's local agents.
 pub struct MemoriesDir(PathBuf);
 
 impl MemoriesDir {
@@ -441,13 +382,10 @@ impl MemoriesDir {
         self.0
     }
 
-    /// Copy in whatever the local agents hold that is not here yet, returning how many files
-    /// were new.
     pub fn import_external(&self) -> io::Result<usize> {
         ExternalMemories::from_env(self.0.clone()).import()
     }
 
-    /// The prompt section inlining every memory, labelled by its path inside the vault.
     pub fn prompt(&self) -> String {
         let files = MarkdownTree(&self.0).files();
         if files.is_empty() {
@@ -478,15 +416,10 @@ impl MemoriesDir {
     }
 }
 
-/// Every markdown file reachable below one directory.
-///
-/// Symlinks and dot-directories are skipped at each level, so a walk stays inside the tree it was
-/// pointed at and never picks up an agent's own scratch state.
 #[derive(Clone, Copy)]
 struct MarkdownTree<'a>(&'a Path);
 
 impl MarkdownTree<'_> {
-    /// The files, sorted, so both the migration order and the prompt they build are stable.
     fn files(self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         self.walk(&mut files);
@@ -526,7 +459,6 @@ impl MarkdownTree<'_> {
     }
 }
 
-/// Where the local agents keep their memories, and where the vault puts them.
 struct ExternalMemories {
     destination: PathBuf,
     claude_projects: PathBuf,
@@ -535,7 +467,6 @@ struct ExternalMemories {
 }
 
 impl ExternalMemories {
-    /// The directories the installed Claude and Codex configs point at.
     fn from_env(destination: PathBuf) -> Self {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -554,10 +485,6 @@ impl ExternalMemories {
         }
     }
 
-    /// Copy every memory that is not already in the vault, returning how many were new.
-    ///
-    /// Existing files are never overwritten, so a memory the user has since edited inside vmux
-    /// survives re-running this against an unchanged source.
     fn import(&self) -> io::Result<usize> {
         std::fs::create_dir_all(&self.destination)?;
         Privacy::Directory.apply(&self.destination)?;
@@ -576,8 +503,6 @@ impl ExternalMemories {
         Ok(imported)
     }
 
-    /// Claude keeps one memory tree per project, so each project directory imports separately and
-    /// keeps its own name in the vault.
     fn import_claude(&self) -> io::Result<usize> {
         let destination = self.destination.join("claude").join("projects");
         let Ok(entries) = std::fs::read_dir(&self.claude_projects) else {
@@ -601,14 +526,12 @@ impl ExternalMemories {
     }
 }
 
-/// One markdown tree being copied into the vault, keeping its shape.
 struct MemoryTree {
     source: PathBuf,
     destination: PathBuf,
 }
 
 impl MemoryTree {
-    /// Copy every markdown file the source holds, returning how many were new.
     fn import(&self) -> io::Result<usize> {
         let mut imported = 0;
         for file in MarkdownTree(&self.source).files() {
@@ -620,10 +543,6 @@ impl MemoryTree {
         Ok(imported)
     }
 
-    /// Copy one file unless the vault already has it, reporting whether it was written.
-    ///
-    /// A copy that fails part way removes what it wrote: a truncated file left behind would read
-    /// as already-imported on the next run and never be repaired.
     fn copy_new(&self, relative: &Path) -> io::Result<bool> {
         let destination = self.destination.join(relative);
         let Some(parent) = destination.parent() else {
@@ -655,17 +574,9 @@ impl MemoryTree {
     }
 }
 
-/// A system prompt with the user vault's skills and memories sections appended.
-///
-/// Each section opens with a marker sentence and is skipped when the base already carries it, so
-/// a launcher that composes prompts in layers cannot embed the vault twice.
 pub struct AgentPrompt(String);
 
 impl AgentPrompt {
-    /// `base` with both vault sections appended.
-    ///
-    /// An empty `base` carries no marker, so it yields the two sections alone — what a launcher
-    /// with no prompt of its own wants.
     pub fn of(base: &str) -> Self {
         Self(base.to_string()).with_skills().with_memories()
     }
@@ -701,18 +612,14 @@ impl AgentPrompt {
     }
 }
 
-/// The YAML block at the top of a markdown note.
 #[derive(Clone, Copy)]
 pub struct Frontmatter<'a>(&'a str);
 
 impl<'a> Frontmatter<'a> {
-    /// The frontmatter of one note's source.
     pub fn of(source: &'a str) -> Self {
         Self(source)
     }
 
-    /// The note's source with `edit` applied: the property renamed, retyped, replaced, removed,
-    /// or added — creating the frontmatter block itself when the note has none.
     pub fn apply(&self, edit: &crate::event::FilePropertyEdit) -> Result<String, String> {
         let text = self.0;
         let original = edit.original_key.trim();
@@ -750,7 +657,6 @@ impl<'a> Frontmatter<'a> {
         }
     }
 
-    /// Whether a property named `key` is already here, so a rename onto it would collide.
     fn has_property(&self, key: &str) -> bool {
         for property in markdown_metadata(self.0).properties {
             if property.key.eq_ignore_ascii_case(key) {
@@ -760,7 +666,6 @@ impl<'a> Frontmatter<'a> {
         false
     }
 
-    /// Where `key` sits, or `None` when the note has no closed frontmatter block to edit.
     fn slot(&self, key: &str) -> Option<PropertySlot> {
         let mut lines = self.0.split_inclusive('\n');
         let first = lines.next()?;
@@ -801,17 +706,12 @@ impl<'a> Frontmatter<'a> {
     }
 }
 
-/// Where one property's lines sit inside a note's frontmatter.
 #[derive(Clone, Copy)]
 enum PropertySlot {
-    /// The key is there, spanning `start..end` including the lines its list items occupy.
     Present { start: usize, end: usize },
-    /// The key is not there. A new property is inserted at `close`, where the closing `---`
-    /// begins, so it lands last inside the block.
     Absent { close: usize },
 }
 
-/// One frontmatter property on its way back to YAML.
 struct PropertySource<'a> {
     key: &'a str,
     kind: KnowledgePropertyKind,
@@ -829,10 +729,6 @@ impl<'a> From<&'a crate::event::FilePropertyEdit> for PropertySource<'a> {
 }
 
 impl PropertySource<'_> {
-    /// The lines this property occupies, or why it cannot be written.
-    ///
-    /// The rendering is driven by the declared kind rather than by what the values look like, so
-    /// a property the user retyped keeps its new shape instead of being re-sniffed on the way out.
     fn render(&self) -> Result<String, String> {
         let key = self.key.trim();
         if key.is_empty()
@@ -884,7 +780,6 @@ impl PropertySource<'_> {
         }
     }
 
-    /// The values with line breaks flattened and blanks dropped, so one value stays one line.
     fn clean_values(&self) -> Vec<String> {
         let mut clean = Vec::new();
         for value in self.values {
@@ -897,8 +792,6 @@ impl PropertySource<'_> {
     }
 }
 
-/// A YAML scalar: always quoted, with backslashes and quotes escaped and line breaks flattened,
-/// so no value a user types can end the frontmatter block early.
 struct YamlScalar<'a>(&'a str);
 
 impl std::fmt::Display for YamlScalar<'_> {

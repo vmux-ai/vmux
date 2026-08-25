@@ -1,5 +1,3 @@
-//! Everything the team view needs a real machine for.
-
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
@@ -20,8 +18,6 @@ use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 
-/// Wires the team domain: spawns the user profile, emits the team-member list (user and
-/// agents) to ready views, and handles team commands.
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
@@ -68,8 +64,6 @@ fn spawn_user_profile(mut commands: Commands) {
     }
 }
 
-/// Keep the user profile's name in sync with the active space's profile name
-/// (e.g. "Personal").
 fn sync_user_profile_name(
     active_space: Option<Res<vmux_space::ActiveSpace>>,
     mut user: Query<&mut Profile, With<User>>,
@@ -112,11 +106,6 @@ fn team_member_row(
     }
 }
 
-/// An agent's live favicon URL, page url, and title. These live on the *webview*
-/// entity, which is the agent entity itself (CLI terminal), a child of it, or a
-/// child of its owning stack (page agent). Probe all three. The page renders the
-/// favicon via `favicon_src_for_url(favicon, url)` so URL-mapped agent icons
-/// (e.g. Vibe's Mistral logo) match the tab strip.
 fn agent_page(
     entity: Entity,
     meta_q: &Query<&PageMetadata>,
@@ -187,9 +176,6 @@ fn build_team_members(
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
-                // CLI/Page agents resolve their favicon via the kind's url prefix; ACP (no kind)
-                // uses its `vmux://agent/<id>` page url so `favicon_src_for_url` maps it to the
-                // brand favicon (agent_host) — same as the tab and chat header.
                 let url = agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_else(|| {
                     meta_q
                         .get(entity)
@@ -217,11 +203,6 @@ fn build_team_members(
     members
 }
 
-/// Answer [`SharedAgentCommand::ListTeam`] for the daemon's remote API.
-///
-/// `AgentCommandRequest` is a message, so reading it here rather than in `vmux_agent`'s central
-/// handler costs nothing and keeps the roster's seven queries out of a system that is already at
-/// Bevy's parameter limit.
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
     service: Option<Res<ServiceClient>>,
@@ -494,8 +475,6 @@ mod tests {
     fn team_page_open_titles_webview_team() {
         use vmux_core::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
-        // Both halves, because that is what opening a page takes: one plugin declares the page and
-        // marks its view, the other is what actually opens one.
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_layout::native_open::NativeOpenPlugin)
             .add_plugins(HostedPagePlugin::<Team>::default());
@@ -632,7 +611,6 @@ mod tests {
             .expect("acp agent in roster");
         assert_eq!(agent.name, "Mistral Vibe");
         assert_eq!(agent.icon, "https://cdn.example/vibe.svg");
-        // ACP rows carry their page url so the frontend resolves the brand favicon.
         assert_eq!(agent.url, "vmux://agent/mistral-vibe");
     }
 }

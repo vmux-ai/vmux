@@ -1,8 +1,3 @@
-// Lock-in tests for the v0.0.4 vibe-keychain fix.
-// Verify that runtime keychain ACL mutation is gone, that local + debug builds
-// share a stable codesigning identity, and that the local app and debug binary
-// share the bundle identifier so Chromium safe-storage ACL covers both flows.
-
 #[test]
 fn startup_does_not_mutate_chromium_safe_storage_acl() {
     let source = include_str!("../src/main.rs");
@@ -571,9 +566,6 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
     }
 }
 
-/// The 3D scene is gone, and the Bevy subsystems it alone pulled must not return through
-/// a crate-level feature. The test above covers the workspace dependency; this covers the
-/// crate that used to opt in.
 #[test]
 fn no_crate_reenables_the_player_only_bevy_features() {
     let layout = include_str!("../../../page/vmux_layout/Cargo.toml");

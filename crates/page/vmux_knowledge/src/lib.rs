@@ -1,5 +1,3 @@
-//! Local-first Markdown knowledge tree and agent context.
-
 #[cfg(host)]
 mod host;
 #[cfg(host)]

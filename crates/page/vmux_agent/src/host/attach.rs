@@ -1,9 +1,3 @@
-//! Binding an agent to a stack: the ACP and in-page variants, and moving a CLI session onto ACP.
-//!
-//! Attaching is where a bare stack becomes an agent — it gains the session component, the team
-//! profile, and the chat webview that renders it. The registry lookups answer the two questions
-//! attaching asks of a bare agent id: what to call it, and which icon to show.
-
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -90,9 +84,6 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
         },
     ));
     let url = format!("vmux://agent/{provider}");
-    // The launcher's view is despawned rather than relabelled. Reuse was worth it when the view
-    // was a CEF browser holding a bundle a url swap would keep loaded; a native view holds a
-    // `VirtualDom` built from the launcher's own component, and no url swap turns that into chat.
     if let Some(webview) = webview {
         commands.entity(webview).despawn();
     }
@@ -134,8 +125,6 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     commands: &mut Commands,
 ) {
     let agent_id = crate::acp_install::agent_url_id(agent_id);
-    // A resume carries the agent-assigned session id in the url; a fresh open is bare and gets
-    // redirected to `vmux://agent/<id>/<acp-session-id>` once the agent returns its id.
     let url = match resume {
         Some(acp_sid) => format!("vmux://agent/{agent_id}/{acp_sid}"),
         None => format!("vmux://agent/{agent_id}"),
@@ -173,7 +162,6 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     if let Some(webview) = webview {
         commands.entity(webview).despawn();
     }
-    // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     let view = commands
         .spawn((
             vmux_layout::Browser::native_page(&url, name),
@@ -182,7 +170,6 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
             anchor,
         ))
         .id();
-    // Over the bundle's own, which has no icon to give: the registry knows this agent's.
     commands.entity(view).insert(PageMetadata {
         url,
         title: name.to_string(),
@@ -191,7 +178,6 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     });
 }
 
-/// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
 pub(crate) fn acp_registry_agent_for_id<'a>(
     catalog: Option<&'a crate::client::acp::AcpCatalog>,
     id: &str,

@@ -124,11 +124,6 @@ fn project_dir_name(cwd: &Path) -> String {
         .collect()
 }
 
-/// Inline `--settings` JSON merging three vmux hooks (merges with the user's
-/// `~/.claude/settings.json`, does not modify it): a Notification bell; a
-/// PostToolUse hook that pings vmux on every file read/edit; and a Stop hook
-/// that pings vmux at turn-end (drives follow-pane auto-tidy + the done-dot).
-/// Both vmux pings are `async` so they never block the agent.
 fn build_settings_json(mcp: &McpServerConfig) -> String {
     let anchor = anchor_from_mcp(mcp);
     let args_for = |subcommand: &str| {
@@ -258,9 +253,6 @@ fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
     out
 }
 
-/// Read the first lines of a claude `.jsonl` to recover the working dir and a title.
-/// `cwd` is taken from the first line carrying a string `cwd`; `title` from the first user
-/// message text. Both fall back gracefully (cwd → the file's parent, title → short sid).
 fn claude_cwd_and_title(path: &Path, stem: &str) -> (PathBuf, String) {
     use std::io::{BufRead, BufReader};
     let mut cwd: Option<PathBuf> = None;
@@ -291,7 +283,6 @@ fn claude_cwd_and_title(path: &Path, stem: &str) -> (PathBuf, String) {
     (cwd, title)
 }
 
-/// Extract plain text from a claude `message.content` (string, or an array of `{type,text}`).
 fn user_message_text(v: &Value) -> Option<String> {
     message_text(v).map(|text| text.chars().take(80).collect())
 }

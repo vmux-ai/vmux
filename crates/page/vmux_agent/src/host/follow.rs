@@ -1,9 +1,3 @@
-//! The file pane that follows an agent around, and the tidying that keeps it from filling up.
-//!
-//! Each file an agent reads or edits opens as a `file://` preview in a pane beside it. Left alone
-//! that pane grows without bound, so at turn-end the previews that are neither changed nor active
-//! are closed — silently when `agent.tidy_files_auto` is set, behind a prompt otherwise.
-
 use std::path::{Path, PathBuf};
 
 use bevy::ecs::relationship::Relationship;
@@ -105,8 +99,6 @@ impl AgentFileResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
-    /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
-    /// `None` for ACP sessions (no `AgentKind`).
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
         let (entity, _, _) = self
             .agent_terms
@@ -179,9 +171,6 @@ impl AgentFileResolve<'_, '_> {
         panes
     }
 
-    /// The agent's existing `file://` follow-page (the page entity) and its leaf
-    /// pane: a sibling pane (same parent split) hosting a file page. `None` if
-    /// the agent has no file pane yet.
     fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
         let pane = self.file_panes_for(agent_pane).into_iter().next()?;
         for (page, page_co, meta, _) in self.file_pages.iter() {
@@ -236,9 +225,6 @@ impl AgentFileResolve<'_, '_> {
         None
     }
 
-    /// The agent's follow-pane and every `file://` preview stack in it, with each
-    /// stack's URL. Generalizes `file_page_for` (which returns only the first).
-    /// `None` when the agent has no file follow-pane yet.
     #[allow(clippy::type_complexity)]
     fn file_stacks_for(
         &self,
@@ -264,10 +250,6 @@ impl AgentFileResolve<'_, '_> {
     }
 }
 
-/// Build the `file://` URL for a touched file, encoding an optional goto/select
-/// as a fragment the editor understands: `#L<line>` (scroll) or
-/// `#L<line>:<col>-<end>` (scroll + highlight the match). `line` is 1-based;
-/// `col`/`end_col` are 0-based.
 pub(crate) fn file_touch_url(
     path: &str,
     line: Option<u32>,
@@ -286,11 +268,6 @@ pub(crate) fn file_touch_url(
     url
 }
 
-/// On an agent file read/edit, open the file in a `file://` pane beside that
-/// agent and record it as the agent's active pane (its focus ring). The first
-/// file spirals a new pane; later reads replace a clean file preview while dirty
-/// previews keep their own stack. Re-reading the same dirty file preserves its
-/// unsaved buffer.
 fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
@@ -465,11 +442,6 @@ fn handle_agent_file_search(
     }
 }
 
-/// Tidy one agent's `file://` follow-pane (the sibling `file:` pane of `agent_pane`): when it
-/// holds more than `tidy_files_max` previews, keep changed files + the active one and close
-/// the rest (silently if `tidy_files_auto`, else tag the pane for the confirm dialog). Shared
-/// by the CLI-terminal bell (`AgentAttention`), ACP idle, and native-chat idle triggers, which
-/// each resolve `agent_pane` first.
 #[allow(clippy::too_many_arguments)]
 fn tidy_follow_pane(
     agent_pane: Entity,
@@ -507,8 +479,6 @@ fn tidy_follow_pane(
         }
         return;
     }
-    // Show the in-UI banner on the follow-pane's active (kept) preview and remember the
-    // closable set on the pane until the user answers (`on_tidy_action`).
     let count = closable.len() as u32;
     let active_page = stacks
         .iter()
@@ -526,8 +496,6 @@ fn tidy_follow_pane(
     }
 }
 
-/// CLI agents: tidy on turn-end `AgentAttention` (the terminal bell), anchored by the
-/// agent terminal's `ProcessId`.
 pub(super) fn tidy_on_agent_attention(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     settings: Res<AppSettings>,
@@ -561,8 +529,6 @@ pub(super) fn tidy_on_agent_attention(
     }
 }
 
-/// ACP agents have no terminal bell; their turn-end is `AgentRunState` → `Idle`. Tidy the
-/// ACP follow-pane on that transition, anchored by the `AcpSession`.
 fn tidy_acp_on_idle(
     settings: Res<AppSettings>,
     sessions: Query<
@@ -597,12 +563,6 @@ fn tidy_acp_on_idle(
     }
 }
 
-/// Native-chat agents (CLI + Page variants) have no terminal bell; their turn-end is
-/// `AgentRunState` → `Idle` on the sid-keyed [`AgentSession`](vmux_session::AgentSession)
-/// stack. That stack is a different entity from the `ProcessId`-anchored one `AgentAttention`
-/// resolves through, so [`tidy_on_agent_attention`] can't see it. Tidy the follow-pane on the
-/// idle transition, resolving `agent_pane` as the session stack's parent pane. Mirrors
-/// [`tidy_acp_on_idle`] for non-ACP agents.
 fn tidy_page_on_idle(
     settings: Res<AppSettings>,
     sessions: Query<
@@ -637,9 +597,6 @@ fn tidy_page_on_idle(
     }
 }
 
-/// The user answered the follow-pane tidy banner (`FileTidyActionEvent` from the active
-/// file page): close the remembered previews, and on "Always" persist
-/// `agent.tidy_files_auto`; "Dismiss" just drops the pending set.
 pub(crate) fn on_tidy_action(
     trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyActionEvent>>,
     child_of: Query<&ChildOf>,
@@ -649,7 +606,6 @@ pub(crate) fn on_tidy_action(
     mut close: MessageWriter<vmux_layout::CloseStackRequest>,
     mut commands: Commands,
 ) {
-    // The event comes from a file page webview: webview → stack → follow-pane (holds PendingTidy).
     let webview = trigger.event().webview;
     let Ok(stack) = child_of.get(webview).map(Relationship::get) else {
         return;

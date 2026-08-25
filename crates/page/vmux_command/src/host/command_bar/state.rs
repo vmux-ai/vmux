@@ -4,7 +4,6 @@ use vmux_core::KeyboardOwner;
 use vmux_core::overlay::OverlayState;
 use vmux_flex::prelude::*;
 
-/// The bar's own view of [`OverlayState`], filtered to its entity rather than to any overlay.
 pub type CommandBarStateQuery<'w, 's> = Query<
     'w,
     's,

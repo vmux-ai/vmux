@@ -2,8 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, Receive};
 use vmux_layout::event::RestartRequestEvent;
 
-/// Restarts the app on request, from the debug, extensions and layout pages as well as from
-/// an installed update.
 pub(crate) struct RelaunchPlugin;
 
 impl Plugin for RelaunchPlugin {

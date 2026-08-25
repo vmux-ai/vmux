@@ -1,10 +1,3 @@
-//! What this crate offers the command bar, and what it does when one of those rows is chosen.
-//!
-//! The command bar is a launcher: it lists things and reports which was picked. It has no idea
-//! what an agent is, so agents are described here as [`ContributedCommand`]s and claimed back here
-//! when chosen. Keeping both halves in one file is the point — the id format is a private contract
-//! between them, and splitting it would let the two drift.
-
 use bevy::prelude::*;
 use vmux_command::event::CommandBarPage;
 use vmux_command::snapshot::{
@@ -22,8 +15,6 @@ impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, claim_chosen_command).add_systems(
             Update,
-            // Publishing reads the snapshots the updaters write, so it runs after them. Stated
-            // here rather than left to position in the set's chain, which is where it used to sit.
             publish_contributions
                 .in_set(WriteCommandBarSnapshots)
                 .after(crate::snapshot_updater::update_agent_sessions_snapshot),
@@ -31,26 +22,12 @@ impl Plugin for CommandBarPlugin {
     }
 }
 
-/// Urls that name "whichever agent is default" rather than a page that exists.
-///
-/// Kept from before agent urls carried an id. The command bar cannot open these — there is nothing
-/// at them until this crate picks one — so it hands them back instead.
 const DEFAULT_AGENT_URLS: [&str; 2] = ["vmux://agent/", "vmux://agent"];
 
-/// Marks a contribution entity as this crate's, so a republish clears only what it published.
-///
-/// Private on purpose: ownership is between a contributor and its own rows, and the command bar
-/// reads every contribution without caring which crate spawned it.
 #[derive(Component)]
 struct AgentContribution;
 
 impl AgentContribution {
-    /// Launcher rows for installed ACP and CLI agents, most recently used first.
-    ///
-    /// What an agent looks like in a launcher is this crate's to decide: that a CLI provider is
-    /// labelled as one, that an ACP agent's icon is a favicon when the registry gave it a url, and
-    /// that recency beats alphabetical. Rank is written onto each row because the entities these
-    /// become carry preference rather than inherit it from a position in a list.
     fn launcher_pages(agents: &CommandBarAgentsSnapshot) -> Vec<ContributedPage> {
         let mut pages = Vec::with_capacity(agents.acp.len() + agents.providers.len());
         for agent in &agents.acp {
@@ -108,7 +85,6 @@ impl AgentContribution {
     }
 }
 
-/// Publish the agents to launch, and a row per model.
 fn publish_contributions(
     agents: Res<CommandBarAgentsSnapshot>,
     mine: Query<Entity, With<AgentContribution>>,
@@ -145,7 +121,6 @@ fn publish_contributions(
     }
 }
 
-/// Act on a row or url the command bar handed back.
 fn claim_chosen_command(
     mut reader: MessageReader<vmux_layout::ContributedCommandChosen>,
     mut attach: MessageWriter<PageAgentAttachRequest>,
@@ -185,17 +160,12 @@ fn claim_chosen_command(
     }
 }
 
-/// The id of a command-bar row that starts a chat with one provider and model.
-///
-/// Round trips through [`Display`](std::fmt::Display) and [`AppAgentId::parse`]: the command bar
-/// carries the id and hands it back, so the two must agree on a format nobody else writes.
 struct AppAgentId {
     provider: String,
     model: String,
 }
 
 impl AppAgentId {
-    /// The provider and model an id names, or `None` when the row is someone else's.
     fn parse(id: &str) -> Option<Self> {
         let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
         let (provider, model) = body.split_once('_')?;
@@ -220,8 +190,6 @@ mod tests {
     use vmux_command::snapshot::{AgentProviderSummary, Contributions};
     use vmux_core::agent::AgentKind;
 
-    /// The launcher lists exactly what is installed, most recently used first, and each row
-    /// carries that order as its rank because the entity it becomes has no position to inherit.
     #[test]
     fn launcher_pages_list_only_installed_agents_in_recent_order() {
         let snapshot = CommandBarAgentsSnapshot {
@@ -262,8 +230,6 @@ mod tests {
         ));
     }
 
-    /// The id is a private round trip between the two halves of this file. A row whose id does not
-    /// survive it is published and then silently ignored when the user picks it.
     #[test]
     fn a_published_row_id_parses_back_to_what_named_it() {
         let id = AppAgentId {
@@ -279,8 +245,6 @@ mod tests {
         );
     }
 
-    /// Rows contributed by other crates land in the same reader; claiming them would start an
-    /// agent for something entirely unrelated.
     #[test]
     fn another_crates_row_is_left_alone() {
         for id in ["browser_open_history", "app_new", "app_onlyprovider_new"] {
@@ -288,8 +252,6 @@ mod tests {
         }
     }
 
-    /// Only the bare urls stand for "the default agent". Claiming one that carries an id would
-    /// send the user to whichever agent is default instead of the one they named.
     #[test]
     fn only_the_bare_agent_url_is_claimed() {
         let mut world = World::new();

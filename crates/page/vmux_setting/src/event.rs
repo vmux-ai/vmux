@@ -3,7 +3,6 @@ pub const SETTINGS_LIST_EVENT: &str = "settings_list";
 pub const SETTINGS_SCHEMA_EVENT: &str = "settings_schema";
 pub const UPDATE_CHECK_STATUS_EVENT: &str = "update_check_status";
 
-/// Requests an immediate update check.
 #[derive(
     Clone,
     Copy,
@@ -19,7 +18,6 @@ pub const UPDATE_CHECK_STATUS_EVENT: &str = "update_check_status";
 )]
 pub struct CheckForUpdatesEvent;
 
-/// Current updater activity shown in Settings.
 #[derive(
     Clone,
     Debug,
@@ -50,7 +48,6 @@ pub enum UpdateCheckStatus {
     Unavailable,
 }
 
-/// Carries updater activity to the Settings page.
 #[derive(
     Clone,
     Debug,
@@ -68,11 +65,9 @@ pub struct UpdateCheckStatusEvent {
 }
 
 #[cfg(host)]
-/// Native request consumed by the desktop updater.
 #[derive(bevy::prelude::Message, Clone, Copy, Debug, Default)]
 pub struct CheckForUpdatesRequest;
 
-/// Updater activity shared by the desktop updater and Settings host.
 #[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);

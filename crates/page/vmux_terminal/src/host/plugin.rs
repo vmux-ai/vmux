@@ -36,8 +36,6 @@ use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-/// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
-/// process-monitor requests, keyboard and mouse forwarding, and snapshot updates.
 pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
@@ -113,8 +111,6 @@ impl Plugin for TerminalPlugin {
     }
 }
 
-/// Drives a terminal's per-frame work: the service connection, PTY input and output, OSC
-/// title updates, and the page/layout spawn requests that create new terminals.
 struct TerminalUpdatePlugin;
 
 impl Plugin for TerminalUpdatePlugin {
@@ -159,17 +155,12 @@ impl Plugin for TerminalUpdatePlugin {
 
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
-/// `Ctrl+V` control byte. Sent on ⌘V when the clipboard holds an image, so the
-/// focused agent CLI (Claude Code / Codex) reads the image from the pasteboard
-/// itself — image data never transits the PTY.
 const CTRL_V: u8 = 0x16;
 
-/// Check if confirmation is needed based on settings.
 pub fn should_confirm_close(settings: &AppSettings) -> bool {
     settings.terminal.as_ref().is_none_or(|t| t.confirm_close)
 }
 
-/// Check if a tab entity has any child terminal that is still running.
 pub fn has_live_terminal(
     tab: Entity,
     children_q: &Query<&Children>,
@@ -182,7 +173,6 @@ pub fn has_live_terminal(
     }
 }
 
-/// Show confirmation dialog for quitting with N running terminals.
 pub fn confirm_quit_dialog(count: usize) -> bool {
     use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
     let msg = if count == 1 {
@@ -204,15 +194,11 @@ pub use vmux_service::client::ServiceClient;
 #[derive(Resource, Clone)]
 struct ServiceWakeCallback(Option<ServiceWake>);
 
-/// Per-process terminal mode flags, last broadcast by the service.
 #[derive(Resource, Default)]
 pub struct TerminalModeMap {
     pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
 }
 
-/// Optimistic copy-mode state owned by the desktop. The service confirms
-/// asynchronously via `TerminalMode`, but keyboard routing must switch on
-/// immediately after the shortcut or first mouse drag.
 #[derive(Resource, Default)]
 struct LocalCopyModeState {
     active: std::collections::HashSet<ProcessId>,
@@ -278,9 +264,6 @@ pub struct TerminalModeFlags {
 pub struct AgentFocusBlurred;
 
 const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Minimum time the loading splash stays up for a plain (non-agent) terminal,
-/// whose shell prints its prompt almost instantly. Agents instead clear when the
-/// TUI takes over (alt-screen).
 const TERMINAL_LOADING_MIN_DISPLAY: std::time::Duration = std::time::Duration::from_millis(700);
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -288,19 +271,12 @@ pub struct AgentLoading {
     pub since: Instant,
 }
 
-/// A prompt to type into an agent terminal once its TUI is up. Delivered by
-/// [`flush_buffered_agent_prompt`] on alt-screen.
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 pub struct BufferedAgentPrompt {
     pub text: String,
     pub submit: bool,
 }
 
-/// While an agent terminal's TUI is booting, the prompt the user types on the
-/// boot screen. Keystrokes are captured here instead of being sent to the
-/// not-yet-ready PTY (see [`on_term_key`]); on alt-screen
-/// [`clear_agent_loading`] moves a non-empty draft into a [`BufferedAgentPrompt`]
-/// and removes this, so keys then flow to the PTY normally.
 #[derive(Component, Debug, Clone, Default)]
 pub struct PromptCapture {
     pub draft: String,
@@ -308,16 +284,10 @@ pub struct PromptCapture {
 }
 
 impl PromptCapture {
-    /// Whether this press wants the clipboard, asked before [`Self::apply`] so the pasteboard is
-    /// read for the one keystroke that needs it rather than for every one.
     fn wants_paste(event: &KeyStroke) -> bool {
         event.mods.super_key && event.code == "KeyV"
     }
 
-    /// Fold one keypress into the draft, answering whether anything changed.
-    ///
-    /// Escape does not clear so much as decline: `skipped` records that the user does not want to
-    /// be asked, which the boot screen shows differently from having typed nothing yet.
     fn apply(&mut self, event: &KeyStroke, pasted: Option<String>) -> bool {
         if event.mods.ctrl && event.code == "KeyC" {
             self.draft.clear();
@@ -350,8 +320,6 @@ impl PromptCapture {
     }
 }
 
-/// Bytes to deliver for a buffered prompt once the agent TUI is ready, or `None`
-/// if not ready yet or there's nothing to send.
 fn agent_prompt_flush_bytes(alt_screen: bool, buf: &BufferedAgentPrompt) -> Option<Vec<u8>> {
     if !alt_screen {
         return None;
@@ -367,10 +335,6 @@ fn flush_buffered_agent_prompt(
 ) {
     let Some(service) = service else { return };
     for (entity, pid, buf) in &q {
-        // Readiness is already decided by `clear_agent_loading` (which only
-        // creates a `BufferedAgentPrompt` once the TUI is up); deliver as soon as
-        // one exists. Re-gating on `alt_screen` here strands the prompt forever
-        // for inline TUIs (Claude Code, Codex, Vibe) that never use alt-screen.
         if let Some(data) = agent_prompt_flush_bytes(true, buf) {
             service.0.send(ClientMessage::ProcessInput {
                 process_id: *pid,
@@ -381,8 +345,6 @@ fn flush_buffered_agent_prompt(
     }
 }
 
-/// Last char-grid size (cols/rows) the page measured for this terminal, so a PTY
-/// restart can recreate the process at the current pane size instead of 80x24.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct TerminalGridSize {
     pub cols: u16,
@@ -395,7 +357,6 @@ impl Default for TerminalGridSize {
     }
 }
 
-/// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub struct RestartPty {
     pub entity: Entity,
@@ -444,11 +405,7 @@ pub struct TerminalStackSpawnRequest {
     pub shell: Option<String>,
     pub agent_run: bool,
     pub pending_input: Option<Vec<u8>>,
-    /// Pin this `ProcessId` on the spawned terminal (so the caller can address
-    /// it later); `None` lets the bundle mint a fresh one.
     pub process_id: Option<ProcessId>,
-    /// When true, the new stack is activated (focus moves to it). When false,
-    /// focus stays where it is.
     pub activate: bool,
 }
 
@@ -476,9 +433,6 @@ pub fn format_terminal_url(
     }
 }
 
-/// Give a plain terminal a shell-specific tab icon (nushell/bash/zsh) derived
-/// from its launch command. Agents keep their own icons; unrecognized shells
-/// keep the generic terminal icon.
 fn set_terminal_shell_icon(
     mut q: Query<(&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata), With<Terminal>>,
 ) {
@@ -659,9 +613,6 @@ fn respond_terminal_spawn(
             .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
             .id();
         commands.entity(term_e).insert(KeyboardOwner);
-        // `requested_pane` is carried rather than looked up: the `ChildOf` below is a queued
-        // command, so `child_of_q` cannot see the new stack's parent in this same run and the
-        // pane's activation time would never be bumped.
         let (stack_e, requested_pane) = match req.target {
             TerminalSpawnTarget::Detached => continue,
             TerminalSpawnTarget::Stack(stack) => (stack, None),
@@ -882,7 +833,6 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
 #[derive(Component)]
 pub struct PendingServiceCreate;
 
-/// Temporary component: terminal needs an AttachProcess sent to service.
 #[derive(Component)]
 struct PendingServiceAttach;
 
@@ -891,34 +841,16 @@ pub struct PendingTerminalInput {
     pub data: Vec<u8>,
 }
 
-/// Marker: the terminal's shell has drawn its prompt and is reading input. Used
-/// to defer flushing [`PendingTerminalInput`] until then, so a `run` command
-/// isn't raw-echoed above the prompt before the shell renders it. Readiness is
-/// decided by [`shell_prompt_ready`], which distinguishes the prompt from
-/// earlier pre-prompt output (e.g. a node-version banner).
 #[derive(Component)]
 struct ShellOutputSeen;
 
-/// Whether a viewport update means the shell has drawn its prompt and is reading
-/// input, used to gate [`PendingTerminalInput`]. `has_content` is whether any
-/// updated line carries non-whitespace and `cursor_col` is the cursor column
-/// after the update.
-///
-/// A shell that prints a banner (e.g. fnm `Using Node vX`) before drawing its
-/// prompt would trip a naive "any output" check on the banner, so a `run`
-/// command gets raw-echoed above the prompt. A drawn prompt leaves the cursor
-/// after the prompt string (`cursor_col > 0`); every banner line ends in a
-/// newline (cursor back at column 0), so even multi-line startup output is
-/// skipped until the prompt itself appears.
 fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
     has_content && cursor_col > 0
 }
 
-/// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
 pub struct AwaitingProcessCreated;
 
-/// Resets prompt readiness while retaining any queued terminal input for the replacement process.
 pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
     commands
         .entity(entity)
@@ -939,10 +871,6 @@ pub fn apply_process_created(
         .remove::<AwaitingProcessCreated>();
 }
 
-/// A `CreateProcess` failed (e.g. the system PTY pool is exhausted). Despawn the
-/// terminal entity: with no `ProcessId` and its in-flight markers gone, no system
-/// would ever drive or reap it, so leaving it behind orphans a dead pane. Despawn
-/// also frees the create budget (the entity drops out of the awaiting query).
 fn apply_process_create_failed(commands: &mut Commands, entity: Entity) {
     commands.entity(entity).despawn();
 }
@@ -967,15 +895,8 @@ fn terminal_shell(settings: &AppSettings) -> String {
         .unwrap_or_else(default_shell)
 }
 
-/// Max `CreateProcess` requests outstanding (awaiting `ProcessCreated`) at once.
-/// Restoring a large saved space would otherwise open hundreds of PTYs in one
-/// tick and exhaust the system PTY pool (macOS `kern.tty.ptmx_max` ≈ 511),
-/// which crashes startup. Bounding concurrency spreads restore across ticks;
-/// each `ProcessCreated` response frees budget and wakes the loop for the next.
 const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
 
-/// How many new `CreateProcess` requests may be dispatched this tick, given how
-/// many are already awaiting a `ProcessCreated` response.
 fn process_create_budget(in_flight: usize, max_concurrent: usize) -> usize {
     max_concurrent.saturating_sub(in_flight)
 }
@@ -1199,9 +1120,6 @@ struct PollServiceWriters<'w> {
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
 }
 
-/// True when a rendered line carries any non-whitespace text. Used to decide
-/// when a shell has actually drawn its prompt (vs. a blank pre-prompt frame), so
-/// pending `run` input is flushed only once the line editor is ready.
 fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
@@ -1303,18 +1221,11 @@ fn poll_service_messages(
 ) {
     let Some(service) = service else { return };
 
-    // Handle pending creates — send CreateProcess, wait for ProcessCreated
-    // response which will carry the real process ID. Throttle by in-flight count
-    // so restoring a large saved space can't open hundreds of PTYs in one tick.
     let create_budget = process_create_budget(
         awaiting_create.iter().count(),
         MAX_CONCURRENT_PROCESS_CREATES,
     );
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
-        // Agents run as bare executables and don't load the user's shell config
-        // the way a terminal does, so merge in the login-shell env (API keys
-        // etc.). Done here (at spawn) rather than at launch-build time so it
-        // also covers agents restored from a persisted space or restarted.
         let mut env = launch.env.clone();
         if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
@@ -1334,7 +1245,6 @@ fn poll_service_messages(
             .insert(AwaitingProcessCreated);
     }
 
-    // Handle pending attaches
     for (entity, pid) in &pending_attach {
         service
             .0
@@ -1345,7 +1255,6 @@ fn poll_service_messages(
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
-    // Drain service messages and dispatch
     let mut restarted_missing_processes = Vec::new();
     let (messages, capped) = service.0.drain_with_status();
     if capped && let Some(proxy) = proxy.as_deref() {
@@ -1533,10 +1442,6 @@ fn poll_service_messages(
                         } else {
                             false
                         };
-                        // Plain terminals close their stack on exit. Agent
-                        // terminals are closed by the agent crate (it
-                        // force-closes the whole pane), so skip the stack close
-                        // here to avoid a double close collapsing the wrong pane.
                         if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
                             let tab = child_of.get();
                             commands.entity(tab).insert(LastActivatedAt::now());
@@ -1659,10 +1564,6 @@ fn poll_service_messages(
                     .write(vmux_service::agent_events::PageAgentDelta { sid, text });
             }
             ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
-                // The one hop never yet observed. A conversation stranded on "Preparing agent…"
-                // has the daemon reporting the agent came up and the pane showing otherwise, and
-                // every step in between now accounts for itself — so either this line appears and
-                // the status reached the GUI, or it does not and the stream never carried it.
                 tracing::info!(%sid, ?status, "run status from the daemon");
                 writers
                     .page_agent_run_status
@@ -1861,9 +1762,6 @@ fn handle_terminal_reinput_requests(
     }
 }
 
-/// Translate a Bevy logical key + ctrl modifier into the corresponding
-/// Vim-style copy-mode action. Returns None if the key has no copy-mode
-/// binding (caller should swallow it regardless).
 #[cfg(test)]
 fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
     map_copy_mode_key_from_input(CopyModeKeyInput {
@@ -2194,7 +2092,6 @@ fn term_key_event_to_key(event: &KeyStroke) -> Key {
     }
 }
 
-/// Wrap `payload` in terminal bracketed-paste markers.
 fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
     let mut data = Vec::with_capacity(payload.len() + 12);
     data.extend_from_slice(b"\x1b[200~");
@@ -2203,10 +2100,6 @@ fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
     data
 }
 
-/// Paste payload for an image file path. Vibe attaches a single-quoted path
-/// (it prepends its own `@` on paste; the quotes keep paths with spaces as one
-/// token, with embedded `'` shell-escaped); Claude Code and Codex auto-detect a
-/// bare path.
 pub fn image_path_payload(is_vibe: bool, path: &str) -> String {
     if is_vibe {
         format!("'{}'", path.replace('\'', "'\\''"))
@@ -2215,9 +2108,6 @@ pub fn image_path_payload(is_vibe: bool, path: &str) -> String {
     }
 }
 
-/// Write clipboard PNG bytes to a unique temp file and return its path. The
-/// per-paste sequence number prevents a later paste from overwriting an earlier
-/// one still pending delivery (e.g. several images in a boot-screen draft).
 fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::path::PathBuf> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2226,11 +2116,6 @@ fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::
     Some(path)
 }
 
-/// Resolve the bytes to forward to the PTY for a ⌘V paste. A copied image *file*
-/// is pasted as its path; raw image *data* goes to the CLI via `Ctrl+V` (Claude
-/// Code, Codex read the pasteboard), except Vibe (`is_vibe`) — which cannot read
-/// the pasteboard, so its data is written to a temp file and pasted as a path.
-/// Otherwise the clipboard text is bracketed-pasted. `None` when nothing to paste.
 fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
     if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(bracketed_paste(
@@ -2250,11 +2135,6 @@ fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
     (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
 }
 
-/// Text to append to an agent's boot-time draft prompt for a ⌘V paste. Unlike
-/// [`resolve_paste`], an image always resolves to a *path* (raw clipboard data is
-/// written to a temp file) — the booting CLI isn't running yet to read the
-/// pasteboard via `Ctrl+V`, and the draft is delivered later as text. Returns
-/// `None` when there is nothing to paste.
 fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
     if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(image_path_payload(is_vibe, &path));
@@ -2310,7 +2190,6 @@ fn resolve_terminal_web_shortcut(
         state.pending_prefix = None;
     }
 
-    // A bare key must stay typeable, so only a modified one can be claimed here.
     if let Some(cmd) = map.direct(&combo)
         && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
     {
@@ -2433,7 +2312,6 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-/// Encode a mouse event as an SGR escape sequence.
 fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
     let mut cb = button as u32;
     if modifiers & MOD_SHIFT != 0 {
@@ -2449,8 +2327,6 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
     format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
 }
 
-/// Tracks the most recent mouse-down per process for click-count detection
-/// (300ms / ~1 cell window) and an active drag anchor.
 #[derive(Resource, Default)]
 struct MouseSelectionState {
     per_process: std::collections::HashMap<ProcessId, MouseSessionState>,
@@ -2461,13 +2337,7 @@ struct MouseSessionState {
     last_click: Option<MouseClickRecord>,
     drag_active: bool,
     drag_visual_active: bool,
-    /// Last (col, row) sent via ExtendSelectionTo during the active drag.
-    /// Used to dedupe redundant move events at the same cell.
     last_extend_cell: Option<(u16, u16)>,
-    /// Anchor cell from the most recent left-click that has not yet
-    /// produced a real selection. We defer materializing the selection
-    /// until the user actually drags so a single click doesn't draw a
-    /// 1-character selection box.
     pending_anchor: Option<(u16, u16)>,
 }
 
@@ -2640,13 +2510,6 @@ fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: Mou
     }
 }
 
-/// Handle mouse events from the terminal webview.
-///
-/// Selection mode (left-button + (no app mouse-capture OR shift held)) is
-/// intercepted and translated into selection commands sent to the service.
-/// Anything else is forwarded as SGR mouse-report bytes to the PTY, but only
-/// when the app enabled mouse capture — otherwise a plain shell would echo
-/// hover/motion reports as literal `^[[<..M` text.
 fn on_term_mouse(
     trigger: On<BinReceive<TermMouseEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -2684,8 +2547,6 @@ fn on_term_mouse(
     }
 }
 
-/// Native-scroll intent from the terminal page: forward the requested window top
-/// (and follow state) to the service, which serves the document-row window.
 fn on_term_scroll(
     trigger: On<BinReceive<TermScrollEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -2702,8 +2563,6 @@ fn on_term_scroll(
     });
 }
 
-/// Open a URL or file the user cmd+clicked in the terminal, in a new stack
-/// beside the current pane. Mirrors the web-shortcut dispatch in `on_term_key`.
 fn on_term_link_open(
     trigger: On<BinReceive<TermLinkOpenRequest>>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -2778,8 +2637,6 @@ fn on_term_key(
         == Some(vmux_core::agent::AgentKind::Vibe)
         || launches.get(entity).ok().map(|launch| launch.kind.clone())
             == Some(crate::launch::TerminalKind::Vibe);
-    // Ahead of both the paste and the pty write: while the agent's TUI is still booting there is
-    // no pty worth writing to, and what is typed belongs in the draft instead.
     if let Ok(mut capture) = capture_q.get_mut(entity) {
         let pasted = PromptCapture::wants_paste(event)
             .then(|| resolve_paste_text(is_vibe, process_id))
@@ -2850,8 +2707,6 @@ fn on_term_key(
     }
 }
 
-/// Loading splash label + url segment for a terminal. Agents use their brand
-/// (color + name); plain terminals use a generic "Terminal" / default accent.
 fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> (String, String) {
     match session {
         Some(s) => (
@@ -2964,10 +2819,6 @@ fn clear_agent_loading(
     mut commands: Commands,
 ) {
     for (entity, pid, session, loading, capture) in &loading_q {
-        // Agents clear when the TUI takes over its terminal. Inline TUIs (Claude
-        // Code, Codex, Vibe) never enter alt-screen, so also treat mouse or focus
-        // reporting — enabled when their input is ready — as readiness. Plain
-        // terminals, whose shell prints instantly, show a brief minimum splash.
         let ready = match session {
             Some(_) => mode_map
                 .modes
@@ -2978,8 +2829,6 @@ fn clear_agent_loading(
         };
         if ready || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
             let (label, segment) = terminal_loading_labels(session);
-            // Flip keyboard back to the PTY: deliver the captured boot prompt (if
-            // any) and drop the capture so keys stop being buffered.
             if let Some(capture) = capture {
                 if !capture.skipped && !capture.draft.trim().is_empty() {
                     commands.entity(entity).insert(BufferedAgentPrompt {
@@ -3017,7 +2866,6 @@ fn reset_terminal_title_on_agent_removed(
     }
 }
 
-/// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -3032,7 +2880,6 @@ fn on_term_ready(
     }
 }
 
-/// Handle resize event from webview (reports char cell dimensions).
 fn on_term_resize(
     trigger: On<BinReceive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
@@ -3142,10 +2989,6 @@ fn theme_signature(
     hasher.finish()
 }
 
-/// Map a terminal color scheme across the light/dark boundary for the app
-/// appearance. Only crosses the boundary: a chosen dark flavor (e.g. frappe,
-/// macchiato) is preserved in dark mode, and any scheme without a known
-/// counterpart is honored as-is.
 fn scheme_for_appearance(name: &str, dark: bool) -> &str {
     match (name, dark) {
         ("catppuccin-mocha" | "catppuccin-frappe" | "catppuccin-macchiato", false) => {
@@ -3289,8 +3132,6 @@ fn on_restart_pty(
     }
 }
 
-/// Consume `AppCommand::Terminal::CopyMode` and ask the service to enter
-/// visual/copy mode for the currently focused terminal process.
 fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
     targeted_terminals: Query<
@@ -3529,7 +3370,6 @@ mod prompt_capture_tests {
         super_key: true,
     };
 
-    /// A press as the page reports one: `key` is what it produces, `code` the physical key.
     fn press(key: &str, code: &str, mods: KeyModifiers) -> KeyStroke {
         KeyStroke {
             key: key.to_string(),
@@ -3544,9 +3384,6 @@ mod prompt_capture_tests {
         press(key, code, KeyModifiers::default())
     }
 
-    /// The draft holds what a user typed before the agent could accept it, so every key that
-    /// edits text has to land and every key that does not has to be left alone — a chord reaching
-    /// the draft would put a shortcut's letter into the prompt.
     #[test]
     fn the_draft_takes_text_and_refuses_everything_else() {
         let mut capture = PromptCapture::default();
@@ -3564,8 +3401,6 @@ mod prompt_capture_tests {
         assert_eq!(capture.draft, "h");
     }
 
-    /// Escape and Ctrl-C both empty the draft and mean opposite things: one declines the prompt,
-    /// the other clears it to type again. The boot screen shows those differently.
     #[test]
     fn escape_declines_the_prompt_and_ctrl_c_only_clears_it() {
         let mut capture = PromptCapture::default();
@@ -3581,8 +3416,6 @@ mod prompt_capture_tests {
         assert_eq!((capture.draft.as_str(), capture.skipped), ("", false));
     }
 
-    /// Backspace on an empty draft changes nothing. Reporting otherwise would emit a draft event
-    /// per keypress at the moment the boot screen is busiest.
     #[test]
     fn a_press_that_changes_nothing_reports_no_change() {
         let mut capture = PromptCapture::default();
@@ -3592,8 +3425,6 @@ mod prompt_capture_tests {
         assert!(capture.draft.is_empty());
     }
 
-    /// Paste joins onto what is already there rather than running into it, and is not an edit at
-    /// all when the clipboard had nothing to give.
     #[test]
     fn paste_is_separated_from_the_draft_it_joins() {
         let paste = press("v", "KeyV", SUPER);
@@ -4945,17 +4776,13 @@ mod tests {
             ))
             .id();
 
-        // ProcessId added before the page is ready must not arm.
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
 
-        // Page becomes ready without a pid change: this system must not arm
-        // (first launch is handled by arm_agent_loading).
         app.world_mut().entity_mut(e).insert(PageReady {});
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
 
-        // A restart mutates ProcessId while the page is ready: must arm.
         *app.world_mut().get_mut::<ProcessId>(e).unwrap() = ProcessId::new();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_some());

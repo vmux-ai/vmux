@@ -33,9 +33,6 @@ pub enum BuiltinIcon {
 }
 
 impl BuiltinIcon {
-    /// Map a shell binary path/name to its brand icon, e.g. `/opt/homebrew/bin/nu`
-    /// -> `Nushell`. Returns `None` for unrecognized shells (caller falls back to
-    /// the generic terminal icon).
     pub fn for_shell(command: &str) -> Option<BuiltinIcon> {
         let lower = command
             .rsplit(['/', '\\'])
