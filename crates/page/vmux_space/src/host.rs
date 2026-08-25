@@ -1,6 +1,7 @@
 pub mod cwd;
 mod key;
 pub mod plugin;
+pub mod project;
 pub mod snapshot_updater;
 pub mod spaces;
 

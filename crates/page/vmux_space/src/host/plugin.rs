@@ -55,6 +55,7 @@ impl Plugin for SpacePlugin {
             .add_plugins((
                 HostedPagePlugin::<Spaces>::default(),
                 super::key::SpaceKeyPlugin,
+                super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
                 BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&["spaces", "layout"]),
             ))

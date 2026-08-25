@@ -65,6 +65,30 @@ pub struct AppSettings {
     pub appearance: AppearanceSettings,
 }
 
+impl AppSettings {
+    pub fn embedded() -> Self {
+        load_embedded_settings()
+    }
+
+    pub fn remember_space_startup_dir(&mut self, space_id: &str, dir: &str) -> bool {
+        let target = normalize_space_key(space_id);
+        let mut key = None;
+        for existing in self.spaces.keys() {
+            if normalize_space_key(existing) == target {
+                key = Some(existing.clone());
+                break;
+            }
+        }
+        let key = key.unwrap_or_else(|| space_id.to_string());
+        let overrides = self.spaces.entry(key).or_default();
+        if overrides.startup_dir.as_deref() == Some(dir) {
+            return false;
+        }
+        overrides.startup_dir = Some(dir.to_string());
+        true
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorScheme {
