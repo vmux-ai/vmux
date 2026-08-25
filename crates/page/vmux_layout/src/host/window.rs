@@ -424,26 +424,16 @@ pub fn spawn_requested_tab_layouts(
             commands.entity(old_stack).despawn();
         }
         new_stack_ctx.previous_stack = None;
-        new_stack_ctx.dismiss_modal = false;
 
         match &request.content {
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
-                let url = effective_startup_url
-                    .as_deref()
-                    .map(|u| u.0.clone())
-                    .unwrap_or_default();
-                if url.is_empty() {
-                    new_stack_ctx.stack = Some(stack);
-                    new_stack_ctx.needs_open = true;
-                } else {
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.needs_open = false;
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url,
-                        request_id: None,
-                    });
-                }
+                new_stack_ctx.stack = None;
+                new_stack_ctx.needs_open = false;
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+                    request_id: None,
+                });
             }
             TabLayoutSpawnContent::Url {
                 url,
@@ -754,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn default_tab_requests_command_bar_open() {
+    fn default_tab_opens_the_start_page() {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
@@ -788,9 +778,16 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<crate::PendingLaunch>();
-        assert!(ctx.stack.is_some());
-        assert!(ctx.needs_open);
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
+            [vmux_core::EffectiveStartupUrl::START_PAGE],
+            "a tab with nothing configured still opens a page rather than staging an empty stack"
+        );
     }
 
     #[test]

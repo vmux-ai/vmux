@@ -477,7 +477,6 @@ fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PendingLaunch;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -816,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_tab_none_url_no_startup_opens_prompt() {
+    fn open_in_new_tab_none_url_opens_the_start_page() {
         let mut app = build_app();
         build_main_and_tab(&mut app);
 
@@ -828,11 +827,15 @@ mod tests {
 
         app.update();
 
-        let collected = app.world().resource::<CollectedSpawns>();
-        assert!(collected.0.is_empty(), "expected no spawn request");
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert!(ctx.stack.is_some());
-        assert!(ctx.needs_open);
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
+            [vmux_core::EffectiveStartupUrl::START_PAGE]
+        );
     }
 
     #[test]
