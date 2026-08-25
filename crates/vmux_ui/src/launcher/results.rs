@@ -1357,11 +1357,11 @@ mod tests {
 
         let items = open_session_results(&tabs, &[]);
 
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 1, "the stack already on screen is not offered");
         assert!(matches!(
             &items[0],
             CommandBarResultItem::Stack { title, pane_id, .. }
-                if title == "Fun terminal demo" && *pane_id == 7
+                if title == "Docs" && *pane_id == 8
         ));
         assert!(open_session_results(&[], &[]).is_empty());
     }
