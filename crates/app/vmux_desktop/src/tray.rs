@@ -164,6 +164,9 @@ fn sync_tray_menu_state(
 ) {
     let Some(mut handle) = handle else { return };
     let any_visible = windows.iter().any(|w| w.visible);
+    if handle.last_any_visible == Some(any_visible) && !settings.is_changed() {
+        return;
+    }
     let locale = tray_locale(&settings);
     if handle.last_any_visible == Some(any_visible) && handle.last_locale == locale {
         return;

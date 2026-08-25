@@ -22,19 +22,18 @@ fn update_spaces_snapshot(
     active_name: Query<&Name, (With<Space>, With<vmux_core::Active>)>,
     mut snapshot: ResMut<CommandBarSpacesSnapshot>,
 ) {
-    let mut rows: Vec<(u32, SpaceSummary)> = spaces
-        .iter()
-        .map(|(id, name, order)| {
-            (
-                order.map(|o| o.0).unwrap_or(u32::MAX),
-                SpaceSummary {
-                    id: id.0.clone(),
-                    name: name.to_string(),
-                    profile: crate::model::bootstrap_profile_name(),
-                },
-            )
-        })
-        .collect();
+    let profile = crate::model::bootstrap_profile_name();
+    let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
+    for (id, name, order) in &spaces {
+        rows.push((
+            order.map(|o| o.0).unwrap_or(u32::MAX),
+            SpaceSummary {
+                id: id.0.clone(),
+                name: name.to_string(),
+                profile: profile.clone(),
+            },
+        ));
+    }
     rows.sort_by_key(|(order, _)| *order);
 
     snapshot.set_if_neq(CommandBarSpacesSnapshot {
