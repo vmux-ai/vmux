@@ -223,11 +223,13 @@ pub fn prepend_prompt_targets(
     results.splice(at..at, suggestions);
 }
 
+/// The stacks worth switching to, which is every one except the stack already showing.
 pub fn open_session_results(
     tabs: &[CommandBarTab],
     pages: &[CommandBarPage],
 ) -> Vec<CommandBarResultItem> {
     tabs.iter()
+        .filter(|tab| !tab.is_active)
         .map(|tab| CommandBarResultItem::Stack {
             title: tab.title.clone(),
             url: tab.url.clone(),
@@ -407,14 +409,18 @@ pub fn filter_results(
                 path: String::new(),
             });
         }
-        items.extend(tabs.iter().map(|t| CommandBarResultItem::Stack {
-            title: t.title.clone(),
-            url: t.url.clone(),
-            icon: stack_icon_for(pages, &t.url),
-            pane_id: t.pane_id,
-            tab_index: t.tab_index as usize,
-            location: t.location.clone(),
-        }));
+        items.extend(
+            tabs.iter()
+                .filter(|t| !t.is_active)
+                .map(|t| CommandBarResultItem::Stack {
+                    title: t.title.clone(),
+                    url: t.url.clone(),
+                    icon: stack_icon_for(pages, &t.url),
+                    pane_id: t.pane_id,
+                    tab_index: t.tab_index as usize,
+                    location: t.location.clone(),
+                }),
+        );
         items.extend(page_results(pages, ""));
         items.extend(work_dir_results(work_dirs, ""));
         items.extend(recent_file_results(recent_files, ""));
@@ -479,6 +485,9 @@ pub fn filter_results(
 
     if !starts_with_cmd || !search.is_empty() {
         for t in tabs {
+            if t.is_active {
+                continue;
+            }
             if search.is_empty()
                 || t.title.to_lowercase().contains(&search_lower)
                 || t.url.to_lowercase().contains(&search_lower)

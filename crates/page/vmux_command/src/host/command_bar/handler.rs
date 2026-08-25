@@ -634,6 +634,42 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     }
 }
 
+/// Resolves what someone typed into a path, and the `~` inside a `file://` they picked.
+struct Home;
+
+impl Home {
+    fn resolve(value: &str) -> std::path::PathBuf {
+        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+        if let Some(rest) = value.strip_prefix('~') {
+            return match home {
+                Some(home) => home.join(rest.trim_start_matches('/')),
+                None => std::path::PathBuf::from(value),
+            };
+        }
+        if value.starts_with('/') {
+            return std::path::PathBuf::from(value);
+        }
+        match home {
+            Some(home) => home.join(value),
+            None => std::path::PathBuf::from(value),
+        }
+    }
+
+    /// A `file://~/…` names nothing: the shell expands `~`, and no one else does.
+    ///
+    /// The launcher builds its editor row from what was typed, so a tilde survives into the URL it
+    /// sends. The editor then answers for a path that does not exist.
+    fn expanded_file_url(value: &str) -> String {
+        let Some(path) = value.strip_prefix("file://") else {
+            return value.to_string();
+        };
+        if !path.starts_with('~') {
+            return value.to_string();
+        }
+        format!("file://{}", Self::resolve(path).display())
+    }
+}
+
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
     if crate::event::is_data_uri(value)
@@ -739,19 +775,8 @@ fn on_command_bar_action(
             }
         }
         CommandBarActionEvent::Open { value, open } => {
-            let expanded = if value.starts_with('~') {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|h| std::path::PathBuf::from(h).join(value[1..].trim_start_matches('/')))
-                    .unwrap_or_else(|| std::path::PathBuf::from(&value))
-            } else if value.starts_with('/') {
-                std::path::PathBuf::from(&value)
-            } else {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|h| std::path::PathBuf::from(h).join(value))
-                    .unwrap_or_else(|| std::path::PathBuf::from(&value))
-            };
+            let value = &Home::expanded_file_url(value);
+            let expanded = Home::resolve(value);
             let is_path = expanded.exists();
 
             if is_path {
@@ -2036,6 +2061,25 @@ mod tests {
                 mode: PaneOpenMode::NewStack,
                 url: Some("https://example.com".to_string()),
             }
+        );
+    }
+
+    #[test]
+    fn a_picked_editor_row_carries_a_path_the_editor_can_open() {
+        let home = std::env::var("HOME").expect("a home directory");
+
+        assert_eq!(
+            Home::expanded_file_url("file://~/.vmux"),
+            format!("file://{home}/.vmux"),
+            "the launcher builds this row from what was typed, so the tilde arrives unexpanded"
+        );
+        assert_eq!(
+            Home::expanded_file_url("file:///etc/hosts"),
+            "file:///etc/hosts"
+        );
+        assert_eq!(
+            Home::expanded_file_url("https://vmux.ai/~jun"),
+            "https://vmux.ai/~jun"
         );
     }
 
