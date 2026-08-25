@@ -24,6 +24,7 @@ pub(crate) struct Api {
     quic: crate::quic::QuicApi,
 }
 
+#[derive(Debug)]
 pub(crate) enum ApiError {
     Unauthorized,
     NotFound,
