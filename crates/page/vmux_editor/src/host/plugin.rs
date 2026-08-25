@@ -1270,6 +1270,34 @@ fn emit_window(
     ));
 }
 
+/// The buffer lines whose selection, search and word highlights the page can actually show.
+///
+/// These were computed over the whole document on every caret move, so holding `j` in a large
+/// file re-scanned every line to find occurrences of the word under the cursor. The page positions
+/// spans by absolute row and only renders the loaded band, so anything outside it was work for
+/// nodes nobody sees.
+struct HighlightedLines;
+
+impl HighlightedLines {
+    fn of(edit: &mut EditState, vp: &FileViewport) -> (u32, u16) {
+        let wrap = wrapped_view(edit, vp);
+        let visible = wrap.total_rows();
+        let (first_row, end_row) = window_range(visible, vp.top_row, vp.rows);
+        let overscan = vmux_core::scroll::overscan_for(
+            vp.rows,
+            vmux_core::scroll::EDITOR_OVERSCAN_K,
+            vmux_core::scroll::OVERSCAN_FLOOR,
+            vmux_core::scroll::OVERSCAN_CAP,
+        );
+        let from = first_row.saturating_sub(overscan);
+        let to = end_row.saturating_add(overscan).min(visible);
+        let first_line = wrap.line_at(from).unwrap_or(0);
+        let last_line = wrap.line_at(to.saturating_sub(1)).unwrap_or(first_line);
+        let rows = last_line.saturating_sub(first_line).saturating_add(1);
+        (first_line, rows.min(u16::MAX as u32) as u16)
+    }
+}
+
 fn emit_cursor(
     entity: Entity,
     edit: &mut EditState,
@@ -1285,21 +1313,22 @@ fn emit_cursor(
     let view = edit.folds.view(total);
     let source_primary = edit.core.cursor_pos();
     let mut primary = source_primary;
+    let (span_first, span_rows) = HighlightedLines::of(edit, vp);
     let raw_selections = edit
         .core
-        .sel_spans(0, total as u16)
+        .sel_spans(span_first, span_rows)
         .into_iter()
         .filter(|selection| !view.is_hidden(selection.line))
         .collect::<Vec<_>>();
     let raw_word_highlights = edit
         .core
-        .word_highlight_spans(0, total as u16)
+        .word_highlight_spans(span_first, span_rows)
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
     let raw_search = edit
         .core
-        .search_spans(0, total as u16)
+        .search_spans(span_first, span_rows)
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();

@@ -219,8 +219,12 @@ pub fn Page() -> Element {
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
         wrap_columns.set(p.wrap_columns);
-        line_layouts.set(p.layouts);
-        lines.set(p.lines);
+        if line_layouts.peek().as_slice() != p.layouts.as_slice() {
+            line_layouts.set(p.layouts);
+        }
+        if lines.peek().as_slice() != p.lines.as_slice() {
+            lines.set(p.lines);
+        }
         lsp_hover.set(None);
     });
 
@@ -1969,20 +1973,95 @@ fn EditorLines(
     lsp_hover: Signal<Option<FileHoverEvent>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
+    let chunks = LineChunk::split(&lines(), &line_layouts(), first_row());
     let diags = diagnostics();
     let markers = git_line_markers();
     let wrap_cols = wrap_columns();
     rsx! {
-        for (i, line) in lines().iter().enumerate() {
+        for chunk in chunks {
+            EditorLineChunk {
+                key: "{chunk.start}",
+                rows: chunk.rows,
+                diagnostics: diags.clone(),
+                markers: markers.clone(),
+                wrap_cols,
+                cell_height,
+                gutter_chars,
+                total_lines,
+                cell_dims,
+                ctx_menu,
+                editor_dragging,
+                editor_drag_origin,
+                gutter_hover,
+                hover_pos,
+                lsp_hover,
+                hover_diag,
+            }
+        }
+    }
+}
+
+/// A fixed band of line numbers, so a chunk's identity survives scrolling.
+///
+/// The host replaces the whole window each time it sends one, so without this every row's props
+/// are rebuilt and every row is diffed for a one-line move. Cutting on absolute line number keeps
+/// the boundaries still while the window slides over them: the chunks that lost or gained a line
+/// re-render, and the ones in the middle compare equal and are skipped whole.
+struct LineChunk {
+    start: u32,
+    rows: Vec<(FileLine, FileLineLayout)>,
+}
+
+impl LineChunk {
+    const LINES: u32 = 24;
+
+    fn split(lines: &[FileLine], layouts: &[FileLineLayout], first_row: u32) -> Vec<Self> {
+        let mut chunks: Vec<Self> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            let layout = layouts.get(i).copied().unwrap_or(FileLineLayout {
+                line_no: line.line_no,
+                row: first_row + i as u32,
+                rows: 1,
+            });
+            let start = line.line_no - (line.line_no % Self::LINES);
+            if chunks.last().is_none_or(|chunk| chunk.start != start) {
+                chunks.push(Self {
+                    start,
+                    rows: Vec::new(),
+                });
+            }
+            if let Some(chunk) = chunks.last_mut() {
+                chunk.rows.push((line.clone(), layout));
+            }
+        }
+        chunks
+    }
+}
+
+#[component]
+fn EditorLineChunk(
+    rows: Vec<(FileLine, FileLineLayout)>,
+    diagnostics: Vec<FileDiagnostic>,
+    markers: HashMap<u32, EditorDiffMarker>,
+    wrap_cols: u16,
+    cell_height: f64,
+    gutter_chars: usize,
+    total_lines: Signal<u32>,
+    cell_dims: Signal<(f64, f64)>,
+    ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
+    editor_dragging: Signal<bool>,
+    editor_drag_origin: Signal<Option<(i32, i32)>>,
+    gutter_hover: Signal<bool>,
+    hover_pos: Signal<Option<(u32, u32)>>,
+    lsp_hover: Signal<Option<FileHoverEvent>>,
+    hover_diag: Signal<Option<FileDiagnostic>>,
+) -> Element {
+    rsx! {
+        for (line, layout) in rows.iter() {
             {
                 let ln = line.line_no;
-                let layout = line_layouts().get(i).copied().unwrap_or(FileLineLayout {
-                    line_no: ln,
-                    row: first_row() + i as u32,
-                    rows: 1,
-                });
                 let mut line_diags: Vec<FileDiagnostic> = Vec::new();
-                for d in diags.iter() {
+                for d in diagnostics.iter() {
                     if d.line == ln {
                         line_diags.push(d.clone());
                     }
@@ -1991,8 +2070,8 @@ fn EditorLines(
                     EditorLineRow {
                         key: "{ln}",
                         line: line.clone(),
-                        layout,
-                        severity: line_severity(&diags, ln),
+                        layout: *layout,
+                        severity: line_severity(&diagnostics, ln),
                         diff_marker: markers.get(&(ln + 1)).copied(),
                         diagnostics: line_diags,
                         cell_height,

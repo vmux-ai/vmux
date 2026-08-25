@@ -115,8 +115,18 @@ fn sync_winit_power_mode(
     }
 }
 
+/// The wake exists so Bevy can service CEF, not so it can match the display.
+///
+/// On macOS CEF is pumped by its own CFRunLoop timer, so this wake only has to be often enough to
+/// upload OSR textures and run the schedule. Following a 120 Hz panel doubled the work for a
+/// surface that is not animating, so the foreground rate is floored at 60 Hz.
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(16_666_666);
+
 fn foreground_cef_wake_interval(refresh_rates: impl IntoIterator<Item = Option<u32>>) -> Duration {
-    windowless_frame_interval_from_refresh_millihertz(refresh_rates.into_iter().flatten().max())
+    let display = windowless_frame_interval_from_refresh_millihertz(
+        refresh_rates.into_iter().flatten().max(),
+    );
+    display.max(MIN_FOREGROUND_CEF_WAKE_INTERVAL)
 }
 
 fn cef_wake_interval(
@@ -482,12 +492,20 @@ mod tests {
     }
 
     #[test]
-    fn cef_wake_policy_matches_display_refresh() {
+    fn cef_wake_policy_follows_display_refresh_but_not_past_60hz() {
         assert_eq!(
             foreground_cef_wake_interval([Some(60_000)]),
-            Duration::from_nanos(16_666_666)
+            MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
-        assert!(foreground_cef_wake_interval([Some(144_000)]) < Duration::from_millis(8));
+        assert_eq!(
+            foreground_cef_wake_interval([Some(144_000)]),
+            MIN_FOREGROUND_CEF_WAKE_INTERVAL,
+            "a faster panel must not make the app wake faster"
+        );
+        assert!(
+            foreground_cef_wake_interval([Some(30_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
+            "a slower panel still wakes less often"
+        );
         assert_eq!(
             cef_wake_interval(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)

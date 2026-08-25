@@ -36,6 +36,7 @@ impl Plugin for FrameRatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LayoutFrameRateBurst>()
             .add_observer(request_layout_frame_burst)
+            .add_systems(Update, cap_uncapped_webview_frame_rate)
             .add_systems(
                 Last,
                 (
@@ -220,6 +221,23 @@ fn refresh_active_windowed_hover(
 
 const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
+const PAGE_MAX_FRAME_RATE: i32 = 60;
+
+/// Caps any webview nobody else caps.
+///
+/// `sync_windowless_frame_rate` drives the texture wake from the *minimum* interval across every
+/// webview, so a single uncapped surface pulls the whole app up to the panel's refresh rate — on a
+/// 120 Hz display that doubled every Bevy update, not just that surface's repaints.
+fn cap_uncapped_webview_frame_rate(
+    uncapped: Query<Entity, (With<WebviewSource>, Without<WebviewMaxFrameRate>)>,
+    mut commands: Commands,
+) {
+    for entity in &uncapped {
+        commands
+            .entity(entity)
+            .insert(WebviewMaxFrameRate(PAGE_MAX_FRAME_RATE));
+    }
+}
 #[derive(Resource, Default)]
 struct LayoutFrameRateBurst {
     pub(crate) last_emit: Option<std::time::Instant>,

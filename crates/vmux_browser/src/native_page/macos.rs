@@ -24,26 +24,27 @@ pub(super) struct NativePagesMacosPlugin;
 
 impl Plugin for NativePagesMacosPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                open_native_pages,
-                sync_native_appearance.run_if(resource_changed::<AppSettings>),
-                sync_native_page_scale,
+        app.add_systems(First, accept_page_wakes)
+            .add_systems(
+                Update,
+                (
+                    open_native_pages,
+                    sync_native_appearance.run_if(resource_changed::<AppSettings>),
+                    sync_native_page_scale,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_systems(
-            PostUpdate,
-            (place_native_pages, render_native_pages)
-                .chain()
-                .after(crate::present::sync_windowed_frames),
-        )
-        .add_systems(
-            PostUpdate,
-            focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
-        )
-        .add_observer(forward_host_emit);
+            .add_systems(
+                PostUpdate,
+                (place_native_pages, render_native_pages)
+                    .chain()
+                    .after(crate::present::sync_windowed_frames),
+            )
+            .add_systems(
+                PostUpdate,
+                focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
+            )
+            .add_observer(forward_host_emit);
     }
 }
 
@@ -375,13 +376,30 @@ impl PageWaker {
     }
 }
 
+/// One pending wake at a time, cleared as each frame starts.
+///
+/// A page wakes the host after every host emit it delivers and after every DOM event it handles,
+/// and the host emits several times per keystroke — so an unthrottled waker turned one keystroke
+/// into several full app updates, and those updates emitted again. Collapsing the wakes a frame
+/// asks for into one leaves the loop event-driven without letting it feed itself. Clearing at the
+/// start of the frame rather than the end is what keeps a change made mid-frame from being lost:
+/// it still schedules the next one.
+static PAGE_WAKE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl vmux_native::Wake for PageWaker {
     fn wake(&self) {
         let Some(proxy) = self.0.as_ref() else {
             return;
         };
+        if PAGE_WAKE_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
+}
+
+pub(crate) fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
+    PAGE_WAKE_PENDING.store(false, std::sync::atomic::Ordering::Release);
 }
 
 struct PageOutbox {
