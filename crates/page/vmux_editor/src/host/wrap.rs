@@ -64,6 +64,13 @@ impl WrapView {
         self.lines[start..end].to_vec()
     }
 
+    pub fn line_at(&self, row: u32) -> Option<u32> {
+        let index = self
+            .lines
+            .partition_point(|line| line.row + line.rows as u32 <= row);
+        self.lines.get(index).map(|line| line.line_no)
+    }
+
     pub fn position(&self, line_no: u32, column: u32) -> (u32, u32) {
         let Ok(index) = self
             .lines
@@ -166,6 +173,10 @@ mod tests {
 
         assert_eq!(view.total_rows(), 5);
         assert_eq!(view.position(0, 7), (1, 2));
+        assert_eq!(view.line_at(0), Some(0));
+        assert_eq!(view.line_at(2), Some(0));
+        assert_eq!(view.line_at(3), Some(1));
+        assert_eq!(view.line_at(99), None);
         assert_eq!(
             view.selections([SelSpan {
                 line: 0,

@@ -1346,6 +1346,50 @@ fn emit_cursor(
     ));
 }
 
+/// Drags the caret along when the window scrolls out from under it, the way `CTRL-E` does.
+///
+/// Scrolling is the one motion that moves the window without moving the caret, so the caret is
+/// the thing that has to give once the window has left it behind. Vim keeps the column and only
+/// surrenders the line, so this places the caret on the same column of the edge row.
+struct ScrolledCursor;
+
+impl ScrolledCursor {
+    fn follow(edit: &mut EditState, vp: &FileViewport) -> bool {
+        if vp.rows == 0 {
+            return false;
+        }
+        let cursor = edit.core.cursor_pos();
+        let top = vp.top_row;
+        let bottom = top + vp.rows as u32 - 1;
+        let row = wrapped_view(edit, vp).position(cursor.line, cursor.col).0;
+        let wanted = if row < top {
+            top
+        } else if row > bottom {
+            bottom
+        } else {
+            return false;
+        };
+        let Some(line) = wrapped_view(edit, vp).line_at(wanted) else {
+            return false;
+        };
+        if line == cursor.line {
+            return false;
+        }
+        let at = edit
+            .core
+            .buffer
+            .coords_to_char(line as usize, cursor.col as usize);
+        if edit.core.mode.is_visual() {
+            let anchor = edit.core.primary().anchor;
+            edit.core.selections = vec![Selection { anchor, head: at }];
+            return true;
+        }
+        edit.core.collapse_carets();
+        edit.core.set_caret(at);
+        true
+    }
+}
+
 fn wrapped_autoscroll(edit: &mut EditState, vp: &FileViewport) -> Option<u32> {
     if vp.rows == 0 {
         return None;
@@ -2278,11 +2322,22 @@ fn run_commands(
     let mut viewport_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
-            if browsers.can_emit_to(&entity) {
+            let visible = wrapped_view(edit, vp).total_rows();
+            let was = vp.top_row;
+            let target = (was as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
+            vp.top_row = clamp_top_line(target, visible, vp.rows);
+            edit.core.top_row = vp.top_row;
+            viewport_changed = true;
+            if ScrolledCursor::follow(edit, vp) {
+                sel_or_mode = true;
+            }
+            if vp.top_row != was && browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
                     entity,
                     FILE_SCROLL_BY_EVENT,
-                    &FileScrollByEvent { lines: *lines },
+                    &FileScrollByEvent {
+                        lines: vp.top_row as i32 - was as i32,
+                    },
                 ));
             }
             continue;
@@ -5214,6 +5269,69 @@ mod page_open_tests {
         let dir = app.world().get::<FileDir>(e).unwrap();
         assert!(dir.entries.iter().any(|x| x.name == "f2"));
         assert!(!dir.entries.iter().any(|x| x.name == "f1"));
+    }
+}
+
+#[cfg(test)]
+mod scrolled_cursor_tests {
+    use super::*;
+
+    impl ScrolledCursor {
+        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (EditState, FileViewport) {
+            let text = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
+            let mut core = EditCore::new(
+                PathBuf::from("/tmp/scroll.rs"),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            core.set_caret(core.buffer.coords_to_char(cursor_line, 3));
+            let edit = EditState::new(
+                core,
+                HighlightCache::new(Path::new("/tmp/scroll.rs")),
+                crate::fold::FoldState::default(),
+            );
+            let viewport = FileViewport {
+                top_row,
+                rows,
+                wrap_columns: 0,
+                word_wrap: vmux_core::editor::WordWrap::Off,
+                word_wrap_column: 80,
+            };
+            (edit, viewport)
+        }
+
+        fn cursor_line(edit: &EditState) -> u32 {
+            edit.core.cursor_pos().line
+        }
+    }
+
+    #[test]
+    fn scrolling_past_the_caret_drags_it_to_the_top_edge() {
+        let (mut edit, vp) = ScrolledCursor::at(2, 10, 20);
+        assert!(ScrolledCursor::follow(&mut edit, &vp));
+        assert_eq!(ScrolledCursor::cursor_line(&edit), 10);
+    }
+
+    #[test]
+    fn scrolling_back_past_the_caret_drags_it_to_the_bottom_edge() {
+        let (mut edit, vp) = ScrolledCursor::at(30, 0, 20);
+        assert!(ScrolledCursor::follow(&mut edit, &vp));
+        assert_eq!(ScrolledCursor::cursor_line(&edit), 19);
+    }
+
+    #[test]
+    fn a_caret_still_on_screen_is_left_alone() {
+        let (mut edit, vp) = ScrolledCursor::at(12, 10, 20);
+        assert!(!ScrolledCursor::follow(&mut edit, &vp));
+        assert_eq!(ScrolledCursor::cursor_line(&edit), 12);
+    }
+
+    #[test]
+    fn a_dragged_caret_keeps_its_column() {
+        let (mut edit, vp) = ScrolledCursor::at(2, 10, 20);
+        ScrolledCursor::follow(&mut edit, &vp);
+        assert_eq!(edit.core.cursor_pos().col, 3);
     }
 }
 
