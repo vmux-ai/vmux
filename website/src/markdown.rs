@@ -419,13 +419,29 @@ fn DiagramFigure(svg: String) -> Element {
     rsx! {
         figure {
             class: "my-6 -mx-6 px-6 overflow-x-auto sm:-mx-10 sm:px-10 cursor-zoom-in",
+            tabindex: "0",
+            role: "button",
+            aria_label: "Open the diagram at full size",
             onclick: move |_| zoomed.set(true),
+            onkeydown: move |event| {
+                let key = event.key();
+                if key == Key::Enter || key == Key::Character(" ".to_string()) {
+                    zoomed.set(true);
+                }
+            },
             dangerous_inner_html: "{svg}",
         }
         if zoomed() {
             div {
                 class: "fixed inset-0 z-50 overflow-auto bg-bg/95 p-6 cursor-zoom-out sm:p-10",
+                tabindex: "0",
+                autofocus: true,
                 onclick: move |_| zoomed.set(false),
+                onkeydown: move |event| {
+                    if event.key() == Key::Escape {
+                        zoomed.set(false);
+                    }
+                },
                 div { class: "grid min-h-full w-max min-w-full place-items-center",
                     div { dangerous_inner_html: "{svg}" }
                 }
@@ -453,14 +469,44 @@ mod tests {
         assert!(!html.is_empty());
     }
 
+    fn code_blocks(nodes: &[Node], found: &mut Vec<(String, String)>) {
+        for node in nodes {
+            match node {
+                Node::CodeBlock(lang, code) => found.push((lang.clone(), code.clone())),
+                Node::Heading(_, children)
+                | Node::Paragraph(children)
+                | Node::BlockQuote(children)
+                | Node::Strong(children)
+                | Node::Emphasis(children)
+                | Node::Strikethrough(children)
+                | Node::Link(_, children) => code_blocks(children, found),
+                Node::List(_, items) => {
+                    for item in items {
+                        code_blocks(item, found);
+                    }
+                }
+                Node::Table(header, rows) => {
+                    for cell in header {
+                        code_blocks(cell, found);
+                    }
+                    for row in rows {
+                        for cell in row {
+                            code_blocks(cell, found);
+                        }
+                    }
+                }
+                Node::Rule | Node::Text(_) | Node::Code(_) | Node::SoftBreak | Node::HardBreak => {}
+            }
+        }
+    }
+
     #[test]
     fn every_published_mermaid_block_resolves_to_an_svg_as_the_parser_yields_it() {
         let mut checked = 0;
         for doc in crate::docs::DOCS {
-            for node in parse(doc.content) {
-                let Node::CodeBlock(lang, code) = node else {
-                    continue;
-                };
+            let mut blocks = Vec::new();
+            code_blocks(&parse(doc.content), &mut blocks);
+            for (lang, code) in blocks {
                 if lang != "mermaid" {
                     continue;
                 }

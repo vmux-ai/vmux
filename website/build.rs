@@ -8,9 +8,10 @@ fn main() {
     let docs = manifest.join("..").join("docs");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("mermaid.rs");
 
+    println!("cargo::rerun-if-changed={}", docs.display());
+
     let mut rendered: BTreeMap<String, String> = BTreeMap::new();
     for source in sources(&docs) {
-        println!("cargo::rerun-if-changed={}", source.display());
         let markdown = std::fs::read_to_string(&source)
             .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
         for diagram in Diagram::all(&markdown) {
@@ -30,12 +31,17 @@ fn main() {
 }
 
 fn sources(docs: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = std::fs::read_dir(docs)
-        .unwrap_or_else(|error| panic!("read {}: {error}", docs.display()))
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
-        .collect();
+    let entries =
+        std::fs::read_dir(docs).unwrap_or_else(|error| panic!("read {}: {error}", docs.display()));
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.unwrap_or_else(|error| panic!("read an entry in {}: {error}", docs.display()));
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension == "md") {
+            found.push(path);
+        }
+    }
     found.sort();
     found
 }
