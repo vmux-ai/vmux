@@ -104,6 +104,7 @@ impl Plugin for TerminalPlugin {
                     arm_agent_loading_on_restart,
                     announce_slow_shell_boot.after(poll_service_messages),
                     clear_agent_loading.after(poll_service_messages),
+                    resend_the_screen_a_page_missed.after(poll_service_messages),
                     flush_buffered_agent_prompt.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
                     set_terminal_shell_icon,
@@ -865,6 +866,9 @@ pub struct PendingTerminalInput {
 #[derive(Component)]
 struct ShellOutputSeen;
 
+#[derive(Component)]
+struct OwedSnapshot;
+
 fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
     has_content && cursor_col > 0
 }
@@ -1332,6 +1336,7 @@ fn poll_service_messages(
                             }
                         }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                            commands.entity(entity).insert(OwedSnapshot);
                             continue;
                         }
                         let mut changed_lines = changed_lines;
@@ -2937,13 +2942,40 @@ fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
     q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    let Ok(pid) = q.get(entity) else { return };
+    let Some(service) = service else {
+        commands.entity(entity).insert(OwedSnapshot);
+        return;
+    };
+    service
+        .0
+        .send(ClientMessage::RequestSnapshot { process_id: *pid });
+}
+
+/// Ask for the screen again once the page can receive it.
+///
+/// A frame emitted before the page is listening is dropped, and the frames after it are deltas —
+/// so a shell that prints its prompt and then waits leaves a page that never hears anything. The
+/// service connection races page readiness too, and loses often enough to matter. Either way the
+/// terminal is owed a whole screen, and this is where that debt is paid.
+fn resend_the_screen_a_page_missed(
+    owed: Query<(Entity, &ProcessId), (With<Terminal>, With<OwedSnapshot>)>,
+    browsers: NonSend<Browsers>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
     let Some(service) = service else { return };
-    if let Ok(pid) = q.get(entity) {
+    for (entity, pid) in &owed {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
         service
             .0
             .send(ClientMessage::RequestSnapshot { process_id: *pid });
+        commands.entity(entity).remove::<OwedSnapshot>();
     }
 }
 
@@ -4811,6 +4843,24 @@ mod tests {
             .id();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn a_page_ready_before_the_service_is_owed_its_screen() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
+        let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
+
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        assert!(
+            app.world().get::<OwedSnapshot>(webview).is_some(),
+            "the snapshot request had nowhere to go, so the debt has to outlive the connection"
+        );
     }
 
     #[test]
