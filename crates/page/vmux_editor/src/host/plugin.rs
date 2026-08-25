@@ -1346,6 +1346,35 @@ fn emit_cursor(
     ));
 }
 
+/// How far the viewport slid, and whether the page needs a fresh window because of it.
+///
+/// The page holds an overscan band either side of what it shows and reveals the caret by
+/// scrolling itself, so a caret walking down the file does not need the host to resend the window
+/// for every line — the page asks for more through `FileScrollEvent` once its own band runs
+/// short. Only a jump large enough to land outside that band has to be served eagerly.
+struct DriftedWindow {
+    rows: u32,
+    overscan: u32,
+}
+
+impl DriftedWindow {
+    fn of(top_before: u32, vp: &FileViewport) -> Self {
+        Self {
+            rows: vp.top_row.abs_diff(top_before),
+            overscan: vmux_core::scroll::overscan_for(
+                vp.rows,
+                vmux_core::scroll::EDITOR_OVERSCAN_K,
+                vmux_core::scroll::OVERSCAN_FLOOR,
+                vmux_core::scroll::OVERSCAN_CAP,
+            ),
+        }
+    }
+
+    fn left_the_band(&self) -> bool {
+        self.rows > self.overscan / 2
+    }
+}
+
 /// Drags the caret along when the window scrolls out from under it, the way `CTRL-E` does.
 ///
 /// Scrolling is the one motion that moves the window without moving the caret, so the caret is
@@ -2315,11 +2344,11 @@ fn run_commands(
     browsers: &Browsers,
     commands: &mut Commands,
 ) -> bool {
+    let top_before = vp.top_row;
     let mut text_changed = false;
     let mut sel_or_mode = false;
     let mut dirty_changed = false;
     let mut fold_changed = false;
-    let mut viewport_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
             let visible = wrapped_view(edit, vp).total_rows();
@@ -2327,7 +2356,6 @@ fn run_commands(
             let target = (was as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
             vp.top_row = clamp_top_line(target, visible, vp.rows);
             edit.core.top_row = vp.top_row;
-            viewport_changed = true;
             if ScrolledCursor::follow(edit, vp) {
                 sel_or_mode = true;
             }
@@ -2355,7 +2383,6 @@ fn run_commands(
                 crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
             };
             edit.core.top_row = vp.top_row;
-            viewport_changed = true;
             if vp.top_row != was && browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
                     entity,
@@ -2529,10 +2556,9 @@ fn run_commands(
     }
     if let Some(top) = wrapped_autoscroll(edit, vp) {
         vp.top_row = top;
-        viewport_changed = true;
     }
     let vpc = *vp;
-    if text_changed || fold_changed || viewport_changed {
+    if text_changed || fold_changed || DriftedWindow::of(top_before, &vpc).left_the_band() {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
     if text_changed || sel_or_mode || fold_changed {
