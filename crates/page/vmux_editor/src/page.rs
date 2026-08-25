@@ -1415,46 +1415,24 @@ pub fn Page() -> Element {
                                         }
                                     },
                                     div { class: "relative", style: "height:{spacer}px;",
-                                        for (i, line) in lines().iter().enumerate() {
-                                            {
-                                                let ln = line.line_no;
-                                                let layout = line_layouts().get(i).copied().unwrap_or(FileLineLayout {
-                                                    line_no: ln,
-                                                    row: first_row() + i as u32,
-                                                    rows: 1,
-                                                });
-                                                let diags = diagnostics();
-                                                let sev = line_severity(&diags, ln);
-                                                let diff_marker = git_line_markers().get(&(ln + 1)).copied();
-                                                let mut line_diags: Vec<FileDiagnostic> = Vec::new();
-                                                for d in diags.iter() {
-                                                    if d.line == ln {
-                                                        line_diags.push(d.clone());
-                                                    }
-                                                }
-                                                rsx! {
-                                                    EditorLineRow {
-                                                        key: "{ln}",
-                                                        line: line.clone(),
-                                                        layout,
-                                                        severity: sev,
-                                                        diff_marker,
-                                                        diagnostics: line_diags,
-                                                        cell_height: ch,
-                                                        gutter_chars: gw,
-                                                        wrap_cols: wrap_columns(),
-                                                        total_lines,
-                                                        cell_dims,
-                                                        ctx_menu,
-                                                        editor_dragging,
-                                                        editor_drag_origin,
-                                                        gutter_hover,
-                                                        hover_pos,
-                                                        lsp_hover,
-                                                        hover_diag,
-                                                    }
-                                                }
-                                            }
+                                        EditorLines {
+                                            lines,
+                                            line_layouts,
+                                            first_row,
+                                            diagnostics,
+                                            git_line_markers,
+                                            wrap_columns,
+                                            cell_height: ch,
+                                            gutter_chars: gw,
+                                            total_lines,
+                                            cell_dims,
+                                            ctx_menu,
+                                            editor_dragging,
+                                            editor_drag_origin,
+                                            gutter_hover,
+                                            hover_pos,
+                                            lsp_hover,
+                                            hover_diag,
                                         }
                                         for s in word_spans().iter() {
                                             {
@@ -1962,6 +1940,76 @@ pub fn Page() -> Element {
                 }
             }
         }
+        }
+    }
+}
+
+/// The list of rendered lines.
+///
+/// Every prop is a signal or a value only a resize changes, so moving the caret leaves them all
+/// equal and Dioxus skips this whole subtree. Without the boundary a caret move re-diffs all
+/// hundred rows to discover that none of them moved.
+#[component]
+fn EditorLines(
+    lines: Signal<Vec<FileLine>>,
+    line_layouts: Signal<Vec<FileLineLayout>>,
+    first_row: Signal<u32>,
+    diagnostics: Signal<Vec<FileDiagnostic>>,
+    git_line_markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    wrap_columns: Signal<u16>,
+    cell_height: f64,
+    gutter_chars: usize,
+    total_lines: Signal<u32>,
+    cell_dims: Signal<(f64, f64)>,
+    ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
+    editor_dragging: Signal<bool>,
+    editor_drag_origin: Signal<Option<(i32, i32)>>,
+    gutter_hover: Signal<bool>,
+    hover_pos: Signal<Option<(u32, u32)>>,
+    lsp_hover: Signal<Option<FileHoverEvent>>,
+    hover_diag: Signal<Option<FileDiagnostic>>,
+) -> Element {
+    let diags = diagnostics();
+    let markers = git_line_markers();
+    let wrap_cols = wrap_columns();
+    rsx! {
+        for (i, line) in lines().iter().enumerate() {
+            {
+                let ln = line.line_no;
+                let layout = line_layouts().get(i).copied().unwrap_or(FileLineLayout {
+                    line_no: ln,
+                    row: first_row() + i as u32,
+                    rows: 1,
+                });
+                let mut line_diags: Vec<FileDiagnostic> = Vec::new();
+                for d in diags.iter() {
+                    if d.line == ln {
+                        line_diags.push(d.clone());
+                    }
+                }
+                rsx! {
+                    EditorLineRow {
+                        key: "{ln}",
+                        line: line.clone(),
+                        layout,
+                        severity: line_severity(&diags, ln),
+                        diff_marker: markers.get(&(ln + 1)).copied(),
+                        diagnostics: line_diags,
+                        cell_height,
+                        gutter_chars,
+                        wrap_cols,
+                        total_lines,
+                        cell_dims,
+                        ctx_menu,
+                        editor_dragging,
+                        editor_drag_origin,
+                        gutter_hover,
+                        hover_pos,
+                        lsp_hover,
+                        hover_diag,
+                    }
+                }
+            }
         }
     }
 }
