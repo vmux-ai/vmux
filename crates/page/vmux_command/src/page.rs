@@ -574,15 +574,17 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
-    let selected_target_title = default_target
+    let effective_target = active_item
         .as_ref()
+        .filter(|item| prompt_target_url(item).is_some())
+        .or(default_target.as_ref());
+    let selected_target_title = effective_target
         .and_then(|item| match item {
             ResultItem::Page { title, .. } => Some(title.clone()),
             _ => None,
         })
         .unwrap_or_else(|| "Agent".to_string());
-    let selected_target_url = default_target
-        .as_ref()
+    let selected_target_url = effective_target
         .and_then(prompt_target_url)
         .unwrap_or_default()
         .to_string();
@@ -748,6 +750,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let start_keydown_nav = nav;
     let start_keydown_ghost = ghost_text.clone();
     let start_keydown = move |e: KeyboardEvent| {
+        if handle_readline_chord(&e, query, &start_keydown_ghost, PROMPT_INPUT_ID) {
+            return;
+        }
         if e.key() == Key::Tab {
             e.prevent_default();
             if !start_keydown_ghost.is_empty() {
@@ -897,7 +902,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let modal_keydown_results = results.clone();
     let modal_keydown_ghost = ghost_text.clone();
     let modal_keydown = move |e: KeyboardEvent| {
-        if handle_readline_chord(&e, query, &modal_keydown_ghost) {
+        if handle_readline_chord(&e, query, &modal_keydown_ghost, COMMAND_BAR_INPUT_ID) {
             return;
         }
         let ctrl = e.modifiers().contains(Modifiers::CONTROL);
@@ -1111,7 +1116,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_action: {
                         let action_results = results.clone();
                         let action_query = q.clone();
-                        let action_default_agent = default_target.clone();
+                        let action_default_agent = effective_target.cloned();
                         let action_nav = nav;
                         move |_| {
                             if let Some(item) = action_results.get(sel).filter(|item| {
@@ -1719,8 +1724,13 @@ pub fn focus_prompt_input() {
     focus_prompt_end(PROMPT_INPUT_ID);
 }
 
-fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost: &str) -> bool {
-    if handle_plain_meta_a(event) {
+fn handle_readline_chord(
+    event: &KeyboardEvent,
+    mut query: Signal<String>,
+    ghost: &str,
+    input_id: &'static str,
+) -> bool {
+    if handle_plain_meta_a(event, input_id) {
         return true;
     }
     if !event.modifiers().contains(Modifiers::CONTROL) {
@@ -1742,12 +1752,19 @@ fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost
         &mut query,
         action,
         ghost,
-        EventSelection::caret_in(COMMAND_BAR_INPUT_ID),
+        EventSelection::caret_in(input_id),
+        input_id,
     );
     true
 }
 
-fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str, caret: usize) {
+fn apply_ctrl_edit(
+    query: &mut Signal<String>,
+    action: CtrlEditAction,
+    ghost: &str,
+    caret: usize,
+    input_id: &'static str,
+) {
     let value = query.peek().clone();
     let ghost = match action {
         CtrlEditAction::End => ghost,
@@ -1758,10 +1775,10 @@ fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &s
     if edited.value != value {
         query.set(edited.value);
     }
-    TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(edited.caret);
+    TextCaret::in_field(input_id).place(edited.caret);
 }
 
-fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
+fn handle_plain_meta_a(event: &KeyboardEvent, input_id: &'static str) -> bool {
     let modifiers = event.modifiers();
     let plain_meta = modifiers.contains(Modifiers::META)
         && !modifiers.contains(Modifiers::CONTROL)
@@ -1773,7 +1790,7 @@ fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
 
     event.prevent_default();
     event.stop_propagation();
-    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
+    TextCaret::in_field(input_id).select_all();
     true
 }
 
