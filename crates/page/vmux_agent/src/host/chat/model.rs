@@ -8,6 +8,7 @@ use vmux_chat::event::{
     MODEL_STATE_EVENT, ModelOptionEntry, ModelState, SLASH_COMMANDS_EVENT, SelectModel,
     SetAgentEffort, SlashCommands,
 };
+use vmux_command::event::StartSelectModel;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_session::AcpSession;
@@ -19,6 +20,7 @@ impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AcpModelRequestCounter>()
             .init_resource::<LastUsedAcpModels>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<ModelSelectRequest>()
             .add_message::<EffortSetRequest>()
@@ -27,9 +29,13 @@ impl Plugin for ChatModelPlugin {
                     "agent", "start",
                 ]),
             )
+            .add_plugins(BinEventEmitterPlugin::<(StartSelectModel,)>::for_hosts(&[
+                "start",
+            ]))
             .add_systems(Startup, load_last_used_acp_models)
             .add_observer(on_select_model)
             .add_observer(on_set_agent_effort)
+            .add_observer(on_start_select_model)
             .add_systems(
                 Update,
                 (
@@ -40,7 +46,11 @@ impl Plugin for ChatModelPlugin {
                     push_removed_acp_model_state_to_page,
                     apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
                     send_acp_model_requests,
-                    save_last_used_acp_models.after(apply_last_used_acp_model),
+                    remember_acp_model_lists,
+                    publish_agent_models.after(remember_acp_model_lists),
+                    save_last_used_acp_models
+                        .after(apply_last_used_acp_model)
+                        .after(remember_acp_model_lists),
                 ),
             );
     }
@@ -190,8 +200,34 @@ struct AcpSetModelRequest {
 
 #[derive(Resource, Default)]
 struct LastUsedAcpModels {
-    by_agent: std::collections::BTreeMap<String, String>,
+    by_agent: std::collections::BTreeMap<String, AgentModelMemory>,
     dirty: bool,
+}
+
+#[derive(Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct AgentModelMemory {
+    selected: String,
+    #[serde(default)]
+    models: Vec<ModelOptionEntry>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SavedAgentModel {
+    Remembered(AgentModelMemory),
+    Selected(String),
+}
+
+impl SavedAgentModel {
+    fn memory(self) -> AgentModelMemory {
+        match self {
+            Self::Remembered(memory) => memory,
+            Self::Selected(selected) => AgentModelMemory {
+                selected,
+                models: Vec::new(),
+            },
+        }
+    }
 }
 
 fn last_used_acp_models_path() -> std::path::PathBuf {
@@ -202,11 +238,14 @@ fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
     let Ok(bytes) = std::fs::read(last_used_acp_models_path()) else {
         return;
     };
-    let Ok(saved) = serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes)
+    let Ok(saved) =
+        serde_json::from_slice::<std::collections::BTreeMap<String, SavedAgentModel>>(&bytes)
     else {
         return;
     };
-    models.by_agent = saved;
+    for (agent, entry) in saved {
+        models.by_agent.insert(agent, entry.memory());
+    }
     models.dirty = false;
 }
 
@@ -287,6 +326,58 @@ pub(super) fn effort_current_for<'a>(
     settings
         .and_then(|settings| settings.agent.effort_for(agent_key))
         .unwrap_or("")
+}
+
+fn on_start_select_model(
+    trigger: On<BinReceive<StartSelectModel>>,
+    mut last_used: ResMut<LastUsedAcpModels>,
+) {
+    let request = &trigger.event().payload;
+    if request.agent_key.is_empty() || request.model_id.is_empty() {
+        return;
+    }
+    last_used.remember(&request.agent_key, &request.model_id);
+}
+
+fn remember_acp_model_lists(
+    sessions: Query<(&AcpSession, &AcpModelState), Changed<AcpModelState>>,
+    mut last_used: ResMut<LastUsedAcpModels>,
+) {
+    for (session, state) in &sessions {
+        let listed = model_state_of(Some(state)).models;
+        last_used.remember_models(&session.agent_id, &listed);
+        let current = state.display_model_id().to_string();
+        if !current.is_empty() && last_used.selected_for(&session.agent_id).is_empty() {
+            last_used.remember(&session.agent_id, &current);
+        }
+    }
+}
+
+fn publish_agent_models(
+    last_used: Res<LastUsedAcpModels>,
+    mut published: ResMut<vmux_command::snapshot::CommandBarAgentModels>,
+) {
+    if !last_used.is_changed() {
+        return;
+    }
+    let mut next = Vec::new();
+    for (agent_key, memory) in &last_used.by_agent {
+        if memory.models.is_empty() {
+            continue;
+        }
+        next.push(vmux_wire::command_bar::AgentModels {
+            agent_key: agent_key.clone(),
+            url: vmux_command::snapshot::AgentPromptTarget::Acp {
+                id: agent_key.clone(),
+            }
+            .url(),
+            selected: memory.selected.clone(),
+            models: memory.models.clone(),
+        });
+    }
+    if published.agents != next {
+        published.agents = next;
+    }
 }
 
 fn push_acp_model_state_to_page(
@@ -432,9 +523,13 @@ fn apply_last_used_acp_model(
     mut requests: MessageWriter<AcpSetModelRequest>,
 ) {
     for (session, mut state) in &mut sessions {
-        let Some(model_id) = last_used.by_agent.get(&session.agent_id) else {
+        let Some(remembered) = last_used.by_agent.get(&session.agent_id) else {
             continue;
         };
+        let model_id = &remembered.selected;
+        if model_id.is_empty() {
+            continue;
+        }
         if state.display_model_id() == model_id
             || !state.models.iter().any(|model| &model.id == model_id)
         {
@@ -473,15 +568,30 @@ fn send_acp_model_requests(
 
 impl LastUsedAcpModels {
     fn remember(&mut self, agent_id: &str, model_id: &str) {
-        if self
-            .by_agent
-            .get(agent_id)
-            .is_some_and(|saved| saved == model_id)
-        {
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        if entry.selected == model_id {
             return;
         }
-        self.by_agent
-            .insert(agent_id.to_string(), model_id.to_string());
+        entry.selected = model_id.to_string();
+        self.dirty = true;
+    }
+
+    fn selected_for(&self, agent_id: &str) -> &str {
+        match self.by_agent.get(agent_id) {
+            Some(memory) => &memory.selected,
+            None => "",
+        }
+    }
+
+    fn remember_models(&mut self, agent_id: &str, models: &[ModelOptionEntry]) {
+        if models.is_empty() {
+            return;
+        }
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        if entry.models == models {
+            return;
+        }
+        entry.models = models.to_vec();
         self.dirty = true;
     }
 }
@@ -587,10 +697,8 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<LastUsedAcpModels>()
-                .by_agent
-                .get("claude")
-                .map(String::as_str),
-            Some("fable")
+                .selected_for("claude"),
+            "fable"
         );
 
         app.world_mut().trigger(BinReceive {
@@ -616,6 +724,20 @@ mod tests {
     }
 
     #[test]
+    fn a_legacy_agent_models_file_still_names_the_remembered_model() {
+        let legacy = br#"{"claude":"fable","codex":{"selected":"gpt","models":[]}}"#;
+        let saved: std::collections::BTreeMap<String, SavedAgentModel> =
+            serde_json::from_slice(legacy).expect("parse");
+        let mut models = LastUsedAcpModels::default();
+        for (agent, entry) in saved {
+            models.by_agent.insert(agent, entry.memory());
+        }
+
+        assert_eq!(models.selected_for("claude"), "fable");
+        assert_eq!(models.selected_for("codex"), "gpt");
+    }
+
+    #[test]
     fn fresh_agent_session_applies_last_used_model() {
         let mut app = App::new();
         app.init_resource::<AcpModelRequestCounter>()
@@ -624,8 +746,7 @@ mod tests {
             .add_systems(Update, apply_last_used_acp_model);
         app.world_mut()
             .resource_mut::<LastUsedAcpModels>()
-            .by_agent
-            .insert("claude".into(), "fable".into());
+            .remember("claude", "fable");
         let stack = app
             .world_mut()
             .spawn((

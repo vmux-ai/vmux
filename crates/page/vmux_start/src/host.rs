@@ -86,6 +86,7 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
+    agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
 }
 
 impl StartPromptContextParams<'_, '_> {
@@ -481,6 +482,7 @@ fn sync_live_start_pages(
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        prompt_context.agent_models.agents.clone(),
         &locale,
     );
     for (e, focus_requested) in targets {
@@ -554,6 +556,7 @@ fn on_start_data_request(
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        prompt_context.agent_models.agents.clone(),
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -583,6 +586,7 @@ fn build_start_payload(
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
     projects: Vec<vmux_wire::space::ProjectRow>,
+    agent_models: Vec<vmux_wire::command_bar::AgentModels>,
     locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
@@ -616,6 +620,7 @@ fn build_start_payload(
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload.prompt_context.projects = projects;
+    payload.agent_models = agent_models;
     payload
 }
 

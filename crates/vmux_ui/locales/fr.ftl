@@ -518,6 +518,7 @@ agent-loading-sessions = Chargement des sessions…
 agent-no-resumable-sessions = Aucune session reprenable trouvée
 agent-no-matching-sessions = Aucune session correspondante
 agent-no-matching-models = Aucun modèle correspondant
+agent-change-model = Changer de modèle
 agent-choice-help = ↑/↓ ou Ctrl+N/Ctrl+P · 1–9 · Entrée
 agent-choose-repository = Choisir le dossier du dépôt
 agent-choose-repository-detail = Sélectionnez le dépôt Git local à utiliser par l’agent.

@@ -518,6 +518,7 @@ agent-loading-sessions = Загрузка сессий…
 agent-no-resumable-sessions = Нет сессий для возобновления
 agent-no-matching-sessions = Подходящих сессий нет
 agent-no-matching-models = Подходящих моделей нет
+agent-change-model = Сменить модель
 agent-choice-help = ↑/↓ или Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = Выберите папку репозитория
 agent-choose-repository-detail = Выберите локальный Git-репозиторий, который будет использовать агент.

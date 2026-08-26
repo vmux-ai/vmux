@@ -25,6 +25,7 @@ use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::model_menu::{ModelMenu, ModelPill};
 use vmux_ui::components::project_picker::{ProjectPick, ProjectPicker};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
@@ -298,6 +299,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         on_activity.call(());
     });
 
+    let mut model_menu_open = use_signal(|| false);
+    let mut model_menu_sel = use_signal(|| 0usize);
     let mut project_menu_open = use_signal(|| false);
     let mut project_expanded = use_signal(String::new);
     let mut project_branches = use_signal(Vec::<vmux_core::event::ProjectBranch>::new);
@@ -312,6 +315,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let space_name = state_val.space_name.clone();
     let prompt_context = state_val.prompt_context.clone();
     let picker_projects = prompt_context.projects.clone();
+    let agent_models = state_val.agent_models.clone();
     let picker_cwd = prompt_context.cwd.clone();
     let open_target = state_val.target;
     let space_switch = state_val.space_switch;
@@ -577,6 +581,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .and_then(prompt_target_url)
         .unwrap_or_default()
         .to_string();
+    let selected_models = SelectedAgentModels::of(&agent_models, &selected_target_url);
+    let selected_model_name = SelectedAgentModels::name(selected_models);
+    let model_options = match selected_models {
+        Some(row) => row.models.clone(),
+        None => Vec::new(),
+    };
+    let model_agent_key = match selected_models {
+        Some(row) => row.agent_key.clone(),
+        None => String::new(),
+    };
+    let model_current_id = match selected_models {
+        Some(row) => row.selected.clone(),
+        None => String::new(),
+    };
+
     let workspace_label = if prompt_context.workspace_name.is_empty() {
         "Select project".to_string()
     } else {
@@ -624,6 +643,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         stroke_width: "2",
                         path { d: "m8 10 4 4 4-4" }
                     }
+                }
+                ModelPill {
+                    name: selected_model_name.clone(),
+                    on_open: move |()| {
+                        model_menu_sel.set(0);
+                        let showing = *model_menu_open.peek();
+                        model_menu_open.set(!showing);
+                    },
                 }
                 button {
                     class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
@@ -947,6 +974,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                             }
                         }
+                    }
+                }
+                if model_menu_open() {
+                    ModelMenu {
+                        models: model_options.clone(),
+                        current_model_id: model_current_id.clone(),
+                        selected: model_menu_sel(),
+                        on_hover: move |index| model_menu_sel.set(index),
+                        on_select: move |model: vmux_wire::room::ModelOptionEntry| {
+                            model_menu_open.set(false);
+                            let _ = send(&crate::event::StartSelectModel {
+                                agent_key: model_agent_key.clone(),
+                                model_id: model.id,
+                            });
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        on_dismiss: move |()| model_menu_open.set(false),
                     }
                 }
                 if project_menu_open() {
@@ -1682,6 +1726,32 @@ fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
     event.stop_propagation();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
+}
+
+struct SelectedAgentModels;
+
+impl SelectedAgentModels {
+    fn of<'a>(
+        rows: &'a [crate::event::AgentModels],
+        target_url: &str,
+    ) -> Option<&'a crate::event::AgentModels> {
+        if target_url.is_empty() {
+            return None;
+        }
+        rows.iter().find(|row| row.url == target_url)
+    }
+
+    fn name(row: Option<&crate::event::AgentModels>) -> String {
+        let Some(row) = row else {
+            return String::new();
+        };
+        for model in &row.models {
+            if model.id == row.selected {
+                return model.name.clone();
+            }
+        }
+        String::new()
+    }
 }
 
 #[cfg(test)]

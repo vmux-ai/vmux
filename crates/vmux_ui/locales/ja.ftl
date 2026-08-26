@@ -503,6 +503,7 @@ agent-loading-sessions = セッションを読み込み中…
 agent-no-resumable-sessions = 再開できるセッションが見つかりません
 agent-no-matching-sessions = 一致するセッションがありません
 agent-no-matching-models = 一致するモデルがありません
+agent-change-model = モデルを変更
 agent-choice-help = ↑/↓またはCtrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = リポジトリフォルダを選択
 agent-choose-repository-detail = エージェントが使用するローカルGitリポジトリを選択してください。

@@ -19,6 +19,7 @@ pub mod input;
 pub mod label;
 pub mod manager;
 pub mod menubar;
+pub mod model_menu;
 pub mod pagination;
 pub mod popover;
 pub mod progress;

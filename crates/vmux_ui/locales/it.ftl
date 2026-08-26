@@ -518,6 +518,7 @@ agent-loading-sessions = Caricamento sessioni…
 agent-no-resumable-sessions = Nessuna sessione ripristinabile trovata
 agent-no-matching-sessions = Nessuna sessione corrispondente
 agent-no-matching-models = Nessun modello corrispondente
+agent-change-model = Cambia modello
 agent-choice-help = ↑/↓ o Ctrl+N/Ctrl+P · 1–9 · Invio
 agent-choose-repository = Scegli cartella repository
 agent-choose-repository-detail = Seleziona il repository Git locale che l’agente deve usare.

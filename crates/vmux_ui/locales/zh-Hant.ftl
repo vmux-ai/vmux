@@ -518,6 +518,7 @@ agent-loading-sessions = 正在載入工作階段…
 agent-no-resumable-sessions = 找不到可恢復的工作階段
 agent-no-matching-sessions = 沒有相符的工作階段
 agent-no-matching-models = 沒有相符的模型
+agent-change-model = 變更模型
 agent-choice-help = ↑/↓ 或 Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = 選擇儲存庫資料夾
 agent-choose-repository-detail = 選取 agent 要使用的本機 Git 儲存庫。

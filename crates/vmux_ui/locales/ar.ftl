@@ -518,6 +518,7 @@ agent-loading-sessions = جارٍ تحميل الجلسات…
 agent-no-resumable-sessions = لم يتم العثور على جلسات قابلة للاستئناف
 agent-no-matching-sessions = لا توجد جلسات مطابقة
 agent-no-matching-models = لا توجد نماذج مطابقة
+agent-change-model = تغيير النموذج
 agent-choice-help = ↑/↓ أو Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = اختر مجلد المستودع
 agent-choose-repository-detail = اختر مستودع Git المحلي الذي يجب أن يستخدمه الوكيل.

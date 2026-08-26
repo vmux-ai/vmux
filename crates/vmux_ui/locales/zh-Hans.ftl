@@ -518,6 +518,7 @@ agent-loading-sessions = 正在加载会话…
 agent-no-resumable-sessions = 未找到可恢复的会话
 agent-no-matching-sessions = 没有匹配的会话
 agent-no-matching-models = 没有匹配的模型
+agent-change-model = 更换模型
 agent-choice-help = ↑/↓ 或 Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = 选择仓库文件夹
 agent-choose-repository-detail = 选择智能体要使用的本地 Git 仓库。

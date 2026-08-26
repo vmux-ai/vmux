@@ -518,6 +518,7 @@ agent-loading-sessions = Sessies laden…
 agent-no-resumable-sessions = Geen hervatbare sessies gevonden
 agent-no-matching-sessions = Geen overeenkomende sessies
 agent-no-matching-models = Geen overeenkomende modellen
+agent-change-model = Model wijzigen
 agent-choice-help = ↑/↓ of Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = Kies repositorymap
 agent-choose-repository-detail = Selecteer de lokale Git-repository die de agent moet gebruiken.

@@ -518,6 +518,7 @@ agent-loading-sessions = 세션 로드 중…
 agent-no-resumable-sessions = 재개할 수 있는 세션이 없습니다
 agent-no-matching-sessions = 일치하는 세션 없음
 agent-no-matching-models = 일치하는 모델 없음
+agent-change-model = 모델 변경
 agent-choice-help = ↑/↓ 또는 Ctrl+N/Ctrl+P · 1–9 · Enter
 agent-choose-repository = 저장소 폴더 선택
 agent-choose-repository-detail = 에이전트가 사용할 로컬 Git 저장소를 선택하세요.
