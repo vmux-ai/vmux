@@ -151,6 +151,7 @@ impl Plugin for TerminalUpdatePlugin {
                 Update,
                 (
                     try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    resolve_pending_terminal_cwd,
                     poll_service_messages
                         .in_set(WriteAppCommands)
                         .in_set(ServiceMessageSet),
@@ -1214,6 +1215,32 @@ fn sync_agent_focus(
             }
             None => {}
         }
+    }
+}
+
+fn resolve_pending_terminal_cwd(
+    mut pending: Query<
+        (Entity, &mut crate::launch::TerminalLaunch),
+        (With<Terminal>, With<PendingServiceCreate>),
+    >,
+    child_of: Query<&ChildOf>,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    settings: Res<AppSettings>,
+    active_space: Res<vmux_space::spaces::ActiveSpace>,
+) {
+    for (entity, mut launch) in &mut pending {
+        if !launch.cwd.is_empty() {
+            continue;
+        }
+        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
+        let Ok(Some(cwd)) = vmux_setting::resolve_tab_workspace_dir(
+            &settings,
+            &active_space.record.id,
+            tab_dir.as_deref(),
+        ) else {
+            continue;
+        };
+        launch.cwd = cwd.to_string_lossy().into_owned();
     }
 }
 
