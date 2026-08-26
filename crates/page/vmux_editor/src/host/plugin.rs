@@ -2715,31 +2715,36 @@ fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<E
     if !repeat {
         return cmds;
     }
-    cmds.into_iter()
-        .flat_map(|cmd| {
-            let accelerate = matches!(
-                &cmd,
-                EditCommand::Move(
-                    Motion::Left
-                        | Motion::Right
-                        | Motion::LeftBounded
-                        | Motion::RightBounded
-                        | Motion::Up
-                        | Motion::Down,
-                ) | EditCommand::Select(
-                    Motion::Left
-                        | Motion::Right
-                        | Motion::LeftBounded
-                        | Motion::RightBounded
-                        | Motion::Up
-                        | Motion::Down,
-                )
-            );
-            [Some(cmd.clone()), accelerate.then_some(cmd)]
-                .into_iter()
-                .flatten()
-        })
-        .collect()
+    let mut out = Vec::with_capacity(cmds.len() * 2);
+    for cmd in cmds {
+        if let EditCommand::ScrollViewport(lines) = cmd {
+            out.push(EditCommand::ScrollViewport(lines.saturating_mul(2)));
+            continue;
+        }
+        let accelerate = matches!(
+            &cmd,
+            EditCommand::Move(
+                Motion::Left
+                    | Motion::Right
+                    | Motion::LeftBounded
+                    | Motion::RightBounded
+                    | Motion::Up
+                    | Motion::Down,
+            ) | EditCommand::Select(
+                Motion::Left
+                    | Motion::Right
+                    | Motion::LeftBounded
+                    | Motion::RightBounded
+                    | Motion::Up
+                    | Motion::Down,
+            )
+        );
+        if accelerate {
+            out.push(cmd.clone());
+        }
+        out.push(cmd);
+    }
+    out
 }
 
 fn remap_note_vertical_commands(
@@ -4783,6 +4788,30 @@ mod edit_flow_tests {
         assert_eq!(
             accelerate_repeated_navigation(vec![EditCommand::DeleteBack], true),
             [EditCommand::DeleteBack]
+        );
+    }
+
+    #[test]
+    fn a_held_scroll_key_covers_the_same_ground_as_a_held_motion_key() {
+        let held = |cmd| accelerate_repeated_navigation(vec![cmd], true);
+        let rows = |cmds: Vec<EditCommand>| {
+            cmds.iter()
+                .map(|cmd| match cmd {
+                    EditCommand::ScrollViewport(lines) => *lines,
+                    EditCommand::Move(Motion::Down) => 1,
+                    EditCommand::Move(Motion::Up) => -1,
+                    other => panic!("unexpected {other:?}"),
+                })
+                .sum::<i32>()
+        };
+
+        assert_eq!(
+            rows(held(EditCommand::ScrollViewport(1))),
+            rows(held(EditCommand::Move(Motion::Down)))
+        );
+        assert_eq!(
+            rows(held(EditCommand::ScrollViewport(-1))),
+            rows(held(EditCommand::Move(Motion::Up)))
         );
     }
 
