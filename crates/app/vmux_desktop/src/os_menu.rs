@@ -484,6 +484,7 @@ mod tests {
             auto_update: false,
             agent: AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),

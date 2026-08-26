@@ -1251,6 +1251,7 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Dashboard".into(),
                     startup_dir: Some(project_dir.to_string_lossy().into_owned()),
+                    ..Default::default()
                 },
                 vmux_layout::tab::TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
@@ -1603,6 +1604,7 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Tab 1".into(),
                     startup_dir: Some(stale.clone()),
+                    ..Default::default()
                 },
                 vmux_layout::tab::TabWorkspace { project_dir: stale },
             ))
@@ -1658,6 +1660,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
@@ -1712,6 +1715,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(active_dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         settings.spaces.insert(
@@ -1719,6 +1723,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(restored_dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -1746,6 +1751,7 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Legacy".into(),
                     startup_dir: None,
+                    ..Default::default()
                 },
                 ChildOf(space),
             ))
@@ -1917,6 +1923,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(space_dir.to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
