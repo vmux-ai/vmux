@@ -590,6 +590,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 bg_color: None,
             },
             vmux_core::host::page::HostsPage,
+            vmux_core::host::page::BindsEditingChords,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),

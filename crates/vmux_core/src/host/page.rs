@@ -36,6 +36,9 @@ pub struct PageManifest {
 pub struct HostsPage;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BindsEditingChords;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrewarmPage {
     pub host: &'static str,
     pub url: &'static str,

@@ -259,17 +259,19 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
 }
 
 #[cfg(target_os = "macos")]
-fn edit_menu_items_enabled(intent: HostFocusIntent) -> bool {
-    !matches!(
-        intent,
-        HostFocusIntent::WinitHost | HostFocusIntent::NativePane(_)
-    )
+fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool {
+    match intent {
+        HostFocusIntent::WinitHost => false,
+        HostFocusIntent::NativePane(_) => !binds_chords,
+        HostFocusIntent::Windowed(_) | HostFocusIntent::LayoutView => true,
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn sync_edit_menu_items(
     menu: Option<NonSend<OsMenuResource>>,
     intent: Option<Res<HostFocusIntent>>,
+    chord_panes: Query<(), With<vmux_core::host::page::BindsEditingChords>>,
 ) {
     let Some(intent) = intent else {
         return;
@@ -280,7 +282,11 @@ fn sync_edit_menu_items(
     let Some(menu) = menu else {
         return;
     };
-    let enabled = edit_menu_items_enabled(*intent);
+    let binds_chords = match *intent {
+        HostFocusIntent::NativePane(pane) => chord_panes.contains(pane),
+        _ => false,
+    };
+    let enabled = edit_menu_items_enabled(*intent, binds_chords);
     for item in &menu.edit_items {
         item.setEnabled(enabled);
     }
@@ -441,20 +447,23 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn edit_items_are_released_to_whatever_answers_the_chords_itself() {
-        assert!(
-            !edit_menu_items_enabled(HostFocusIntent::WinitHost),
-            "terminal focus must release ⌘C/⌘V to the terminal's own handler"
-        );
-        assert!(
-            !edit_menu_items_enabled(HostFocusIntent::NativePane(Entity::PLACEHOLDER)),
-            "a page hosted in this process binds ⌘Z itself, and the menu's undo would rewind the \
-             wrong buffer"
-        );
-        assert!(edit_menu_items_enabled(HostFocusIntent::Windowed(
-            Entity::PLACEHOLDER
-        )));
-        assert!(edit_menu_items_enabled(HostFocusIntent::LayoutView));
+    fn only_a_pane_that_binds_the_chords_takes_the_menu_away_from_the_platform() {
+        let pane = HostFocusIntent::NativePane(Entity::PLACEHOLDER);
+        let cases = [
+            (pane, true, false),
+            (pane, false, true),
+            (HostFocusIntent::Windowed(Entity::PLACEHOLDER), false, true),
+            (HostFocusIntent::LayoutView, false, true),
+            (HostFocusIntent::WinitHost, false, false),
+        ];
+
+        for (intent, binds_chords, want) in cases {
+            assert_eq!(
+                edit_menu_items_enabled(intent, binds_chords),
+                want,
+                "{intent:?} with binds_chords={binds_chords}"
+            );
+        }
     }
 
     fn test_settings() -> AppSettings {
