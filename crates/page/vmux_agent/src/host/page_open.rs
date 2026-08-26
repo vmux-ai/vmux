@@ -1251,7 +1251,6 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Dashboard".into(),
                     startup_dir: Some(project_dir.to_string_lossy().into_owned()),
-                    ..Default::default()
                 },
                 vmux_layout::tab::TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
@@ -1604,7 +1603,6 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Tab 1".into(),
                     startup_dir: Some(stale.clone()),
-                    ..Default::default()
                 },
                 vmux_layout::tab::TabWorkspace { project_dir: stale },
             ))
@@ -1751,7 +1749,6 @@ mod tests {
                 vmux_layout::tab::Tab {
                     name: "Legacy".into(),
                     startup_dir: None,
-                    ..Default::default()
                 },
                 ChildOf(space),
             ))
