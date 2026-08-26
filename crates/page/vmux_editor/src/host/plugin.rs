@@ -2545,6 +2545,22 @@ fn run_commands(
             }
             continue;
         }
+        if matches!(cmd, EditCommand::Paste) {
+            let Some(cb) = clipboard.0.as_mut() else {
+                continue;
+            };
+            let Ok(s) = cb.get_text() else {
+                continue;
+            };
+            if edit.core.paste(&s) {
+                text_changed = true;
+                let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
+                edit.hl.invalidate_from(l.saturating_sub(1));
+            }
+            sel_or_mode = true;
+            dirty_changed = true;
+            continue;
+        }
         if matches!(cmd, EditCommand::Put { .. })
             && let Some(cb) = clipboard.0.as_mut()
             && let Ok(s) = cb.get_text()
@@ -3237,11 +3253,7 @@ fn on_file_editor_action(
             target: crate::edit::command::Target::Selection,
             register: None,
         }],
-        EditorAction::Paste => vec![EditCommand::Put {
-            before: false,
-            count: 1,
-            register: None,
-        }],
+        EditorAction::Paste => vec![EditCommand::Paste],
         EditorAction::ChangeAllOccurrences => vec![EditCommand::SelectAllOccurrences],
     };
     run_commands(

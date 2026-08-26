@@ -185,6 +185,7 @@ pub enum EditCommand {
         count: usize,
         register: Option<char>,
     },
+    Paste,
     ReplaceChar {
         ch: char,
         count: usize,

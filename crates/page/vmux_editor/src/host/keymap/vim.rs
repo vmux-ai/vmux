@@ -1163,11 +1163,7 @@ impl VimKeymap {
                     target: Target::Selection,
                     register: None,
                 }),
-                "v" => Some(EditCommand::Put {
-                    before: true,
-                    count: 1,
-                    register: None,
-                }),
+                "v" => Some(EditCommand::Paste),
                 "a" => Some(EditCommand::Move(Motion::DocStart)),
                 "s" => Some(EditCommand::Save),
                 "z" if k.mods.shift => Some(EditCommand::Redo),

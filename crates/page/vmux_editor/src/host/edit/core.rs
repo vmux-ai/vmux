@@ -967,6 +967,13 @@ impl EditCore {
         i
     }
 
+    pub fn paste(&mut self, text: &str) -> bool {
+        self.break_group();
+        let changed = self.insert_text(text);
+        self.break_group();
+        changed
+    }
+
     fn insert_text(&mut self, text: &str) -> bool {
         self.checkpoint(Group::Insert);
         if !self.primary().is_empty() {
@@ -1439,12 +1446,7 @@ impl EditCore {
                 self.checkpoint(Group::Other);
                 self.buf_insert(at, &text);
                 let end = at + text.chars().count();
-                let caret = if self.mode == EditMode::Insert {
-                    end
-                } else {
-                    end.saturating_sub(1).max(at)
-                };
-                self.set_caret(caret);
+                self.set_caret(end.saturating_sub(1).max(at));
             }
             RegisterKind::Blockwise => {
                 let head = self.primary().head;
@@ -1961,6 +1963,7 @@ impl EditCore {
                 }
             }
             EditCommand::Save
+            | EditCommand::Paste
             | EditCommand::ScrollViewport(_)
             | EditCommand::ScrollCursorTo(_)
             | EditCommand::GotoDefinition
@@ -2076,15 +2079,38 @@ mod tests {
     }
 
     #[test]
-    fn pasting_while_inserting_types_after_the_pasted_text() {
+    fn pasting_types_after_the_pasted_text() {
         let mut c = core("ab\n");
         c.mode = EditMode::Insert;
-        c.registers.set_unnamed(RegisterValue::charwise("XY"));
         c.set_caret(2);
-        c.apply(put(true));
+        c.paste("XY");
         c.apply(EditCommand::InsertText("Z".into()));
 
         assert_eq!(text_of(&c), "abXYZ\n");
+    }
+
+    #[test]
+    fn pasting_replaces_the_selection() {
+        let mut c = core("abcd\n");
+        c.mode = EditMode::Insert;
+        c.selections = vec![Selection { anchor: 1, head: 3 }];
+        c.paste("X");
+
+        assert_eq!(text_of(&c), "aXd\n");
+    }
+
+    #[test]
+    fn undo_takes_a_paste_back_on_its_own() {
+        let mut c = core("");
+        c.mode = EditMode::Insert;
+        c.apply(EditCommand::InsertText("a".into()));
+        c.paste("XY");
+        c.apply(EditCommand::InsertText("b".into()));
+
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "aXY");
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "a");
     }
 
     #[test]
