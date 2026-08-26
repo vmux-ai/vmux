@@ -96,6 +96,7 @@ pub struct EditCore {
     memory: Vec<CaretMemory>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
+    search_cache: Option<(u64, String, Vec<std::ops::Range<usize>>)>,
     block_insert: Option<(Vec<usize>, usize)>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
@@ -129,6 +130,7 @@ impl EditCore {
             memory: vec![CaretMemory::default()],
             fold_view,
             search: None,
+            search_cache: None,
             block_insert: None,
             search_highlight: false,
             marks: std::collections::HashMap::new(),
@@ -491,6 +493,7 @@ impl EditCore {
         self.selections = state.selections;
         self.active = 0;
         self.rev = state.rev;
+        self.search_cache = None;
         self.dirty = self.saved_rev != Some(self.rev);
         self.break_group();
         let len = self.buffer.len_chars();
@@ -586,6 +589,31 @@ impl EditCore {
         out
     }
 
+    pub fn refresh_search_matches(&mut self) {
+        let Some(search) = self.search.as_ref() else {
+            self.search_cache = None;
+            return;
+        };
+        if self
+            .search_cache
+            .as_ref()
+            .is_some_and(|(rev, pattern, _)| *rev == self.rev && *pattern == search.pattern)
+        {
+            return;
+        }
+        let rev = self.rev;
+        let pattern = search.pattern.clone();
+        let matches = self.search_matches();
+        self.search_cache = Some((rev, pattern, matches));
+    }
+
+    pub fn cached_search_matches(&self) -> &[std::ops::Range<usize>] {
+        match self.search_cache.as_ref() {
+            Some((_, _, matches)) => matches,
+            None => &[],
+        }
+    }
+
     fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
         let search = self.search.as_ref()?;
         let forward = search.forward != reverse;
@@ -593,37 +621,87 @@ impl EditCore {
         crate::edit::search::step(&matches, from, forward)
     }
 
+    fn is_word_char(&self, at: usize) -> bool {
+        at < self.buffer.len_chars() && {
+            let c = self.buffer.rope.char(at);
+            c.is_alphanumeric() || c == '_'
+        }
+    }
+
+    fn word_at(&self, caret: usize) -> Option<std::ops::Range<usize>> {
+        let caret = caret.min(self.buffer.len_chars());
+        let mut start = caret;
+        while start > 0 && self.is_word_char(start - 1) {
+            start -= 1;
+        }
+        let mut end = caret;
+        while self.is_word_char(end) {
+            end += 1;
+        }
+        (start != end).then_some(start..end)
+    }
+
     pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
         if rows == 0 || !self.primary().is_empty() {
             return Vec::new();
         }
-        let Some((_, found)) = self.word_occurrences() else {
+        let Some(word) = self.word_at(self.primary().head) else {
             return Vec::new();
         };
-        let last_line = first as usize + rows as usize;
+        let first_line = first as usize;
+        let last_line = (first_line + rows as usize).min(self.buffer.len_lines());
+        if first_line >= last_line {
+            return Vec::new();
+        }
+        let band_start = self.buffer.line_to_char(first_line);
+        let band_end = if last_line >= self.buffer.len_lines() {
+            self.buffer.len_chars()
+        } else {
+            self.buffer.line_to_char(last_line)
+        };
+        let needle: Vec<char> = self.buffer.rope.slice(word).chars().collect();
+        let band: Vec<char> = self
+            .buffer
+            .rope
+            .slice(band_start..band_end)
+            .chars()
+            .collect();
+
         let mut out = Vec::new();
-        for range in found {
-            let (line, start) = self.buffer.char_to_coords(range.start);
-            if line < first as usize || line >= last_line {
+        let mut at = 0;
+        while at + needle.len() <= band.len() {
+            let found = band[at..at + needle.len()] == needle[..];
+            let absolute = band_start + at;
+            let bounded = (absolute == 0 || !self.is_word_char(absolute - 1))
+                && !self.is_word_char(absolute + needle.len());
+            if found && bounded {
+                let (line, column) = self.buffer.char_to_coords(absolute);
+                let line_start = self.buffer.line_to_char(line);
+                out.push(SelSpan {
+                    line: line as u32,
+                    row: line as u32,
+                    start: self.vis_col(line_start, column),
+                    end: self.vis_col(line_start, absolute + needle.len() - line_start),
+                });
+                at += needle.len();
                 continue;
             }
-            let ls = self.buffer.line_to_char(line);
-            out.push(SelSpan {
-                line: line as u32,
-                row: line as u32,
-                start: start as u32,
-                end: (range.end - ls) as u32,
-            });
+            at += 1;
         }
         out
     }
-    pub fn search_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
+    pub fn search_spans(
+        &self,
+        matches: &[std::ops::Range<usize>],
+        first: u32,
+        rows: u16,
+    ) -> Vec<SelSpan> {
         if !self.search_highlight || rows == 0 {
             return Vec::new();
         }
         let last_line = first as usize + rows as usize;
         let mut out = Vec::new();
-        for m in self.search_matches() {
+        for m in matches.iter().cloned() {
             let (l0, _) = self.buffer.char_to_coords(m.start);
             let (l1, _) = self.buffer.char_to_coords(m.end);
             if l1 < first as usize || l0 >= last_line {
@@ -965,6 +1043,13 @@ impl EditCore {
             i -= 1;
         }
         i
+    }
+
+    pub fn paste(&mut self, text: &str) -> bool {
+        self.break_group();
+        let changed = self.insert_text(text);
+        self.break_group();
+        changed
     }
 
     fn insert_text(&mut self, text: &str) -> bool {
@@ -1956,6 +2041,7 @@ impl EditCore {
                 }
             }
             EditCommand::Save
+            | EditCommand::Paste
             | EditCommand::ScrollViewport(_)
             | EditCommand::ScrollCursorTo(_)
             | EditCommand::GotoDefinition
@@ -2036,6 +2122,159 @@ mod tests {
 
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+
+    fn typed_after_vim_keys(text: &str, caret: usize, keys: &[&str], typed: &str) -> String {
+        use crate::host::keymap::vim::VimKeymap;
+        use crate::keymap::{KeyInput, Keymap, Mods};
+
+        let mut c = core(text);
+        c.mode = EditMode::Normal;
+        c.set_caret(caret);
+        let mut keymap = VimKeymap::default();
+        for key in keys {
+            let stroke = KeyInput {
+                key: (*key).into(),
+                mods: Mods::default(),
+                repeat: false,
+            };
+            for cmd in keymap.handle(&stroke) {
+                c.apply(cmd);
+            }
+        }
+        c.apply(EditCommand::InsertText(typed.into()));
+        text_of(&c)
+    }
+
+    #[test]
+    fn append_at_line_end_types_past_the_last_character() {
+        assert_eq!(typed_after_vim_keys("ab\n", 0, &["A"], "X"), "abX\n");
+    }
+
+    #[test]
+    fn append_on_the_last_character_types_past_it() {
+        assert_eq!(typed_after_vim_keys("ab\n", 1, &["a"], "X"), "abX\n");
+    }
+
+    #[test]
+    fn cached_search_matches_follow_an_edit_and_a_new_pattern() {
+        let mut c = core("foo bar foo\n");
+        c.mode = EditMode::Normal;
+        let count = |c: &mut EditCore| {
+            c.refresh_search_matches();
+            c.cached_search_matches().len()
+        };
+
+        c.apply(EditCommand::SetSearch {
+            pattern: "foo".into(),
+            forward: true,
+        });
+        assert_eq!(count(&mut c), 2);
+
+        c.mode = EditMode::Insert;
+        c.set_caret(0);
+        c.apply(EditCommand::InsertText("foo ".into()));
+        assert_eq!(count(&mut c), 3, "an edit must not serve a stale match set");
+
+        c.apply(EditCommand::SetSearch {
+            pattern: "bar".into(),
+            forward: true,
+        });
+        assert_eq!(
+            count(&mut c),
+            1,
+            "a new pattern must not serve the old one's matches"
+        );
+    }
+
+    #[test]
+    fn cached_search_matches_survive_an_undo_onto_a_different_edit() {
+        let mut c = core("foo\n");
+        c.mode = EditMode::Insert;
+        c.apply(EditCommand::SetSearch {
+            pattern: "foo".into(),
+            forward: true,
+        });
+        c.set_caret(3);
+        c.apply(EditCommand::InsertText(" foo".into()));
+        c.refresh_search_matches();
+        assert_eq!(c.cached_search_matches().len(), 2);
+
+        c.apply(EditCommand::Undo);
+        c.set_caret(3);
+        c.apply(EditCommand::InsertText(" foo foo".into()));
+        c.refresh_search_matches();
+
+        assert_eq!(
+            c.cached_search_matches().len(),
+            3,
+            "a revision number is reused across undo branches, so it cannot key the cache alone"
+        );
+    }
+
+    #[test]
+    fn word_highlight_scans_the_band_and_skips_longer_words() {
+        let mut c = core("id\nid_x\nother\nid\nid\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+
+        let in_band = |first, rows| {
+            c.word_highlight_spans(first, rows)
+                .iter()
+                .map(|s| (s.line, s.start, s.end))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(in_band(0, 3), vec![(0, 0, 2)]);
+        assert_eq!(in_band(0, 5), vec![(0, 0, 2), (3, 0, 2), (4, 0, 2)]);
+        assert_eq!(in_band(3, 2), vec![(3, 0, 2), (4, 0, 2)]);
+    }
+
+    #[test]
+    fn pasting_types_after_the_pasted_text() {
+        let mut c = core("ab\n");
+        c.mode = EditMode::Insert;
+        c.set_caret(2);
+        c.paste("XY");
+        c.apply(EditCommand::InsertText("Z".into()));
+
+        assert_eq!(text_of(&c), "abXYZ\n");
+    }
+
+    #[test]
+    fn pasting_replaces_the_selection() {
+        let mut c = core("abcd\n");
+        c.mode = EditMode::Insert;
+        c.selections = vec![Selection { anchor: 1, head: 3 }];
+        c.paste("X");
+
+        assert_eq!(text_of(&c), "aXd\n");
+    }
+
+    #[test]
+    fn undo_takes_a_paste_back_on_its_own() {
+        let mut c = core("");
+        c.mode = EditMode::Insert;
+        c.apply(EditCommand::InsertText("a".into()));
+        c.paste("XY");
+        c.apply(EditCommand::InsertText("b".into()));
+
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "aXY");
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "a");
+    }
+
+    #[test]
+    fn putting_in_normal_mode_lands_on_the_last_pasted_character() {
+        let mut c = core("ab\n");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue::charwise("XY"));
+        c.set_caret(0);
+        c.apply(put(false));
+
+        assert_eq!(text_of(&c), "aXYb\n");
+        assert_eq!(c.primary().head, 2);
     }
 
     #[test]
@@ -2800,9 +3039,9 @@ mod tests {
             pattern: "foo".into(),
             forward: true,
         });
-        assert_eq!(c.search_spans(0, 4).len(), 2);
+        assert_eq!(c.search_spans(&c.search_matches(), 0, 4).len(), 2);
         c.apply(EditCommand::ClearSearchHighlight);
-        assert!(c.search_spans(0, 4).is_empty());
+        assert!(c.search_spans(&c.search_matches(), 0, 4).is_empty());
     }
 
     #[test]

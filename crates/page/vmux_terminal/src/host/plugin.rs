@@ -749,6 +749,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
             },
             WebviewWindowed,
             vmux_core::host::page::HostsPage,
+            vmux_core::host::page::BindsEditingChords,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -837,6 +838,7 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
             },
             WebviewWindowed,
             vmux_core::host::page::HostsPage,
+            vmux_core::host::page::BindsEditingChords,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),

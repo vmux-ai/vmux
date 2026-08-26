@@ -74,11 +74,7 @@ impl Keymap for VscodeKeymap {
             let cmd = match k.key.to_ascii_lowercase().as_str() {
                 "c" => Some(vec![selection_op(Operator::Yank)]),
                 "x" => Some(vec![selection_op(Operator::Delete)]),
-                "v" => Some(vec![Put {
-                    before: true,
-                    count: 1,
-                    register: None,
-                }]),
+                "v" => Some(vec![EditCommand::Paste]),
                 "a" => Some(vec![Move(Motion::DocStart), Select(Motion::DocEnd)]),
                 "s" => Some(vec![Save]),
                 "z" if m.shift => Some(vec![Redo]),

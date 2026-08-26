@@ -263,6 +263,25 @@ the app's bus. Nothing about a native page's messages touches CEF — wry carrie
 end — but the channel they land in is registered by a CEF plugin, so a wry page will not
 build until that plugin has. The transport moved and the channel types did not.
 
+### Who owns ⌘V
+
+macOS hands a menu key equivalent to the menu **before** the key window's responder chain
+sees a keyDown. So while the Edit menu's Paste item is enabled, no page can observe ⌘V as a
+keystroke — the menu has already eaten it and dispatched `paste:` down the responder chain,
+where the WKWebView answers with its own text editing.
+
+That is what most pages want. Two do not: the terminal forwards the chord to a pty, and the
+editor binds all five of ⌘C/⌘X/⌘V/⌘Z/⌘A to its own keymap, where the menu's undo would
+rewind the wrong buffer. They can only see the raw keyDown if the menu item is disabled
+while they hold focus.
+
+A pane says which it is by carrying `BindsEditingChords`, and `sync_edit_menu_items` greys
+the Edit menu for exactly those panes. The declaration is on the pane, not in the desktop
+crate, because the hosting mechanism cannot answer the question: the composer and the editor
+are both native panes, so anything keyed on `HostFocusIntent::NativePane` alone gives one
+answer to two pages that want opposite things. Absence of the marker means platform text
+editing, which is the default a new page wants.
+
 ---
 
 ## Pages, and the trust boundary

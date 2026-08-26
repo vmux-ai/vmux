@@ -615,15 +615,15 @@ impl VimKeymap {
             }
             "a" => {
                 self.enter_insert();
-                vec![Move(Motion::Right), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::Right)]
             }
             "I" => {
                 self.enter_insert();
-                vec![Move(Motion::FirstNonBlank), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::FirstNonBlank)]
             }
             "A" => {
                 self.enter_insert();
-                vec![Move(Motion::LineEnd), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::LineEnd)]
             }
             "o" => {
                 self.enter_insert();
@@ -1163,11 +1163,7 @@ impl VimKeymap {
                     target: Target::Selection,
                     register: None,
                 }),
-                "v" => Some(EditCommand::Put {
-                    before: true,
-                    count: 1,
-                    register: None,
-                }),
+                "v" => Some(EditCommand::Paste),
                 "a" => Some(EditCommand::Move(Motion::DocStart)),
                 "s" => Some(EditCommand::Save),
                 "z" if k.mods.shift => Some(EditCommand::Redo),
