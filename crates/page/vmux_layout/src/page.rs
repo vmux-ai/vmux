@@ -342,7 +342,6 @@ fn SideSheetView(
                     pane_id: pane.id,
                     expanded: pane.bookmarks_expanded,
                 }
-                VaultCard { pane_id: pane.id, vault: tools.vault.clone(), loaded: tools_loaded }
                 KnowledgeCard {
                     pane_id: pane.id,
                     knowledge,
@@ -352,10 +351,11 @@ fn SideSheetView(
                 }
                 ToolsCard {
                     pane_id: pane.id,
-                    tools,
+                    tools: tools.clone(),
                     loaded: tools_loaded,
                     expanded: pane.tools_expanded,
                 }
+                VaultCard { pane_id: pane.id, vault: tools.vault.clone(), loaded: tools_loaded }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
