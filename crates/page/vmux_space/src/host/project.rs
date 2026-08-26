@@ -4,15 +4,16 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                remember_space_project.before(vmux_layout::settings::EffectiveStartupDirSet),
-                publish_project_roots
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots)
-                    .after(remember_space_project),
-            ),
-        );
+        app.init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
+            .add_systems(
+                Update,
+                (
+                    remember_space_project.before(vmux_layout::settings::EffectiveStartupDirSet),
+                    publish_project_roots
+                        .in_set(vmux_command::snapshot::WriteCommandBarSnapshots)
+                        .after(remember_space_project),
+                ),
+            );
     }
 }
 
