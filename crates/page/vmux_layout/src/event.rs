@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use vmux_core::{PageIcon, PageMetadata};
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
@@ -136,6 +138,75 @@ pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 pub const PANE_GAP_PX: f32 = 4.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn a_web_address_is_its_host_and_the_page_name() {
+        let parts = AddressParts::web("https://github.com/vmux-ai/vmux/pull/412", "Add a pill");
+        assert_eq!(parts.origin, "github.com");
+        assert_eq!(parts.rest, "Add a pill");
+    }
+
+    #[test]
+    fn an_untitled_web_address_is_its_host_alone() {
+        let parts = AddressParts::web("https://github.com/vmux-ai/vmux", "  ");
+        assert_eq!(parts.origin, "github.com");
+        assert_eq!(parts.rest, "");
+    }
+
+    #[test]
+    fn an_address_with_no_host_stands_alone() {
+        let parts = AddressParts::web("about:blank", "");
+        assert_eq!(parts.origin, "");
+        assert_eq!(parts.rest, "about:blank");
+    }
+
+    #[test]
+    fn an_internal_page_is_shown_whole_and_unpilled() {
+        let parts = AddressParts::internal("vmux://terminal/");
+        assert_eq!(parts.origin, "");
+        assert_eq!(parts.rest, "vmux://terminal");
+    }
+
+    #[test]
+    fn a_file_in_a_checkout_is_shown_against_its_repository_and_branch() {
+        let parts = AddressParts::in_repo(
+            Path::new("/w/.worktrees/lsp/client/crates/app/main.rs"),
+            Path::new("/w/.worktrees/lsp/client"),
+            "vmux",
+            "lsp-bidirectional",
+        );
+        assert_eq!(parts.origin, "vmux@lsp-bidirectional");
+        assert_eq!(parts.rest, "crates/app/main.rs");
+    }
+
+    #[test]
+    fn a_checkout_on_no_branch_is_shown_as_the_repository_alone() {
+        let parts = AddressParts::in_repo(Path::new("/w/a.rs"), Path::new("/w"), "vmux", "");
+        assert_eq!(parts.origin, "vmux");
+        assert_eq!(parts.rest, "a.rs");
+    }
+
+    #[test]
+    fn a_file_outside_any_checkout_is_shown_against_home() {
+        let parts = AddressParts::on_disk(
+            Path::new("/Users/me/Downloads/a.txt"),
+            Path::new("/Users/me"),
+        );
+        assert_eq!(parts.origin, "~");
+        assert_eq!(parts.rest, "Downloads/a.txt");
+    }
+
+    #[test]
+    fn a_file_outside_home_is_shown_against_the_filesystem() {
+        let parts = AddressParts::on_disk(Path::new("/usr/local/bin/vmux"), Path::new("/Users/me"));
+        assert_eq!(parts.origin, "/");
+        assert_eq!(parts.rest, "usr/local/bin/vmux");
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -310,6 +381,68 @@ pub struct StackRow {
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
+    #[serde(default)]
+    pub address: AddressParts,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AddressParts {
+    pub origin: String,
+    pub rest: String,
+}
+
+impl AddressParts {
+    pub fn web(url: &str, title: &str) -> Self {
+        let host = vmux_ui::favicon::host_for_favicon_fallback(url).unwrap_or_default();
+        let title = title.trim();
+        if title.is_empty() {
+            return match host.is_empty() {
+                true => Self::new("", url),
+                false => Self::new(host, ""),
+            };
+        }
+        Self::new(host, title)
+    }
+
+    pub fn internal(url: &str) -> Self {
+        Self::new("", url.trim_end_matches('/'))
+    }
+
+    pub fn in_repo(path: &Path, root: &Path, name: &str, branch: &str) -> Self {
+        let Ok(rest) = path.strip_prefix(root) else {
+            return Self::new("", path.to_string_lossy());
+        };
+        let origin = match branch.is_empty() {
+            true => name.to_string(),
+            false => format!("{name}@{branch}"),
+        };
+        Self::new(origin, rest.to_string_lossy())
+    }
+
+    pub fn on_disk(path: &Path, home: &Path) -> Self {
+        match path.strip_prefix(home) {
+            Ok(rest) => Self::new("~", rest.to_string_lossy()),
+            Err(_) => Self::new("/", path.to_string_lossy().trim_start_matches('/')),
+        }
+    }
+
+    fn new(origin: impl Into<String>, rest: impl Into<String>) -> Self {
+        Self {
+            origin: origin.into(),
+            rest: rest.into(),
+        }
+    }
 }
 
 #[derive(

@@ -103,13 +103,17 @@ impl PageHost for MobileHost {
         if names::<SelectModel>(id) {
             let payload: SelectModel = decode(bytes)?;
             return self.agent_call(move |api, sid| async move {
-                let _ = api.select_model(&sid, &payload.model_id).await;
+                if let Err(error) = api.select_model(&sid, &payload.model_id).await {
+                    tracing::warn!("selecting the model failed: {error:?}");
+                }
             });
         }
         if names::<SetAgentEffort>(id) {
             let payload: SetAgentEffort = decode(bytes)?;
             return self.agent_call(move |api, sid| async move {
-                let _ = api.set_effort(&sid, &payload.level).await;
+                if let Err(error) = api.set_effort(&sid, &payload.level).await {
+                    tracing::warn!("setting the effort failed: {error:?}");
+                }
             });
         }
         if names::<ChatMediaListRequest>(id) {
@@ -206,7 +210,9 @@ impl MobileHost {
 
     fn cancel(&self) -> Result<(), EventListenerError> {
         self.agent_call(|api, sid| async move {
-            let _ = api.cancel(&sid).await;
+            if let Err(error) = api.cancel(&sid).await {
+                tracing::warn!("cancelling failed: {error:?}");
+            }
         })
     }
 
@@ -217,7 +223,9 @@ impl MobileHost {
                 call_id: payload.call_id,
                 decision: payload.decision,
             };
-            let _ = api.approve(&sid, &request).await;
+            if let Err(error) = api.approve(&sid, &request).await {
+                tracing::warn!("approving failed: {error:?}");
+            }
         })
     }
 

@@ -156,7 +156,11 @@ pub fn Page() -> Element {
             vmux_core::scroll::OVERSCAN_FLOOR,
             vmux_core::scroll::OVERSCAN_CAP,
         );
-        let keep_hi = first + patch.rows as u32 + overscan * 2 + 2;
+        // Never past the end of the document. `clear` drops the screen's scrollback, so the rows
+        // that were there are gone rather than changed — nothing arrives to overwrite them, and a
+        // window wide enough to still cover them leaves the cleared screen on display.
+        let keep_hi =
+            (first + patch.rows as u32 + overscan * 2 + 2).min(patch.total_rows.saturating_sub(1));
         let previous_cursor = cursor.peek().clone();
         let next_cursor = patch.cursor.clone();
         let cursor_for_row = |doc_row| (next_cursor.row == doc_row).then_some(next_cursor.clone());
@@ -288,6 +292,9 @@ pub fn Page() -> Element {
             prompt_draft.set((evt.draft, evt.skipped));
         });
 
+    // The element's own rect, rather than the size the resize event carries: the payload names a
+    // box that is not this element's, so a terminal sized from it reports the wrong row count and
+    // never scrolls to the bottom of a screen it thinks is seven rows tall.
     let locate_container = move || {
         spawn(async move {
             let Some(element) = container() else {
@@ -296,7 +303,10 @@ pub fn Page() -> Element {
             let Ok(rect) = element.get_client_rect().await else {
                 return;
             };
-            viewport.write().origin = (rect.origin.x, rect.origin.y);
+            let padding = theme.peek().as_ref().map(|t| t.padding).unwrap_or(4.0) as f64;
+            let mut viewport = viewport.write();
+            viewport.origin = (rect.origin.x, rect.origin.y);
+            viewport.container_resized((rect.size.width, rect.size.height), padding);
         });
     };
 
@@ -317,7 +327,7 @@ pub fn Page() -> Element {
                 }
                 if !t.font_family.is_empty() {
                     s.push_str(&format!(
-                        "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
+                        "font-family:\"{}\",var(--font-mono);",
                         t.font_family
                     ));
                 }
@@ -368,29 +378,17 @@ pub fn Page() -> Element {
             class: "relative h-full w-full {overflow_class} bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
             style: "{theme_style}{cell_style}outline:none;",
 
-            onmounted: move |e: Event<MountedData>| {
+            onmounted: move |e: Event<MountedData>| async move {
                 container.set(Some(e.data()));
                 locate_container();
+                if let Err(error) = e.data().set_focus(true).await {
+                    dioxus::logger::tracing::warn!("focusing the terminal failed: {error:?}");
+                }
             },
 
-            onresize: move |e: Event<ResizeData>| {
-                let Ok(size) = e.get_border_box_size() else {
-                    return;
-                };
-                viewport
-                    .write()
-                    .container_resized((size.width, size.height), padding);
-                locate_container();
-            },
+            onresize: move |_: Event<ResizeData>| locate_container(),
 
             onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                spawn(async move {
-                    let Some(element) = container.peek().clone() else {
-                        return;
-                    };
-                    let _ = element.set_focus(true).await;
-                });
                 if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {
                     emit_mouse(trigger_button_id(&e), col, row, modifier_bits(e.modifiers()), true, false);
                 }
@@ -515,19 +513,6 @@ pub fn Page() -> Element {
                             class: "rounded-md border border-ansi-1 bg-term-bg px-4 py-2 text-sm text-ansi-1",
                             "{msg}"
                         }
-                    }
-                })
-            }
-
-            {
-                let waiting = rows.read().is_empty()
-                    && service_error.read().is_empty()
-                    && loading.read().is_none();
-                waiting.then(|| rsx! {
-                    div {
-                        class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
-                        style: "color:#888;",
-                        {translate("terminal-loading")}
                     }
                 })
             }

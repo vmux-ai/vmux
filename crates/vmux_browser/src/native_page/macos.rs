@@ -4,7 +4,7 @@ use std::rc::Rc;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
-use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender};
+use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, ZoomLevel};
 use bevy_cef_core::prelude::{
     BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
     asset_load_path_from_request_url, embedded_page_host_of,
@@ -24,25 +24,27 @@ pub(super) struct NativePagesMacosPlugin;
 
 impl Plugin for NativePagesMacosPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                open_native_pages,
-                sync_native_appearance.run_if(resource_changed::<AppSettings>),
+        app.add_systems(First, accept_page_wakes)
+            .add_systems(
+                Update,
+                (
+                    open_native_pages,
+                    sync_native_appearance.run_if(resource_changed::<AppSettings>),
+                    sync_native_page_scale,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_systems(
-            PostUpdate,
-            (place_native_pages, render_native_pages)
-                .chain()
-                .after(crate::present::sync_windowed_frames),
-        )
-        .add_systems(
-            PostUpdate,
-            focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
-        )
-        .add_observer(forward_host_emit);
+            .add_systems(
+                PostUpdate,
+                (place_native_pages, render_native_pages)
+                    .chain()
+                    .after(crate::present::sync_windowed_frames),
+            )
+            .add_systems(
+                PostUpdate,
+                focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
+            )
+            .add_observer(forward_host_emit);
     }
 }
 
@@ -165,6 +167,7 @@ fn place_native_pages(
     window: Query<&Window, With<PrimaryWindow>>,
     pages: Query<(), With<HostsPage>>,
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
+    settings: Res<AppSettings>,
 ) {
     let Some(mut hosted) = hosted else {
         return;
@@ -172,12 +175,17 @@ fn place_native_pages(
     hosted.0.retain(|entity, _| pages.contains(*entity));
     let window = window.single().ok();
     let capturing = !capturing.is_empty();
+    let all_corners = frames.all_corners();
     for (entity, page) in hosted.0.iter() {
         let Some(bounds) = page.placement.bounds(*entity, window, &frames) else {
             page.surface.set_visible(false);
             continue;
         };
         page.surface.set_bounds(bounds);
+        page.surface
+            .set_corner_radius(settings.layout.radius as f64, all_corners);
+        let ring = frames.ring_of(*entity);
+        page.surface.set_focus_ring(ring.width as f64, ring.rgb);
         page.surface.set_visible(true);
         if let Some(order) = page.placement.pointer_order(capturing) {
             page.surface.order_among_siblings(order);
@@ -231,6 +239,25 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
     for page in hosted.0.values() {
         page.surface.set_appearance(appearance);
     }
+}
+
+fn sync_native_page_scale(
+    hosted: Option<NonSend<HostedPages>>,
+    zoom: Query<(Entity, &ZoomLevel), Changed<ZoomLevel>>,
+) {
+    let Some(hosted) = hosted else {
+        return;
+    };
+    for (entity, level) in zoom.iter() {
+        let Some(page) = hosted.0.get(&entity) else {
+            continue;
+        };
+        page.surface.set_page_scale(page_scale_of(level.0));
+    }
+}
+
+fn page_scale_of(level: f64) -> f64 {
+    1.2f64.powf(level)
 }
 
 fn appearance_of(mode: ColorScheme) -> Appearance {
@@ -349,13 +376,30 @@ impl PageWaker {
     }
 }
 
+/// One pending wake at a time, cleared as each frame starts.
+///
+/// A page wakes the host after every host emit it delivers and after every DOM event it handles,
+/// and the host emits several times per keystroke — so an unthrottled waker turned one keystroke
+/// into several full app updates, and those updates emitted again. Collapsing the wakes a frame
+/// asks for into one leaves the loop event-driven without letting it feed itself. Clearing at the
+/// start of the frame rather than the end is what keeps a change made mid-frame from being lost:
+/// it still schedules the next one.
+static PAGE_WAKE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl vmux_native::Wake for PageWaker {
     fn wake(&self) {
         let Some(proxy) = self.0.as_ref() else {
             return;
         };
+        if PAGE_WAKE_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
+}
+
+pub(crate) fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
+    PAGE_WAKE_PENDING.store(false, std::sync::atomic::Ordering::Release);
 }
 
 struct PageOutbox {

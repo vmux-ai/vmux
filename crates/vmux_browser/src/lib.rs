@@ -47,7 +47,7 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::{HeaderCommandEvent, StackRow},
+    event::HeaderCommandEvent,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
@@ -536,6 +536,7 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
+static NATIVE_TEXT_ENTRY_OWNS_KEYS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
@@ -550,6 +551,14 @@ pub(crate) fn set_native_page_owns_escape(owns: bool) {
 
 pub fn native_page_owns_escape() -> bool {
     NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_native_text_entry_owns_keys(owns: bool) {
+    NATIVE_TEXT_ENTRY_OWNS_KEYS.store(owns, Ordering::Relaxed);
+}
+
+pub fn native_text_entry_owns_keys() -> bool {
+    NATIVE_TEXT_ENTRY_OWNS_KEYS.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {
@@ -625,22 +634,6 @@ impl LayoutFixedOffsets {
             height: logical.size.y,
         })
     }
-}
-
-fn should_emit_new_stack_placeholder(
-    pending_stack: Option<Entity>,
-    active_stack: Option<Entity>,
-    rows: &[StackRow],
-) -> bool {
-    let Some(pending_stack) = pending_stack else {
-        return false;
-    };
-    if active_stack != Some(pending_stack) {
-        return false;
-    }
-    !rows
-        .iter()
-        .any(|row| row.is_active && !row.url.is_empty() && row.url != "about:blank")
 }
 
 fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) -> bool {
@@ -1119,24 +1112,6 @@ mod tests {
             assert!(app.world().get::<WebviewWindowed>(entity).is_some());
             assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
         }
-    }
-
-    #[test]
-    fn active_browser_url_wins_over_stale_new_stack_placeholder() {
-        let stack = Entity::from_bits(1);
-        let rows = [StackRow {
-            title: "Google".to_string(),
-            url: "https://www.google.com".to_string(),
-            icon: vmux_core::PageIcon::None,
-            is_active: true,
-            bg_color: None,
-        }];
-
-        assert!(!should_emit_new_stack_placeholder(
-            Some(stack),
-            Some(stack),
-            &rows
-        ));
     }
 
     #[test]

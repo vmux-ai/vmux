@@ -55,3 +55,6 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
 
 [dev-dependencies]
 dioxus = { workspace = true }
+
+[lints]
+workspace = true

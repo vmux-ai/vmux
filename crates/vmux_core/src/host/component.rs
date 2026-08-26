@@ -176,3 +176,18 @@ pub enum TransitionType {
 
 #[derive(bevy::prelude::Resource, Clone, Debug, Default)]
 pub struct EffectiveStartupUrl(pub String);
+
+impl EffectiveStartupUrl {
+    pub const START_PAGE: &'static str = "vmux://start/";
+
+    /// What a new tab, pane or stack opens.
+    ///
+    /// Settings resolve this and never leave it empty, so the fallback covers only the window
+    /// before they have loaded — a surface opened in it still gets a page rather than nothing.
+    pub fn of(resolved: Option<&Self>) -> String {
+        match resolved {
+            Some(url) if !url.0.is_empty() => url.0.clone(),
+            _ => Self::START_PAGE.to_string(),
+        }
+    }
+}

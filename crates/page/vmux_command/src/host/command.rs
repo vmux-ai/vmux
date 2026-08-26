@@ -70,6 +70,9 @@ pub enum FileKeyCommand {
     #[menu(id = "file_panel_dismiss", label = "Close Panel", hidden)]
     #[shortcut(direct = "Escape", when = "files.panel")]
     PanelDismiss,
+    #[menu(id = "file_find", label = "Find In File")]
+    #[shortcut(direct = "Super+f", when = "files")]
+    Find,
 }
 
 impl From<FileKeyCommand> for vmux_core::event::FileKey {
@@ -81,6 +84,7 @@ impl From<FileKeyCommand> for vmux_core::event::FileKey {
             FileKeyCommand::PanelPrevious => Self::PanelPrevious,
             FileKeyCommand::PanelChoose => Self::PanelChoose,
             FileKeyCommand::PanelDismiss => Self::PanelDismiss,
+            FileKeyCommand::Find => Self::Find,
         }
     }
 }

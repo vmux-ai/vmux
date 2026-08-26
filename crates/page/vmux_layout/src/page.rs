@@ -29,7 +29,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
+use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -386,20 +386,6 @@ fn layout_overlay_ready(
         && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
 }
 
-fn format_address(stack: &StackRow) -> String {
-    if stack.url.starts_with("vmux://") || stack.url.starts_with("file:") {
-        return stack.url.clone();
-    }
-    let host = host_for_favicon_fallback(&stack.url);
-    let title = stack.title.trim();
-    match (host, title.is_empty()) {
-        (Some(h), false) => format!("{h} / {title}"),
-        (Some(h), true) => h.to_string(),
-        (None, false) => title.to_string(),
-        (None, true) => stack.url.clone(),
-    }
-}
-
 #[component]
 fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
     let (label, version) = match &phase {
@@ -494,7 +480,7 @@ fn HeaderView(
                 if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
+                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden pl-2",
                         for tab in tabs.iter() {
                             {
                                 let mut tab = tab.clone();
@@ -724,11 +710,10 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
     let status = match remote.phase {
-        RemotePhase::Disabled => "Off",
-        RemotePhase::Starting if remote.enabled => "Starting…",
-        RemotePhase::Starting => "Stopping…",
-        RemotePhase::Enabled => "On",
-        RemotePhase::Error => "Needs attention",
+        RemotePhase::Disabled | RemotePhase::Enabled => None,
+        RemotePhase::Starting if remote.enabled => Some("Starting…"),
+        RemotePhase::Starting => Some("Stopping…"),
+        RemotePhase::Error => Some("Needs attention"),
     };
     let qr = if active
         && show_pairing()
@@ -760,24 +745,16 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     }
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "flex items-center gap-1.5",
-                        span { class: "text-ui font-semibold", "Remote" }
-                        if active {
-                            span { class: "inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success",
-                                span { class: "size-1.5 rounded-full bg-success" }
-                                "Live"
-                            }
+                    div { class: "text-ui font-semibold", "Live" }
+                    if let Some(status) = status {
+                        div {
+                            class: if remote.phase == RemotePhase::Error {
+                                "mt-0.5 truncate text-[10px] text-destructive"
+                            } else {
+                                "mt-0.5 text-[10px] text-muted-foreground"
+                            },
+                            "{status}"
                         }
-                    }
-                    div {
-                        class: if remote.phase == RemotePhase::Error {
-                            "mt-0.5 truncate text-[10px] text-destructive"
-                        } else if remote.enabled {
-                            "mt-0.5 text-[10px] text-success/90"
-                        } else {
-                            "mt-0.5 text-[10px] text-muted-foreground"
-                        },
-                        "{status}"
                     }
                 }
                 button {
@@ -787,7 +764,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     } else {
                         "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
                     },
-                    aria_label: "Toggle Remote",
+                    aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
                         if remote.enabled {
@@ -845,7 +822,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             dangerous_inner_html: "{svg}",
                         }
                         div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
-                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux Remote and pairs automatically" }
+                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux and pairs automatically" }
                     }
                     div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
                         div {
@@ -1337,9 +1314,11 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                                 span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{tools.installed}" }
                             }
                         }
-                        div { class: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground/65",
+                        div { class: "mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-hidden text-[10px] text-foreground/65",
                             if loaded {
-                                span { class: "whitespace-nowrap", {translate("common-installed")} }
+                                if tools.updates == 0 && tools.conflicts == 0 {
+                                    span { class: "whitespace-nowrap", {translate("common-installed")} }
+                                }
                                 if tools.updates > 0 {
                                     span { class: "flex whitespace-nowrap items-center gap-1",
                                         span { class: "size-1.5 rounded-full bg-amber-500" }
@@ -1912,33 +1891,32 @@ fn open_vault(pane_id: u64) {
 
 #[component]
 fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
-    let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
-    let address_value = active_row.as_ref().map(format_address).unwrap_or_default();
-    let placeholder = if has_content {
-        String::new()
+    let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
+    let address = active_row.map(|row| row.address).unwrap_or_default();
+    let empty_class = if bg_color.is_some() {
+        "opacity-50"
     } else {
-        translate("layout-new-stack")
-    };
-    let placeholder_class = if bg_color.is_some() {
-        "placeholder:opacity-50"
-    } else {
-        "placeholder:text-muted-foreground"
+        "text-muted-foreground"
     };
 
     rsx! {
         div {
-            class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center",
+            class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
                 let _ = send(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
-            input {
-                r#type: "text",
-                readonly: true,
-                class: "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none {placeholder_class}",
-                value: "{address_value}",
-                placeholder: "{placeholder}",
+            if !has_content {
+                span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
+            } else {
+                if !address.origin.is_empty() {
+                    span {
+                        class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ui leading-tight",
+                        "{address.origin}"
+                    }
+                }
+                span { class: "min-w-0 truncate text-ui", "{address.rest}" }
             }
         }
     }

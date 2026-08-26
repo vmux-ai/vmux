@@ -47,9 +47,18 @@ fn main() {
 }
 
 fn run_update_on_one_thread(app: &mut App) {
-    app.edit_schedule(Update, |schedule| {
-        schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
-    });
+    use bevy::ecs::schedule::ScheduleLabel;
+    for label in [
+        First.intern(),
+        PreUpdate.intern(),
+        Update.intern(),
+        PostUpdate.intern(),
+        Last.intern(),
+    ] {
+        app.edit_schedule(label, |schedule| {
+            schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+        });
+    }
 }
 
 extern "C" fn sigint_handler(_: libc::c_int) {

@@ -246,6 +246,7 @@ pub enum EditCommand {
     Save,
     GotoDefinition,
     FindReferences,
+    BeginRename,
     Hover,
     TriggerCompletion,
     FoldToggle,
@@ -254,6 +255,35 @@ pub enum EditCommand {
     FoldToggleRecursive,
     FoldAll,
     UnfoldAll,
+    SelectAllOccurrences,
+    CollapseCarets,
+    AddCaretVertically(VerticalDirection),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerticalDirection {
+    Up,
+    Down,
+}
+
+impl EditCommand {
+    pub fn is_per_caret(&self) -> bool {
+        matches!(
+            self,
+            Self::Move(_)
+                | Self::Select(_)
+                | Self::InsertText(_)
+                | Self::OvertypeText(_)
+                | Self::InsertNewline
+                | Self::InsertTab
+                | Self::DeleteBack
+                | Self::DeleteForward
+                | Self::DeleteWordBack
+                | Self::ReplaceChar { .. }
+                | Self::SelectTextObject(_)
+                | Self::SwapSelectionEnds
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

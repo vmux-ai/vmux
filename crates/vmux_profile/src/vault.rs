@@ -39,12 +39,13 @@ const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-const IGNORED_ROOTS: [&str; 8] = [
+const IGNORED_ROOTS: [&str; 9] = [
     "agents",
     "extensions",
     "lsp",
     "local",
     "profiles",
+    "projects",
     "spaces",
     "workspace",
     "worktrees",

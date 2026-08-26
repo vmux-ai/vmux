@@ -102,13 +102,23 @@ impl Plugin for TerminalPlugin {
                 (
                     arm_agent_loading,
                     arm_agent_loading_on_restart,
+                    announce_slow_shell_boot.after(poll_service_messages),
                     clear_agent_loading.after(poll_service_messages),
+                    resend_the_screen_a_page_missed.after(poll_service_messages),
                     flush_buffered_agent_prompt.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
                     set_terminal_shell_icon,
                 ),
+            )
+            .add_systems(
+                Update,
+                prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
             );
     }
+}
+
+fn prewarm_login_shell_env(settings: Res<AppSettings>) {
+    crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
 }
 
 struct TerminalUpdatePlugin;
@@ -264,11 +274,26 @@ pub struct TerminalModeFlags {
 pub struct AgentFocusBlurred;
 
 const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-const TERMINAL_LOADING_MIN_DISPLAY: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// How long a plain shell may take to reach its prompt before the boot screen is worth showing.
+///
+/// A local shell beats this, so opening a terminal shows the terminal — the way tmux does. The
+/// screen is for the shell that does not, and for an agent, which never does.
+const SHELL_BOOT_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AgentLoading {
     pub since: Instant,
+    pub announced: bool,
+}
+
+impl AgentLoading {
+    fn armed(announced: bool) -> Self {
+        Self {
+            since: Instant::now(),
+            announced,
+        }
+    }
 }
 
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
@@ -844,6 +869,9 @@ pub struct PendingTerminalInput {
 #[derive(Component)]
 struct ShellOutputSeen;
 
+#[derive(Component)]
+struct OwedSnapshot;
+
 fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
     has_content && cursor_col > 0
 }
@@ -1004,7 +1032,7 @@ fn broadcast_service_unavailable(
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 SERVICE_UNAVAILABLE_EVENT,
@@ -1310,7 +1338,8 @@ fn poll_service_messages(
                                 commands.entity(entity).insert(ShellOutputSeen);
                             }
                         }
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
+                            commands.entity(entity).insert(OwedSnapshot);
                             continue;
                         }
                         let mut changed_lines = changed_lines;
@@ -1352,7 +1381,7 @@ fn poll_service_messages(
                 });
                 for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
                             continue;
                         }
                         let evt = TermTitleEvent { title };
@@ -1380,7 +1409,7 @@ fn poll_service_messages(
                                 commands.entity(entity).insert(ShellOutputSeen);
                             }
                         }
-                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                        if !browsers.can_emit_to(&entity) {
                             continue;
                         }
                         let mut changed_lines: Vec<(u32, TermLine)> = lines
@@ -2723,16 +2752,20 @@ fn arm_agent_loading(
             Entity,
             Option<&vmux_core::agent::AgentSession>,
             Option<&PromptCapture>,
+            Has<ShellOutputSeen>,
         ),
         (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, session, capture) in &newly_ready {
-        let (label, segment) = terminal_loading_labels(session);
-        commands.entity(entity).insert(AgentLoading {
-            since: Instant::now(),
-        });
+    for (entity, session, capture, output_seen) in &newly_ready {
+        if session.is_none() && output_seen {
+            continue;
+        }
+        let announced = session.is_some();
+        commands
+            .entity(entity)
+            .insert(AgentLoading::armed(announced));
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }
@@ -2746,6 +2779,39 @@ fn arm_agent_loading(
                 },
             ));
         }
+        if !announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: true,
+                label,
+                segment,
+            },
+        ));
+    }
+}
+
+fn announce_slow_shell_boot(
+    mut waiting: Query<
+        (Entity, &mut AgentLoading),
+        (
+            With<Terminal>,
+            Without<vmux_core::agent::AgentSession>,
+            Without<ShellOutputSeen>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, mut loading) in &mut waiting {
+        if loading.announced || loading.since.elapsed() < SHELL_BOOT_GRACE {
+            continue;
+        }
+        loading.announced = true;
+        let (label, segment) = terminal_loading_labels(None);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2775,10 +2841,10 @@ fn arm_agent_loading_on_restart(
     mut commands: Commands,
 ) {
     for (entity, session, capture) in &restarted {
-        let (label, segment) = terminal_loading_labels(session);
-        commands.entity(entity).insert(AgentLoading {
-            since: Instant::now(),
-        });
+        let announced = session.is_some();
+        commands
+            .entity(entity)
+            .insert(AgentLoading::armed(announced));
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }
@@ -2792,6 +2858,10 @@ fn arm_agent_loading_on_restart(
                 },
             ));
         }
+        if !announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2812,43 +2882,48 @@ fn clear_agent_loading(
             Option<&vmux_core::agent::AgentSession>,
             &AgentLoading,
             Option<&PromptCapture>,
+            Has<ShellOutputSeen>,
         ),
         With<Terminal>,
     >,
     mode_map: Res<TerminalModeMap>,
     mut commands: Commands,
 ) {
-    for (entity, pid, session, loading, capture) in &loading_q {
+    for (entity, pid, session, loading, capture, output_seen) in &loading_q {
         let ready = match session {
             Some(_) => mode_map
                 .modes
                 .get(pid)
                 .map(|m| m.alt_screen || m.mouse_capture || m.focus_reporting)
                 .unwrap_or(false),
-            None => loading.since.elapsed() >= TERMINAL_LOADING_MIN_DISPLAY,
+            None => output_seen,
         };
-        if ready || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
-            let (label, segment) = terminal_loading_labels(session);
-            if let Some(capture) = capture {
-                if !capture.skipped && !capture.draft.trim().is_empty() {
-                    commands.entity(entity).insert(BufferedAgentPrompt {
-                        text: capture.draft.clone(),
-                        submit: true,
-                    });
-                }
-                commands.entity(entity).remove::<PromptCapture>();
-            }
-            commands.entity(entity).remove::<AgentLoading>();
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                TERM_LOADING_EVENT,
-                &crate::event::TermLoadingEvent {
-                    loading: false,
-                    label,
-                    segment,
-                },
-            ));
+        if !ready && loading.since.elapsed() < AGENT_LOADING_TIMEOUT {
+            continue;
         }
+        if let Some(capture) = capture {
+            if !capture.skipped && !capture.draft.trim().is_empty() {
+                commands.entity(entity).insert(BufferedAgentPrompt {
+                    text: capture.draft.clone(),
+                    submit: true,
+                });
+            }
+            commands.entity(entity).remove::<PromptCapture>();
+        }
+        commands.entity(entity).remove::<AgentLoading>();
+        if !loading.announced {
+            continue;
+        }
+        let (label, segment) = terminal_loading_labels(session);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: false,
+                label,
+                segment,
+            },
+        ));
     }
 }
 
@@ -2870,13 +2945,40 @@ fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
     q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    let Ok(pid) = q.get(entity) else { return };
+    let Some(service) = service else {
+        commands.entity(entity).insert(OwedSnapshot);
+        return;
+    };
+    service
+        .0
+        .send(ClientMessage::RequestSnapshot { process_id: *pid });
+}
+
+/// Ask for the screen again once the page can receive it.
+///
+/// A frame emitted before the page is listening is dropped, and the frames after it are deltas —
+/// so a shell that prints its prompt and then waits leaves a page that never hears anything. The
+/// service connection races page readiness too, and loses often enough to matter. Either way the
+/// terminal is owed a whole screen, and this is where that debt is paid.
+fn resend_the_screen_a_page_missed(
+    owed: Query<(Entity, &ProcessId), (With<Terminal>, With<OwedSnapshot>)>,
+    browsers: NonSend<Browsers>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
     let Some(service) = service else { return };
-    if let Ok(pid) = q.get(entity) {
+    for (entity, pid) in &owed {
+        if !browsers.can_emit_to(&entity) {
+            continue;
+        }
         service
             .0
             .send(ClientMessage::RequestSnapshot { process_id: *pid });
+        commands.entity(entity).remove::<OwedSnapshot>();
     }
 }
 
@@ -3049,7 +3151,7 @@ fn sync_terminal_theme(
     };
 
     for entity in targets {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 TERM_THEME_EVENT,
@@ -4734,6 +4836,77 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_already_at_its_prompt_is_shown_without_arming_loading() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((Terminal, ShellOutputSeen, PageReady {}))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn a_page_ready_before_the_service_is_owed_its_screen() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
+        let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
+
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        assert!(
+            app.world().get::<OwedSnapshot>(webview).is_some(),
+            "the snapshot request had nowhere to go, so the debt has to outlive the connection"
+        );
+    }
+
+    #[test]
+    fn a_plain_terminal_holds_its_boot_screen_back_until_the_shell_is_late() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (arm_agent_loading, announce_slow_shell_boot).chain(),
+        );
+        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
+
+        app.update();
+        assert!(
+            !app.world().get::<AgentLoading>(e).unwrap().announced,
+            "a shell that may still beat the grace period must not have been announced"
+        );
+
+        let mut loading = app.world_mut().get_mut::<AgentLoading>(e).unwrap();
+        loading.since = Instant::now() - SHELL_BOOT_GRACE - Duration::from_millis(1);
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
+    }
+
+    #[test]
+    fn an_agent_announces_its_boot_screen_at_once() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                PageReady {},
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
+    }
+
+    #[test]
     fn agent_loading_preserves_initial_prompt_capture() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -4805,6 +4978,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4840,6 +5014,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
                 capture,
             ))
@@ -4899,6 +5074,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now() - AGENT_LOADING_TIMEOUT - Duration::from_secs(1),
+                    announced: true,
                 },
             ))
             .id();
@@ -4923,6 +5099,7 @@ mod tests {
                 pid,
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4953,6 +5130,7 @@ mod tests {
                 ProcessId::new(),
                 AgentLoading {
                     since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
@@ -4961,7 +5139,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_terminal_loading_cleared_after_min_display() {
+    fn plain_terminal_loading_cleared_once_the_shell_prompt_lands() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<TerminalModeMap>()
@@ -4972,10 +5150,16 @@ mod tests {
                 Terminal,
                 ProcessId::new(),
                 AgentLoading {
-                    since: Instant::now() - TERMINAL_LOADING_MIN_DISPLAY - Duration::from_millis(1),
+                    since: Instant::now(),
+                    announced: true,
                 },
             ))
             .id();
+
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+
+        app.world_mut().entity_mut(e).insert(ShellOutputSeen);
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
     }

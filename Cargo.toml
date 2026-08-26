@@ -12,6 +12,11 @@ license = "GPL-3.0-or-later"
 homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
+[workspace.lints.clippy]
+# `let _ = async_fn()` drops the future without polling it, so the work never runs at all — a
+# quieter failure than discarding a completed future's error, and never intentional.
+let_underscore_future = "deny"
+
 [workspace.dependencies]
 bytes = "1"
 webpki-roots = "1"

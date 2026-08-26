@@ -35,3 +35,6 @@ tempfile = "3"
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
+
+[lints]
+workspace = true

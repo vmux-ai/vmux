@@ -6,7 +6,9 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_core::event::{FileLine, StyledSpan};
 
-pub const FILE_VIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+pub const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
@@ -46,7 +48,15 @@ fn theme_name() -> &'static str {
 }
 
 pub fn default_theme() -> syntect::highlighting::Theme {
-    ThemeSet::load_defaults().themes[theme_name()].clone()
+    crate::palette::Palette::of(is_dark_theme()).theme()
+}
+
+pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
+    theme
+        .settings
+        .foreground
+        .map(|c| [c.r, c.g, c.b])
+        .unwrap_or_else(|| crate::palette::Palette::of(is_dark_theme()).foreground_rgb())
 }
 
 pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
@@ -148,7 +158,32 @@ impl Highlighter {
             std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let content = String::from_utf8(bytes)
             .map_err(|_| format!("not a UTF-8 text file: {}", path.display()))?;
+        if meta.len() > HIGHLIGHT_MAX_BYTES {
+            return Ok(self.plain(&content, path));
+        }
         Ok(self.highlight(&content, path))
+    }
+
+    fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
+        let theme = &self.themes.themes[theme_name()];
+        let fg = theme_foreground(theme);
+        let lines = LinesWithEndings::from(content)
+            .enumerate()
+            .map(|(idx, line)| FileLine {
+                line_no: idx as u32,
+                fold: vmux_core::event::FoldGutter::None,
+                spans: vec![StyledSpan {
+                    text: line.trim_end_matches(['\n', '\r']).to_string(),
+                    fg,
+                    bold: false,
+                    italic: false,
+                }],
+            })
+            .collect();
+        HighlightedFile {
+            language: select_syntax(path).name.clone(),
+            lines,
+        }
     }
 }
 
@@ -246,6 +281,26 @@ mod tests {
         let dir = std::env::temp_dir();
         let err = hl.load_file(&dir).unwrap_err();
         assert!(err.to_lowercase().contains("not a file"), "got: {err}");
+    }
+
+    #[test]
+    fn load_serves_a_file_past_the_highlight_cap_without_colouring_it() {
+        let hl = Highlighter::new();
+        let mut p = std::env::temp_dir();
+        p.push(format!("vmux-editor-large-{}.rs", std::process::id()));
+        let line = "fn main() { let x = 1; }\n";
+        std::fs::write(
+            &p,
+            line.repeat(1 + HIGHLIGHT_MAX_BYTES as usize / line.len()),
+        )
+        .unwrap();
+        let out = hl.load_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(out.language, "Rust", "the language is still recognised");
+        assert!(
+            out.lines.iter().all(|l| l.spans.len() <= 1),
+            "a line past the cap is one span, not a syntect parse"
+        );
     }
 
     #[test]

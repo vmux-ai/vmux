@@ -24,8 +24,7 @@ pub use archive::{
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 pub use launcher::{
     ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,
-    PendingLaunch, PendingStackAbandoned, RendersLauncherPanel, RestoreKeyboardToStack,
-    StackInPaneChosen,
+    PendingLaunch, RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use overlay::{OverlayShownInline, OverlayState, OverlayStateQuery, WindowOverlay};

@@ -504,12 +504,12 @@ fn begin_requested_inline_transition(
     for request in requests.read() {
         commands
             .entity(request.stack)
-            .insert(crate::StartInlineTransition {
+            .try_insert(crate::StartInlineTransition {
                 webview: request.webview,
             });
         commands
             .entity(request.webview)
-            .insert(crate::StartInlineTransitionView);
+            .try_insert(crate::StartInlineTransitionView);
     }
 }
 
@@ -551,6 +551,27 @@ mod tests {
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.host == "start"));
+    }
+
+    #[test]
+    fn a_transition_whose_page_already_closed_is_skipped() {
+        let mut app = App::new();
+        app.add_message::<InlineTransitionRequested>()
+            .add_systems(Update, begin_requested_inline_transition);
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().entity_mut(webview).despawn();
+
+        app.world_mut()
+            .write_message(InlineTransitionRequested { stack, webview });
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<crate::StartInlineTransition>(stack)
+                .is_some(),
+            "the surviving half of the transition still applies"
+        );
     }
 
     #[test]

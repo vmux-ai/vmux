@@ -1,44 +1,9 @@
 use std::path::PathBuf;
 
-use serde_json::Value;
-
 use crate::lsp::{LspOutbox, PendingMap};
 
 pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri).ok()?.to_file_path().ok()
-}
-
-pub fn dispatch_message(msg: Value, pending: &PendingMap, outbox: &LspOutbox) {
-    if let Some(id) = msg.get("id").and_then(|v| v.as_i64())
-        && msg.get("method").is_none()
-    {
-        if let Some(tx) = pending
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&id)
-        {
-            let _ = tx.send(msg);
-        }
-        return;
-    }
-    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    if method == "textDocument/publishDiagnostics" {
-        let Some(params) = msg.get("params") else {
-            return;
-        };
-        let Ok(parsed) =
-            serde_json::from_value::<lsp_types::PublishDiagnosticsParams>(params.clone())
-        else {
-            return;
-        };
-        if let Some(path) = path_from_uri(parsed.uri.as_str()) {
-            outbox
-                .0
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push((path, parsed.diagnostics));
-        }
-    }
 }
 
 use std::io::BufReader;
@@ -51,7 +16,9 @@ use std::time::Duration;
 
 use std::collections::HashMap;
 
+use crate::lsp::reader::Reader;
 use crate::lsp::registry::ServerSpec;
+use crate::lsp::server_request::ServerEvent;
 use crate::lsp::{ServerKey, framing};
 
 pub struct ServerClient {
@@ -59,9 +26,76 @@ pub struct ServerClient {
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
     next_id: AtomicI64,
+    capabilities: Capabilities,
     _reader: JoinHandle<()>,
     _writer: JoinHandle<()>,
     _stderr: JoinHandle<()>,
+}
+
+#[derive(Default)]
+pub struct Capabilities {
+    server: lsp_types::ServerCapabilities,
+    semantic: Option<crate::lsp::semantic::SemanticLegend>,
+}
+
+impl Capabilities {
+    fn of(reply: &serde_json::Value) -> Self {
+        let server: lsp_types::ServerCapabilities = reply
+            .get("result")
+            .and_then(|result| result.get("capabilities"))
+            .cloned()
+            .and_then(|caps| serde_json::from_value(caps).ok())
+            .unwrap_or_default();
+        let semantic = crate::lsp::semantic::SemanticLegend::of(&server);
+        Self { server, semantic }
+    }
+
+    pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
+        self.semantic.as_ref()
+    }
+
+    pub fn allows(&self, method: &str) -> bool {
+        let caps = &self.server;
+        match method {
+            "textDocument/hover" => match &caps.hover_provider {
+                Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
+                Some(lsp_types::HoverProviderCapability::Options(_)) => true,
+                None => false,
+            },
+            "textDocument/foldingRange" => match &caps.folding_range_provider {
+                Some(lsp_types::FoldingRangeProviderCapability::Simple(yes)) => *yes,
+                Some(_) => true,
+                None => false,
+            },
+            "textDocument/codeAction" => match &caps.code_action_provider {
+                Some(lsp_types::CodeActionProviderCapability::Simple(yes)) => *yes,
+                Some(lsp_types::CodeActionProviderCapability::Options(_)) => true,
+                None => false,
+            },
+            "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
+            "textDocument/completion" => caps.completion_provider.is_some(),
+            "textDocument/definition" => Self::offered(&caps.definition_provider),
+            "textDocument/declaration" => caps.declaration_provider.is_some(),
+            "textDocument/typeDefinition" => caps.type_definition_provider.is_some(),
+            "textDocument/implementation" => caps.implementation_provider.is_some(),
+            "textDocument/references" => Self::offered(&caps.references_provider),
+            "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
+            "textDocument/rename" => Self::offered(&caps.rename_provider),
+            "textDocument/formatting" => Self::offered(&caps.document_formatting_provider),
+            "textDocument/rangeFormatting" => {
+                Self::offered(&caps.document_range_formatting_provider)
+            }
+            _ => true,
+        }
+    }
+
+    fn offered<T>(provider: &Option<lsp_types::OneOf<bool, T>>) -> bool {
+        match provider {
+            Some(lsp_types::OneOf::Left(yes)) => *yes,
+            Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        }
+    }
 }
 
 impl ServerClient {
@@ -69,6 +103,7 @@ impl ServerClient {
         spec: &ServerSpec,
         root: &std::path::Path,
         outbox: LspOutbox,
+        events: crossbeam_channel::Sender<ServerEvent>,
     ) -> std::io::Result<Self> {
         let store_root = crate::lsp::store::default_root();
         let mut child = Command::new(&spec.command)
@@ -96,14 +131,8 @@ impl ServerClient {
             }
         });
 
-        let r_pending = pending.clone();
-        let r_outbox = outbox.clone();
-        let reader = std::thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            while let Ok(Some(msg)) = framing::read_message(&mut r) {
-                dispatch_message(msg, &r_pending, &r_outbox);
-            }
-        });
+        let dispatcher = Reader::new(pending.clone(), outbox, outgoing.clone(), events, root);
+        let reader = std::thread::spawn(move || dispatcher.run(stdout));
 
         let cmd_name = spec.command.clone();
         let stderr_thread = std::thread::spawn(move || {
@@ -114,18 +143,27 @@ impl ServerClient {
             }
         });
 
-        let client = ServerClient {
+        let mut client = ServerClient {
             child,
             outgoing,
             pending,
             next_id: AtomicI64::new(1),
+            capabilities: Capabilities::default(),
             _reader: reader,
             _writer: writer,
             _stderr: stderr_thread,
         };
 
-        client.initialize(root)?;
+        client.capabilities = client.initialize(root)?;
         Ok(client)
+    }
+
+    pub fn provides(&self, method: &str) -> bool {
+        self.capabilities.allows(method)
+    }
+
+    pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
+        self.capabilities.semantic_legend()
     }
 
     fn notify(&self, method: &str, params: serde_json::Value) {
@@ -140,9 +178,9 @@ impl ServerClient {
         &self,
         method: &str,
         params: serde_json::Value,
-    ) -> (i64, mpsc::Receiver<serde_json::Value>) {
+    ) -> (i64, crossbeam_channel::Receiver<serde_json::Value>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         self.pending
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -172,24 +210,69 @@ impl ServerClient {
         })
     }
 
-    fn initialize(&self, root: &std::path::Path) -> std::io::Result<()> {
+    fn initialize(&self, root: &std::path::Path) -> std::io::Result<Capabilities> {
         let root_uri = url::Url::from_file_path(root)
             .map(|u| u.to_string())
             .unwrap_or_default();
         let params = serde_json::json!({
             "processId": std::process::id(),
             "rootUri": root_uri,
-            "capabilities": {
-                "textDocument": {
-                    "publishDiagnostics": { "relatedInformation": false },
-                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true }
-                }
-            },
+            "capabilities": Self::capabilities(),
             "clientInfo": { "name": "vmux" }
         });
-        self.request("initialize", params, Duration::from_secs(10))?;
+        let reply = self.request("initialize", params, Duration::from_secs(10))?;
         self.notify("initialized", serde_json::json!({}));
-        Ok(())
+        Ok(Capabilities::of(&reply))
+    }
+
+    fn capabilities() -> lsp_types::ClientCapabilities {
+        lsp_types::ClientCapabilities {
+            workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                apply_edit: Some(true),
+                workspace_edit: Some(lsp_types::WorkspaceEditClientCapabilities {
+                    document_changes: Some(true),
+                    resource_operations: Some(vec![]),
+                    failure_handling: Some(lsp_types::FailureHandlingKind::Abort),
+                    ..Default::default()
+                }),
+                configuration: Some(true),
+                workspace_folders: Some(true),
+                ..Default::default()
+            }),
+            text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                hover: Some(lsp_types::HoverClientCapabilities {
+                    content_format: Some(vec![lsp_types::MarkupKind::Markdown]),
+                    ..Default::default()
+                }),
+                publish_diagnostics: Some(lsp_types::PublishDiagnosticsClientCapabilities {
+                    related_information: Some(false),
+                    ..Default::default()
+                }),
+                document_symbol: Some(lsp_types::DocumentSymbolClientCapabilities {
+                    hierarchical_document_symbol_support: Some(true),
+                    ..Default::default()
+                }),
+                semantic_tokens: Some(lsp_types::SemanticTokensClientCapabilities {
+                    requests: lsp_types::SemanticTokensClientCapabilitiesRequests {
+                        full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                        range: Some(false),
+                    },
+                    token_types: crate::lsp::semantic::SEMANTIC_TOKEN_TYPES
+                        .iter()
+                        .map(|name| lsp_types::SemanticTokenType::new(name))
+                        .collect(),
+                    token_modifiers: Vec::new(),
+                    formats: vec![lsp_types::TokenFormat::RELATIVE],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            window: Some(lsp_types::WindowClientCapabilities {
+                work_done_progress: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 
     pub fn did_open(&self, uri: &str, language_id: &str, version: i32, text: &str) {
@@ -246,63 +329,49 @@ pub fn server_key(root: &std::path::Path, spec: &ServerSpec) -> ServerKey {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::mpsc;
 
-    fn outbox() -> LspOutbox {
-        LspOutbox::default()
-    }
-
-    fn pending() -> PendingMap {
-        PendingMap::default()
+    fn advertising(capabilities: serde_json::Value) -> Capabilities {
+        Capabilities::of(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
     }
 
     #[test]
-    fn publish_diagnostics_lands_in_outbox() {
-        let ob = outbox();
-        let pd = pending();
-        let msg = json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/publishDiagnostics",
-            "params": {
-                "uri": "file:///tmp/main.rs",
-                "diagnostics": [{
-                    "range": {"start": {"line": 1, "character": 2},
-                              "end": {"line": 1, "character": 5}},
-                    "severity": 1,
-                    "message": "boom",
-                    "source": "rustc"
-                }]
-            }
-        });
-        dispatch_message(msg, &pd, &ob);
-        let q = ob.0.lock().unwrap();
-        assert_eq!(q.len(), 1);
-        assert_eq!(q[0].0, PathBuf::from("/tmp/main.rs"));
-        assert_eq!(q[0].1.len(), 1);
-        assert_eq!(q[0].1[0].message, "boom");
+    fn a_server_that_said_nothing_is_asked_for_nothing() {
+        let caps = advertising(json!({}));
+        assert!(!caps.allows("textDocument/hover"));
+        assert!(!caps.allows("textDocument/foldingRange"));
+        assert!(!caps.allows("textDocument/documentSymbol"));
     }
 
     #[test]
-    fn response_routes_to_pending_sender() {
-        let ob = outbox();
-        let pd = pending();
-        let (tx, rx) = mpsc::channel();
-        pd.lock().unwrap().insert(7, tx);
-        dispatch_message(json!({"jsonrpc": "2.0", "id": 7, "result": {}}), &pd, &ob);
-        let got = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
-        assert_eq!(got["id"], 7);
-        assert!(pd.lock().unwrap().is_empty(), "pending entry consumed");
-    }
-
-    #[test]
-    fn unknown_notification_is_ignored() {
-        let ob = outbox();
-        let pd = pending();
-        dispatch_message(
-            json!({"method": "window/logMessage", "params": {}}),
-            &pd,
-            &ob,
+    fn an_explicit_false_is_honoured() {
+        assert!(
+            !advertising(json!({ "definitionProvider": false })).allows("textDocument/definition")
         );
-        assert!(ob.0.lock().unwrap().is_empty());
+        assert!(
+            advertising(json!({ "definitionProvider": true })).allows("textDocument/definition")
+        );
+    }
+
+    #[test]
+    fn options_objects_count_as_provided() {
+        let caps = advertising(json!({
+            "renameProvider": { "prepareProvider": true },
+            "codeActionProvider": { "codeActionKinds": ["quickfix"] },
+            "hoverProvider": { "workDoneProgress": false },
+        }));
+        assert!(caps.allows("textDocument/rename"));
+        assert!(caps.allows("textDocument/codeAction"));
+        assert!(caps.allows("textDocument/hover"));
+    }
+
+    #[test]
+    fn a_method_we_do_not_model_is_not_blocked() {
+        assert!(advertising(json!({})).allows("textDocument/didOpen"));
+    }
+
+    #[test]
+    fn an_unparseable_reply_provides_nothing() {
+        let caps = Capabilities::of(&json!({ "id": 1, "result": "not an object" }));
+        assert!(!caps.allows("textDocument/hover"));
     }
 }

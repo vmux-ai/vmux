@@ -18,3 +18,6 @@ vmux_command_mcp = { path = "../vmux_command_mcp" }
 vmux_macro = { path = "../../vmux_macro" }
 vmux_profile = { path = "../../vmux_profile" }
 vmux_client = { path = "../vmux_client" }
+
+[lints]
+workspace = true

@@ -15,6 +15,10 @@ pub(crate) enum DomRequest {
     ScrollIntoView {
         element: String,
     },
+    ScrollTo {
+        element: String,
+        top: f64,
+    },
     SelectAll {
         element: String,
     },
@@ -30,6 +34,9 @@ pub(crate) enum DomRequest {
     PlaceCaret {
         element: String,
         byte: usize,
+    },
+    CaretToEnd {
+        element: String,
     },
     RevealElement {
         elements: Vec<String>,
@@ -145,5 +152,51 @@ impl RequestQueue {
         };
 
         std::mem::take(&mut *queued)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_request_kind_is_a_case_the_shim_handles() {
+        let requests = [
+            DomRequest::Focus {
+                element: "e".into(),
+            },
+            DomRequest::ScrollIntoView {
+                element: "e".into(),
+            },
+            DomRequest::ScrollTo {
+                element: "e".into(),
+                top: 0.0,
+            },
+            DomRequest::SelectAll {
+                element: "e".into(),
+            },
+            DomRequest::OfferText {
+                element: "e".into(),
+            },
+            DomRequest::ClearText {
+                element: "e".into(),
+            },
+            DomRequest::ToggleMedia {
+                element: "e".into(),
+            },
+            DomRequest::PlaceCaret {
+                element: "e".into(),
+                byte: 0,
+            },
+        ];
+
+        for request in requests {
+            let json = serde_json::to_value(&request).expect("a request serializes");
+            let kind = json["kind"].as_str().expect("every request is tagged");
+            assert!(
+                super::super::shim::WRY_HOST_SHIM.contains(&format!("case '{kind}':")),
+                "the shim has no case for `{kind}`, so the page ignores it"
+            );
+        }
     }
 }

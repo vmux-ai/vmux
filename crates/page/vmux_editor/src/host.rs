@@ -7,6 +7,7 @@ pub mod highlight;
 pub mod keymap;
 pub mod lsp;
 pub mod markdown;
+pub mod palette;
 
 pub(crate) mod app_key;
 pub(crate) mod dir;

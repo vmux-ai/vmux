@@ -484,6 +484,7 @@ impl VimKeymap {
                 }
                 "d" => vec![GotoDefinition],
                 "r" => vec![FindReferences],
+                "R" => vec![BeginRename],
                 "e" => self.motion_command(Motion::WordEndPrev),
                 "E" => self.motion_command(Motion::BigWordEndPrev),
                 "_" => self.motion_command(Motion::LastNonBlank),

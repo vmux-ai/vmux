@@ -5,6 +5,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::edit::buffer::TextBuffer;
 use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
+    VerticalDirection,
 };
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
@@ -71,9 +72,18 @@ pub struct EditOutcome {
     pub yank: Option<RegisterValue>,
 }
 
+#[derive(Default, Clone)]
+struct CaretMemory {
+    preferred_vertical_col: Option<usize>,
+    replaced: Vec<Option<char>>,
+}
+
 pub struct EditCore {
     pub buffer: TextBuffer,
     pub selections: Vec<Selection>,
+    active: usize,
+    in_sweep: bool,
+    sweep_snapshotted: bool,
     pub mode: EditMode,
     pub rows: u16,
     pub top_row: u32,
@@ -83,10 +93,9 @@ pub struct EditCore {
     saved_rev: Option<u64>,
     undo: crate::edit::undo::UndoTree,
     last_group: Option<Group>,
-    preferred_vertical_col: Option<usize>,
+    memory: Vec<CaretMemory>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
-    replaced: Vec<Option<char>>,
     block_insert: Option<(Vec<usize>, usize)>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
@@ -105,6 +114,9 @@ impl EditCore {
         Self {
             buffer,
             selections: vec![Selection::caret(0)],
+            active: 0,
+            in_sweep: false,
+            sweep_snapshotted: false,
             mode: default_mode,
             rows: 0,
             top_row: 0,
@@ -114,10 +126,9 @@ impl EditCore {
             saved_rev: Some(0),
             undo,
             last_group: None,
-            preferred_vertical_col: None,
+            memory: vec![CaretMemory::default()],
             fold_view,
             search: None,
-            replaced: Vec::new(),
             block_insert: None,
             search_highlight: false,
             marks: std::collections::HashMap::new(),
@@ -136,6 +147,7 @@ impl EditCore {
                 *mark += n;
             }
         }
+        self.slide_inactive(|pos| if pos > at { pos + n } else { pos });
     }
 
     fn buf_remove(&mut self, range: std::ops::Range<usize>) {
@@ -147,6 +159,29 @@ impl EditCore {
             } else if *mark > range.start {
                 *mark = range.start;
             }
+        }
+        self.slide_inactive(|pos| {
+            if pos >= range.end {
+                pos - n
+            } else if pos > range.start {
+                range.start
+            } else {
+                pos
+            }
+        });
+    }
+
+    fn slide_inactive(&mut self, shift: impl Fn(usize) -> usize) {
+        if self.selections.len() == 1 {
+            return;
+        }
+        let active = self.active;
+        for (index, sel) in self.selections.iter_mut().enumerate() {
+            if index == active {
+                continue;
+            }
+            sel.anchor = shift(sel.anchor);
+            sel.head = shift(sel.head);
         }
     }
 
@@ -190,11 +225,126 @@ impl EditCore {
     }
 
     pub fn primary(&self) -> Selection {
-        self.selections[0]
+        self.selections[self.active.min(self.selections.len() - 1)]
+    }
+
+    pub fn selected_lines(&self) -> (u32, u32) {
+        let sel = self.primary();
+        let (from, _) = self.buffer.char_to_coords(sel.anchor.min(sel.head));
+        let (to, _) = self.buffer.char_to_coords(sel.anchor.max(sel.head));
+        (from as u32, to as u32)
+    }
+
+    fn set_active(&mut self, sel: Selection) {
+        let at = self.active.min(self.selections.len() - 1);
+        self.selections[at] = sel;
+    }
+
+    pub fn toggle_caret(&mut self, at: usize) {
+        let at = at.min(self.buffer.len_chars());
+        if let Some(index) = self.selections.iter().position(|s| s.head == at) {
+            if self.selections.len() > 1 {
+                self.selections.remove(index);
+                self.active = self.active.saturating_sub((self.active >= index) as usize);
+            }
+            return;
+        }
+        self.selections.push(Selection::caret(at));
+        self.active = self.selections.len() - 1;
+        self.merge_overlapping_carets();
+    }
+
+    pub fn add_caret_vertically(&mut self, direction: VerticalDirection) {
+        let delta = match direction {
+            VerticalDirection::Up => -1,
+            VerticalDirection::Down => 1,
+        };
+        let head = self.primary().head;
+        let (line, col) = self.buffer.char_to_coords(head);
+        let row = self.fold_view.step_rows(line as u32, delta) as usize;
+        if row == line {
+            return;
+        }
+        self.toggle_caret(self.buffer.coords_to_char(row, col));
+    }
+
+    pub fn collapse_carets(&mut self) {
+        let keep = self.primary();
+        self.selections = vec![keep];
+        self.active = 0;
+    }
+
+    pub fn select_all_occurrences(&mut self) {
+        let Some((under_caret, found)) = self.word_occurrences() else {
+            return;
+        };
+        self.active = found
+            .iter()
+            .position(|range| range.start == under_caret.start)
+            .unwrap_or(0);
+        self.selections = found
+            .into_iter()
+            .map(|range| Selection {
+                anchor: range.start,
+                head: range.end,
+            })
+            .collect();
+    }
+
+    pub fn word_occurrences(
+        &self,
+    ) -> Option<(std::ops::Range<usize>, Vec<std::ops::Range<usize>>)> {
+        let text = self.buffer.text();
+        let chars: Vec<char> = text.chars().collect();
+        let caret = self.primary().head.min(chars.len());
+        let word = |i: usize| chars[i].is_alphanumeric() || chars[i] == '_';
+
+        let mut start = caret;
+        while start > 0 && word(start - 1) {
+            start -= 1;
+        }
+        let mut end = caret;
+        while end < chars.len() && word(end) {
+            end += 1;
+        }
+        if start == end {
+            return None;
+        }
+        let needle = &chars[start..end];
+
+        let mut found = Vec::new();
+        let mut at = 0;
+        while at + needle.len() <= chars.len() {
+            let matches = chars[at..at + needle.len()] == *needle;
+            let bounded = (at == 0 || !word(at - 1))
+                && (at + needle.len() == chars.len() || !word(at + needle.len()));
+            if matches && bounded {
+                found.push(at..at + needle.len());
+                at += needle.len();
+                continue;
+            }
+            at += 1;
+        }
+        if found.is_empty() {
+            return None;
+        }
+        Some((start..end, found))
+    }
+
+    pub fn caret_count(&self) -> usize {
+        self.selections.len()
+    }
+
+    fn memory(&mut self) -> &mut CaretMemory {
+        if self.memory.len() != self.selections.len() {
+            self.memory = vec![CaretMemory::default(); self.selections.len()];
+        }
+        let at = self.active.min(self.memory.len().saturating_sub(1));
+        &mut self.memory[at]
     }
 
     pub fn set_caret(&mut self, at: usize) {
-        self.preferred_vertical_col = None;
+        self.memory().preferred_vertical_col = None;
         self.place_caret(at);
     }
 
@@ -204,12 +354,12 @@ impl EditCore {
         } else {
             at.min(self.buffer.len_chars())
         };
-        self.selections = vec![Selection::caret(at)];
+        self.set_active(Selection::caret(at));
     }
 
     fn set_head(&mut self, head: usize) {
-        let anchor = self.selections[0].anchor;
-        self.selections = vec![Selection { anchor, head }];
+        let anchor = self.primary().anchor;
+        self.set_active(Selection { anchor, head });
     }
 
     fn vis_col(&self, line_start: usize, col: usize) -> u32 {
@@ -223,8 +373,17 @@ impl EditCore {
     }
 
     pub fn cursor_pos(&self) -> CursorPos {
-        let head = self.primary().head;
-        let (line, col) = self.buffer.char_to_coords(head);
+        self.cursor_pos_of(self.primary())
+    }
+
+    pub fn cursor_positions(&self) -> Vec<CursorPos> {
+        let mut sorted: Vec<Selection> = self.selections.clone();
+        sorted.sort_by_key(|s| s.head);
+        sorted.into_iter().map(|s| self.cursor_pos_of(s)).collect()
+    }
+
+    fn cursor_pos_of(&self, sel: Selection) -> CursorPos {
+        let (line, col) = self.buffer.char_to_coords(sel.head);
         let line_start = self.buffer.line_to_char(line);
         CursorPos {
             line: line as u32,
@@ -234,7 +393,10 @@ impl EditCore {
     }
 
     pub fn visual_range(&self) -> std::ops::Range<usize> {
-        let sel = self.primary();
+        self.visual_range_of(self.primary())
+    }
+
+    fn visual_range_of(&self, sel: Selection) -> std::ops::Range<usize> {
         let r = sel.range();
         match self.mode {
             EditMode::Visual => {
@@ -250,7 +412,17 @@ impl EditCore {
     }
 
     pub fn sel_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        let sel = self.primary();
+        if self.selections.len() == 1 {
+            return self.sel_spans_of(self.primary(), first, rows);
+        }
+        let mut out = Vec::new();
+        for sel in &self.selections {
+            out.extend(self.sel_spans_of(*sel, first, rows));
+        }
+        out
+    }
+
+    fn sel_spans_of(&self, sel: Selection, first: u32, rows: u16) -> Vec<SelSpan> {
         if sel.is_empty() && !self.mode.is_visual() {
             return Vec::new();
         }
@@ -277,7 +449,7 @@ impl EditCore {
                 .filter(|span| span.end > span.start)
                 .collect();
         }
-        let r = self.visual_range();
+        let r = self.visual_range_of(sel);
         if r.start >= r.end {
             return Vec::new();
         }
@@ -317,6 +489,7 @@ impl EditCore {
     fn restore(&mut self, state: crate::edit::undo::Restored) {
         self.buffer.rope = state.rope;
         self.selections = state.selections;
+        self.active = 0;
         self.rev = state.rev;
         self.dirty = self.saved_rev != Some(self.rev);
         self.break_group();
@@ -327,8 +500,10 @@ impl EditCore {
     }
 
     fn checkpoint(&mut self, group: Group) {
-        if self.last_group != Some(group) || group == Group::Other {
+        let wants_snapshot = self.last_group != Some(group) || group == Group::Other;
+        if wants_snapshot && !(self.in_sweep && self.sweep_snapshotted) {
             self.snapshot();
+            self.sweep_snapshotted = true;
         }
         self.last_group = Some(group);
         self.rev += 1;
@@ -418,6 +593,30 @@ impl EditCore {
         crate::edit::search::step(&matches, from, forward)
     }
 
+    pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
+        if rows == 0 || !self.primary().is_empty() {
+            return Vec::new();
+        }
+        let Some((_, found)) = self.word_occurrences() else {
+            return Vec::new();
+        };
+        let last_line = first as usize + rows as usize;
+        let mut out = Vec::new();
+        for range in found {
+            let (line, start) = self.buffer.char_to_coords(range.start);
+            if line < first as usize || line >= last_line {
+                continue;
+            }
+            let ls = self.buffer.line_to_char(line);
+            out.push(SelSpan {
+                line: line as u32,
+                row: line as u32,
+                start: start as u32,
+                end: (range.end - ls) as u32,
+            });
+        }
+        out
+    }
     pub fn search_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
         if !self.search_highlight || rows == 0 {
             return Vec::new();
@@ -590,11 +789,14 @@ impl EditCore {
             _ => None,
         };
         let Some(delta) = delta else {
-            self.preferred_vertical_col = None;
+            self.memory().preferred_vertical_col = None;
             return self.resolve_motion(from, motion);
         };
         let (_, current_col) = self.buffer.char_to_coords(from);
-        let preferred_col = *self.preferred_vertical_col.get_or_insert(current_col);
+        let preferred_col = *self
+            .memory()
+            .preferred_vertical_col
+            .get_or_insert(current_col);
         let (line, _) = self.buffer.char_to_coords(from);
         let target = self.fold_view.step_rows(line as u32, delta) as usize;
         self.buffer.coords_to_char(target, preferred_col)
@@ -1289,6 +1491,61 @@ impl EditCore {
     }
 
     pub fn apply(&mut self, cmd: EditCommand) -> EditOutcome {
+        if self.selections.len() == 1 {
+            self.active = 0;
+            return self.apply_at_active(cmd);
+        }
+        if !cmd.is_per_caret() {
+            return self.apply_at_active(cmd);
+        }
+
+        let mut order: Vec<usize> = (0..self.selections.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(self.selections[i].range().start));
+
+        let was_active = self.active;
+        let mut outcome = EditOutcome::default();
+        self.in_sweep = true;
+        self.sweep_snapshotted = false;
+        for index in order {
+            self.active = index;
+            let out = self.apply_at_active(cmd.clone());
+            outcome.text_changed |= out.text_changed;
+            outcome.sel_changed |= out.sel_changed;
+            outcome.mode_changed |= out.mode_changed;
+            outcome.dirty_changed |= out.dirty_changed;
+            outcome.scroll_to = outcome.scroll_to.or(out.scroll_to);
+            outcome.yank = outcome.yank.or(out.yank);
+        }
+        self.in_sweep = false;
+        self.sweep_snapshotted = false;
+        self.active = was_active.min(self.selections.len().saturating_sub(1));
+        self.merge_overlapping_carets();
+        outcome
+    }
+
+    fn merge_overlapping_carets(&mut self) {
+        if self.selections.len() == 1 {
+            return;
+        }
+        let active = self.primary();
+        self.selections.sort_by_key(|s| (s.range().start, s.head));
+        let mut merged: Vec<Selection> = Vec::with_capacity(self.selections.len());
+        for sel in self.selections.drain(..) {
+            match merged.last() {
+                Some(prev) if prev.range().end >= sel.range().start && prev.head == sel.head => {}
+                Some(prev) if prev.head == sel.head && prev.anchor == sel.anchor => {}
+                _ => merged.push(sel),
+            }
+        }
+        self.selections = merged;
+        self.active = self
+            .selections
+            .iter()
+            .position(|s| *s == active)
+            .unwrap_or(0);
+    }
+
+    fn apply_at_active(&mut self, cmd: EditCommand) -> EditOutcome {
         let before_sel = self.primary();
         let before_mode = self.mode;
         let before_dirty = self.dirty;
@@ -1303,7 +1560,7 @@ impl EditCore {
                 )
                 | EditCommand::ScrollViewport(_)
         ) {
-            self.preferred_vertical_col = None;
+            self.memory().preferred_vertical_col = None;
         }
 
         match cmd {
@@ -1315,7 +1572,7 @@ impl EditCore {
                 let selection = self.primary();
                 let collapse_selection = !self.mode.is_visual() && !selection.is_empty();
                 let h = if collapse_selection {
-                    self.preferred_vertical_col = None;
+                    self.memory().preferred_vertical_col = None;
                     match m.collapse_to_start() {
                         Some(true) => selection.range().start,
                         Some(false) => selection.range().end,
@@ -1342,10 +1599,11 @@ impl EditCore {
                     let at = self.primary().head;
                     let line_end = self.resolve_motion(at, Motion::LineEnd);
                     if at < line_end {
-                        self.replaced.push(Some(self.buffer.rope.char(at)));
+                        let covered = self.buffer.rope.char(at);
+                        self.memory().replaced.push(Some(covered));
                         self.buf_remove(at..at + 1);
                     } else {
-                        self.replaced.push(None);
+                        self.memory().replaced.push(None);
                     }
                     self.buf_insert(at, &ch.to_string());
                     self.set_caret(at + 1);
@@ -1366,7 +1624,7 @@ impl EditCore {
             EditCommand::InsertNewline => text_changed = self.insert_text("\n"),
             EditCommand::DeleteBack if self.mode == EditMode::Replace => {
                 let head = self.primary().head;
-                if let Some(original) = self.replaced.pop()
+                if let Some(original) = self.memory().replaced.pop()
                     && head > 0
                 {
                     self.checkpoint(Group::Delete);
@@ -1681,20 +1939,20 @@ impl EditCore {
             }
             EditCommand::SwapSelectionEnds => {
                 let sel = self.primary();
-                self.selections = vec![Selection {
+                self.set_active(Selection {
                     anchor: sel.head,
                     head: sel.anchor,
-                }];
+                });
             }
             EditCommand::SelectTextObject(obj) => {
                 if let Some(r) =
                     crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)
                     && r.start < r.end
                 {
-                    self.selections = vec![Selection {
+                    self.set_active(Selection {
                         anchor: r.start,
                         head: self.buffer.prev_grapheme(r.end),
-                    }];
+                    });
                 }
             }
             EditCommand::Save
@@ -1702,6 +1960,7 @@ impl EditCore {
             | EditCommand::ScrollCursorTo(_)
             | EditCommand::GotoDefinition
             | EditCommand::FindReferences
+            | EditCommand::BeginRename
             | EditCommand::Hover
             | EditCommand::TriggerCompletion
             | EditCommand::FoldToggle
@@ -1710,6 +1969,9 @@ impl EditCore {
             | EditCommand::FoldToggleRecursive
             | EditCommand::FoldAll
             | EditCommand::UnfoldAll => {}
+            EditCommand::SelectAllOccurrences => self.select_all_occurrences(),
+            EditCommand::CollapseCarets => self.collapse_carets(),
+            EditCommand::AddCaretVertically(direction) => self.add_caret_vertically(direction),
         }
 
         EditOutcome {
@@ -1774,6 +2036,200 @@ mod tests {
 
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+
+    #[test]
+    fn selecting_all_occurrences_skips_the_ones_inside_longer_words() {
+        let mut c = core("id width id_x\nid\n");
+        c.apply(EditCommand::SelectAllOccurrences);
+
+        let hits: Vec<&str> = c
+            .selections
+            .iter()
+            .map(|s| {
+                let text = c.buffer.text();
+                let chars: Vec<char> = text.chars().collect();
+                let r = s.range();
+                chars[r.start..r.end].iter().collect::<String>()
+            })
+            .map(|s| Box::leak(s.into_boxed_str()) as &str)
+            .collect();
+        assert_eq!(hits, vec!["id", "id"], "`width` and `id_x` are other words");
+    }
+
+    #[test]
+    fn selecting_all_occurrences_off_a_word_leaves_the_carets_alone() {
+        let mut c = core("id  id\n");
+        c.selections = vec![Selection { anchor: 3, head: 3 }];
+        c.apply(EditCommand::SelectAllOccurrences);
+
+        assert_eq!(c.selections.len(), 1);
+        assert_eq!(c.primary().head, 3);
+    }
+
+    fn multi_caret(text: &str, at: &[usize]) -> EditCore {
+        let mut c = core(text);
+        c.set_caret(at[0]);
+        for &offset in &at[1..] {
+            c.toggle_caret(offset);
+        }
+        assert_eq!(c.caret_count(), at.len(), "fixture placed every caret");
+        c
+    }
+
+    fn heads(c: &EditCore) -> Vec<usize> {
+        let mut heads: Vec<usize> = c.selections.iter().map(|s| s.head).collect();
+        heads.sort_unstable();
+        heads
+    }
+
+    #[test]
+    fn each_caret_keeps_its_own_column_through_a_short_line() {
+        let mut c = multi_caret("abcdefgh\nij\nklmnopqr\nABCDEFGH\nkl\nMNOPQRST\n", &[6, 25]);
+        c.apply(EditCommand::Move(Motion::Down));
+        c.apply(EditCommand::Move(Motion::Down));
+        let cols: Vec<usize> = c
+            .selections
+            .iter()
+            .map(|s| c.buffer.char_to_coords(s.head).1)
+            .collect();
+        assert_eq!(cols, vec![6, 4], "each caret homes on the column it left");
+    }
+
+    #[test]
+    fn backspace_restores_what_this_caret_overtyped() {
+        let mut c = multi_caret("abc\nxyz\n", &[0, 4]);
+        c.mode = EditMode::Replace;
+        c.apply(EditCommand::OvertypeText("Q".into()));
+        assert_eq!(text_of(&c), "Qbc\nQyz\n");
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "abc\nxyz\n");
+    }
+
+    #[test]
+    fn collapsing_keeps_the_caret_placed_last_even_when_it_sorts_first() {
+        let mut c = multi_caret("abcdef\n", &[4, 1]);
+        c.collapse_carets();
+        assert_eq!(heads(&c), vec![1]);
+    }
+
+    #[test]
+    fn adding_a_caret_below_twice_types_on_three_rows() {
+        let mut c = core("ab\ncd\nef\ngh\n");
+        c.set_caret(0);
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        assert_eq!(c.caret_count(), 3, "the second one grew from the new caret");
+        c.apply(EditCommand::InsertText(">".into()));
+        assert_eq!(text_of(&c), ">ab\n>cd\n>ef\ngh\n");
+    }
+
+    #[test]
+    fn a_sweep_leaves_the_active_caret_where_it_was() {
+        let mut c = core("ab\ncd\nef\n");
+        c.set_caret(0);
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        c.apply(EditCommand::InsertText(">".into()));
+        c.apply(EditCommand::CollapseCarets);
+        let (line, _) = c.buffer.char_to_coords(c.primary().head);
+        assert_eq!(line, 2, "the caret the gesture ended on");
+    }
+
+    #[test]
+    fn adding_a_caret_past_the_last_row_adds_nothing() {
+        let mut c = core("ab\ncd\n");
+        c.set_caret(c.buffer.coords_to_char(2, 0));
+        c.apply(EditCommand::AddCaretVertically(VerticalDirection::Down));
+        assert_eq!(c.caret_count(), 1);
+    }
+
+    #[test]
+    fn untoggling_an_earlier_caret_does_not_move_which_one_is_active() {
+        let mut c = multi_caret("abcdef\n", &[1, 5, 3]);
+        c.toggle_caret(1);
+        assert_eq!(heads(&c), vec![3, 5]);
+        c.collapse_carets();
+        assert_eq!(heads(&c), vec![3], "still the caret the user placed last");
+    }
+
+    #[test]
+    fn typing_reaches_every_caret() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n");
+        assert_eq!(
+            heads(&c),
+            vec![1, 5, 9],
+            "each caret sits after its own insert"
+        );
+    }
+
+    #[test]
+    fn a_multi_caret_edit_undoes_in_one_step() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
+    }
+
+    #[test]
+    fn deleting_reaches_every_caret() {
+        let mut c = multi_caret("aXa\nbXb\ncXc\n", &[2, 6, 10]);
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "aa\nbb\ncc\n");
+        assert_eq!(heads(&c), vec![1, 4, 7]);
+    }
+
+    #[test]
+    fn a_caret_that_runs_into_another_is_merged_away() {
+        let mut c = multi_caret("ab\n", &[1, 2]);
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "\n");
+        assert_eq!(c.caret_count(), 1, "two carets collapsed onto one offset");
+    }
+
+    #[test]
+    fn toggling_an_existing_caret_takes_it_away() {
+        let mut c = multi_caret("abcdef\n", &[1, 3]);
+        c.toggle_caret(3);
+        assert_eq!(c.caret_count(), 1);
+        assert_eq!(heads(&c), vec![1]);
+    }
+
+    #[test]
+    fn the_last_caret_cannot_be_removed() {
+        let mut c = core("abc\n");
+        c.set_caret(1);
+        c.toggle_caret(1);
+        assert_eq!(c.caret_count(), 1, "a buffer with no caret has no meaning");
+    }
+
+    #[test]
+    fn collapsing_leaves_the_caret_the_user_last_placed() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.collapse_carets();
+        assert_eq!(c.caret_count(), 1);
+    }
+
+    #[test]
+    fn a_buffer_wide_command_runs_once_however_many_carets() {
+        let mut c = multi_caret("aa\nbb\ncc\n", &[0, 3, 6]);
+        c.apply(EditCommand::InsertText("X".into()));
+        c.apply(EditCommand::Move(Motion::Right));
+        c.apply(EditCommand::InsertText("Y".into()));
+        assert_eq!(text_of(&c), "XaYa\nXbYb\nXcYc\n");
+
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "Xaa\nXbb\nXcc\n", "one step back, not three");
+    }
+
+    #[test]
+    fn every_caret_is_drawn_not_just_the_first() {
+        let mut c = multi_caret("aaaa\nbbbb\n", &[0, 5]);
+        c.apply(EditCommand::Select(Motion::Right));
+        let spans = c.sel_spans(0, 10);
+        assert_eq!(spans.len(), 2, "both selections render: {spans:?}");
     }
 
     fn op(operator: Operator, target: Target) -> EditCommand {

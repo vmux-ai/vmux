@@ -10,6 +10,9 @@ pub enum CommandBarResultItem {
     Terminal {
         path: String,
     },
+    Editor {
+        path: String,
+    },
     Stack {
         title: String,
         url: String,
@@ -220,11 +223,13 @@ pub fn prepend_prompt_targets(
     results.splice(at..at, suggestions);
 }
 
+/// The stacks worth switching to, which is every one except the stack already showing.
 pub fn open_session_results(
     tabs: &[CommandBarTab],
     pages: &[CommandBarPage],
 ) -> Vec<CommandBarResultItem> {
     tabs.iter()
+        .filter(|tab| !tab.is_active)
         .map(|tab| CommandBarResultItem::Stack {
             title: tab.title.clone(),
             url: tab.url.clone(),
@@ -404,14 +409,18 @@ pub fn filter_results(
                 path: String::new(),
             });
         }
-        items.extend(tabs.iter().map(|t| CommandBarResultItem::Stack {
-            title: t.title.clone(),
-            url: t.url.clone(),
-            icon: stack_icon_for(pages, &t.url),
-            pane_id: t.pane_id,
-            tab_index: t.tab_index as usize,
-            location: t.location.clone(),
-        }));
+        items.extend(
+            tabs.iter()
+                .filter(|t| !t.is_active)
+                .map(|t| CommandBarResultItem::Stack {
+                    title: t.title.clone(),
+                    url: t.url.clone(),
+                    icon: stack_icon_for(pages, &t.url),
+                    pane_id: t.pane_id,
+                    tab_index: t.tab_index as usize,
+                    location: t.location.clone(),
+                }),
+        );
         items.extend(page_results(pages, ""));
         items.extend(work_dir_results(work_dirs, ""));
         items.extend(recent_file_results(recent_files, ""));
@@ -428,9 +437,17 @@ pub fn filter_results(
     let is_path = looks_like_path(search);
 
     if !starts_with_cmd && is_path {
-        items.push(CommandBarResultItem::Terminal {
+        let names_a_directory = search.ends_with('/');
+        let editor = CommandBarResultItem::Editor {
             path: search.to_string(),
-        });
+        };
+        let terminal = CommandBarResultItem::Terminal {
+            path: search.to_string(),
+        };
+        match names_a_directory {
+            true => items.extend([terminal, editor]),
+            false => items.extend([editor, terminal]),
+        }
     }
 
     let terminal_label = translate("command-terminal").to_lowercase();
@@ -468,6 +485,9 @@ pub fn filter_results(
 
     if !starts_with_cmd || !search.is_empty() {
         for t in tabs {
+            if t.is_active {
+                continue;
+            }
             if search.is_empty()
                 || t.title.to_lowercase().contains(&search_lower)
                 || t.url.to_lowercase().contains(&search_lower)
@@ -1245,6 +1265,54 @@ mod tests {
         assert!(first_work < first_recent, "dirs before recent files");
     }
 
+    fn path_results(query: &str) -> Vec<CommandBarResultItem> {
+        filter_results(query, &[], &[], &[], &sample_pages(), false, &[], &[], &[])
+    }
+
+    #[test]
+    fn a_file_path_leads_with_the_editor_and_still_offers_the_terminal() {
+        let results = path_results("/work/proj/main.rs");
+        let editor = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+            .expect("a path offers the editor");
+        let terminal = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Terminal { .. }))
+            .expect("a path still offers the terminal");
+        assert!(editor < terminal, "a file is likelier to be read than cd'd");
+    }
+
+    #[test]
+    fn a_directory_leads_with_the_terminal() {
+        let results = path_results("/work/proj/");
+        let editor = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+            .expect("a directory still opens in the editor");
+        let terminal = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Terminal { .. }))
+            .expect("a directory offers the terminal");
+        assert!(terminal < editor, "a directory is a place to work");
+    }
+
+    #[test]
+    fn the_editor_row_carries_the_path_that_was_typed() {
+        assert!(path_results("~/notes.md").iter().any(|r| matches!(
+            r, CommandBarResultItem::Editor { path } if path == "~/notes.md"
+        )));
+    }
+
+    #[test]
+    fn a_command_is_never_offered_to_the_editor() {
+        assert!(
+            !path_results("> /work/proj/main.rs")
+                .iter()
+                .any(|r| matches!(r, CommandBarResultItem::Editor { .. }))
+        );
+    }
+
     #[test]
     fn work_dir_matched_by_query() {
         let results = filter_results(
@@ -1289,11 +1357,11 @@ mod tests {
 
         let items = open_session_results(&tabs, &[]);
 
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 1, "the stack already on screen is not offered");
         assert!(matches!(
             &items[0],
             CommandBarResultItem::Stack { title, pane_id, .. }
-                if title == "Fun terminal demo" && *pane_id == 7
+                if title == "Docs" && *pane_id == 8
         ));
         assert!(open_session_results(&[], &[]).is_empty());
     }

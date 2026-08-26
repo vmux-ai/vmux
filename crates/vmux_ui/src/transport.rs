@@ -14,6 +14,7 @@ pub trait PageHost {
 
     fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
 
+    fn scroll_element_to(&self, _element_id: &str, _top: f64) {}
     fn text_offset_at(&self, _element_id: &str, _x: f64, _y: f64) -> TextOffsetAnswer {
         Box::pin(std::future::ready(None))
     }
@@ -28,6 +29,7 @@ pub trait PageHost {
 
     fn place_caret(&self, _element_id: &str, _byte: usize) {}
 
+    fn caret_to_end(&self, _element_id: &str) {}
     fn event_field_selection(&self, _element_id: &str) -> (usize, usize) {
         (0, 0)
     }
@@ -109,6 +111,9 @@ impl Host {
         let _ = Self::with_installed(|host| host.place_caret(id, byte));
     }
 
+    pub(crate) fn caret_to_end(id: &str) {
+        let _ = Self::with_installed(|host| host.caret_to_end(id));
+    }
     pub(crate) fn clear_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.clear_element_text(id));
     }
@@ -118,6 +123,9 @@ impl Host {
         let _ = Self::with_installed(|host| host.toggle_media(id));
     }
 
+    pub(crate) fn scroll_element_to(element_id: &str, top: f64) {
+        let _ = Self::with_installed(|host| host.scroll_element_to(element_id, top));
+    }
     pub(crate) fn reveal_first_rendered(element_ids: &[&str], centered: bool) {
         let _ = Self::with_installed(|host| host.reveal_first_rendered(element_ids, centered));
     }

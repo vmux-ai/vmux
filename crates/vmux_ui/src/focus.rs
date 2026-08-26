@@ -27,5 +27,8 @@ impl FocusClaim {
 impl FocusClaim {
     pub fn request(self) {
         crate::transport::Host::focus_element(&self.element_id);
+        if self.caret == Caret::ToEnd {
+            crate::transport::Host::caret_to_end(&self.element_id);
+        }
     }
 }

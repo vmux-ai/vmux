@@ -58,6 +58,7 @@ impl Plugin for GitPlugin {
             .init_resource::<GitStatusJobs>()
             .insert_resource(RepoInfoCache {
                 entries: HashMap::new(),
+                canonical: HashMap::new(),
                 wake: repo_info_wake,
             })
             .add_plugins(BinEventEmitterPlugin::<(
@@ -197,12 +198,30 @@ struct RepoInfoCacheEntry {
 #[derive(Resource)]
 pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
+    canonical: HashMap<PathBuf, PathBuf>,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
+    /// Resolves `path` once and remembers the answer.
+    ///
+    /// `canonicalize` is a syscall per path component, and the systems asking for repo info run
+    /// every frame, which put the filesystem in the scroll path. Only a successful resolution is
+    /// kept: the fallback guesses at a path that does not exist yet, and that guess must not
+    /// outlive the file appearing.
+    fn canonical_path(&mut self, path: &Path) -> PathBuf {
+        if let Some(known) = self.canonical.get(path) {
+            return known.clone();
+        }
+        let Ok(resolved) = path.canonicalize() else {
+            return canon(path);
+        };
+        self.canonical.insert(path.to_path_buf(), resolved.clone());
+        resolved
+    }
+
     pub fn get(&mut self, path: &Path) -> Option<crate::host::worktree::RepoInfo> {
-        let path = canon(path);
+        let path = self.canonical_path(path);
         let wake = self.wake.clone();
         let entry = self
             .entries
@@ -963,6 +982,7 @@ mod tests {
         let path = canon(repo.path());
         let mut cache = RepoInfoCache {
             entries: HashMap::new(),
+            canonical: HashMap::new(),
             wake: None,
         };
         let wait_for = |cache: &mut RepoInfoCache, expected| {
@@ -995,6 +1015,7 @@ mod tests {
         let stale = crate::host::worktree::repo_info(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
         let mut cache = RepoInfoCache {
+            canonical: HashMap::new(),
             entries: HashMap::from([(
                 path.clone(),
                 RepoInfoCacheEntry {

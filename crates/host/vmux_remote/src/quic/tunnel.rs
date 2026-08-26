@@ -84,7 +84,7 @@ impl AsyncUdpSocket for TunnelSocket {
             Poll::Ready(Some(datagram)) => datagram,
             Poll::Ready(None) => {
                 return Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
+                    io::ErrorKind::BrokenPipe,
                     "relay control connection closed",
                 )));
             }

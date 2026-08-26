@@ -203,6 +203,12 @@ impl Dom {
         outcome
     }
 
+    /// Runs the page's listeners for a host emit.
+    ///
+    /// Deliberately does not wake the host: the only caller is a host observer, so the host is
+    /// already inside the frame that will render whatever a listener changed. Waking from here
+    /// asked for a frame the host was already running, and since that frame emits again it fed
+    /// itself — a keystroke became a sustained loop rather than one update.
     pub(crate) fn deliver(&self, id: &str, payload: &[u8]) {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
@@ -225,7 +231,6 @@ impl Dom {
             registered.append(slot);
             *slot = registered;
         }
-        self.waker.wake();
     }
 }
 
@@ -267,6 +272,13 @@ impl PageHost for SurfaceHost {
     fn scroll_element_into_view(&self, element_id: &str) {
         self.request(DomRequest::ScrollIntoView {
             element: element_id.to_string(),
+        });
+    }
+
+    fn scroll_element_to(&self, element_id: &str, top: f64) {
+        self.request(DomRequest::ScrollTo {
+            element: element_id.to_string(),
+            top,
         });
     }
 
@@ -337,6 +349,12 @@ impl PageHost for SurfaceHost {
         self.request(DomRequest::PlaceCaret {
             element: element_id.to_string(),
             byte,
+        });
+    }
+
+    fn caret_to_end(&self, element_id: &str) {
+        self.request(DomRequest::CaretToEnd {
+            element: element_id.to_string(),
         });
     }
 }

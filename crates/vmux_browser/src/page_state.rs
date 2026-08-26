@@ -24,8 +24,7 @@ use vmux_setting::AppSettings;
 use crate::{
     LayoutFixedOffsets, abbreviate_home, active_stack_in_tab, first_browser_meta,
     layout_window_padding_from_node, layout_window_padding_from_settings,
-    should_emit_cached_payload, should_emit_new_stack_placeholder, should_emit_update,
-    tab_boundary_dir, tab_of,
+    should_emit_cached_payload, should_emit_update, tab_boundary_dir, tab_of,
 };
 use vmux_flex::prelude::*;
 
@@ -114,6 +113,40 @@ fn push_layout_state_emit(
     *last = body;
 }
 
+struct AddressRoots<'a> {
+    repos: Option<&'a mut vmux_git::RepoInfoCache>,
+    home: std::path::PathBuf,
+}
+
+impl AddressRoots<'_> {
+    fn of(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
+        let Some(path) = vmux_core::file_url::FileUrl::parse(url).and_then(|url| url.path()) else {
+            return match url.starts_with("vmux://") {
+                true => vmux_layout::event::AddressParts::internal(url),
+                false => vmux_layout::event::AddressParts::web(url, title),
+            };
+        };
+        if let Some(info) = self.checkout_of(&path) {
+            return vmux_layout::event::AddressParts::in_repo(
+                &path,
+                &info.repo_root,
+                &info.name,
+                &info.branch,
+            );
+        }
+        vmux_layout::event::AddressParts::on_disk(&path, &self.home)
+    }
+
+    fn checkout_of(&mut self, path: &std::path::Path) -> Option<vmux_git::worktree::RepoInfo> {
+        let dir = match path.is_dir() {
+            true => path,
+            false => path.parent()?,
+        };
+        self.repos.as_mut()?.get(dir)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -129,9 +162,9 @@ fn push_stacks_host_emit(
     >,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -150,7 +183,14 @@ fn push_stacks_host_emit(
     let mut rows: Vec<StackRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
-    let _ = active_stack_opt.is_none();
+    let mut roots = AddressRoots {
+        repos: repo_info
+            .as_mut()
+            .map(|cache| cache.bypass_change_detection()),
+        home: std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default(),
+    };
     if let Some(active_stack_entity) = active_stack_opt {
         for (meta, child_of, nav_state, osc) in &browser_q {
             let stack_entity = child_of.get();
@@ -163,24 +203,16 @@ fn push_stacks_host_emit(
                 can_go_back = ns.can_go_back;
                 can_go_forward = ns.can_go_forward;
             }
+            let title = meta.title_with(osc).to_string();
             rows.push(StackRow {
-                title: meta.title_with(osc).to_string(),
+                address: roots.of(&meta.url, &title),
+                title,
                 url: meta.url.clone(),
                 icon: meta.icon.clone(),
                 is_active,
                 bg_color: meta.bg_color.clone(),
             });
         }
-    }
-    if should_emit_new_stack_placeholder(pending_launch.stack, active_stack_opt, &rows) {
-        rows.retain(|r| !r.is_active);
-        rows.push(StackRow {
-            title: "New Stack".to_string(),
-            url: String::new(),
-            icon: vmux_core::PageIcon::None,
-            is_active: true,
-            bg_color: None,
-        });
     }
     if active_stack_opt.is_some() && rows.is_empty() {
         return;
@@ -204,7 +236,6 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
     tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
@@ -253,8 +284,7 @@ fn push_pane_tree_emit(
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
                         if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
-                            let is_new_stack = pending_launch.stack == Some(child)
-                                && (meta.url.is_empty() || meta.url == "about:blank");
+                            let is_new_stack = false;
                             stacks.push(StackNode {
                                 title: if is_new_stack {
                                     "New Stack".to_string()

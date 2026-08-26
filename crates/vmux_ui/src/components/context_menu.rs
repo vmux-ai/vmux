@@ -106,7 +106,9 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
                 mount_context_menu_top_layer(event.clone());
                 let data = event.data();
                 spawn(async move {
-                    let _ = data.set_focus(true).await;
+                    if let Err(error) = data.set_focus(true).await {
+                        dioxus::logger::tracing::warn!("focusing the context menu failed: {error:?}");
+                    }
                 });
             },
             onpointerdown: move |event| {
@@ -176,7 +178,11 @@ pub fn ContextMenuItem(props: ContextMenuItemProps) -> Element {
             && let Some(item) = item_ref()
         {
             spawn(async move {
-                let _ = item.set_focus(true).await;
+                if let Err(error) = item.set_focus(true).await {
+                    dioxus::logger::tracing::warn!(
+                        "focusing a context menu item failed: {error:?}"
+                    );
+                }
             });
         }
     });

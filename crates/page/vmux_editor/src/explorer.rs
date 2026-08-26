@@ -142,47 +142,99 @@ fn cancel_tree_focus(mut generation: Signal<u32>) {
     generation.set(id);
 }
 
-fn reconcile_rows(
-    mut rows: Signal<Vec<MotionRow>>,
-    mut generation: Signal<u32>,
-    next: Vec<TreeRow>,
-) {
-    let id = generation().wrapping_add(1);
-    generation.set(id);
-    let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
-    let current = rows
-        .read()
-        .iter()
-        .map(|motion| motion.row.clone())
-        .collect::<Vec<_>>();
-    let merged = merge_tree_motion_rows(&current, &next)
-        .into_iter()
-        .map(|(row, visible)| MotionRow { row, visible })
-        .collect();
-    rows.set(merged);
-    spawn(async move {
-        sleep_ms(0).await;
-        if generation() != id {
+#[derive(Clone, Copy)]
+struct TreeRows {
+    rows: Signal<Vec<MotionRow>>,
+    generation: Signal<u32>,
+}
+
+impl TreeRows {
+    fn reconcile(self, next: Vec<TreeRow>) {
+        let mut rows = self.rows;
+        let generation = self.generation;
+        let id = self.claim();
+        let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
+        let current = rows
+            .read()
+            .iter()
+            .filter(|motion| motion.visible)
+            .map(|motion| motion.row.clone())
+            .collect::<Vec<_>>();
+        if current.is_empty() {
+            rows.set(
+                next.into_iter()
+                    .map(|row| MotionRow { row, visible: true })
+                    .collect(),
+            );
             return;
         }
-        let mut opening = rows.read().clone();
-        for item in &mut opening {
-            if next_paths.contains(&item.row.path) {
-                item.visible = true;
+        let merged = merge_tree_motion_rows(&current, &next)
+            .into_iter()
+            .map(|(row, visible)| MotionRow { row, visible })
+            .collect();
+        rows.set(merged);
+        spawn(async move {
+            sleep_ms(0).await;
+            if generation() != id {
+                return;
+            }
+            let mut opening = rows.read().clone();
+            for item in &mut opening {
+                if next_paths.contains(&item.row.path) {
+                    item.visible = true;
+                }
+            }
+            rows.set(opening);
+
+            sleep_ms(TREE_MOTION_MS).await;
+            if generation() != id {
+                return;
+            }
+            rows.set(
+                next.into_iter()
+                    .map(|row| MotionRow { row, visible: true })
+                    .collect(),
+            );
+        });
+    }
+
+    fn collapse(self, path: &str) {
+        self.claim();
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        let mut kept = Vec::new();
+        for motion in self.rows.read().iter() {
+            if motion.row.path.starts_with(&prefix) {
+                continue;
+            }
+            let mut motion = motion.clone();
+            if motion.row.path == path {
+                motion.row.expanded = false;
+            }
+            kept.push(motion);
+        }
+        let mut rows = self.rows;
+        rows.set(kept);
+    }
+
+    fn expand(self, path: &str) {
+        self.claim();
+        let mut opened = self.rows.read().clone();
+        for motion in &mut opened {
+            if motion.row.path == path {
+                motion.row.expanded = true;
+                motion.row.loading = true;
             }
         }
-        rows.set(opening);
+        let mut rows = self.rows;
+        rows.set(opened);
+    }
 
-        sleep_ms(TREE_MOTION_MS).await;
-        if generation() != id {
-            return;
-        }
-        rows.set(
-            next.into_iter()
-                .map(|row| MotionRow { row, visible: true })
-                .collect(),
-        );
-    });
+    fn claim(self) -> u32 {
+        let mut generation = self.generation;
+        let id = generation().wrapping_add(1);
+        generation.set(id);
+        id
+    }
 }
 
 fn show_notice(
@@ -276,6 +328,10 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let mut root_loading = use_signal(|| false);
     let rows = use_signal(Vec::<MotionRow>::new);
     let row_generation = use_signal(|| 0u32);
+    let tree = TreeRows {
+        rows,
+        generation: row_generation,
+    };
     let focus_generation = use_signal(|| 0u32);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
@@ -301,7 +357,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         root_path.set(e.root_path);
         current_path.set(e.current_path);
         root_loading.set(e.loading);
-        reconcile_rows(rows, row_generation, e.rows);
+        tree.reconcile(e.rows);
         if visible() && !e.focus_path.is_empty() {
             schedule_tree_focus(e.focus_path, focus_generation);
         }
@@ -485,6 +541,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                 let path_menu = row.path.clone();
                                 let name_menu = row.name.clone();
                                 let is_dir = row.is_dir;
+                                let was_expanded = row.expanded;
                                 let active = row.path == current_path();
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
@@ -526,6 +583,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 },
                                                 onclick: move |_| {
                                                     if is_dir {
+                                                        if was_expanded {
+                                                            tree.collapse(&path_click);
+                                                        } else {
+                                                            tree.expand(&path_click);
+                                                        }
                                                         toggle_dir(path_click.clone());
                                                     } else {
                                                         open_file(path_click.clone());
@@ -536,7 +598,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
-                                                {rsx! { TypeIcon { path: row.path.to_string(), is_dir: is_dir, class: "h-4 w-4 shrink-0 opacity-80" } }}
+                                                if !is_dir {
+                                                    {rsx! { TypeIcon { path: row.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
+                                                }
                                                 span { class: "truncate", "{row.name}" }
                                             }
                                         }

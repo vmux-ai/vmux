@@ -383,7 +383,6 @@ pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<crate::PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
     spaces: Query<(), With<crate::space::Space>>,
@@ -418,39 +417,18 @@ pub fn spawn_requested_tab_layouts(
             commands.entity(leaf).insert(LastActivatedAt(0));
             commands.entity(stack).insert(LastActivatedAt(0));
         }
-        if request.clear_pending_stack
-            && let Some(old_stack) = new_stack_ctx.stack.take()
-        {
-            commands.entity(old_stack).despawn();
-        }
-        new_stack_ctx.previous_stack = None;
-        new_stack_ctx.dismiss_modal = false;
-
         match &request.content {
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
-                let url = effective_startup_url
-                    .as_deref()
-                    .map(|u| u.0.clone())
-                    .unwrap_or_default();
-                if url.is_empty() {
-                    new_stack_ctx.stack = Some(stack);
-                    new_stack_ctx.needs_open = true;
-                } else {
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.needs_open = false;
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url,
-                        request_id: None,
-                    });
-                }
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+                    request_id: None,
+                });
             }
             TabLayoutSpawnContent::Url {
                 url,
                 pending_prompt,
             } => {
-                new_stack_ctx.stack = None;
-                new_stack_ctx.needs_open = false;
                 if let Some(prompt) = pending_prompt {
                     commands
                         .entity(stack)
@@ -536,9 +514,12 @@ fn sync_window_layout_to_settings(
     }
 }
 
+/// Hold split panes off the header by the gap they hold each other by.
+///
+/// A single pane runs flush under the header and takes its width, so meeting it is right. Several
+/// panes are already spaced from each other, and the header is one more edge among them.
 fn sync_main_column_gap_to_pane_count(
     focus: Res<crate::stack::FocusedStack>,
-    settings: Res<LayoutSettings>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,
@@ -552,7 +533,7 @@ fn sync_main_column_gap_to_pane_count(
         })
         .unwrap_or(0);
     let target = if pane_count > 1 {
-        settings.window.pad_top()
+        crate::event::PANE_GAP_PX
     } else {
         0.0
     };
@@ -751,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn default_tab_requests_command_bar_open() {
+    fn default_tab_opens_the_start_page() {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
@@ -785,9 +766,16 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<crate::PendingLaunch>();
-        assert!(ctx.stack.is_some());
-        assert!(ctx.needs_open);
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
+            [vmux_core::EffectiveStartupUrl::START_PAGE],
+            "a tab with nothing configured still opens a page rather than staging an empty stack"
+        );
     }
 
     #[test]

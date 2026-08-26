@@ -47,6 +47,14 @@ pub fn ResultRow(
                                 }
                                 span { class: result_trailing_slot_class() }
                             },
+                            ResultItem::Editor { path } => rsx! {
+                                div { class: result_content_row_class(),
+                                    span { class: "shrink-0 text-sm text-muted-foreground", "\u{2261}" }
+                                    span { class: "shrink-0 text-sm text-foreground", {translate("command-open-editor")} }
+                                    span { class: result_terminal_path_class(), "{path}" }
+                                }
+                                span { class: result_trailing_slot_class() }
+                            },
                             ResultItem::Stack { title, url, icon, location, .. } => rsx! {
                                 div { class: result_content_row_class(),
                                     PageIconView {

@@ -72,6 +72,7 @@ impl NativePagePlugin {
 #[cfg(target_os = "macos")]
 pub static LAYOUT_PAGE: NativePage = NativePage {
     url: vmux_layout::event::LAYOUT_PAGE_URL,
+    document_url: None,
     component: vmux_layout::page::Page,
     root_id: "main",
     root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
@@ -93,6 +94,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
 #[cfg(target_os = "macos")]
 pub static START_PAGE: NativePage = NativePage {
     url: vmux_start::START_PAGE_URL,
+    document_url: None,
     component: vmux_start::page::StartPage,
     root_id: "main",
     root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
@@ -129,8 +131,9 @@ pub static CHAT_PAGE: NativePage =
 pub static LSP_PAGE: NativePage = NativePage::pane("vmux://lsp/", vmux_editor::lsp_page::Page);
 
 #[cfg(target_os = "macos")]
-pub static FILES_PAGE: NativePage =
-    NativePage::pane("file://", vmux_editor::page::Page).owning_subtree();
+pub static FILES_PAGE: NativePage = NativePage::pane("file://", vmux_editor::page::Page)
+    .owning_subtree()
+    .served_from("vmux://files/");
 
 #[cfg(target_os = "macos")]
 pub static TERMINAL_PAGE: NativePage = NativePage::pane(
@@ -200,6 +203,31 @@ impl Plugin for NativePagesPlugin {
 mod tests {
     use super::*;
 
+    #[test]
+    fn every_page_loads_its_document_over_the_vmux_scheme() {
+        for page in [
+            &LAYOUT_PAGE,
+            &START_PAGE,
+            &CHAT_PAGE,
+            &LSP_PAGE,
+            &FILES_PAGE,
+            &TERMINAL_PAGE,
+            &VAULT_PAGE,
+        ] {
+            assert!(
+                page.document_url().starts_with("vmux://"),
+                "{} loads from {}, which no protocol handler serves",
+                page.url,
+                page.document_url()
+            );
+        }
+    }
+    #[test]
+    fn the_editor_still_answers_for_file_urls() {
+        assert_eq!(FILES_PAGE.url, "file://");
+        assert!(FILES_PAGE.answers_for("file:///Users/me/a.rs"));
+        assert_eq!(FILES_PAGE.document_url(), "vmux://files/");
+    }
     #[test]
     fn the_vault_claims_the_provider_deep_links_and_nothing_next_door() {
         assert!(VAULT_PAGE.answers_for("vmux://vault/"));

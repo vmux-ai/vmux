@@ -44,26 +44,6 @@ fn status_dot_class(s: FileStatus) -> &'static str {
     }
 }
 
-fn repo_display_path(input: &str, repo_root: &str) -> String {
-    let root = repo_root.trim_end_matches('/');
-    if root.is_empty() {
-        return input.trim_start_matches('/').to_string();
-    }
-    let name = root.rsplit('/').next().unwrap_or(root);
-    let rel = if let Some(stripped) = input.strip_prefix(root) {
-        stripped.trim_start_matches('/')
-    } else if input.starts_with('/') {
-        return input.to_string();
-    } else {
-        input
-    };
-    if rel.is_empty() {
-        name.to_string()
-    } else {
-        format!("{name}/{rel}")
-    }
-}
-
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");
@@ -112,7 +92,6 @@ pub fn GitBar(
     path: ReadSignal<String>,
     has_diff: Signal<bool>,
     nonce: Signal<u32>,
-    display_path: Signal<String>,
     branch: Signal<String>,
     ahead: Signal<u32>,
     behind: Signal<u32>,
@@ -130,11 +109,6 @@ pub fn GitBar(
         staged_count.set(s.staged_count);
         has_diff.set(status_has_diff(s.file_status));
         file_status.set(s.file_status);
-        display_path.set(if s.repo_root.is_empty() {
-            path()
-        } else {
-            repo_display_path(&path(), &s.repo_root)
-        });
     });
     let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
         message.set(if r.ok { String::new() } else { r.message });

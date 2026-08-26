@@ -3,8 +3,11 @@
 @source "../src";
 @source ".";
 
+/* The shared stack rather than a reordering of it. The Nerd Font used to sit second here, so it
+   drew every ordinary character in a terminal — which is why a shell never looked like the editor
+   beside it. It belongs at the end, where it answers only for the glyphs nothing else has. */
 @theme {
-  --font-mono: ui-monospace, "JetBrainsMono NF", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "JetBrainsMono NF", monospace;
 }
 
 @font-face {

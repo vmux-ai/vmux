@@ -49,9 +49,13 @@ pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
+pub const FILE_FIND_EVENT: &str = "file_find";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
+pub const FILE_RENAME_BEGIN_EVENT: &str = "file_rename_begin";
+pub const FILE_CODE_ACTIONS_EVENT: &str = "file_code_actions";
+pub const FILE_EDIT_FAILED_EVENT: &str = "file_edit_failed";
 pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
 pub const FILE_REFERENCES_EVENT: &str = "file_references";
 pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
@@ -741,6 +745,7 @@ pub struct FileLspStatusEvent {
     pub server: String,
     pub package: Option<String>,
     pub state: LspServerState,
+    pub actions: Vec<EditorAction>,
 }
 
 #[derive(
@@ -1510,6 +1515,7 @@ mod file_event_tests {
             server: "rust-analyzer".into(),
             package: Some("rust-analyzer".into()),
             state: LspServerState::Ready,
+            actions: vec![EditorAction::Rename, EditorAction::FormatDocument],
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
         let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
@@ -1517,6 +1523,10 @@ mod file_event_tests {
         assert_eq!(d.server, "rust-analyzer");
         assert_eq!(d.package.as_deref(), Some("rust-analyzer"));
         assert_eq!(d.state, LspServerState::Ready);
+        assert_eq!(
+            d.actions,
+            vec![EditorAction::Rename, EditorAction::FormatDocument]
+        );
     }
 
     #[test]
@@ -1790,6 +1800,7 @@ pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
     pub extend: bool,
+    pub add: bool,
 }
 
 #[derive(
@@ -1807,11 +1818,15 @@ pub struct FileCursorEvent {
     pub mode: crate::editor::EditMode,
     pub mode_label: String,
     pub primary: crate::editor::CursorPos,
+    pub carets: Vec<crate::editor::CursorPos>,
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
     pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
+    pub word_highlights: Vec<crate::editor::SelSpan>,
+    pub search_total: u32,
+    pub search_index: u32,
 }
 
 #[derive(
@@ -1933,6 +1948,7 @@ pub enum FileKey {
     PanelPrevious,
     PanelChoose,
     PanelDismiss,
+    Find,
 }
 
 #[derive(
@@ -2020,6 +2036,25 @@ pub struct FileHoverRequest {
 #[derive(
     Debug,
     Clone,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileFindRequest {
+    pub query: String,
+    pub step: bool,
+    pub reverse: bool,
+    pub done: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
     PartialEq,
     Serialize,
     Deserialize,
@@ -2064,6 +2099,131 @@ pub struct FileHoverEvent {
 pub struct FileDefinitionRequest {
     pub line: u32,
     pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileRenameRequest {
+    pub line: u32,
+    pub col: u32,
+    pub new_name: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCodeActionsEvent {
+    pub titles: Vec<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCodeActionPick {
+    pub index: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum EditorAction {
+    GotoDeclaration,
+    GotoTypeDefinition,
+    GotoImplementation,
+    Rename,
+    FormatDocument,
+    FormatSelection,
+    Cut,
+    Copy,
+    Paste,
+    ChangeAllOccurrences,
+    CodeAction,
+    CommandPalette,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEditorAction {
+    pub action: EditorAction,
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEditFailedEvent {
+    pub reason: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileRenameBeginEvent {
+    pub line: u32,
+    pub col: u32,
+    pub current: String,
 }
 
 #[derive(
@@ -2218,6 +2378,8 @@ mod tests {
     fn file_cursor_event_roundtrips() {
         use crate::editor::{CursorPos, EditMode, SelSpan};
         let e = FileCursorEvent {
+            search_total: 4,
+            search_index: 2,
             mode: EditMode::Insert,
             mode_label: "INSERT".into(),
             primary: CursorPos {
@@ -2225,6 +2387,18 @@ mod tests {
                 row: 3,
                 col: 5,
             },
+            carets: vec![
+                CursorPos {
+                    line: 3,
+                    row: 3,
+                    col: 5,
+                },
+                CursorPos {
+                    line: 4,
+                    row: 4,
+                    col: 5,
+                },
+            ],
             selections: vec![SelSpan {
                 line: 3,
                 row: 3,
@@ -2248,6 +2422,12 @@ mod tests {
                 row: 1,
                 start: 2,
                 end: 6,
+            }],
+            word_highlights: vec![SelSpan {
+                line: 3,
+                row: 3,
+                start: 0,
+                end: 5,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();

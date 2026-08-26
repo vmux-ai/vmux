@@ -685,6 +685,7 @@ fn emit_tools_snapshot(
     mut state: ResMut<ToolsState>,
     browsers: NonSend<Browsers>,
     layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    entities: &bevy::ecs::entity::Entities,
     mut layout_revision: Local<u64>,
     mut commands: Commands,
 ) {
@@ -705,10 +706,10 @@ fn emit_tools_snapshot(
     let revision = state.revision;
     let snapshot = state.snapshot.clone();
     state.subscribers.retain(|entity, sent_revision| {
-        if !browsers.has_browser(*entity) {
+        if !entities.contains(*entity) {
             return false;
         }
-        if *sent_revision != revision && browsers.host_emit_ready(entity) {
+        if *sent_revision != revision && browsers.can_emit_to(entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 *entity,
                 TOOLS_SNAPSHOT_EVENT,

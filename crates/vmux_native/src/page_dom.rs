@@ -1,10 +1,12 @@
 use std::rc::Rc;
 
 use dioxus_core::{Element, Event, VirtualDom};
-use dioxus_html::{EventData, HtmlEvent, MountedData, PlatformEventData, RenderedElementBacking};
+use dioxus_html::{EventData, HtmlEvent, PlatformEventData, RenderedElementBacking};
 use dioxus_interpreter_js::MutationState;
 
 use crate::event_request::EventOutcome;
+
+mod converter;
 
 pub type PageComponent = fn() -> Element;
 
@@ -32,7 +34,7 @@ impl PageDom {
         static ONCE: std::sync::Once = std::sync::Once::new();
 
         ONCE.call_once(|| {
-            dioxus_html::set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+            dioxus_html::set_event_converter(Box::new(converter::LiveElements::new()));
         });
     }
 
@@ -76,7 +78,7 @@ impl PageDom {
     pub fn handle(
         &mut self,
         event: HtmlEvent,
-        backing: impl RenderedElementBacking + 'static,
+        backing: impl RenderedElementBacking + Clone + 'static,
     ) -> EventOutcome {
         let HtmlEvent {
             element,
@@ -86,10 +88,9 @@ impl PageDom {
         } = event;
 
         let data = match data {
-            EventData::Mounted => {
-                Rc::new(PlatformEventData::new(Box::new(MountedData::new(backing))))
-                    as Rc<dyn std::any::Any>
-            }
+            EventData::Mounted => Rc::new(PlatformEventData::new(Box::new(
+                converter::MountedBacking::of(backing),
+            ))) as Rc<dyn std::any::Any>,
             data => data.into_any(),
         };
         let event = Event::new(data, bubbles);
@@ -202,6 +203,60 @@ mod tests {
         assert!(
             !page.handle(click_on(ElementId(9999)), ()).prevent_default(),
             "the page blocks on the reply, so an unrecognised element still has to be answered"
+        );
+    }
+
+    #[test]
+    fn a_mounted_element_reaches_the_page_able_to_answer_for_itself() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Clone, Default)]
+        struct Focusable(Rc<Cell<bool>>);
+
+        impl dioxus_html::RenderedElementBacking for Focusable {
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+
+            fn set_focus(
+                &self,
+                _: bool,
+            ) -> std::pin::Pin<Box<dyn Future<Output = dioxus_html::MountedResult<()>>>>
+            {
+                self.0.set(true);
+                Box::pin(std::future::ready(Ok(())))
+            }
+        }
+
+        #[component]
+        fn Mounting() -> Element {
+            rsx! {
+                div {
+                    onmounted: move |event: Event<MountedData>| {
+                        drop(event.data().set_focus(true));
+                    },
+                }
+            }
+        }
+
+        let backing = Focusable::default();
+        let mut page = PageDom::mount(Mounting, crate::Instance::default());
+        page.rebuild();
+        page.handle(
+            HtmlEvent {
+                element: ElementId(1),
+                name: "mounted".to_string(),
+                bubbles: false,
+                data: EventData::Mounted,
+            },
+            backing.clone(),
+        );
+
+        assert!(
+            backing.0.get(),
+            "the page asked its own element to take focus; a backing that never arrives makes \
+             that a silent no-op, and the page cannot be typed in"
         );
     }
 

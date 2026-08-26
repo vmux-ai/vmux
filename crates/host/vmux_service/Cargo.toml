@@ -73,3 +73,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
 mockito = "1"
 serial_test = "3"
+
+[lints]
+workspace = true

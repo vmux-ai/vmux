@@ -1,5 +1,6 @@
 pub struct NativePage {
     pub url: &'static str,
+    pub document_url: Option<&'static str>,
     pub component: crate::PageComponent,
     pub root_id: &'static str,
     pub root_class: &'static str,
@@ -15,6 +16,16 @@ impl NativePage {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))
     }
 
+    pub fn document_url(&self) -> &'static str {
+        match self.document_url {
+            Some(url) => url,
+            None => self.url,
+        }
+    }
+    pub const fn served_from(mut self, url: &'static str) -> Self {
+        self.document_url = Some(url);
+        self
+    }
     pub const fn owning_subtree(mut self) -> Self {
         self.owns_subtree = true;
         self
@@ -37,6 +48,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
+            document_url: None,
         }
     }
 }
@@ -44,7 +56,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 #[cfg(ui)]
 impl NativePage {
     pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
-        let html = crate::InterpreterShell::new(self.root_id, self.url)
+        let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(self.head)
             .with_html_attributes(self.html_attributes)
             .with_body_class(self.body_class)
@@ -55,6 +67,29 @@ impl NativePage {
             .header(wry::http::header::CONTENT_TYPE, "text/html")
             .body(html.into_bytes())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
+    }
+}
+
+#[cfg(all(test, ui))]
+mod shell_tests {
+    use super::*;
+
+    fn page() -> NativePage {
+        NativePage::pane("file://", || unreachable!()).served_from("vmux://files/")
+    }
+
+    #[test]
+    fn the_interpreter_talks_to_the_origin_the_document_came_from() {
+        let html = String::from_utf8(page().shell().into_body()).unwrap();
+
+        assert!(
+            html.contains(r#"new NativeInterpreter("vmux://files", false)"#),
+            "the shell pointed the interpreter somewhere other than the document url"
+        );
+        assert!(
+            !html.contains(r#"NativeInterpreter("file:"#),
+            "no protocol handler answers `file://`, so nothing would reply to a fetch there"
+        );
     }
 }
 

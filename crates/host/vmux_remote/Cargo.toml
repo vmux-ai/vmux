@@ -30,3 +30,6 @@ quinn = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

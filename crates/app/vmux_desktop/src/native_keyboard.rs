@@ -66,6 +66,7 @@ fn decide(
     pending: &mut Option<(KeyCombo, Instant)>,
     combo: KeyCombo,
     now: Instant,
+    text_entry_owns_keys: bool,
 ) -> KeyAction {
     if let Some((_, started)) = pending.as_ref()
         && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
@@ -88,7 +89,7 @@ fn decide(
         return KeyAction::PassThrough;
     }
 
-    if map.has_chord_prefix(&combo) {
+    if !text_entry_owns_keys && map.has_chord_prefix(&combo) {
         *pending = Some((combo, now));
         return KeyAction::Consume(None);
     }
@@ -106,7 +107,13 @@ fn classify(combo: KeyCombo) -> KeyAction {
         return KeyAction::PassThrough;
     };
     let mut pending = PENDING_PREFIX.lock();
-    decide(map, &mut pending, combo, Instant::now())
+    decide(
+        map,
+        &mut pending,
+        combo,
+        Instant::now(),
+        vmux_browser::native_text_entry_owns_keys(),
+    )
 }
 
 fn handle_key_action(
@@ -301,16 +308,33 @@ mod tests {
     }
 
     #[test]
+    fn a_field_being_typed_into_keeps_the_leader_key() {
+        let map = map();
+        let mut pending = None;
+
+        let action = decide(
+            &map,
+            &mut pending,
+            combo(KeyCode::KeyG, true),
+            Instant::now(),
+            true,
+        );
+
+        assert!(matches!(action, KeyAction::PassThrough));
+        assert!(pending.is_none(), "no chord may be left open");
+    }
+
+    #[test]
     fn leader_then_h_consumes_and_emits_select_left() {
         let map = map();
         let mut pending = None;
         let now = Instant::now();
 
-        let prefix = decide(&map, &mut pending, combo(KeyCode::KeyG, true), now);
+        let prefix = decide(&map, &mut pending, combo(KeyCode::KeyG, true), now, false);
         assert!(matches!(prefix, KeyAction::Consume(None)));
         assert!(pending.is_some());
 
-        let second = decide(&map, &mut pending, combo(KeyCode::KeyH, false), now);
+        let second = decide(&map, &mut pending, combo(KeyCode::KeyH, false), now, false);
         match second {
             KeyAction::Consume(Some(AppCommand::Layout(LayoutCommand::Pane(
                 PaneCommand::SelectLeft,
@@ -329,6 +353,7 @@ mod tests {
             &mut pending,
             combo(KeyCode::KeyH, false),
             Instant::now(),
+            false,
         );
         assert!(matches!(action, KeyAction::PassThrough));
     }
@@ -361,7 +386,13 @@ mod tests {
         let map = map();
         let mut pending = Some((combo(KeyCode::KeyG, true), Instant::now()));
         let later = Instant::now() + Duration::from_millis(2000);
-        let action = decide(&map, &mut pending, combo(KeyCode::KeyH, false), later);
+        let action = decide(
+            &map,
+            &mut pending,
+            combo(KeyCode::KeyH, false),
+            later,
+            false,
+        );
         assert!(matches!(action, KeyAction::PassThrough));
         assert!(pending.is_none());
     }
@@ -386,7 +417,7 @@ mod tests {
         ];
 
         for (pressed, expected) in shortcuts {
-            let action = decide(&map, &mut pending, pressed, now);
+            let action = decide(&map, &mut pending, pressed, now, false);
             match action {
                 KeyAction::Consume(Some(AppCommand::Browser(BrowserCommand::Bar(cmd)))) => {
                     assert_eq!(cmd, expected);

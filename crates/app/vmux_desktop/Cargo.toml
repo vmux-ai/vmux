@@ -263,3 +263,6 @@ application-folder-position = { x = 480, y = 180 }
 minimum-system-version = "13.0"
 entitlements = "../../../packaging/macos/Vmux.entitlements"
 info-plist-path = "../../../packaging/macos/usage-descriptions.plist"
+
+[lints]
+workspace = true

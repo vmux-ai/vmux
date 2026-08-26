@@ -1,5 +1,5 @@
 use crate::{
-    CloseRequiresConfirmation, PendingLaunch,
+    CloseRequiresConfirmation,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
@@ -550,15 +550,11 @@ pub fn first_stack_in_pane(
 struct PaneStartupContext<'w> {
     effective: Option<Res<'w, vmux_core::EffectiveStartupUrl>>,
     requests: MessageWriter<'w, PageOpenRequest>,
-    new_stack_ctx: ResMut<'w, PendingLaunch>,
 }
 
 impl PaneStartupContext<'_> {
     fn url(&self) -> String {
-        self.effective
-            .as_deref()
-            .map(|u| u.0.clone())
-            .unwrap_or_default()
+        vmux_core::EffectiveStartupUrl::of(self.effective.as_deref())
     }
 }
 
@@ -637,18 +633,11 @@ fn handle_pane_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                         .id();
                     commands.entity(leaf).insert(LastActivatedAt::now());
-                    let url = startup.url();
-                    if url.is_empty() {
-                        startup.new_stack_ctx.stack = Some(tab);
-                        startup.new_stack_ctx.previous_stack = None;
-                        startup.new_stack_ctx.needs_open = true;
-                    } else {
-                        startup.requests.write(PageOpenRequest {
-                            target: PageOpenTarget::Stack(tab),
-                            url,
-                            request_id: None,
-                        });
-                    }
+                    startup.requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(tab),
+                        url: startup.url(),
+                        request_id: None,
+                    });
                     continue;
                 }
 
@@ -982,7 +971,6 @@ pub fn handle_open_beside_requests(
     rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut spawn_counter: ResMut<SpawnCounter>,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
@@ -1099,7 +1087,6 @@ pub fn handle_open_beside_requests(
                 target_pane,
                 req,
                 &mut commands,
-                &mut new_stack_ctx,
                 &mut page_open_requests,
                 &mut spawn_counter,
                 &rc.seq_q,
@@ -1118,7 +1105,6 @@ pub fn handle_open_beside_requests(
                 req.pane,
                 req,
                 &mut commands,
-                &mut new_stack_ctx,
                 &mut page_open_requests,
                 &mut spawn_counter,
                 &rc.seq_q,
@@ -1161,7 +1147,6 @@ pub fn handle_open_beside_requests(
                     pane,
                     req,
                     &mut commands,
-                    &mut new_stack_ctx,
                     &mut page_open_requests,
                     &mut spawn_counter,
                     &rc.seq_q,
@@ -1211,7 +1196,6 @@ pub fn handle_open_beside_requests(
                     split.target,
                     req,
                     &mut commands,
-                    &mut new_stack_ctx,
                     &mut page_open_requests,
                     &mut spawn_counter,
                     &rc.seq_q,
@@ -1371,7 +1355,6 @@ fn spawn_beside_stack(
     target_pane: Entity,
     req: &OpenBesideRequest,
     commands: &mut Commands,
-    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
     spawn_counter: &mut SpawnCounter,
     seq_q: &Query<&SpawnSeq>,
@@ -1411,12 +1394,11 @@ fn spawn_beside_stack(
         .entry(target_pane)
         .or_default()
         .push(new_stack);
-    open_or_prompt_stack(
+    open_stack(
         new_stack,
-        Some(req.url.clone()),
+        req.url.clone(),
         (!req.url.starts_with("file:") && !req.url.starts_with("vmux://"))
             .then_some(req.request_id),
-        new_stack_ctx,
         page_open_requests,
     );
     new_stack
@@ -1783,7 +1765,6 @@ fn handle_open_in_pane(
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
@@ -1813,7 +1794,11 @@ fn handle_open_in_pane(
             url.as_deref(),
             effective_startup_url.as_ref().map(|s| s.0.as_str()),
         );
-        let resolved = (!resolved.is_empty()).then_some(resolved);
+        let resolved = if resolved.is_empty() {
+            vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref())
+        } else {
+            resolved
+        };
 
         let split_dir = direction_to_split(direction);
 
@@ -1859,39 +1844,21 @@ fn handle_open_in_pane(
             let new_stack = commands
                 .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                 .id();
-            open_or_prompt_stack(
-                new_stack,
-                resolved,
-                None,
-                &mut new_stack_ctx,
-                &mut page_open_requests,
-            );
+            open_stack(new_stack, resolved, None, &mut page_open_requests);
         } else {
             match mode {
                 PaneOpenMode::InPlace => {
                     let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
                         .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
                     if let Some(stack) = active_stack {
-                        open_or_prompt_stack(
-                            stack,
-                            resolved,
-                            None,
-                            &mut new_stack_ctx,
-                            &mut page_open_requests,
-                        );
+                        open_stack(stack, resolved, None, &mut page_open_requests);
                     }
                 }
                 PaneOpenMode::NewStack => {
                     let new_stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                         .id();
-                    open_or_prompt_stack(
-                        new_stack,
-                        resolved,
-                        None,
-                        &mut new_stack_ctx,
-                        &mut page_open_requests,
-                    );
+                    open_stack(new_stack, resolved, None, &mut page_open_requests);
                 }
             }
         }
@@ -1899,27 +1866,17 @@ fn handle_open_in_pane(
     }
 }
 
-fn open_or_prompt_stack(
+fn open_stack(
     stack: Entity,
-    url: Option<String>,
+    url: String,
     request_id: Option<[u8; 16]>,
-    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
 ) {
-    if let Some(url) = url {
-        new_stack_ctx.stack = None;
-        new_stack_ctx.previous_stack = None;
-        new_stack_ctx.needs_open = false;
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url,
-            request_id,
-        });
-    } else {
-        new_stack_ctx.stack = Some(stack);
-        new_stack_ctx.previous_stack = None;
-        new_stack_ctx.needs_open = true;
-    }
+    page_open_requests.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url,
+        request_id,
+    });
 }
 
 fn on_pane_select(
@@ -1931,7 +1888,6 @@ fn on_pane_select(
     pane_pos_q: Query<&ComputedNode, With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -1946,11 +1902,6 @@ fn on_pane_select(
             AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown)) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
-
-        if let Some(e) = new_stack_ctx.stack.take() {
-            commands.entity(e).despawn();
-            new_stack_ctx.previous_stack = None;
-        }
 
         let active_tab = active_tab_param.get();
         let Some(tab_e) = active_tab else {
@@ -2505,6 +2456,7 @@ fn process_pending_stack_closes(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PendingLaunch;
     use crate::{
         settings::ConfirmCloseSettings,
         settings::{
@@ -6103,7 +6055,7 @@ mod tests {
     }
 
     #[test]
-    fn in_pane_new_split_without_url_or_startup_opens_prompt_stack() {
+    fn in_pane_new_split_without_url_opens_the_start_page() {
         use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, pane, _stack) = build_single_pane(&mut app);
@@ -6121,11 +6073,15 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<PaneSplit>(pane).is_some());
-        let collected = app.world().resource::<InPaneCollectedSpawns>();
-        assert!(collected.0.is_empty());
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert!(ctx.stack.is_some());
-        assert!(ctx.needs_open);
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
+            [vmux_core::EffectiveStartupUrl::START_PAGE]
+        );
     }
 
     #[test]

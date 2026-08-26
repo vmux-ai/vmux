@@ -13,11 +13,29 @@ const ENV_END: &str = "__VMUX_LOGIN_ENV_END_7Qz9__";
 
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
+static CACHE: OnceLock<Vec<(String, String)>> = OnceLock::new();
+
 pub fn login_shell_env(shell: &str) -> &'static [(String, String)] {
-    static CACHE: OnceLock<Vec<(String, String)>> = OnceLock::new();
     CACHE
         .get_or_init(|| capture_login_shell_env(shell))
         .as_slice()
+}
+
+/// Fill the cache off the main thread, so the first agent spawn does not wait on a login shell.
+///
+/// Capturing runs an interactive login shell and reads it to EOF, which on a full rc chain is
+/// hundreds of milliseconds and on a stuck shell is the whole ten-second timeout. Doing that
+/// inside `poll_service_messages` stalls the frame loop, and with it every terminal already
+/// drawing. Starting at boot means the answer is usually there before anything asks.
+pub fn prewarm_login_shell_env(shell: String) {
+    if CACHE.get().is_some() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("login-shell-env-prewarm".to_string())
+        .spawn(move || {
+            login_shell_env(&shell);
+        });
 }
 
 pub fn merge_login_shell_env(env: &mut Vec<(String, String)>, shell: &str) {

@@ -789,4 +789,23 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn a_tree_arriving_into_nothing_is_entirely_hidden() {
+        let row = |path: &str| TreeRow {
+            name: path.to_string(),
+            path: path.to_string(),
+            depth: 0,
+            is_dir: false,
+            expanded: false,
+            loading: false,
+        };
+
+        let merged = merge_tree_motion_rows(&[], &[row("a"), row("b")]);
+
+        assert!(
+            merged.iter().all(|(_, visible)| !visible),
+            "nothing on screen to animate from, so every row is staged for entry"
+        );
+    }
 }

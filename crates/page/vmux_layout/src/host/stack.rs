@@ -1,6 +1,5 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
-    PendingLaunch,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
     tab::{CloseTabRequest, Tab},
@@ -71,7 +70,6 @@ fn handle_close_stack_requests(
     child_of_q: Query<&ChildOf>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -84,12 +82,6 @@ fn handle_close_stack_requests(
         let stack_count = children.iter().filter(|&e| stack_q.contains(e)).count();
         if stack_count <= 1 {
             continue;
-        }
-        if new_stack_ctx.stack == Some(req.stack) {
-            new_stack_ctx.stack = None;
-        }
-        if new_stack_ctx.previous_stack == Some(req.stack) {
-            new_stack_ctx.previous_stack = None;
         }
         commands.entity(req.stack).despawn();
     }
@@ -232,8 +224,6 @@ fn handle_stack_commands(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut close_tab_requests: MessageWriter<CloseTabRequest>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -288,32 +278,17 @@ fn handle_stack_commands(
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                let startup = effective_startup_url
-                    .as_deref()
-                    .map(|u| u.0.clone())
-                    .filter(|u| !u.is_empty());
-                let resolved = override_url.filter(|u| !u.is_empty()).or(startup);
-                if let Some(url) = resolved {
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url,
-                        request_id: None,
-                    });
-                } else {
-                    if new_stack_ctx.stack.is_some() {
-                        new_stack_ctx.needs_open = true;
-                        continue;
-                    }
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    new_stack_ctx.stack = Some(stack);
-                    new_stack_ctx.previous_stack = active_stack;
-                    new_stack_ctx.needs_open = true;
-                }
+                let url = override_url.filter(|u| !u.is_empty()).unwrap_or_else(|| {
+                    vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref())
+                });
+                let stack = commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id();
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url,
+                    request_id: None,
+                });
             }
             Dispatch::Stack(StackCommand::Close) => {
                 let Some(pane) = active_pane else {
@@ -337,11 +312,6 @@ fn handle_stack_commands(
                             &mut close_tab_requests,
                         )
                     {
-                        if new_stack_ctx.stack == Some(active) {
-                            new_stack_ctx.stack = None;
-                        }
-                        new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
@@ -376,11 +346,6 @@ fn handle_stack_commands(
                             {
                                 commands.entity(t).insert(LastActivatedAt::now());
                             }
-                            if new_stack_ctx.stack == Some(active) {
-                                new_stack_ctx.stack = None;
-                            }
-                            new_stack_ctx.previous_stack = None;
-                            new_stack_ctx.needs_open = false;
                             continue;
                         }
 
@@ -444,11 +409,6 @@ fn handle_stack_commands(
                         if let Some(t) = new_stack {
                             commands.entity(t).insert(LastActivatedAt::now());
                         }
-                        if new_stack_ctx.stack == Some(active) {
-                            new_stack_ctx.stack = None;
-                        }
-                        new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
@@ -456,23 +416,11 @@ fn handle_stack_commands(
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-                    new_stack_ctx.previous_stack = None;
-                    let startup_url = effective_startup_url
-                        .as_deref()
-                        .map(|u| u.0.clone())
-                        .unwrap_or_default();
-                    if startup_url.is_empty() {
-                        new_stack_ctx.stack = Some(stack);
-                        new_stack_ctx.needs_open = true;
-                    } else {
-                        new_stack_ctx.stack = None;
-                        new_stack_ctx.needs_open = false;
-                        page_open_requests.write(PageOpenRequest {
-                            target: PageOpenTarget::Stack(stack),
-                            url: startup_url,
-                            request_id: None,
-                        });
-                    }
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+                        request_id: None,
+                    });
                     continue;
                 }
                 let next = active_among(
@@ -486,12 +434,6 @@ fn handle_stack_commands(
                 commands.entity(next).insert(LastActivatedAt::now());
             }
             Dispatch::Stack(sc @ (StackCommand::Next | StackCommand::Previous)) => {
-                let empty_stack = new_stack_ctx.stack.take();
-                let prev_stack = new_stack_ctx.previous_stack.take();
-                if let Some(e) = empty_stack {
-                    commands.entity(e).despawn();
-                }
-
                 let Some(active_tab_e) = active_tab else {
                     continue;
                 };
@@ -501,7 +443,7 @@ fn handle_stack_commands(
                 for &pane_e in &tab_panes {
                     if let Ok(children) = pane_children.get(pane_e) {
                         for child in children.iter() {
-                            if stack_q.contains(child) && Some(child) != empty_stack {
+                            if stack_q.contains(child) {
                                 flat.push((pane_e, child));
                             }
                         }
@@ -510,13 +452,7 @@ fn handle_stack_commands(
                 if flat.len() < 2 {
                     continue;
                 }
-                let effective_current = if empty_stack.is_some() {
-                    prev_stack.or(active_stack)
-                } else {
-                    active_stack
-                };
-                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == effective_current)
-                else {
+                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == active_stack) else {
                     continue;
                 };
                 let delta: i32 = if sc == StackCommand::Next { 1 } else { -1 };
@@ -598,7 +534,6 @@ pub fn open_startup_url_if_no_stacks(
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -622,21 +557,11 @@ pub fn open_startup_url_if_no_stacks(
     let stack = commands
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    let startup_url = effective_startup_url
-        .as_deref()
-        .map(|u| u.0.clone())
-        .unwrap_or_default();
-    if startup_url.is_empty() {
-        new_stack_ctx.stack = Some(stack);
-        new_stack_ctx.previous_stack = None;
-        new_stack_ctx.needs_open = true;
-    } else {
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url: startup_url,
-            request_id: None,
-        });
-    }
+    page_open_requests.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+        request_id: None,
+    });
 }
 
 fn entity_tree_contains_stack(
@@ -655,6 +580,7 @@ fn entity_tree_contains_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PendingLaunch;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -893,13 +819,21 @@ mod tests {
             app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
             None
         );
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert!(ctx.needs_open);
-        assert!(ctx.stack.is_some());
-        assert_eq!(ctx.previous_stack, None);
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("the replacement tab opens exactly one page");
+        };
+        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        let PageOpenTarget::Stack(new_stack) = request.target else {
+            panic!("the page is opened into a stack");
+        };
         let new_pane = app
             .world()
-            .get::<ChildOf>(ctx.stack.unwrap())
+            .get::<ChildOf>(new_stack)
             .map(Relationship::get)
             .unwrap();
         let split_root = app
@@ -976,10 +910,6 @@ mod tests {
         assert!(app.world().get_entity(closing_stack).is_err());
         assert!(app.world().get_entity(remaining_tab).is_ok());
         assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
-
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
     }
 
     #[test]
@@ -1098,8 +1028,6 @@ mod tests {
             Some(split)
         );
         assert!(!app.world().entity(split).contains::<PaneSplit>());
-        assert_eq!(app.world().resource::<PendingLaunch>().stack, None);
-        assert!(!app.world().resource::<PendingLaunch>().needs_open);
     }
 
     #[test]
@@ -1197,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_active_pane_opens_command_bar_even_when_other_tabs_have_stacks() {
+    fn empty_active_pane_opens_the_start_page_even_when_other_tabs_have_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<PendingLaunch>()
@@ -1226,11 +1154,18 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<PendingLaunch>();
-        let Some(new_stack) = ctx.stack else {
-            panic!("expected empty active pane to get pending stack");
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("an empty active pane opens exactly one page");
         };
-        assert!(ctx.needs_open);
+        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        let PageOpenTarget::Stack(new_stack) = request.target else {
+            panic!("the page is opened into a stack");
+        };
         assert_eq!(
             app.world().get::<ChildOf>(new_stack).map(Relationship::get),
             Some(active_pane)
@@ -1238,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_active_pane_does_not_open_command_bar_when_tab_has_stacks() {
+    fn empty_active_pane_does_not_open_a_page_when_tab_has_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<PendingLaunch>()
@@ -1263,13 +1198,18 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none(),
+            "the tab already shows a page, so an empty sibling pane is not one to fill"
+        );
     }
 
     #[test]
-    fn active_empty_stack_does_not_reopen_command_bar() {
+    fn a_pane_that_already_holds_a_stack_is_not_filled_again() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<PendingLaunch>()
@@ -1284,16 +1224,18 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
-            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)));
 
         app.update();
 
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_ne!(ctx.stack, Some(stack));
-        assert!(!ctx.needs_open);
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
     }
 
     #[derive(Resource, Default)]
@@ -1360,9 +1302,6 @@ mod tests {
 
         assert!(app.world().get_entity(original_stack).is_ok());
         assert!(app.world().get_entity(tab).is_ok());
-        let ctx = app.world().resource::<PendingLaunch>();
-        assert_eq!(ctx.stack, None);
-        assert!(!ctx.needs_open);
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert!(collected.0.is_empty());
@@ -1415,7 +1354,7 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_stack_none_url_queues_empty_stack_for_command_bar() {
+    fn open_in_new_stack_none_url_opens_the_start_page() {
         let mut app = build_app_with_collector();
         let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
@@ -1427,18 +1366,24 @@ mod tests {
 
         app.update();
 
-        let collected = app.world().resource::<CollectedSpawns>();
-        assert!(
-            collected.0.is_empty(),
-            "no spawn request until URL is provided"
-        );
-        let ctx = app.world().resource::<PendingLaunch>();
-        let queued = ctx.stack.expect("an empty stack should be queued");
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("a new stack opens exactly one page");
+        };
+        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        let PageOpenTarget::Stack(opened_stack) = request.target else {
+            panic!("a new stack is opened by entity");
+        };
         assert_eq!(
-            app.world().get::<ChildOf>(queued).map(Relationship::get),
+            app.world()
+                .get::<ChildOf>(opened_stack)
+                .map(Relationship::get),
             Some(pane),
         );
-        assert!(ctx.needs_open, "command bar should be requested");
     }
 
     #[test]

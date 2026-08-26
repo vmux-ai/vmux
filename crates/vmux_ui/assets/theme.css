@@ -99,7 +99,14 @@
 }
 
 @theme inline {
-  --font-sans: -apple-system, system-ui, sans-serif;
+  /* GitHub's own two stacks: the platform's UI face, and the platform's code face.
+     The bundled Nerd Font sits at the end of the code stack rather than the front, because
+     fallback is per character — text is drawn by SF Mono, and only the glyphs it has no answer
+     for (a powerline arrow, a devicon in a vim status line) fall through to one that does. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    "JetBrainsMono NF", monospace;
 
   --color-border: var(--border);
   --color-input: var(--input);

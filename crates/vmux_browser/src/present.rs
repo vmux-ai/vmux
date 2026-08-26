@@ -164,7 +164,6 @@ fn sync_children_to_ui(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     glass: Single<(Entity, &ComputedNode), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node) = &*glass;
@@ -234,11 +233,7 @@ fn sync_children_to_ui(
             true
         };
 
-        let is_previous_stack =
-            pending_launch.stack.is_some() && pending_launch.previous_stack == Some(parent);
-
-        let is_inactive_stack =
-            parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
+        let is_inactive_stack = parent != glass_entity && !is_cef_ui && !is_active_stack;
 
         let is_inactive_tab = under_inactive_tab;
 
@@ -367,9 +362,11 @@ pub(crate) fn sync_windowed_frames(
     mut last_windowed_pages: Local<Vec<Entity>>,
     mut pane_frames: ResMut<PaneFrames>,
 ) {
-    pane_frames.0.clear();
+    pane_frames.frames.clear();
+    pane_frames.rings.clear();
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
+    pane_frames.all_corners = windowed_page_all_corners(layout_hidden.0, visible_pane_count);
     let header_frame = header_rect.iter().find_map(WindowedFrameRect::of);
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
@@ -395,7 +392,7 @@ pub(crate) fn sync_windowed_frames(
             visible_pane_count,
         );
         if let Some(logical) = PaneFrame::of(frame, scale) {
-            pane_frames.0.insert(entity, logical);
+            pane_frames.frames.insert(entity, logical);
         }
         let became_visible = !memory.visible_pages.contains(&entity);
         if became_visible {
@@ -426,6 +423,13 @@ pub(crate) fn sync_windowed_frames(
             scale,
         );
         browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
+        pane_frames.rings.insert(
+            entity,
+            FocusRing {
+                width: focus_ring_width / scale,
+                rgb: focus_ring_rgb,
+            },
+        );
         let badge = focus_ring_kind.and_then(|kind| {
             agent_logo(kind).map(|logo| {
                 (
@@ -494,13 +498,34 @@ pub(crate) struct FrameSyncMemory {
 }
 
 #[derive(Resource, Default)]
-pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
+pub(crate) struct PaneFrames {
+    frames: std::collections::HashMap<Entity, PaneFrame>,
+    rings: std::collections::HashMap<Entity, FocusRing>,
+    all_corners: bool,
+}
 
 impl PaneFrames {
     #[cfg(target_os = "macos")]
     pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
-        self.0.get(&page).copied()
+        self.frames.get(&page).copied()
     }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn ring_of(&self, page: Entity) -> FocusRing {
+        self.rings.get(&page).copied().unwrap_or_default()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn all_corners(&self) -> bool {
+        self.all_corners
+    }
+}
+
+/// The ring a pane wears while it holds the keyboard, or while an agent is working in it.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub(crate) struct FocusRing {
+    pub(crate) width: f32,
+    pub(crate) rgb: [f32; 3],
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1024,7 +1049,6 @@ fn sync_osr_webview_focus(
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -1122,7 +1146,7 @@ fn sync_osr_webview_focus(
         let mut parent_is_stack = false;
         let mut pane_is_leaf = false;
         let mut is_active = false;
-        let mut is_prev = false;
+        let is_prev = false;
 
         if let Ok(parent) = child_of_q.get(e).map(|co| co.get()) {
             parent_is_stack = tab_ts.get(parent).is_ok();
@@ -1131,8 +1155,6 @@ fn sync_osr_webview_focus(
                 if pane_is_leaf {
                     is_active =
                         active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
-                    is_prev = pending_launch.stack.is_some()
-                        && pending_launch.previous_stack == Some(parent);
                 }
             }
         }
@@ -1602,12 +1624,12 @@ mod tests {
     }
 
     #[test]
-    fn split_pane_windowed_frame_starts_below_header_without_changing_width() {
+    fn split_pane_windowed_frame_keeps_the_gap_the_layout_gave_it() {
         let pane = WindowedFrameRect {
             left: 610.2,
-            top: 24.0,
+            top: 104.2,
             width: 560.6,
-            height: 720.0,
+            height: 640.0,
         };
         let header = WindowedFrameRect {
             left: 150.0,
@@ -1622,9 +1644,9 @@ mod tests {
             frame,
             WindowedFrameRect {
                 left: 611.0,
-                top: 97.0,
+                top: 105.0,
                 width: 559.0,
-                height: 647.0,
+                height: 639.0,
             }
         );
     }
