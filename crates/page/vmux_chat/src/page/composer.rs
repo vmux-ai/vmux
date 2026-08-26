@@ -1,6 +1,6 @@
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
 use self::options::{ChatEffortMenu, ChatModelMenu, ChatModelPill};
-use self::workspace::WorkspacePills;
+use self::workspace::{WorkspaceMenu, WorkspacePills};
 use super::agent::StatusDot;
 use super::approval::ChoiceList;
 use super::keys::ChatKeys;
@@ -29,6 +29,9 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 }
                 if chat.model_menu_open() {
                     ChatModelMenu { chat }
+                }
+                if chat.projects.is_open() {
+                    WorkspaceMenu { chat }
                 }
                 ChoiceList { chat }
                 QueuedPrompts { chat }

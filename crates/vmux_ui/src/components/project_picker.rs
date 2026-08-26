@@ -41,7 +41,7 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
         .cloned()
         .collect::<Vec<_>>();
     rsx! {
-        PromptPopup { class: "min-w-72", on_dismiss: move |()| on_dismiss.call(()),
+        PromptPopup { on_dismiss: move |()| on_dismiss.call(()),
             if roots.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-none")} }
             }

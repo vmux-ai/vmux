@@ -625,59 +625,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         path { d: "m8 10 4 4 4-4" }
                     }
                 }
-                div { class: "relative shrink-0",
-                    button {
-                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
-                        title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
-                        onmousedown: move |event| event.prevent_default(),
-                        onclick: move |_| {
-                            let showing = *project_menu_open.peek();
-                            project_menu_open.set(!showing);
-                        },
-                        svg {
-                            class: "h-3.5 w-3.5 shrink-0",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "1.8",
-                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
-                        }
-                        span { class: "truncate", "{workspace_label}" }
+                button {
+                    class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
+                    title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
+                    onmousedown: move |event| event.prevent_default(),
+                    onclick: move |_| {
+                        let showing = *project_menu_open.peek();
+                        project_menu_open.set(!showing);
+                    },
+                    svg {
+                        class: "h-3.5 w-3.5 shrink-0",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
                     }
-                    if project_menu_open() {
-                        ProjectPicker {
-                            projects: picker_projects.clone(),
-                            expanded: project_expanded(),
-                            branches: project_branches(),
-                            branches_for: project_branches_for(),
-                            on_expand: move |path: String| {
-                                if *project_expanded.peek() == path {
-                                    project_expanded.set(String::new());
-                                    return;
-                                }
-                                project_expanded.set(path.clone());
-                                if *project_branches_for.peek() != path {
-                                    project_branches.set(Vec::new());
-                                }
-                                let _ = send(&StartBranchesRequest { project: path });
-                            },
-                            on_pick: move |pick: ProjectPick| {
-                                project_menu_open.set(false);
-                                let _ = send(&StartGoToBranch {
-                                    project: pick.project,
-                                    branch: pick.branch,
-                                    checkout: pick.checkout,
-                                });
-                                focus_prompt_end(PROMPT_INPUT_ID);
-                            },
-                            on_choose_another: move |()| {
-                                project_menu_open.set(false);
-                                let _ = send(&StartSelectWorkspace { current_dir: picker_cwd.clone() });
-                                focus_prompt_end(PROMPT_INPUT_ID);
-                            },
-                            on_dismiss: move |()| project_menu_open.set(false),
-                        }
-                    }
+                    span { class: "truncate", "{workspace_label}" }
                 }
                 if prompt_context.is_git_repo {
                     span {
@@ -935,8 +899,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         div { class: "relative",
             if is_start {
                 if let Some(accent) = active_agent_accent {
-                    div { class: "{accent.glow_top} transition-all duration-500 ease-out" }
-                    div { class: "{accent.glow_bottom} transition-all duration-500 ease-out" }
+                    div { class: "{accent.glow_top} transform-gpu" }
+                    div { class: "{accent.glow_bottom} transform-gpu" }
                 }
             }
             if is_start {
@@ -983,6 +947,40 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                             }
                         }
+                    }
+                }
+                if project_menu_open() {
+                    ProjectPicker {
+                        projects: picker_projects.clone(),
+                        expanded: project_expanded(),
+                        branches: project_branches(),
+                        branches_for: project_branches_for(),
+                        on_expand: move |path: String| {
+                            if *project_expanded.peek() == path {
+                                project_expanded.set(String::new());
+                                return;
+                            }
+                            project_expanded.set(path.clone());
+                            if *project_branches_for.peek() != path {
+                                project_branches.set(Vec::new());
+                            }
+                            let _ = send(&StartBranchesRequest { project: path });
+                        },
+                        on_pick: move |pick: ProjectPick| {
+                            project_menu_open.set(false);
+                            let _ = send(&StartGoToBranch {
+                                project: pick.project,
+                                branch: pick.branch,
+                                checkout: pick.checkout,
+                            });
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        on_choose_another: move |()| {
+                            project_menu_open.set(false);
+                            let _ = send(&StartSelectWorkspace { current_dir: picker_cwd.clone() });
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        on_dismiss: move |()| project_menu_open.set(false),
                     }
                 }
                 PromptComposer {

@@ -901,6 +901,7 @@ pub fn use_model_picker() -> ModelPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ProjectPicker {
+    pub open: Signal<bool>,
     pub expanded: Signal<String>,
     pub branches: Signal<Vec<ChatBranch>>,
     pub branches_for: Signal<String>,
@@ -908,6 +909,7 @@ pub struct ProjectPicker {
 
 pub fn use_project_picker() -> ProjectPicker {
     ProjectPicker {
+        open: use_signal(|| false),
         expanded: use_signal(String::new),
         branches: use_signal(Vec::new),
         branches_for: use_signal(String::new),
@@ -915,6 +917,21 @@ pub fn use_project_picker() -> ProjectPicker {
 }
 
 impl ProjectPicker {
+    pub fn is_open(&self) -> bool {
+        (self.open)()
+    }
+
+    pub fn toggle(&self) {
+        let mut open = self.open;
+        let showing = *open.peek();
+        open.set(!showing);
+    }
+
+    pub fn close(&self) {
+        let mut open = self.open;
+        open.set(false);
+    }
+
     pub fn expand(&self, project: &str) {
         let mut expanded = self.expanded;
         if expanded.peek().as_str() == project {

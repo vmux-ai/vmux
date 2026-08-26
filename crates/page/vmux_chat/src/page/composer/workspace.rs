@@ -7,9 +7,37 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 #[component]
+pub(super) fn WorkspaceMenu(chat: Chat) -> Element {
+    let context = (chat.slash.composer_context)();
+    rsx! {
+        ProjectPicker {
+            projects: context.projects.clone(),
+            expanded: (chat.projects.expanded)(),
+            branches: (chat.projects.branches)(),
+            branches_for: (chat.projects.branches_for)(),
+            on_expand: move |path: String| chat.projects.expand(&path),
+            on_pick: move |pick: ProjectPick| {
+                chat.projects.close();
+                let _ = send(&ChatGoToBranch {
+                    project: pick.project,
+                    branch: pick.branch,
+                    checkout: pick.checkout,
+                });
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+            on_choose_another: move |()| {
+                chat.projects.close();
+                let _ = send(&ChatSelectWorkspace);
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+            on_dismiss: move |()| chat.projects.close(),
+        }
+    }
+}
+
+#[component]
 pub(super) fn WorkspacePills(chat: Chat) -> Element {
     let context = (chat.slash.composer_context)();
-    let mut open = use_signal(|| false);
     let workspace_label = if context.workspace_selected && !context.workspace_name.is_empty() {
         context.workspace_name.clone()
     } else {
@@ -32,51 +60,22 @@ pub(super) fn WorkspacePills(chat: Chat) -> Element {
     };
     rsx! {
         if context.can_manage_workspace {
-            div { class: "relative shrink-0",
-                button {
-                    class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: "{workspace_title}",
-                    onmousedown: move |event| event.prevent_default(),
-                    onclick: move |_| {
-                        let showing = *open.peek();
-                        open.set(!showing);
-                    },
-                    svg {
-                        class: "h-3.5 w-3.5 shrink-0",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
-                    }
-                    span { class: "truncate", "{workspace_label}" }
+            button {
+                class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
+                title: "{workspace_title}",
+                onmousedown: move |event| event.prevent_default(),
+                onclick: move |_| chat.projects.toggle(),
+                svg {
+                    class: "h-3.5 w-3.5 shrink-0",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "1.8",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
                 }
-                if open() {
-                    ProjectPicker {
-                        projects: context.projects.clone(),
-                        expanded: (chat.projects.expanded)(),
-                        branches: (chat.projects.branches)(),
-                        branches_for: (chat.projects.branches_for)(),
-                        on_expand: move |path: String| chat.projects.expand(&path),
-                        on_pick: move |pick: ProjectPick| {
-                            open.set(false);
-                            let _ = send(&ChatGoToBranch {
-                                project: pick.project,
-                                branch: pick.branch,
-                                checkout: pick.checkout,
-                            });
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_choose_another: move |()| {
-                            open.set(false);
-                            let _ = send(&ChatSelectWorkspace);
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_dismiss: move |()| open.set(false),
-                    }
-                }
+                span { class: "truncate", "{workspace_label}" }
             }
         } else if !context.cwd.is_empty() {
             span {
