@@ -34,7 +34,8 @@ impl Plugin for StartPlugin {
                 title: "Start",
             },
         ));
-        app.add_message::<FocusLauncherInput>()
+        app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -686,6 +687,7 @@ mod tests {
         app.init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(capture_emit);
