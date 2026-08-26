@@ -60,6 +60,15 @@ pub fn PromptPopup(
     });
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
+        if let Some(on_dismiss) = on_dismiss {
+            div {
+                class: "fixed inset-0 z-10",
+                onmousedown: move |event: MouseEvent| {
+                    event.prevent_default();
+                    on_dismiss.call(());
+                },
+            }
+        }
         div { ..merged,
             if let Some(on_dismiss) = on_dismiss {
                 div { class: "pointer-events-none sticky top-0 z-10 flex justify-end",

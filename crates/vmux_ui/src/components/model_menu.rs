@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use vmux_wire::room::ModelOptionEntry;
 
-use crate::components::prompt_box::PromptPopup;
+use crate::components::prompt_box::{PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 
 #[component]
@@ -41,6 +41,7 @@ pub fn ModelPill(name: String, on_open: EventHandler<()>) -> Element {
 
 #[component]
 pub fn ModelMenu(
+    #[props(default)] placement: PromptPopupPlacement,
     models: Vec<ModelOptionEntry>,
     current_model_id: String,
     selected: usize,
@@ -49,7 +50,7 @@ pub fn ModelMenu(
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
-        PromptPopup { on_dismiss,
+        PromptPopup { placement, on_dismiss,
             if models.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-matching-models")} }
             } else {

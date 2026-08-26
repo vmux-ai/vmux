@@ -718,10 +718,10 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow) -> Element {
     let forget = project.path.clone();
     let forget_title = translate("layout-project-forget");
     rsx! {
-        div { class: "group/project flex items-center",
+        div { class: "group/project flex items-center transition-colors hover:bg-glass-hover",
             button {
                 r#type: "button",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 {indent} pr-1 py-1 text-left text-ui-xs transition-colors hover:bg-glass-hover {tone}",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 {indent} pr-1 py-1 text-left text-ui-xs {tone}",
                 title: "{project.display_path}",
                 onclick: move |_| emit_project_command("activate", Some(activate.clone())),
                 span { class: "w-1.5 shrink-0 text-center",

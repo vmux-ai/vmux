@@ -26,7 +26,7 @@ use vmux_ui::components::composer::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::model_menu::{ModelMenu, ModelPill};
-use vmux_ui::components::project_picker::{ProjectPick, ProjectPicker};
+use vmux_ui::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::focus::FocusClaim;
@@ -302,6 +302,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut model_menu_open = use_signal(|| false);
     let mut model_menu_sel = use_signal(|| 0usize);
     let mut project_menu_open = use_signal(|| false);
+    let mut branch_menu_open = use_signal(|| false);
     let mut project_expanded = use_signal(String::new);
     let mut project_branches = use_signal(Vec::<vmux_core::event::ProjectBranch>::new);
     let mut project_branches_for = use_signal(String::new);
@@ -315,6 +316,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let space_name = state_val.space_name.clone();
     let prompt_context = state_val.prompt_context.clone();
     let picker_projects = prompt_context.projects.clone();
+    let branch_project = ActiveProject::of(&prompt_context);
     let agent_models = state_val.agent_models.clone();
     let picker_cwd = prompt_context.cwd.clone();
     let open_target = state_val.target;
@@ -620,7 +622,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     title: "Choose agent",
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        target_menu_open.set(!target_menu_open());
+                        let showing = target_menu_open();
+                        model_menu_open.set(false);
+                        project_menu_open.set(false);
+                        branch_menu_open.set(false);
+                        target_menu_open.set(!showing);
                         focus_prompt_end(PROMPT_INPUT_ID);
                     },
                     svg {
@@ -649,6 +655,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_open: move |()| {
                         model_menu_sel.set(0);
                         let showing = *model_menu_open.peek();
+                        target_menu_open.set(false);
+                        project_menu_open.set(false);
+                        branch_menu_open.set(false);
                         model_menu_open.set(!showing);
                     },
                 }
@@ -658,6 +667,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
                         let showing = *project_menu_open.peek();
+                        target_menu_open.set(false);
+                        model_menu_open.set(false);
+                        branch_menu_open.set(false);
                         project_menu_open.set(!showing);
                     },
                     svg {
@@ -671,9 +683,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     span { class: "truncate", "{workspace_label}" }
                 }
                 if prompt_context.is_git_repo {
-                    span {
-                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground",
+                    button {
+                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
                         title: "{branch_title}",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: {
+                            let project = branch_project.clone();
+                            move |_| {
+                                let showing = *branch_menu_open.peek();
+                                target_menu_open.set(false);
+                                model_menu_open.set(false);
+                                project_menu_open.set(false);
+                                branch_menu_open.set(!showing);
+                                if !showing && !project.is_empty() {
+                                    let _ = send(&StartBranchesRequest { project: project.clone() });
+                                }
+                            }
+                        },
                         svg {
                             class: "h-3.5 w-3.5 shrink-0",
                             view_box: "0 0 24 24",
@@ -978,6 +1004,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 if model_menu_open() {
                     ModelMenu {
+                        placement: PromptPopupPlacement::Downward,
                         models: model_options.clone(),
                         current_model_id: model_current_id.clone(),
                         selected: model_menu_sel(),
@@ -993,8 +1020,27 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         on_dismiss: move |()| model_menu_open.set(false),
                     }
                 }
+                if branch_menu_open() {
+                    BranchPicker {
+                        placement: PromptPopupPlacement::Downward,
+                        project: branch_project.clone(),
+                        branches: project_branches(),
+                        loaded: project_branches_for() == branch_project,
+                        on_pick: move |pick: ProjectPick| {
+                            branch_menu_open.set(false);
+                            let _ = send(&StartGoToBranch {
+                                project: pick.project,
+                                branch: pick.branch,
+                                checkout: pick.checkout,
+                            });
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        on_dismiss: move |()| branch_menu_open.set(false),
+                    }
+                }
                 if project_menu_open() {
                     ProjectPicker {
+                        placement: PromptPopupPlacement::Downward,
                         projects: picker_projects.clone(),
                         expanded: project_expanded(),
                         branches: project_branches(),
@@ -1726,6 +1772,19 @@ fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
     event.stop_propagation();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
+}
+
+struct ActiveProject;
+
+impl ActiveProject {
+    fn of(context: &crate::event::CommandBarPromptContext) -> String {
+        for project in &context.projects {
+            if project.is_active {
+                return project.path.clone();
+            }
+        }
+        context.cwd.clone()
+    }
 }
 
 struct SelectedAgentModels;

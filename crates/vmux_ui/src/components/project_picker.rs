@@ -1,11 +1,13 @@
 use dioxus::prelude::*;
 use vmux_core::event::{ProjectBranch, ProjectRow};
 
-use crate::components::prompt_box::PromptPopup;
+use crate::components::prompt_box::{PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ProjectPickerProps {
+    #[props(default)]
+    pub placement: PromptPopupPlacement,
     pub projects: Vec<ProjectRow>,
     pub expanded: String,
     pub branches: Vec<ProjectBranch>,
@@ -26,6 +28,7 @@ pub struct ProjectPick {
 #[component]
 pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
     let ProjectPickerProps {
+        placement,
         projects,
         expanded,
         branches,
@@ -41,7 +44,7 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
         .cloned()
         .collect::<Vec<_>>();
     rsx! {
-        PromptPopup { on_dismiss: move |()| on_dismiss.call(()),
+        PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
             if roots.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-none")} }
             }
@@ -74,6 +77,35 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
                 onmousedown: move |event| event.prevent_default(),
                 onclick: move |_| on_choose_another.call(()),
                 {translate("agent-project-choose-another")}
+            }
+        }
+    }
+}
+
+#[component]
+pub fn BranchPicker(
+    #[props(default)] placement: PromptPopupPlacement,
+    project: String,
+    branches: Vec<ProjectBranch>,
+    loaded: bool,
+    on_pick: EventHandler<ProjectPick>,
+    on_dismiss: EventHandler<()>,
+) -> Element {
+    rsx! {
+        PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
+            if !loaded {
+                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-loading-branches")} }
+            } else if branches.is_empty() {
+                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-no-branches")} }
+            } else {
+                for branch in branches {
+                    ProjectBranchRow {
+                        key: "bp{branch.branch}",
+                        project: project.clone(),
+                        branch,
+                        on_pick: move |pick| on_pick.call(pick),
+                    }
+                }
             }
         }
     }
