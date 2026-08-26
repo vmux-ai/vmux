@@ -471,14 +471,6 @@ fn sync_live_start_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
-    bevy::log::warn!(
-        "start-emit targets={} cwd={:?} git={:?} changed={} git_changed={}",
-        targets.len(),
-        cwd,
-        git_info.as_ref().map(|info| info.branch.clone()),
-        changed,
-        git_changed,
-    );
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -538,9 +530,20 @@ fn on_start_data_request(
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
     space_projects: vmux_space::SpaceProjects,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
+    let cwd = prompt_context.cwd(tab_gather.active_tab.get());
+    let git_info = (!cwd.is_empty())
+        .then(|| {
+            repo_info.as_mut().and_then(|cache| {
+                cache
+                    .bypass_change_detection()
+                    .get(std::path::Path::new(&cwd))
+            })
+        })
+        .flatten();
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -549,7 +552,7 @@ fn on_start_data_request(
         &work_snapshot,
         &prompt_context,
         tab_gather.active_tab.get(),
-        None,
+        git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         &locale
             .as_deref()
