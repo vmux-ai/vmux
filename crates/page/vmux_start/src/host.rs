@@ -433,15 +433,6 @@ fn sync_live_start_pages(
         })
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
-    if git_changed {
-        bevy::log::warn!(
-            "start-git-probe cwd={:?} cache={} info={:?}",
-            cwd,
-            repo_info.is_some(),
-            git_info.as_ref().map(|info| info.branch.clone()),
-        );
-        *last_git = (cwd, git_info.clone());
-    }
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
@@ -477,6 +468,17 @@ fn sync_live_start_pages(
     if targets.is_empty() {
         return;
     }
+    if git_changed {
+        *last_git = (cwd.clone(), git_info.clone());
+    }
+    bevy::log::warn!(
+        "start-emit targets={} cwd={:?} git={:?} changed={} git_changed={}",
+        targets.len(),
+        cwd,
+        git_info.as_ref().map(|info| info.branch.clone()),
+        changed,
+        git_changed,
+    );
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
