@@ -163,7 +163,7 @@ impl Plugin for EditorPlugin {
                 Update,
                 (
                     init_explorer_state,
-                    emit_explorer_tree,
+                    emit_explorer_tree.after(drain_explorer_dir_loads),
                     sync_explorer_chrome,
                     emit_explorer_chrome,
                     sync_open_editors,
@@ -1247,14 +1247,27 @@ fn emit_window(
     let layouts = wrapped_view(edit, vp).window(first_row, end_row);
     let first_row = layouts.first().map_or(first_row, |line| line.row);
     let mut lines = Vec::with_capacity(layouts.len());
-    for layout in &layouts {
-        let ln = layout.line_no;
-        let mut fl = edit
+    if let (Some(first_line), Some(last_line)) = (
+        layouts.first().map(|layout| layout.line_no),
+        layouts.last().map(|layout| layout.line_no),
+    ) {
+        let mut window: Vec<Option<vmux_core::event::FileLine>> = edit
             .hl
-            .line_window(&edit.core.buffer.rope, ln as usize, ln as usize + 1);
-        if let Some(mut l) = fl.pop() {
-            l.fold = edit.folds.gutter(ln);
-            lines.push(l);
+            .line_window(
+                &edit.core.buffer.rope,
+                first_line as usize,
+                last_line as usize + 1,
+            )
+            .into_iter()
+            .map(Some)
+            .collect();
+        for layout in &layouts {
+            let index = (layout.line_no - first_line) as usize;
+            let Some(mut line) = window.get_mut(index).and_then(Option::take) else {
+                continue;
+            };
+            line.fold = edit.folds.gutter(layout.line_no);
+            lines.push(line);
         }
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1327,9 +1340,10 @@ fn emit_cursor(
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
+    let matches = edit.core.search_matches();
     let raw_search = edit
         .core
-        .search_spans(span_first, span_rows)
+        .search_spans(&matches, span_first, span_rows)
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
@@ -1348,7 +1362,6 @@ fn emit_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    let matches = edit.core.search_matches();
     let caret = edit.core.primary().head;
     let search_index = matches
         .iter()
@@ -3602,6 +3615,8 @@ fn explorer_root_name(root: &Path) -> String {
         .unwrap_or_else(|| root.to_string_lossy().to_uppercase())
 }
 
+const EXPLORER_WARM_AHEAD: usize = 64;
+
 fn start_explorer_dir_load(
     entity: Entity,
     path: PathBuf,
@@ -3717,8 +3732,24 @@ fn drain_explorer_dir_loads(
         if !st.loading.remove(&path) {
             continue;
         }
-        st.children.insert(path, entries);
+        let warm_ahead = st.expanded.contains(&path);
+        st.children.insert(path.clone(), entries);
         commands.entity(webview).insert(ExplorerTreeDirty);
+        if !warm_ahead {
+            continue;
+        }
+        let ahead = st
+            .children
+            .get(&path)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.is_dir)
+            .take(EXPLORER_WARM_AHEAD)
+            .map(|entry| PathBuf::from(&entry.path))
+            .collect::<Vec<_>>();
+        for dir in ahead {
+            start_explorer_dir_load(webview, dir, &mut st, &mut commands, false);
+        }
     }
 }
 
@@ -4835,6 +4866,42 @@ mod explorer_tests {
                 .any(|x| x.name == "src")
         );
         assert!(app.world().get::<ExplorerTreeDirty>(e).is_some());
+    }
+
+    #[test]
+    fn expanding_warms_the_next_level_and_stops_there() {
+        let tmp = git_repo();
+        let deep = tmp.path().join("src").join("deep");
+        fs::create_dir_all(&deep).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads));
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: tmp.path().join("README.md"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+
+        wait_for_children(&mut app, e, tmp.path());
+        wait_for_children(&mut app, e, &tmp.path().join("src"));
+
+        for _ in 0..200 {
+            app.update();
+            std::thread::yield_now();
+        }
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(
+            !st.expanded.contains(&tmp.path().join("src")),
+            "warming must not expand anything on the user's behalf"
+        );
+        assert!(
+            !st.children.contains_key(&deep),
+            "a warmed directory must not warm its own children, or a deep tree loads itself"
+        );
     }
 
     #[test]
