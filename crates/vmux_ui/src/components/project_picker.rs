@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::{ProjectBranch, ProjectRow};
+use vmux_wire::space::{ProjectBranch, ProjectRow};
 
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED,
