@@ -38,7 +38,7 @@ fn remember_space_project(
         };
         if settings
             .bypass_change_detection()
-            .remember_space_startup_dir(&space_id, dir)
+            .remember_space_project(&space_id, vmux_setting::SpaceProject::at(dir))
         {
             settings.set_changed();
             saves.write(vmux_setting::SettingsSaveRequest);
@@ -88,8 +88,28 @@ mod tests {
                 .resource::<vmux_setting::AppSettings>()
                 .spaces
                 .get(space_id)?
-                .startup_dir
-                .clone()
+                .active_dir()
+                .map(str::to_string)
+        }
+
+        fn listed(&self, space_id: &str) -> Vec<String> {
+            self.app
+                .world()
+                .resource::<vmux_setting::AppSettings>()
+                .spaces
+                .get(space_id)
+                .map(|space| space.projects.iter().map(|p| p.path.clone()).collect())
+                .unwrap_or_default()
+        }
+
+        fn known(&self) -> Vec<String> {
+            self.app
+                .world()
+                .resource::<vmux_setting::AppSettings>()
+                .projects
+                .iter()
+                .map(|p| p.path.clone())
+                .collect()
         }
 
         fn drain_saves(&mut self) -> usize {
@@ -119,10 +139,52 @@ mod tests {
     }
 
     #[test]
-    fn switching_project_replaces_what_the_space_remembers() {
+    fn switching_project_keeps_the_previous_one_in_the_list() {
         let mut fixture = Fixture::start("work");
         fixture.select("/tmp/alpha");
         fixture.select("/tmp/beta");
+
+        assert_eq!(fixture.listed("work"), ["/tmp/alpha", "/tmp/beta"]);
         assert_eq!(fixture.remembered("work").as_deref(), Some("/tmp/beta"));
+    }
+
+    #[test]
+    fn reselecting_an_earlier_project_promotes_it_without_duplicating() {
+        let mut fixture = Fixture::start("work");
+        fixture.select("/tmp/alpha");
+        fixture.select("/tmp/beta");
+        fixture.select("/tmp/alpha");
+
+        assert_eq!(
+            fixture.listed("work"),
+            ["/tmp/alpha", "/tmp/beta"],
+            "the list keeps the order projects were first seen in"
+        );
+        assert_eq!(fixture.remembered("work").as_deref(), Some("/tmp/alpha"));
+    }
+
+    #[test]
+    fn a_selected_project_is_also_remembered_across_spaces() {
+        let mut fixture = Fixture::start("work");
+        fixture.select("/tmp/alpha");
+        fixture.select("/tmp/beta");
+
+        assert_eq!(
+            fixture.known(),
+            ["/tmp/beta", "/tmp/alpha"],
+            "the global list is most-recent-first so a new space can offer them"
+        );
+    }
+
+    #[test]
+    fn a_project_belongs_to_the_space_that_selected_it() {
+        let mut work = Fixture::start("work");
+        work.select("/tmp/alpha");
+        let mut play = Fixture::start("play");
+        play.select("/tmp/beta");
+
+        assert_eq!(work.listed("work"), ["/tmp/alpha"]);
+        assert_eq!(play.listed("play"), ["/tmp/beta"]);
+        assert!(play.listed("work").is_empty());
     }
 }

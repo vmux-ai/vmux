@@ -667,6 +667,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -706,6 +707,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
 
@@ -735,6 +737,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(first.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -794,6 +797,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(active_dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         settings.spaces.insert(
@@ -801,6 +805,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(inactive_dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -915,6 +920,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -955,6 +961,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(primary_path.to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();

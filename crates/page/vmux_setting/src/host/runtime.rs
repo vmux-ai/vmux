@@ -58,6 +58,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
     #[serde(default)]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default)]
     pub recording: RecordingSettings,
     #[serde(default)]
     pub editor: EditorSettings,
@@ -70,7 +72,8 @@ impl AppSettings {
         load_embedded_settings()
     }
 
-    pub fn remember_space_startup_dir(&mut self, space_id: &str, dir: &str) -> bool {
+    pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
+        let known = self.remember_known_project(&project);
         let target = normalize_space_key(space_id);
         let mut key = None;
         for existing in self.spaces.keys() {
@@ -81,13 +84,48 @@ impl AppSettings {
         }
         let key = key.unwrap_or_else(|| space_id.to_string());
         let overrides = self.spaces.entry(key).or_default();
-        if overrides.startup_dir.as_deref() == Some(dir) {
-            return false;
+        let listed = match overrides
+            .projects
+            .iter_mut()
+            .find(|p| p.path == project.path)
+        {
+            Some(existing) => {
+                let gained_parent = existing.parent.is_none() && project.parent.is_some();
+                if gained_parent {
+                    existing.parent = project.parent.clone();
+                }
+                gained_parent
+            }
+            None => {
+                overrides.projects.push(project.clone());
+                true
+            }
+        };
+        let promoted = overrides.active_project.as_deref() != Some(project.path.as_str());
+        if promoted {
+            overrides.active_project = Some(project.path);
         }
-        overrides.startup_dir = Some(dir.to_string());
-        true
+        known || listed || promoted
+    }
+
+    fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
+        match self.projects.iter().position(|p| p.path == project.path) {
+            Some(0) => false,
+            Some(at) => {
+                let existing = self.projects.remove(at);
+                self.projects.insert(0, existing);
+                true
+            }
+            None => {
+                self.projects.insert(0, project.clone());
+                self.projects.truncate(KNOWN_PROJECT_LIMIT);
+                true
+            }
+        }
     }
 }
+
+const KNOWN_PROJECT_LIMIT: usize = 50;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -832,6 +870,8 @@ struct PartialAppSettings {
     #[serde(default)]
     spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
     #[serde(default)]
+    projects: Option<Vec<SpaceProject>>,
+    #[serde(default)]
     recording: Option<RecordingSettings>,
     #[serde(default)]
     editor: Option<EditorSettings>,
@@ -864,6 +904,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     for overrides in settings.spaces.values_mut() {
         overrides.normalize();
+    }
+    if let Some(projects) = partial.projects {
+        settings.projects = projects;
     }
     if let Some(recording) = partial.recording {
         settings.recording = recording;
@@ -1078,6 +1121,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     }
     if differs("spaces") {
         parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if differs("projects") {
+        parts.push(format!(
+            "    projects: {},",
+            section_ron(&settings.projects)?
+        ));
     }
     if differs("recording") {
         parts.push(format!(
@@ -1549,6 +1598,7 @@ mod tests {
             auto_update: false,
             agent: crate::host::runtime::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
