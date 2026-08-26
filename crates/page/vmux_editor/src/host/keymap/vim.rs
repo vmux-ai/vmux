@@ -615,15 +615,15 @@ impl VimKeymap {
             }
             "a" => {
                 self.enter_insert();
-                vec![Move(Motion::Right), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::Right)]
             }
             "I" => {
                 self.enter_insert();
-                vec![Move(Motion::FirstNonBlank), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::FirstNonBlank)]
             }
             "A" => {
                 self.enter_insert();
-                vec![Move(Motion::LineEnd), SetMode(EditMode::Insert)]
+                vec![SetMode(EditMode::Insert), Move(Motion::LineEnd)]
             }
             "o" => {
                 self.enter_insert();

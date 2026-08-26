@@ -1439,7 +1439,12 @@ impl EditCore {
                 self.checkpoint(Group::Other);
                 self.buf_insert(at, &text);
                 let end = at + text.chars().count();
-                self.set_caret(end.saturating_sub(1).max(at));
+                let caret = if self.mode == EditMode::Insert {
+                    end
+                } else {
+                    end.saturating_sub(1).max(at)
+                };
+                self.set_caret(caret);
             }
             RegisterKind::Blockwise => {
                 let head = self.primary().head;
@@ -2036,6 +2041,62 @@ mod tests {
 
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+
+    fn typed_after_vim_keys(text: &str, caret: usize, keys: &[&str], typed: &str) -> String {
+        use crate::host::keymap::vim::VimKeymap;
+        use crate::keymap::{KeyInput, Keymap, Mods};
+
+        let mut c = core(text);
+        c.mode = EditMode::Normal;
+        c.set_caret(caret);
+        let mut keymap = VimKeymap::default();
+        for key in keys {
+            let stroke = KeyInput {
+                key: (*key).into(),
+                mods: Mods::default(),
+                repeat: false,
+            };
+            for cmd in keymap.handle(&stroke) {
+                c.apply(cmd);
+            }
+        }
+        c.apply(EditCommand::InsertText(typed.into()));
+        text_of(&c)
+    }
+
+    #[test]
+    fn append_at_line_end_types_past_the_last_character() {
+        assert_eq!(typed_after_vim_keys("ab\n", 0, &["A"], "X"), "abX\n");
+    }
+
+    #[test]
+    fn append_on_the_last_character_types_past_it() {
+        assert_eq!(typed_after_vim_keys("ab\n", 1, &["a"], "X"), "abX\n");
+    }
+
+    #[test]
+    fn pasting_while_inserting_types_after_the_pasted_text() {
+        let mut c = core("ab\n");
+        c.mode = EditMode::Insert;
+        c.registers.set_unnamed(RegisterValue::charwise("XY"));
+        c.set_caret(2);
+        c.apply(put(true));
+        c.apply(EditCommand::InsertText("Z".into()));
+
+        assert_eq!(text_of(&c), "abXYZ\n");
+    }
+
+    #[test]
+    fn putting_in_normal_mode_lands_on_the_last_pasted_character() {
+        let mut c = core("ab\n");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue::charwise("XY"));
+        c.set_caret(0);
+        c.apply(put(false));
+
+        assert_eq!(text_of(&c), "aXYb\n");
+        assert_eq!(c.primary().head, 2);
     }
 
     #[test]
