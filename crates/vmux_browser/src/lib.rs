@@ -899,6 +899,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let tab = Tab::default();
@@ -1061,6 +1062,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -1183,6 +1185,7 @@ mod tests {
                 auto_update: false,
                 agent: vmux_setting::AgentSettings::default(),
                 spaces: Default::default(),
+                projects: Default::default(),
                 recording: Default::default(),
                 editor: Default::default(),
                 appearance: Default::default(),

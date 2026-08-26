@@ -696,6 +696,30 @@ pub struct TabBoundary {
 )]
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
+    pub projects: Vec<ProjectRow>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectRow {
+    pub path: String,
+    pub label: String,
+    pub display_path: String,
+    pub depth: u32,
+    pub is_active: bool,
+    pub is_worktree: bool,
+    pub missing: bool,
+    pub branch: String,
 }
 
 #[derive(

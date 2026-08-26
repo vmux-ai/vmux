@@ -158,7 +158,9 @@ pub fn Page() -> Element {
     let tabs = tabs_state();
     let PaneTreeEvent { panes } = pane_tree_state();
     let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
-    let tab_boundary = boundary_state().boundary;
+    let boundary_event = boundary_state();
+    let tab_boundary = boundary_event.boundary;
+    let space_projects = boundary_event.projects;
     let layout_error = (layout_listener.error)();
     let stacks_error = (stacks_listener.error)();
     let tabs_error = (tabs_listener.error)();
@@ -235,6 +237,7 @@ pub fn Page() -> Element {
                             panes,
                             active_space,
                             tab_boundary,
+                            space_projects,
                             remote: remote_state(),
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
@@ -276,6 +279,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
+    space_projects: Vec<crate::event::ProjectRow>,
     remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
@@ -328,6 +332,7 @@ fn SideSheetView(
             if let Some(pane) = active_pane {
                 ProjectsCard {
                     boundary: project_boundary,
+                    projects: space_projects.clone(),
                     pane_id: pane.id,
                     expanded: pane.projects_expanded,
                 }
@@ -625,6 +630,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
 #[component]
 fn ProjectsCard(
     boundary: Option<crate::event::TabBoundary>,
+    projects: Vec<crate::event::ProjectRow>,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
@@ -682,9 +688,16 @@ fn ProjectsCard(
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
+                    if !projects.is_empty() {
+                        div { class: "flex flex-col border-t border-foreground/10 py-1",
+                            for project in projects.iter().cloned() {
+                                ProjectListRow { project }
+                            }
+                        }
+                    }
                     if let Some(boundary) = boundary {
                         TabBoundaryPanel { boundary }
-                    } else {
+                    } else if projects.is_empty() {
                         div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
                     }
                 }
@@ -693,8 +706,35 @@ fn ProjectsCard(
     }
 }
 
+#[component]
+fn ProjectListRow(project: crate::event::ProjectRow) -> Element {
+    let indent = if project.depth > 0 { "pl-7" } else { "pl-2.5" };
+    let tone = if project.missing {
+        "text-muted-foreground/50 line-through"
+    } else if project.is_active {
+        "text-foreground"
+    } else {
+        "text-muted-foreground"
+    };
+    rsx! {
+        div {
+            class: "flex items-center gap-2 {indent} pr-2.5 py-1 text-ui-xs {tone}",
+            title: "{project.display_path}",
+            span { class: "w-1.5 shrink-0 text-center",
+                if project.is_active { "•" } else { " " }
+            }
+            span { class: "truncate", "{project.label}" }
+            if !project.branch.is_empty() {
+                span { class: "ml-auto shrink-0 truncate text-[10px] text-muted-foreground/70",
+                    "{project.branch}"
+                }
+            }
+        }
+    }
+}
+
 fn dir_truncate_class(title: &str) -> &'static str {
-    if title.starts_with('/') || title.starts_with("~/") {
+    if title.contains('/') {
         "truncate-start"
     } else {
         "truncate"

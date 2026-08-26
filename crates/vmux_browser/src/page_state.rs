@@ -397,7 +397,26 @@ fn push_tab_boundary_emit(
             pane_count: leaves.len() as u32,
         })
     });
-    let payload = TabBoundaryEvent { boundary };
+    let mut projects = active_space
+        .as_deref()
+        .and_then(|space| settings.space(&space.record.id))
+        .map(vmux_setting::SpaceOverrides::project_rows)
+        .unwrap_or_default();
+    if let Some(cache) = repo_info.as_mut() {
+        let cache = cache.bypass_change_detection();
+        for row in &mut projects {
+            if row.missing {
+                continue;
+            }
+            if let Some(info) = cache.get(std::path::Path::new(&row.path)) {
+                row.branch = info.branch.clone();
+            }
+        }
+    }
+    for row in &mut projects {
+        row.display_path = abbreviate_home(std::path::Path::new(&row.path));
+    }
+    let payload = TabBoundaryEvent { boundary, projects };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
         return;

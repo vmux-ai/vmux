@@ -72,6 +72,10 @@ impl AppSettings {
         load_embedded_settings()
     }
 
+    pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
+        space_override(self, space_id)
+    }
+
     pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
         let known = self.remember_known_project(&project);
         let target = normalize_space_key(space_id);
@@ -304,6 +308,42 @@ impl SpaceOverrides {
                 self.active_project = Some(legacy);
             }
         }
+    }
+
+    pub fn project_rows(&self) -> Vec<vmux_layout::event::ProjectRow> {
+        use vmux_layout::event::ProjectRow;
+
+        let listed: std::collections::HashSet<&str> =
+            self.projects.iter().map(|p| p.path.as_str()).collect();
+        let active = self.active_dir();
+        let row = |project: &SpaceProject, depth: u32| ProjectRow {
+            path: project.path.clone(),
+            label: project.display_label().to_string(),
+            display_path: project.path.clone(),
+            depth,
+            is_active: active == Some(project.path.as_str()),
+            is_worktree: project.parent.is_some(),
+            missing: !std::path::Path::new(&project.path).is_dir(),
+            branch: String::new(),
+        };
+
+        let mut rows = Vec::with_capacity(self.projects.len());
+        for project in &self.projects {
+            let rooted = project
+                .parent
+                .as_deref()
+                .is_none_or(|parent| !listed.contains(parent));
+            if !rooted {
+                continue;
+            }
+            rows.push(row(project, 0));
+            for child in &self.projects {
+                if child.parent.as_deref() == Some(project.path.as_str()) {
+                    rows.push(row(child, 1));
+                }
+            }
+        }
+        rows
     }
 
     pub fn active_dir(&self) -> Option<&str> {
@@ -2143,6 +2183,50 @@ mod tests {
             resolve_startup_dir_for_tab_with_source(&settings, "work", None),
             Some((dir.path().to_path_buf(), DirSource::Space))
         );
+    }
+
+    #[test]
+    fn worktrees_sit_under_the_repository_they_came_from() {
+        let space = SpaceOverrides {
+            projects: vec![
+                SpaceProject::at("/repo/dashboard"),
+                SpaceProject::at("/repo/vmux"),
+                SpaceProject::under("/worktrees/a1b2", "/repo/dashboard"),
+                SpaceProject::under("/worktrees/c3d4", "/repo/dashboard"),
+            ],
+            active_project: Some("/worktrees/a1b2".to_string()),
+            ..Default::default()
+        };
+
+        let rows: Vec<(String, u32, bool)> = space
+            .project_rows()
+            .into_iter()
+            .map(|row| (row.path, row.depth, row.is_active))
+            .collect();
+
+        assert_eq!(
+            rows,
+            vec![
+                ("/repo/dashboard".to_string(), 0, false),
+                ("/worktrees/a1b2".to_string(), 1, true),
+                ("/worktrees/c3d4".to_string(), 1, false),
+                ("/repo/vmux".to_string(), 0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_worktree_whose_repository_is_not_listed_still_shows_up() {
+        let space = SpaceOverrides {
+            projects: vec![SpaceProject::under("/worktrees/a1b2", "/repo/gone")],
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows.len(), 1, "an unlisted parent must not swallow the row");
+        assert_eq!(rows[0].path, "/worktrees/a1b2");
+        assert_eq!(rows[0].depth, 0);
     }
 
     #[test]
