@@ -951,13 +951,32 @@ impl ProjectPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
+    pub open: Signal<bool>,
     pub levels: Signal<Vec<String>>,
     pub current: Signal<String>,
     pub agent_key: Signal<String>,
 }
 
+impl EffortPicker {
+    pub fn is_open(&self) -> bool {
+        (self.open)()
+    }
+
+    pub fn toggle(&self) {
+        let mut open = self.open;
+        let showing = *open.peek();
+        open.set(!showing);
+    }
+
+    pub fn close(&self) {
+        let mut open = self.open;
+        open.set(false);
+    }
+}
+
 pub fn use_effort_picker() -> EffortPicker {
     EffortPicker {
+        open: use_signal(|| false),
         levels: use_signal(Vec::new),
         current: use_signal(String::new),
         agent_key: use_signal(String::new),

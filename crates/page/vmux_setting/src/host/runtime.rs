@@ -367,6 +367,8 @@ impl SpaceOverrides {
             is_worktree: project.parent.is_some(),
             missing: !std::path::Path::new(&project.path).is_dir(),
             branch: String::new(),
+            kind: vmux_core::event::ProjectRowKind::Project,
+            expanded: false,
         };
 
         let mut rows = Vec::with_capacity(self.projects.len());

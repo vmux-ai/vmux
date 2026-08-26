@@ -58,9 +58,11 @@ impl Plugin for SpacePlugin {
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
-                BinEventEmitterPlugin::<(SpaceCommandEvent, ProjectCommandEvent)>::for_hosts(&[
-                    "spaces", "layout",
-                ]),
+                BinEventEmitterPlugin::<(
+                    SpaceCommandEvent,
+                    ProjectCommandEvent,
+                    vmux_core::event::ProjectTreeToggle,
+                )>::for_hosts(&["spaces", "layout"]),
             ))
             .add_observer(on_space_command)
             .add_observer(on_project_command)

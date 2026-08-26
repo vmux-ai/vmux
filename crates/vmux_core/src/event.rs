@@ -493,7 +493,7 @@ pub struct FileFoldToggle {
     pub line: u32,
 }
 
-pub use vmux_wire::space::{ProjectBranch, ProjectRow};
+pub use vmux_wire::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 
 #[derive(
     Debug,

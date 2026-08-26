@@ -378,6 +378,7 @@ menu-edit = 編輯
 layout-knowledge = 知識
 layout-projects = Projects
 layout-project-forget = 忘記此專案
+layout-project-activate = 在此開啟新分頁
 layout-no-project-selected = No project selected
 layout-open-knowledge = 開啟知識
 layout-open-welcome-knowledge = 開啟「歡迎使用知識」

@@ -378,6 +378,7 @@ menu-edit = 편집
 layout-knowledge = 지식
 layout-projects = Projects
 layout-project-forget = 이 프로젝트 잊기
+layout-project-activate = 여기에서 새 탭 열기
 layout-no-project-selected = No project selected
 layout-open-knowledge = 지식 열기
 layout-open-welcome-knowledge = 지식 시작하기 열기

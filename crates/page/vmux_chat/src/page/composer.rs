@@ -1,5 +1,5 @@
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
-use self::options::{ChatEffortMenu, ChatModelMenu, ChatModelPill};
+use self::options::{ChatEffortMenu, ChatEffortPill, ChatModelMenu, ChatModelPill};
 use self::workspace::{WorkspaceMenu, WorkspacePills};
 use super::agent::StatusDot;
 use super::approval::ChoiceList;
@@ -32,6 +32,9 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 }
                 if chat.projects.is_open() {
                     WorkspaceMenu { chat }
+                }
+                if chat.effort.is_open() {
+                    ChatEffortMenu { chat }
                 }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
@@ -87,7 +90,7 @@ fn ComposerFooter(chat: Chat) -> Element {
         div { class: "flex min-w-0 items-center justify-between gap-1",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
                 ChatModelPill { chat }
-                ChatEffortMenu { chat }
+                ChatEffortPill { chat }
                 WorkspacePills { chat }
             }
             ComposerStatus {

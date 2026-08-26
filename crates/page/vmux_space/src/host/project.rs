@@ -4,7 +4,9 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
+        app.init_resource::<ExpandedProjectDirs>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
+            .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,
                 (
@@ -15,6 +17,13 @@ impl Plugin for SpaceProjectPlugin {
                 ),
             );
     }
+}
+
+fn on_project_tree_toggle(
+    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::ProjectTreeToggle>>,
+    mut expanded: ResMut<ExpandedProjectDirs>,
+) {
+    expanded.toggle(&trigger.event().payload.path);
 }
 
 fn publish_project_roots(
@@ -33,10 +42,84 @@ fn publish_project_roots(
     }
 }
 
+#[derive(Resource, Default)]
+pub struct ExpandedProjectDirs(std::collections::BTreeSet<String>);
+
+impl ExpandedProjectDirs {
+    fn toggle(&mut self, path: &str) {
+        if !self.0.remove(path) {
+            self.0.insert(path.to_string());
+        }
+    }
+
+    fn holds(&self, path: &str) -> bool {
+        self.0.contains(path)
+    }
+
+    fn children_of(&self, dir: &std::path::Path, depth: u32) -> Vec<vmux_core::event::ProjectRow> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || UNLISTED_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path().to_string_lossy().into_owned();
+            rows.push(vmux_core::event::ProjectRow {
+                label: name,
+                display_path: path.clone(),
+                depth,
+                kind: match kind.is_dir() {
+                    true => vmux_core::event::ProjectRowKind::Directory,
+                    false => vmux_core::event::ProjectRowKind::File,
+                },
+                expanded: kind.is_dir() && self.holds(&path),
+                path,
+                is_active: false,
+                is_worktree: false,
+                missing: false,
+                branch: String::new(),
+            });
+        }
+        rows.sort_by(|a, b| {
+            let folder_first = b.kind.opens_a_tree().cmp(&a.kind.opens_a_tree());
+            folder_first.then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
+        });
+        let mut out = Vec::new();
+        for row in rows {
+            let descend = row.expanded;
+            let path = row.path.clone();
+            out.push(row);
+            if descend {
+                out.extend(self.children_of(std::path::Path::new(&path), depth + 1));
+            }
+        }
+        out
+    }
+}
+
+const UNLISTED_DIRS: &[&str] = &[
+    "DerivedData",
+    "Pods",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+    "venv",
+];
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
     active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
+    expanded: Option<Res<'w, ExpandedProjectDirs>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -66,7 +149,22 @@ impl SpaceProjects<'_, '_> {
         let Some(overrides) = settings.space(space_id) else {
             return Vec::new();
         };
-        overrides.project_rows()
+        let listed = overrides.project_rows();
+        let Some(expanded) = self.expanded.as_deref() else {
+            return listed;
+        };
+        let mut rows = Vec::new();
+        for mut project in listed {
+            let open = !project.missing && expanded.holds(&project.path);
+            project.expanded = open;
+            let path = project.path.clone();
+            let depth = project.depth;
+            rows.push(project);
+            if open {
+                rows.extend(expanded.children_of(std::path::Path::new(&path), depth + 1));
+            }
+        }
+        rows
     }
 }
 

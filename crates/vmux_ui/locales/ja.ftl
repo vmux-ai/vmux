@@ -363,6 +363,7 @@ menu-edit = 編集
 layout-knowledge = ナレッジ
 layout-projects = Projects
 layout-project-forget = このプロジェクトを忘れる
+layout-project-activate = 新しいタブをここで開く
 layout-no-project-selected = No project selected
 layout-open-knowledge = ナレッジを開く
 layout-open-welcome-knowledge = 「ナレッジへようこそ」を開く

@@ -476,6 +476,7 @@ menu-close-vmux = Close Vmux
 layout-knowledge = Knowledge
 layout-projects = Projects
 layout-project-forget = Forget this project
+layout-project-activate = Start new tabs here
 layout-no-project-selected = No project selected
 layout-open-knowledge = Open Knowledge
 layout-open-welcome-knowledge = Open Welcome to Knowledge

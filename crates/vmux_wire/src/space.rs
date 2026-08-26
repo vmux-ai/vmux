@@ -115,6 +115,52 @@ pub struct ProjectRow {
     pub is_worktree: bool,
     pub missing: bool,
     pub branch: String,
+    #[serde(default)]
+    pub kind: ProjectRowKind,
+    #[serde(default)]
+    pub expanded: bool,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ProjectRowKind {
+    #[default]
+    Project,
+    Directory,
+    File,
+}
+
+impl ProjectRowKind {
+    pub fn opens_a_tree(self) -> bool {
+        matches!(self, Self::Project | Self::Directory)
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectTreeToggle {
+    pub path: String,
 }
 
 #[derive(

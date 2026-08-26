@@ -683,7 +683,7 @@ fn ProjectsCard(
                     if !projects.is_empty() {
                         div { class: "flex flex-col border-t border-foreground/10 py-1",
                             for project in projects.iter().cloned() {
-                                ProjectListRow { project }
+                                ProjectListRow { project, pane_id }
                             }
                         }
                     } else if let Some(boundary) = boundary {
@@ -705,8 +705,10 @@ fn emit_project_command(command: &str, path: Option<String>) {
 }
 
 #[component]
-fn ProjectListRow(project: vmux_core::event::ProjectRow) -> Element {
-    let indent = if project.depth > 0 { "pl-7" } else { "pl-2.5" };
+fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Element {
+    let tree = project.kind.opens_a_tree();
+    let root = matches!(project.kind, vmux_core::event::ProjectRowKind::Project);
+    let indent = 0.5 + f64::from(project.depth) * 0.75;
     let tone = if project.missing {
         "text-muted-foreground/50 line-through"
     } else if project.is_active {
@@ -715,17 +717,30 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow) -> Element {
         "text-muted-foreground"
     };
     let activate = project.path.clone();
+    let activate_target = project.path.clone();
     let forget = project.path.clone();
     let forget_title = translate("layout-project-forget");
+    let activate_title = translate("layout-project-activate");
     rsx! {
         div { class: "group/project flex items-center transition-colors hover:bg-glass-hover",
             button {
                 r#type: "button",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 {indent} pr-1 py-1 text-left text-ui-xs {tone}",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 pr-1 py-1 text-left text-ui-xs {tone}",
+                style: "padding-left:{indent}rem;",
                 title: "{project.display_path}",
-                onclick: move |_| emit_project_command("activate", Some(activate.clone())),
-                span { class: "w-1.5 shrink-0 text-center",
-                    if project.is_active { "•" } else { " " }
+                onclick: move |_| match tree {
+                    true => {
+                        let _ = send(&vmux_core::event::ProjectTreeToggle { path: activate.clone() });
+                    }
+                    false => open_knowledge_path(pane_id, activate.clone()),
+                },
+                if tree {
+                    Icon {
+                        class: if project.expanded { "h-3 w-3 shrink-0 rotate-90 text-muted-foreground" } else { "h-3 w-3 shrink-0 text-muted-foreground" },
+                        path { d: "m9 18 6-6-6-6" }
+                    }
+                } else {
+                    span { class: "w-3 shrink-0" }
                 }
                 span { class: "truncate", "{project.label}" }
                 if !project.branch.is_empty() {
@@ -734,14 +749,26 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow) -> Element {
                     }
                 }
             }
-            button {
-                r#type: "button",
-                aria_label: "{forget_title}",
-                title: "{forget_title}",
-                class: "mr-2 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
-                onclick: move |_| emit_project_command("forget", Some(forget.clone())),
-                Icon { class: "h-3 w-3 pointer-events-none",
-                    path { d: "M18 6 6 18M6 6l12 12" }
+            if root {
+                button {
+                    r#type: "button",
+                    aria_label: "{activate_title}",
+                    title: "{activate_title}",
+                    class: if project.is_active { "mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-success" } else { "mr-1 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
+                    onclick: move |_| emit_project_command("activate", Some(activate_target.clone())),
+                    Icon { class: "h-3 w-3 pointer-events-none",
+                        path { d: "m5 12 4 4L19 6" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    aria_label: "{forget_title}",
+                    title: "{forget_title}",
+                    class: "mr-2 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
+                    onclick: move |_| emit_project_command("forget", Some(forget.clone())),
+                    Icon { class: "h-3 w-3 pointer-events-none",
+                        path { d: "M18 6 6 18M6 6l12 12" }
+                    }
                 }
             }
         }

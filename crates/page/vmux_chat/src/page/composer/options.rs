@@ -3,6 +3,9 @@ use crate::page::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::model_menu::{ModelMenu, ModelPill};
+use vmux_ui::components::prompt_box::{
+    PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED, PromptPopup,
+};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -38,6 +41,17 @@ pub(super) fn ChatModelMenu(chat: Chat) -> Element {
 }
 
 #[component]
+pub(super) fn ChatEffortPill(chat: Chat) -> Element {
+    rsx! {
+        EffortPill {
+            levels: (chat.effort.levels)(),
+            selected: (chat.effort.current)(),
+            on_open: move |()| chat.effort.toggle(),
+        }
+    }
+}
+
+#[component]
 pub(super) fn ChatEffortMenu(chat: Chat) -> Element {
     let mut current = chat.effort.current;
     let agent_key = (chat.effort.agent_key)();
@@ -46,10 +60,53 @@ pub(super) fn ChatEffortMenu(chat: Chat) -> Element {
             levels: (chat.effort.levels)(),
             selected: current(),
             on_select: move |level: String| {
+                chat.effort.close();
                 current.set(level.clone());
                 let _ = send(&SetAgentEffort { agent_key: agent_key.clone(), level });
                 focus_prompt_end(PROMPT_INPUT_ID);
             },
+            on_dismiss: move |()| chat.effort.close(),
+        }
+    }
+}
+
+#[component]
+pub fn EffortPill(levels: Vec<String>, selected: String, on_open: EventHandler<()>) -> Element {
+    if levels.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        button {
+            id: "chat-effort-trigger",
+            class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+            title: translate("agent-effort-tooltip"),
+            onmousedown: move |event| event.prevent_default(),
+            onclick: move |_| {
+                on_open.call(());
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+            svg {
+                class: "h-3.5 w-3.5 shrink-0",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.8",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M12 20a8 8 0 1 1 8-8" }
+                path { d: "M12 12l3.5-2" }
+            }
+            span { class: "truncate capitalize",
+                {if selected.is_empty() { translate("agent-effort") } else { selected.clone() }}
+            }
+            svg {
+                class: "h-3 w-3 shrink-0 opacity-50",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                path { d: "m8 10 4 4 4-4" }
+            }
         }
     }
 }
@@ -59,68 +116,25 @@ pub fn EffortMenu(
     levels: Vec<String>,
     selected: String,
     on_select: EventHandler<String>,
+    #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     if levels.is_empty() {
         return rsx! {};
     }
-    let mut menu_open = use_signal(|| false);
     rsx! {
-        div { class: "relative shrink-0",
-            button {
-                id: "chat-effort-trigger",
-                class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
-                title: translate("agent-effort-tooltip"),
-                onmousedown: move |event| event.prevent_default(),
-                onclick: move |_| {
-                    let next = !menu_open();
-                    menu_open.set(next);
-                    focus_prompt_end(PROMPT_INPUT_ID);
-                },
-                svg {
-                    class: "h-3.5 w-3.5 shrink-0",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "1.8",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M12 20a8 8 0 1 1 8-8" }
-                    path { d: "M12 12l3.5-2" }
-                }
-                span { class: "truncate capitalize",
-                    {if selected.is_empty() { translate("agent-effort") } else { selected.clone() }}
-                }
-                svg {
-                    class: "h-3 w-3 shrink-0 opacity-50",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path { d: "m8 10 4 4 4-4" }
-                }
+        PromptPopup { on_dismiss,
+            div { class: "px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
+            EffortOption {
+                level: None,
+                selected: selected.is_empty(),
+                on_pick: move |level| on_select.call(level),
             }
-            if menu_open() {
-                div { class: "absolute bottom-full left-0 z-20 mb-2 min-w-[9rem] rounded-2xl border border-foreground/10 bg-background/95 p-1.5 shadow-xl backdrop-blur-xl",
-                    div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
-                    EffortOption {
-                        level: None,
-                        selected: selected.is_empty(),
-                        on_pick: move |level| {
-                            menu_open.set(false);
-                            on_select.call(level);
-                        },
-                    }
-                    for level in levels.into_iter() {
-                        EffortOption {
-                            key: "effort-{level}",
-                            level: Some(level.clone()),
-                            selected: level == selected,
-                            on_pick: move |level| {
-                                menu_open.set(false);
-                                on_select.call(level);
-                            },
-                        }
-                    }
+            for level in levels.into_iter() {
+                EffortOption {
+                    key: "effort-{level}",
+                    level: Some(level.clone()),
+                    selected: level == selected,
+                    on_pick: move |level| on_select.call(level),
                 }
             }
         }
@@ -136,7 +150,7 @@ fn EffortOption(level: Option<String>, selected: bool, on_pick: EventHandler<Str
     let level = level.unwrap_or_default();
     rsx! {
         button {
-            class: if selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+            class: if selected { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED} text-foreground") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} text-foreground/75 hover:text-foreground") },
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_pick.call(level.clone()),
             span { class: "{label_class}", "{label}" }
