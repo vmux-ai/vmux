@@ -997,6 +997,16 @@ pub fn Page() -> Element {
                         }
                     }
                 }
+                GitBar {
+                    path: git_path,
+                    has_diff: git_has_diff,
+                    nonce: git_nonce,
+                    branch: git_branch,
+                    ahead: git_ahead,
+                    behind: git_behind,
+                    staged_count: git_staged,
+                    message: git_message,
+                }
                 {
                     tidy_prompt().map(|count| {
                         rsx! {
@@ -1037,17 +1047,6 @@ pub fn Page() -> Element {
                         }
                     })
                 }
-            }
-
-            GitBar {
-                path: git_path,
-                has_diff: git_has_diff,
-                nonce: git_nonce,
-                branch: git_branch,
-                ahead: git_ahead,
-                behind: git_behind,
-                staged_count: git_staged,
-                message: git_message,
             }
 
             {
