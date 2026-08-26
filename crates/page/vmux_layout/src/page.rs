@@ -330,17 +330,17 @@ fn SideSheetView(
                 }
             }
             if let Some(pane) = active_pane {
-                ProjectsCard {
-                    boundary: project_boundary,
-                    projects: space_projects.clone(),
-                    pane_id: pane.id,
-                    expanded: pane.projects_expanded,
-                }
                 BookmarksSection {
                     bookmarks: bookmarks.clone(),
                     active_page,
                     pane_id: pane.id,
                     expanded: pane.bookmarks_expanded,
+                }
+                ProjectsCard {
+                    boundary: project_boundary,
+                    projects: space_projects.clone(),
+                    pane_id: pane.id,
+                    expanded: pane.projects_expanded,
                 }
                 KnowledgeCard {
                     pane_id: pane.id,
