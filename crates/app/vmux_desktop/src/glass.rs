@@ -108,9 +108,7 @@ fn install_window_glass(
     backdrop_window.setFloatingPanel(false);
     backdrop_window.setBecomesKeyOnlyIfNeeded(true);
     backdrop.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::IgnoresCycle,
+        NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::IgnoresCycle,
     );
     let glass: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
     glass.setStyle(NSGlassEffectViewStyle::Clear);
