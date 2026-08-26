@@ -1440,6 +1440,34 @@ pub fn Page() -> Element {
                                             lsp_hover,
                                             hover_diag,
                                         }
+                                        if sel().is_empty() {
+                                            {
+                                                let mut caret_rows = carets()
+                                                    .iter()
+                                                    .map(|caret| caret.row)
+                                                    .collect::<Vec<_>>();
+                                                caret_rows.push(cursor().row);
+                                                caret_rows.sort_unstable();
+                                                caret_rows.dedup();
+                                                rsx! {
+                                                    for row in caret_rows {
+                                                        {
+                                                            let top = row as f64 * ch;
+                                                            let style = format!(
+                                                                "left:{gutter}px;right:0;top:{top}px;height:{ch}px;",
+                                                            );
+                                                            rsx! {
+                                                                div {
+                                                                    key: "curline{row}",
+                                                                    class: "pointer-events-none absolute z-0 bg-foreground/[0.05]",
+                                                                    style: "{style}",
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                         for s in word_spans().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
@@ -2146,7 +2174,7 @@ fn EditorLineRow(
     };
     rsx! {
         div {
-            class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start hover:bg-foreground/[0.035]" },
+            class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start" },
             style: "position:absolute;left:0;right:0;top:{lt}px;height:{line_height}px;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.prevent_default();
