@@ -223,31 +223,3 @@ fn EffortOption(level: Option<String>, selected: bool, on_pick: EventHandler<Str
         }
     }
 }
-
-#[component]
-pub(super) fn AccessPill(chat: Chat) -> Element {
-    let auto_allow_count = chat.slash.composer_context.read().auto_allow_count;
-    let label = if auto_allow_count == 0 {
-        "Ask".to_string()
-    } else {
-        format!("Ask · {auto_allow_count} allowed")
-    };
-    rsx! {
-        span {
-            class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
-            title: "Tools ask before protected actions; Allow always is remembered per agent, repository or working directory, and tool",
-            svg {
-                class: "h-3.5 w-3.5",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "1.8",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                path { d: "M12 3 5 6v5c0 4.8 2.9 8.2 7 10 4.1-1.8 7-5.2 7-10V6l-7-3Z" }
-                path { d: "m9 12 2 2 4-4" }
-            }
-            "{label}"
-        }
-    }
-}

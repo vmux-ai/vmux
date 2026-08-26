@@ -1,5 +1,5 @@
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
-use self::options::{AccessPill, ChatEffortMenu, ChatModelMenu, ChatModelPill};
+use self::options::{ChatEffortMenu, ChatModelMenu, ChatModelPill};
 use self::workspace::WorkspacePills;
 use super::agent::StatusDot;
 use super::approval::ChoiceList;
@@ -85,7 +85,6 @@ fn ComposerFooter(chat: Chat) -> Element {
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
                 ChatModelPill { chat }
                 ChatEffortMenu { chat }
-                AccessPill { chat }
                 WorkspacePills { chat }
             }
             ComposerStatus {

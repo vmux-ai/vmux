@@ -625,22 +625,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         path { d: "m8 10 4 4 4-4" }
                     }
                 }
-                span {
-                    class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
-                    title: "Tools ask before protected actions",
-                    svg {
-                        class: "h-3.5 w-3.5",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M12 3 5 6v5c0 4.8 2.9 8.2 7 10 4.1-1.8 7-5.2 7-10V6l-7-3Z" }
-                        path { d: "m9 12 2 2 4-4" }
-                    }
-                    "Ask"
-                }
                 div { class: "relative shrink-0",
                     button {
                         class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
