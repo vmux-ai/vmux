@@ -59,6 +59,15 @@ impl FoldState {
         }
     }
 
+    pub fn toggle_header(&mut self, start: u32) {
+        if self.region_at_start(start).is_none() {
+            return;
+        }
+        if !self.collapsed.remove(&start) {
+            self.collapsed.insert(start);
+        }
+    }
+
     pub fn open(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line) {
             self.collapsed.remove(&r.start);
@@ -339,6 +348,28 @@ mod tests {
         assert_eq!(s.gutter(2), FoldGutter::None);
         s.close(1);
         assert_eq!(s.gutter(1), FoldGutter::Collapsed);
+    }
+
+    #[test]
+    fn clicking_a_header_toggles_that_header_not_an_overlapping_region() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 3, end: 9 },
+            FoldRegion { start: 4, end: 5 },
+        ]);
+
+        s.toggle_header(4);
+
+        assert!(s.collapsed.contains(&4));
+        assert!(!s.collapsed.contains(&3));
+        assert_eq!(s.gutter(4), FoldGutter::Collapsed);
+    }
+
+    #[test]
+    fn clicking_a_line_that_starts_no_region_folds_nothing() {
+        let mut s = state();
+        s.toggle_header(2);
+        assert!(s.collapsed.is_empty());
     }
 
     #[test]

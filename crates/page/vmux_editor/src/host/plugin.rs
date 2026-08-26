@@ -1687,7 +1687,7 @@ fn on_file_fold_toggle(
     let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
         return;
     };
-    edit.folds.toggle(line);
+    edit.folds.toggle_header(line);
     sync_fold_view(&mut edit);
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);

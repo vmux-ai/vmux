@@ -2271,32 +2271,14 @@ fn EditorLineRow(
                     }
                 }
                 match fold {
-                    FoldGutter::Open => {
-                        let vis = if gutter_hover() { "opacity-100" } else { "opacity-0" };
-                        rsx! {
-                            span {
-                                class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 transition-opacity hover:!text-foreground {vis}",
-                                onmousedown: move |e: Event<MouseData>| {
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                    let _ = send(&FileFoldToggle { line: ln });
-                                },
-                                "⌄"
-                            }
-                        }
-                    }
-                    FoldGutter::Collapsed => rsx! {
-                        span {
-                            class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/70 hover:!text-foreground",
-                            onmousedown: move |e: Event<MouseData>| {
-                                e.stop_propagation();
-                                e.prevent_default();
-                                let _ = send(&FileFoldToggle { line: ln });
-                            },
-                            "›"
+                    FoldGutter::None => rsx! {},
+                    _ => rsx! {
+                        FoldMarker {
+                            line: ln,
+                            collapsed: fold == FoldGutter::Collapsed,
+                            revealed: gutter_hover(),
                         }
                     },
-                    FoldGutter::None => rsx! {},
                 }
             }
             span { class: "{text_class}", style: "{text_style}",
@@ -2325,6 +2307,35 @@ fn EditorLineRow(
                 if fold == FoldGutter::Collapsed {
                     span { class: "ml-1 rounded bg-white/10 px-1 text-foreground/40", "⋯" }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FoldMarker(line: u32, collapsed: bool, revealed: bool) -> Element {
+    let tone = match collapsed {
+        true => "text-foreground/60 opacity-100",
+        false if revealed => "text-foreground/35 opacity-100",
+        false => "text-foreground/35 opacity-0",
+    };
+    rsx! {
+        span {
+            class: "absolute right-0.5 flex h-full w-4 cursor-pointer items-center justify-center transition-opacity hover:!text-foreground {tone}",
+            onmousedown: move |e: Event<MouseData>| {
+                e.stop_propagation();
+                e.prevent_default();
+                let _ = send(&FileFoldToggle { line });
+            },
+            svg {
+                class: if collapsed { "h-3 w-3 -rotate-90" } else { "h-3 w-3" },
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2.5",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "m6 9 6 6 6-6" }
             }
         }
     }
