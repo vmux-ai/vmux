@@ -11,6 +11,7 @@ impl Plugin for CommandBarSnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandBarAgentsSnapshot>()
             .init_resource::<CommandBarWorkspaceSnapshot>()
+            .init_resource::<CommandBarProjectRoots>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
@@ -29,6 +30,11 @@ pub struct CommandBarWorkspaceSnapshot {
     pub tabs: Vec<vmux_wire::command_bar::CommandBarTab>,
     pub stack_count: usize,
     pub project_root: Option<String>,
+}
+
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarProjectRoots {
+    pub roots: Vec<String>,
 }
 
 #[derive(Resource, Default, Clone, Debug)]

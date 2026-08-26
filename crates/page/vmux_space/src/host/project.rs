@@ -6,8 +6,29 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            remember_space_project.before(vmux_layout::settings::EffectiveStartupDirSet),
+            (
+                remember_space_project.before(vmux_layout::settings::EffectiveStartupDirSet),
+                publish_project_roots
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots)
+                    .after(remember_space_project),
+            ),
         );
+    }
+}
+
+fn publish_project_roots(
+    projects: SpaceProjects,
+    mut roots: ResMut<vmux_command::snapshot::CommandBarProjectRoots>,
+) {
+    let mut next = Vec::new();
+    for project in projects.active_rows() {
+        if project.missing {
+            continue;
+        }
+        next.push(project.path);
+    }
+    if roots.roots != next {
+        roots.roots = next;
     }
 }
 
@@ -22,20 +43,26 @@ pub struct SpaceProjects<'w, 's> {
 
 impl SpaceProjects<'_, '_> {
     pub fn rows(&self, entity: Entity) -> Vec<vmux_core::event::ProjectRow> {
+        let space_id =
+            vmux_layout::space::space_id_of(entity, &self.child_of, &self.spaces, &self.space_ids);
+        let Some(space_id) = space_id else {
+            return self.active_rows();
+        };
+        self.rows_of(&space_id)
+    }
+
+    pub fn active_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
+        let Some(active) = self.active_space.as_deref() else {
+            return Vec::new();
+        };
+        self.rows_of(&active.record.id)
+    }
+
+    fn rows_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
         let Some(settings) = self.settings.as_deref() else {
             return Vec::new();
         };
-        let space_id =
-            vmux_layout::space::space_id_of(entity, &self.child_of, &self.spaces, &self.space_ids)
-                .or_else(|| {
-                    self.active_space
-                        .as_deref()
-                        .map(|space| space.record.id.clone())
-                });
-        let Some(space_id) = space_id else {
-            return Vec::new();
-        };
-        let Some(overrides) = settings.space(&space_id) else {
+        let Some(overrides) = settings.space(space_id) else {
             return Vec::new();
         };
         overrides.project_rows()
