@@ -1340,13 +1340,21 @@ fn emit_cursor(
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
-    let matches = edit.core.search_matches();
+    edit.core.refresh_search_matches();
+    let matches = edit.core.cached_search_matches();
     let raw_search = edit
         .core
-        .search_spans(&matches, span_first, span_rows)
+        .search_spans(matches, span_first, span_rows)
         .into_iter()
         .filter(|span| !view.is_hidden(span.line))
         .collect::<Vec<_>>();
+    let caret = edit.core.primary().head;
+    let search_index = matches
+        .iter()
+        .position(|found| found.contains(&caret) || found.start == caret)
+        .map(|at| at as u32 + 1)
+        .unwrap_or_default();
+    let search_total = matches.len() as u32;
     let raw_carets: Vec<_> = edit
         .core
         .cursor_positions()
@@ -1362,13 +1370,6 @@ fn emit_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    let caret = edit.core.primary().head;
-    let search_index = matches
-        .iter()
-        .position(|found| found.contains(&caret) || found.start == caret)
-        .map(|at| at as u32 + 1)
-        .unwrap_or_default();
-    let search_total = matches.len() as u32;
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,

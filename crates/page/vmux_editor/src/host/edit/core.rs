@@ -96,6 +96,7 @@ pub struct EditCore {
     memory: Vec<CaretMemory>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
+    search_cache: Option<(u64, String, Vec<std::ops::Range<usize>>)>,
     block_insert: Option<(Vec<usize>, usize)>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
@@ -129,6 +130,7 @@ impl EditCore {
             memory: vec![CaretMemory::default()],
             fold_view,
             search: None,
+            search_cache: None,
             block_insert: None,
             search_highlight: false,
             marks: std::collections::HashMap::new(),
@@ -584,6 +586,31 @@ impl EditCore {
             out.push(chars..chars + len);
         }
         out
+    }
+
+    pub fn refresh_search_matches(&mut self) {
+        let Some(search) = self.search.as_ref() else {
+            self.search_cache = None;
+            return;
+        };
+        if self
+            .search_cache
+            .as_ref()
+            .is_some_and(|(rev, pattern, _)| *rev == self.rev && *pattern == search.pattern)
+        {
+            return;
+        }
+        let rev = self.rev;
+        let pattern = search.pattern.clone();
+        let matches = self.search_matches();
+        self.search_cache = Some((rev, pattern, matches));
+    }
+
+    pub fn cached_search_matches(&self) -> &[std::ops::Range<usize>] {
+        match self.search_cache.as_ref() {
+            Some((_, _, matches)) => matches,
+            None => &[],
+        }
     }
 
     fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
@@ -2126,6 +2153,37 @@ mod tests {
     #[test]
     fn append_on_the_last_character_types_past_it() {
         assert_eq!(typed_after_vim_keys("ab\n", 1, &["a"], "X"), "abX\n");
+    }
+
+    #[test]
+    fn cached_search_matches_follow_an_edit_and_a_new_pattern() {
+        let mut c = core("foo bar foo\n");
+        c.mode = EditMode::Normal;
+        let count = |c: &mut EditCore| {
+            c.refresh_search_matches();
+            c.cached_search_matches().len()
+        };
+
+        c.apply(EditCommand::SetSearch {
+            pattern: "foo".into(),
+            forward: true,
+        });
+        assert_eq!(count(&mut c), 2);
+
+        c.mode = EditMode::Insert;
+        c.set_caret(0);
+        c.apply(EditCommand::InsertText("foo ".into()));
+        assert_eq!(count(&mut c), 3, "an edit must not serve a stale match set");
+
+        c.apply(EditCommand::SetSearch {
+            pattern: "bar".into(),
+            forward: true,
+        });
+        assert_eq!(
+            count(&mut c),
+            1,
+            "a new pattern must not serve the old one's matches"
+        );
     }
 
     #[test]
