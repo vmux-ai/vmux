@@ -3,11 +3,12 @@ use std::collections::{HashMap, HashSet};
 use super::scroll;
 use crate::event::{
     ApprovalDecision, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
-    CHAT_HISTORY_PAGE_EVENT, CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT,
-    COMPOSER_CONTEXT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatChoiceSelected, ChatEscape,
-    ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    CHAT_HISTORY_PAGE_EVENT, CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT,
+    CHAT_PROJECT_BRANCHES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval,
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBranch,
+    ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
+    ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatPickFiles, ChatProjectBranches, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
     ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
@@ -43,6 +44,7 @@ pub struct Chat {
     pub media: MediaPicker,
     pub models: ModelPicker,
     pub effort: EffortPicker,
+    pub projects: ProjectPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
     pub activity_counts: Memo<(usize, usize)>,
@@ -64,6 +66,7 @@ pub fn use_chat() -> Chat {
         media: use_media_picker(),
         models: use_model_picker(),
         effort: use_effort_picker(),
+        projects: use_project_picker(),
         slash: use_slash_commands(),
         resume: use_resume(),
         activity_counts: use_memo(move || vmux_wire::chat::activity_counts(&items.read())),
@@ -136,6 +139,13 @@ impl Chat {
             let mut composer_context = chat.slash.composer_context;
             composer_context.set(context.clone());
         });
+        let _branches =
+            use_listener::<ChatProjectBranches, _>(CHAT_PROJECT_BRANCHES_EVENT, move |incoming| {
+                let mut branches = chat.projects.branches;
+                let mut branches_for = chat.projects.branches_for;
+                branches.set(incoming.branches.clone());
+                branches_for.set(incoming.project.clone());
+            });
         let _sessions =
             use_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |incoming| {
                 let mut sessions = chat.resume.sessions;
@@ -886,6 +896,46 @@ pub fn use_model_picker() -> ModelPicker {
         models: use_signal(Vec::new),
         current_model_id: use_signal(String::new),
         current_model: use_signal(String::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct ProjectPicker {
+    pub expanded: Signal<String>,
+    pub branches: Signal<Vec<ChatBranch>>,
+    pub branches_for: Signal<String>,
+}
+
+pub fn use_project_picker() -> ProjectPicker {
+    ProjectPicker {
+        expanded: use_signal(String::new),
+        branches: use_signal(Vec::new),
+        branches_for: use_signal(String::new),
+    }
+}
+
+impl ProjectPicker {
+    pub fn expand(&self, project: &str) {
+        let mut expanded = self.expanded;
+        if expanded.peek().as_str() == project {
+            expanded.set(String::new());
+            return;
+        }
+        expanded.set(project.to_string());
+        if self.branches_for.peek().as_str() != project {
+            let mut branches = self.branches;
+            branches.set(Vec::new());
+        }
+        let _ = send(&ChatBranchesRequest {
+            project: project.to_string(),
+        });
+    }
+
+    pub fn listed(&self, project: &str) -> Option<Vec<ChatBranch>> {
+        if self.branches_for.read().as_str() != project {
+            return None;
+        }
+        Some(self.branches.read().clone())
     }
 }
 

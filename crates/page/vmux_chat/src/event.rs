@@ -88,6 +88,7 @@ pub struct ComposerContext {
     pub ahead: u32,
     pub can_manage_workspace: bool,
     pub auto_allow_count: u32,
+    pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
 #[derive(
@@ -251,6 +252,72 @@ pub struct ChatSelectWorkspace;
     rkyv::Deserialize,
 )]
 pub struct ChatCreateWorktree;
+
+pub const CHAT_PROJECT_BRANCHES_EVENT: &str = "chat_project_branches";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatBranchesRequest {
+    pub project: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatProjectBranches {
+    pub project: String,
+    pub branches: Vec<ChatBranch>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatBranch {
+    pub branch: String,
+    pub checkout: String,
+    pub label: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatGoToBranch {
+    pub project: String,
+    pub branch: String,
+    #[serde(default)]
+    pub checkout: String,
+}
 
 pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";
 pub const SLASH_COMMANDS_EVENT: &str = "slash_commands";

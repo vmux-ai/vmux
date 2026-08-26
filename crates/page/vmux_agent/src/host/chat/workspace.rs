@@ -4,7 +4,8 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use super::AgentChatView;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
-    COMPOSER_CONTEXT_EVENT, ChatCreateWorktree, ChatSelectWorkspace, ComposerContext,
+    CHAT_PROJECT_BRANCHES_EVENT, COMPOSER_CONTEXT_EVENT, ChatBranch, ChatBranchesRequest,
+    ChatCreateWorktree, ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
 use vmux_session::AcpSession;
@@ -17,10 +18,14 @@ impl Plugin for ChatWorkspacePlugin {
         app.add_plugins(BinEventEmitterPlugin::<(
             ChatSelectWorkspace,
             ChatCreateWorktree,
+            ChatBranchesRequest,
+            ChatGoToBranch,
         )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_create_worktree)
-            .add_systems(Update, push_composer_context_to_page);
+            .add_observer(on_chat_branches_request)
+            .add_observer(on_chat_go_to_branch)
+            .add_systems(Update, (push_composer_context_to_page, drain_branch_reads));
     }
 }
 
@@ -31,6 +36,37 @@ struct ComposerContextInput {
     worktree: Option<vmux_layout::tab::TabWorktree>,
     can_manage_workspace: bool,
     auto_allow_count: u32,
+    projects: Vec<vmux_core::event::ProjectRow>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpaceProjects<'w, 's> {
+    settings: Option<Res<'w, vmux_setting::AppSettings>>,
+    active_space: Option<Res<'w, vmux_space::ActiveSpace>>,
+    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
+    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+}
+
+impl SpaceProjects<'_, '_> {
+    fn rows(&self, stack: Entity, child_of: &Query<&ChildOf>) -> Vec<vmux_core::event::ProjectRow> {
+        let Some(settings) = self.settings.as_deref() else {
+            return Vec::new();
+        };
+        let space_id =
+            vmux_layout::space::space_id_of(stack, child_of, &self.spaces, &self.space_ids)
+                .or_else(|| {
+                    self.active_space
+                        .as_deref()
+                        .map(|space| space.record.id.clone())
+                });
+        let Some(space_id) = space_id else {
+            return Vec::new();
+        };
+        let Some(overrides) = settings.space(&space_id) else {
+            return Vec::new();
+        };
+        overrides.project_rows()
+    }
 }
 
 #[derive(Default)]
@@ -55,6 +91,7 @@ fn push_composer_context_to_page(
     )>,
     browsers: NonSend<Browsers>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    space_projects: SpaceProjects,
     mut cache: Local<ComposerContextCache>,
     mut commands: Commands,
 ) {
@@ -73,7 +110,8 @@ fn push_composer_context_to_page(
         let Ok((acp, policy)) = sessions.get(stack) else {
             continue;
         };
-        let input = composer_context_input(stack, acp, policy, &child_of, &tabs);
+        let mut input = composer_context_input(stack, acp, policy, &child_of, &tabs);
+        input.projects = space_projects.rows(stack, &child_of);
         let info = (!input.cwd.as_os_str().is_empty())
             .then(|| {
                 repo_info
@@ -136,6 +174,7 @@ fn composer_context_input(
         auto_allow_count: policy
             .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
             .unwrap_or_default(),
+        projects: Vec::new(),
     }
 }
 
@@ -176,7 +215,113 @@ fn composer_context_from_input(
         ahead: info.map(|info| info.ahead).unwrap_or_default(),
         can_manage_workspace: input.can_manage_workspace,
         auto_allow_count: input.auto_allow_count,
+        projects: input.projects.clone(),
     }
+}
+
+#[derive(Component)]
+struct BranchRead {
+    webview: Entity,
+    project: String,
+    task: bevy::tasks::Task<Vec<ChatBranch>>,
+}
+
+fn on_chat_branches_request(trigger: On<BinReceive<ChatBranchesRequest>>, mut commands: Commands) {
+    let webview = trigger.event().webview;
+    let project = trigger.event().payload.project.trim().to_string();
+    if project.is_empty() {
+        return;
+    }
+    let root = std::path::PathBuf::from(&project);
+    let task = bevy::tasks::IoTaskPool::get().spawn(async move {
+        let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {
+            return Vec::new();
+        };
+        holders
+            .into_iter()
+            .map(|holder| {
+                let checkout = holder
+                    .checkout
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let label = holder
+                    .checkout
+                    .as_ref()
+                    .and_then(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                ChatBranch {
+                    branch: holder.branch,
+                    checkout,
+                    label,
+                }
+            })
+            .collect()
+    });
+    commands.spawn(BranchRead {
+        webview,
+        project,
+        task,
+    });
+}
+
+fn drain_branch_reads(
+    mut reads: Query<(Entity, &mut BranchRead)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    use bevy::tasks::futures_lite::future;
+
+    for (entity, mut read) in &mut reads {
+        let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if !browsers.can_emit_to(&read.webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            read.webview,
+            CHAT_PROJECT_BRANCHES_EVENT,
+            &ChatProjectBranches {
+                project: read.project.clone(),
+                branches,
+            },
+        ));
+    }
+}
+
+fn on_chat_go_to_branch(
+    trigger: On<BinReceive<ChatGoToBranch>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<&AcpSession>,
+    mut requests: MessageWriter<AgentCommandRequest>,
+) {
+    let evt = &trigger.event().payload;
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok(session) = sessions.get(parent.parent()) else {
+        return;
+    };
+    let checkout = evt.checkout.trim();
+    let command = if checkout.is_empty() {
+        ServiceAgentCommand::CreateWorktreeOnBranch {
+            anchor: session.anchor,
+            branch: evt.branch.clone(),
+        }
+    } else {
+        ServiceAgentCommand::ChooseWorkspaceAtPath {
+            anchor: session.anchor,
+            path: checkout.to_string(),
+        }
+    };
+    requests.write(AgentCommandRequest {
+        request_id: AgentRequestId::new(),
+        origin: CommandOrigin::User,
+        command,
+    });
 }
 
 fn on_chat_select_workspace(
