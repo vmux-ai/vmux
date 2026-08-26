@@ -352,8 +352,8 @@ impl SpaceOverrides {
         }
     }
 
-    pub fn project_rows(&self) -> Vec<vmux_layout::event::ProjectRow> {
-        use vmux_layout::event::ProjectRow;
+    pub fn project_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
+        use vmux_core::event::ProjectRow;
 
         let listed: std::collections::HashSet<&str> =
             self.projects.iter().map(|p| p.path.as_str()).collect();

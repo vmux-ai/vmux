@@ -279,7 +279,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
-    space_projects: Vec<crate::event::ProjectRow>,
+    space_projects: Vec<vmux_core::event::ProjectRow>,
     remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
@@ -630,7 +630,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
 #[component]
 fn ProjectsCard(
     boundary: Option<crate::event::TabBoundary>,
-    projects: Vec<crate::event::ProjectRow>,
+    projects: Vec<vmux_core::event::ProjectRow>,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
@@ -714,7 +714,7 @@ fn emit_project_command(command: &str, path: Option<String>) {
 }
 
 #[component]
-fn ProjectListRow(project: crate::event::ProjectRow) -> Element {
+fn ProjectListRow(project: vmux_core::event::ProjectRow) -> Element {
     let indent = if project.depth > 0 { "pl-7" } else { "pl-2.5" };
     let tone = if project.missing {
         "text-muted-foreground/50 line-through"
