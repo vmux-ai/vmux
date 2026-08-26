@@ -127,7 +127,7 @@ pub fn Page() -> Element {
     let mut explorer_resizing = use_signal(|| false);
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
-    let explorer_reflowed_at = use_signal(|| 0u32);
+    let explorer_reflowed_at = use_signal(|| Option::<ExplorerReflowKey>::None);
     let explorer = ExplorerPane {
         visible: explorer_visible,
         preferred_visible: explorer_preferred_visible,
@@ -3798,6 +3798,13 @@ fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
     page_width > 0 && NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ExplorerReflowKey {
+    page_width: u32,
+    width: u32,
+    preferred_visible: bool,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub struct ExplorerPane {
     pub visible: Signal<bool>,
@@ -3806,7 +3813,7 @@ pub struct ExplorerPane {
     pub page_width: Signal<u32>,
     pub client_id: Signal<u64>,
     pub request_id: Signal<u64>,
-    pub reflowed_at: Signal<u32>,
+    pub reflowed_at: Signal<Option<ExplorerReflowKey>>,
 }
 
 impl ExplorerPane {
@@ -3814,13 +3821,21 @@ impl ExplorerPane {
         explorer_has_room((self.page_width)(), (self.width)())
     }
 
+    fn reflow_key(self) -> ExplorerReflowKey {
+        ExplorerReflowKey {
+            page_width: (self.page_width)(),
+            width: (self.width)(),
+            preferred_visible: (self.preferred_visible)(),
+        }
+    }
+
     fn sync(mut self) {
-        let page_width = (self.page_width)();
-        if page_width == 0 || (self.reflowed_at)() == page_width {
+        let key = self.reflow_key();
+        if key.page_width == 0 || (self.reflowed_at)() == Some(key) {
             return;
         }
-        self.reflowed_at.set(page_width);
-        let next = (self.preferred_visible)() && self.has_room();
+        self.reflowed_at.set(Some(key));
+        let next = key.preferred_visible && self.has_room();
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -3831,7 +3846,7 @@ impl ExplorerPane {
         self.request_id.set(request_id);
         self.preferred_visible.set(next);
         self.visible.set(next);
-        self.reflowed_at.set((self.page_width)());
+        self.reflowed_at.set(Some(self.reflow_key()));
         let _ = send(&ExplorerPanelSetVisible {
             visible: next,
             client_id: (self.client_id)(),

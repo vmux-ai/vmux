@@ -493,6 +493,7 @@ impl EditCore {
         self.selections = state.selections;
         self.active = 0;
         self.rev = state.rev;
+        self.search_cache = None;
         self.dirty = self.saved_rev != Some(self.rev);
         self.break_group();
         let len = self.buffer.len_chars();
@@ -679,8 +680,8 @@ impl EditCore {
                 out.push(SelSpan {
                     line: line as u32,
                     row: line as u32,
-                    start: column as u32,
-                    end: (absolute + needle.len() - line_start) as u32,
+                    start: self.vis_col(line_start, column),
+                    end: self.vis_col(line_start, absolute + needle.len() - line_start),
                 });
                 at += needle.len();
                 continue;
@@ -2183,6 +2184,31 @@ mod tests {
             count(&mut c),
             1,
             "a new pattern must not serve the old one's matches"
+        );
+    }
+
+    #[test]
+    fn cached_search_matches_survive_an_undo_onto_a_different_edit() {
+        let mut c = core("foo\n");
+        c.mode = EditMode::Insert;
+        c.apply(EditCommand::SetSearch {
+            pattern: "foo".into(),
+            forward: true,
+        });
+        c.set_caret(3);
+        c.apply(EditCommand::InsertText(" foo".into()));
+        c.refresh_search_matches();
+        assert_eq!(c.cached_search_matches().len(), 2);
+
+        c.apply(EditCommand::Undo);
+        c.set_caret(3);
+        c.apply(EditCommand::InsertText(" foo foo".into()));
+        c.refresh_search_matches();
+
+        assert_eq!(
+            c.cached_search_matches().len(),
+            3,
+            "a revision number is reused across undo branches, so it cannot key the cache alone"
         );
     }
 
