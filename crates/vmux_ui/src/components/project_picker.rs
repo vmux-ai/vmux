@@ -1,7 +1,10 @@
 use dioxus::prelude::*;
 use vmux_core::event::{ProjectBranch, ProjectRow};
 
-use crate::components::prompt_box::{PromptPopup, PromptPopupPlacement};
+use crate::components::prompt_box::{
+    PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED,
+    PromptPopup, PromptPopupPlacement,
+};
 use crate::i18n::translate;
 
 #[derive(Clone, PartialEq, Props)]
@@ -46,7 +49,7 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
     rsx! {
         PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
             if roots.is_empty() {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-none")} }
+                div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-project-none")} }
             }
             for project in roots {
                 ProjectPickerRow {
@@ -57,15 +60,16 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
                 }
                 if expanded == project.path {
                     if branches_for != project.path {
-                        div { class: "px-3.5 py-1.5 pl-8 text-xs text-muted-foreground", {translate("agent-project-loading-branches")} }
+                        div { class: "{PROMPT_MENU_ROW} {PROMPT_MENU_INDENT} text-muted-foreground", {translate("agent-project-loading-branches")} }
                     } else if branches.is_empty() {
-                        div { class: "px-3.5 py-1.5 pl-8 text-xs text-muted-foreground", {translate("agent-project-no-branches")} }
+                        div { class: "{PROMPT_MENU_ROW} {PROMPT_MENU_INDENT} text-muted-foreground", {translate("agent-project-no-branches")} }
                     } else {
                         for branch in branches.iter().cloned() {
                             ProjectBranchRow {
                                 key: "pb{project.path}/{branch.branch}",
                                 project: project.path.clone(),
                                 branch,
+                                indent: true,
                                 on_pick: move |pick| on_pick.call(pick),
                             }
                         }
@@ -73,7 +77,7 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
                 }
             }
             button {
-                class: "flex w-full items-center gap-2 border-t border-foreground/10 px-3.5 py-2 text-left text-sm text-muted-foreground transition hover:bg-foreground/[0.06] hover:text-foreground",
+                class: "{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} border-t border-foreground/10 text-muted-foreground hover:text-foreground",
                 onmousedown: move |event| event.prevent_default(),
                 onclick: move |_| on_choose_another.call(()),
                 {translate("agent-project-choose-another")}
@@ -94,15 +98,16 @@ pub fn BranchPicker(
     rsx! {
         PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
             if !loaded {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-loading-branches")} }
+                div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-project-loading-branches")} }
             } else if branches.is_empty() {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-project-no-branches")} }
+                div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-project-no-branches")} }
             } else {
                 for branch in branches {
                     ProjectBranchRow {
                         key: "bp{branch.branch}",
                         project: project.clone(),
                         branch,
+                        indent: false,
                         on_pick: move |pick| on_pick.call(pick),
                     }
                 }
@@ -116,7 +121,7 @@ fn ProjectPickerRow(project: ProjectRow, open: bool, on_toggle: EventHandler<Str
     let path = project.path.clone();
     rsx! {
         button {
-            class: if project.is_active { "flex w-full items-center gap-2 bg-foreground/[0.06] px-3.5 py-2 text-left text-sm" } else { "flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm transition hover:bg-foreground/[0.06]" },
+            class: if project.is_active { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED}") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE}") },
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_toggle.call(path.clone()),
             svg {
@@ -144,6 +149,7 @@ fn ProjectPickerRow(project: ProjectRow, open: bool, on_toggle: EventHandler<Str
 fn ProjectBranchRow(
     project: String,
     branch: ProjectBranch,
+    indent: bool,
     on_pick: EventHandler<ProjectPick>,
 ) -> Element {
     let held = branch.held();
@@ -158,7 +164,7 @@ fn ProjectBranchRow(
     };
     rsx! {
         button {
-            class: "flex w-full items-center gap-2 py-1.5 pl-8 pr-3.5 text-left text-xs transition hover:bg-foreground/[0.06]",
+            class: if indent { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} {PROMPT_MENU_INDENT}") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE}") },
             title: "{title}",
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_pick.call(pick.clone()),

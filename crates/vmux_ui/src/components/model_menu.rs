@@ -1,7 +1,10 @@
 use dioxus::prelude::*;
 use vmux_wire::room::ModelOptionEntry;
 
-use crate::components::prompt_box::{PromptPopup, PromptPopupPlacement};
+use crate::components::prompt_box::{
+    PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED, PromptPopup,
+    PromptPopupPlacement,
+};
 use crate::i18n::translate;
 
 #[component]
@@ -52,13 +55,13 @@ pub fn ModelMenu(
     rsx! {
         PromptPopup { placement, on_dismiss,
             if models.is_empty() {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-matching-models")} }
+                div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-no-matching-models")} }
             } else {
                 for (i , model) in models.into_iter().enumerate() {
                     div {
                         key: "model{i}",
                         id: "agent-selector-item-{i}",
-                        class: if i == selected { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                        class: if i == selected { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED} cursor-pointer flex-col items-stretch gap-0.5") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} cursor-pointer flex-col items-stretch gap-0.5") },
                         onmouseenter: move |_| on_hover.call(i),
                         onclick: {
                             let model = model.clone();

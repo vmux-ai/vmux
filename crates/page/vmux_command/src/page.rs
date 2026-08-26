@@ -27,7 +27,10 @@ use vmux_ui::components::composer::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::model_menu::{ModelMenu, ModelPill};
 use vmux_ui::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker};
-use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
+use vmux_ui::components::prompt_box::{
+    PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED, PromptBox, PromptPopup,
+    PromptPopupPlacement,
+};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
@@ -971,7 +974,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         rsx! {
                                             button {
                                                 key: "{url}",
-                                                class: if option_selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-2 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                                class: if option_selected { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED} text-foreground") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} text-foreground/75 hover:text-foreground") },
                                                 onmousedown: move |event| event.prevent_default(),
                                                 onclick: move |_| {
                                                     start_target_url.set(option_url.clone());
