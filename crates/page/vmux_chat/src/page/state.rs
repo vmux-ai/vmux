@@ -715,6 +715,16 @@ impl Chat {
         }
     }
 
+    pub fn open_only(&self, menu: ComposerMenu) {
+        if !matches!(menu, ComposerMenu::Effort) {
+            self.effort.close();
+        }
+        if !matches!(menu, ComposerMenu::Projects) {
+            self.projects.close();
+        }
+        self.dismiss_selector();
+    }
+
     pub fn dismiss_selector(&self) {
         let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
@@ -947,6 +957,12 @@ impl ProjectPicker {
             project: project.to_string(),
         });
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ComposerMenu {
+    Effort,
+    Projects,
 }
 
 #[derive(Clone, Copy, PartialEq)]

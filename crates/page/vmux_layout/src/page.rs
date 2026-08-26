@@ -29,6 +29,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::tree_row::SidebarTreeRow;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
@@ -708,46 +709,32 @@ fn emit_project_command(command: &str, path: Option<String>) {
 fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Element {
     let tree = project.kind.opens_a_tree();
     let root = matches!(project.kind, vmux_core::event::ProjectRowKind::Project);
-    let indent = 0.5 + f64::from(project.depth) * 0.75;
-    let tone = if project.missing {
-        "text-muted-foreground/50 line-through"
-    } else if project.is_active {
-        "text-foreground"
-    } else {
-        "text-muted-foreground"
-    };
     let activate = project.path.clone();
     let activate_target = project.path.clone();
     let forget = project.path.clone();
     let forget_title = translate("layout-project-forget");
     let activate_title = translate("layout-project-activate");
     rsx! {
-        div { class: "group/project flex items-center transition-colors hover:bg-glass-hover",
-            button {
-                r#type: "button",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 pr-1 py-1 text-left text-ui-xs {tone}",
-                style: "padding-left:{indent}rem;",
-                title: "{project.display_path}",
-                onclick: move |_| match tree {
+        div { class: "group/project flex items-center",
+            SidebarTreeRow {
+                path: project.path.clone(),
+                label: project.label.clone(),
+                is_dir: tree,
+                expanded: project.expanded,
+                depth: project.depth,
+                emphasis: root,
+                title: project.display_path.clone(),
+                on_activate: move |()| match tree {
                     true => {
                         let _ = send(&vmux_core::event::ProjectTreeToggle { path: activate.clone() });
                     }
                     false => open_knowledge_path(pane_id, activate.clone()),
                 },
-                if tree {
-                    Icon {
-                        class: if project.expanded { "h-3 w-3 shrink-0 rotate-90 text-muted-foreground" } else { "h-3 w-3 shrink-0 text-muted-foreground" },
-                        path { d: "m9 18 6-6-6-6" }
+                trailing: rsx! {
+                    if !project.branch.is_empty() {
+                        span { class: "shrink-0 truncate text-[10px] text-muted-foreground/70", "{project.branch}" }
                     }
-                } else {
-                    span { class: "w-3 shrink-0" }
-                }
-                span { class: "truncate", "{project.label}" }
-                if !project.branch.is_empty() {
-                    span { class: "ml-auto shrink-0 truncate text-[10px] text-muted-foreground/70",
-                        "{project.branch}"
-                    }
-                }
+                },
             }
             if root {
                 button {

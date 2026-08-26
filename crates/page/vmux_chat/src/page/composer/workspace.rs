@@ -64,7 +64,10 @@ pub(super) fn WorkspacePills(chat: Chat) -> Element {
                 class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
                 title: "{workspace_title}",
                 onmousedown: move |event| event.prevent_default(),
-                onclick: move |_| chat.projects.toggle(),
+                onclick: move |_| {
+                    chat.open_only(crate::page::state::ComposerMenu::Projects);
+                    chat.projects.toggle();
+                },
                 svg {
                     class: "h-3.5 w-3.5 shrink-0",
                     view_box: "0 0 24 24",

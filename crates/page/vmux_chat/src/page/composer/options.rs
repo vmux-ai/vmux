@@ -46,7 +46,10 @@ pub(super) fn ChatEffortPill(chat: Chat) -> Element {
         EffortPill {
             levels: (chat.effort.levels)(),
             selected: (chat.effort.current)(),
-            on_open: move |()| chat.effort.toggle(),
+            on_open: move |()| {
+                chat.open_only(crate::page::state::ComposerMenu::Effort);
+                chat.effort.toggle();
+            },
         }
     }
 }

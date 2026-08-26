@@ -43,6 +43,7 @@ pub mod toggle;
 pub mod toggle_group;
 pub mod toolbar;
 pub mod tooltip;
+pub mod tree_row;
 pub mod virtual_list;
 
 pub use crate::util::merge_class;
