@@ -181,10 +181,10 @@ fn on_start_select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let workspace_dir = vmux_core::profile::workspace_dir();
-    let initial_dir = std::fs::create_dir_all(&workspace_dir)
+    let projects_dir = vmux_core::profile::projects_dir();
+    let initial_dir = std::fs::create_dir_all(&projects_dir)
         .ok()
-        .map(|_| workspace_dir)
+        .map(|_| projects_dir)
         .filter(|path| path.is_dir())
         .or_else(|| {
             std::path::PathBuf::from(&trigger.event().payload.current_dir)
