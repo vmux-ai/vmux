@@ -78,6 +78,22 @@ pub struct SpaceCommandEvent {
     pub name: Option<String>,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectCommandEvent {
+    pub command: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

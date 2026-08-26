@@ -377,6 +377,7 @@ menu-edit = Bewerk
 
 layout-knowledge = Kennis
 layout-projects = Projects
+layout-project-forget = Dit project vergeten
 layout-no-project-selected = No project selected
 layout-open-knowledge = Kennis openen
 layout-open-welcome-knowledge = Welkom bij Kennis openen

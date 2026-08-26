@@ -377,6 +377,7 @@ menu-edit = تحرير
 
 layout-knowledge = المعرفة
 layout-projects = Projects
+layout-project-forget = نسيان هذا المشروع
 layout-no-project-selected = No project selected
 layout-open-knowledge = فتح المعرفة
 layout-open-welcome-knowledge = فتح مرحبًا بك في المعرفة

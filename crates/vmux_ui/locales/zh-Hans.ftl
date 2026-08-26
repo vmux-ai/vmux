@@ -377,6 +377,7 @@ menu-edit = 编辑
 
 layout-knowledge = 知识
 layout-projects = Projects
+layout-project-forget = 忘记此项目
 layout-no-project-selected = No project selected
 layout-open-knowledge = 打开知识
 layout-open-welcome-knowledge = 打开“欢迎使用知识”

@@ -377,6 +377,7 @@ menu-edit = Modifica
 
 layout-knowledge = Conoscenza
 layout-projects = Projects
+layout-project-forget = Dimentica questo progetto
 layout-no-project-selected = No project selected
 layout-open-knowledge = Apri Conoscenza
 layout-open-welcome-knowledge = Apri Benvenuto in Conoscenza

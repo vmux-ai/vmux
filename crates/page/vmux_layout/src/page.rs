@@ -706,6 +706,13 @@ fn ProjectsCard(
     }
 }
 
+fn emit_project_command(command: &str, path: Option<String>) {
+    let _ = send(&vmux_wire::space::ProjectCommandEvent {
+        command: command.to_string(),
+        path,
+    });
+}
+
 #[component]
 fn ProjectListRow(project: crate::event::ProjectRow) -> Element {
     let indent = if project.depth > 0 { "pl-7" } else { "pl-2.5" };
@@ -716,17 +723,34 @@ fn ProjectListRow(project: crate::event::ProjectRow) -> Element {
     } else {
         "text-muted-foreground"
     };
+    let activate = project.path.clone();
+    let forget = project.path.clone();
+    let forget_title = translate("layout-project-forget");
     rsx! {
-        div {
-            class: "flex items-center gap-2 {indent} pr-2.5 py-1 text-ui-xs {tone}",
-            title: "{project.display_path}",
-            span { class: "w-1.5 shrink-0 text-center",
-                if project.is_active { "•" } else { " " }
+        div { class: "group/project flex items-center",
+            button {
+                r#type: "button",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 {indent} pr-1 py-1 text-left text-ui-xs transition-colors hover:bg-glass-hover {tone}",
+                title: "{project.display_path}",
+                onclick: move |_| emit_project_command("activate", Some(activate.clone())),
+                span { class: "w-1.5 shrink-0 text-center",
+                    if project.is_active { "•" } else { " " }
+                }
+                span { class: "truncate", "{project.label}" }
+                if !project.branch.is_empty() {
+                    span { class: "ml-auto shrink-0 truncate text-[10px] text-muted-foreground/70",
+                        "{project.branch}"
+                    }
+                }
             }
-            span { class: "truncate", "{project.label}" }
-            if !project.branch.is_empty() {
-                span { class: "ml-auto shrink-0 truncate text-[10px] text-muted-foreground/70",
-                    "{project.branch}"
+            button {
+                r#type: "button",
+                aria_label: "{forget_title}",
+                title: "{forget_title}",
+                class: "mr-2 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
+                onclick: move |_| emit_project_command("forget", Some(forget.clone())),
+                Icon { class: "h-3 w-3 pointer-events-none",
+                    path { d: "M18 6 6 18M6 6l12 12" }
                 }
             }
         }

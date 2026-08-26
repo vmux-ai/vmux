@@ -112,6 +112,48 @@ impl AppSettings {
         known || listed || promoted
     }
 
+    pub fn activate_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        if !overrides.projects.iter().any(|p| p.path == path) {
+            return false;
+        }
+        if overrides.active_project.as_deref() == Some(path) {
+            return false;
+        }
+        overrides.active_project = Some(path.to_string());
+        true
+    }
+
+    pub fn forget_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        let Some(at) = overrides.projects.iter().position(|p| p.path == path) else {
+            return false;
+        };
+        overrides.projects.remove(at);
+        if overrides.active_project.as_deref() == Some(path) {
+            overrides.active_project = overrides.projects.first().map(|p| p.path.clone());
+        }
+        true
+    }
+
+    fn space_key(&self, space_id: &str) -> Option<String> {
+        let target = normalize_space_key(space_id);
+        self.spaces
+            .keys()
+            .find(|existing| normalize_space_key(existing) == target)
+            .cloned()
+    }
+
     fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
         match self.projects.iter().position(|p| p.path == project.path) {
             Some(0) => false,
