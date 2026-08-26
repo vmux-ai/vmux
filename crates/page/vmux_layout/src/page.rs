@@ -641,18 +641,10 @@ fn ProjectsCard(
     } else {
         translate("common-expand")
     };
-    let project_name = boundary
-        .as_ref()
-        .and_then(|boundary| {
-            boundary
-                .effective_dir
-                .trim_end_matches('/')
-                .rsplit('/')
-                .next()
-                .filter(|name| !name.is_empty())
-        })
-        .map(str::to_string)
-        .unwrap_or_else(|| empty.clone());
+    let project_name = match projects.iter().find(|project| project.is_active) {
+        Some(project) => project.label.clone(),
+        None => empty.clone(),
+    };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
@@ -694,10 +686,9 @@ fn ProjectsCard(
                                 ProjectListRow { project }
                             }
                         }
-                    }
-                    if let Some(boundary) = boundary {
+                    } else if let Some(boundary) = boundary {
                         TabBoundaryPanel { boundary }
-                    } else if projects.is_empty() {
+                    } else {
                         div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
                     }
                 }
