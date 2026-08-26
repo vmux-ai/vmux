@@ -33,6 +33,12 @@ pub struct WorktreeRegistration {
     pub prunable: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchHolder {
+    pub branch: String,
+    pub checkout: Option<PathBuf>,
+}
+
 struct RepositoryWorktreeLock(File);
 
 impl Drop for RepositoryWorktreeLock {
@@ -380,7 +386,14 @@ pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, 
 }
 
 pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
-    let (stdout, stderr, ok) = git(root, &["branch", "--format=%(refname:short)"])?;
+    let (stdout, stderr, ok) = git(
+        root,
+        &[
+            "branch",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+        ],
+    )?;
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
@@ -388,6 +401,20 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
         .lines()
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty())
+        .collect())
+}
+
+pub fn branch_holders(root: &Path) -> Result<Vec<BranchHolder>, GitError> {
+    let registrations = worktree_registrations(root)?;
+    Ok(local_branches(root)?
+        .into_iter()
+        .map(|branch| {
+            let checkout = registrations
+                .iter()
+                .find(|registration| registration.branch.as_deref() == Some(branch.as_str()))
+                .map(|registration| registration.path.clone());
+            BranchHolder { branch, checkout }
+        })
         .collect())
 }
 
@@ -776,6 +803,36 @@ mod tests {
         let (tracked, _, ok) = git(repository.path(), &["ls-files", "note.md"]).unwrap();
         assert!(ok);
         assert_eq!(tracked.trim(), "note.md");
+    }
+
+    #[test]
+    fn branch_holders_name_the_checkout_that_has_each_branch() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        test_repo::run(repo.path(), &["branch", "spare", "main"]);
+
+        let holders = branch_holders(repo.path()).unwrap();
+        let held = |branch: &str| {
+            holders
+                .iter()
+                .find(|holder| holder.branch == branch)
+                .unwrap_or_else(|| panic!("{branch} listed"))
+                .checkout
+                .clone()
+        };
+
+        assert_eq!(
+            held("vmux/feat").map(|p| p.canonicalize().unwrap()),
+            Some(wt.canonicalize().unwrap()),
+            "a branch checked out in a worktree names that worktree"
+        );
+        assert_eq!(
+            held("spare"),
+            None,
+            "a branch nothing has checked out is free for a new worktree"
+        );
     }
 
     #[test]
