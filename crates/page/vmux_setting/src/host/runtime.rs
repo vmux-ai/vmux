@@ -205,12 +205,80 @@ pub struct RecordingSettings {
     pub output_dir: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SpaceProject {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl SpaceProject {
+    pub fn at(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            parent: None,
+            label: None,
+        }
+    }
+
+    pub fn under(path: impl Into<String>, parent: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            parent: Some(parent.into()),
+            label: None,
+        }
+    }
+
+    pub fn display_label(&self) -> &str {
+        if let Some(label) = self.label.as_deref() {
+            return label;
+        }
+        let trimmed = self.path.trim_end_matches('/');
+        match trimmed.rsplit('/').next() {
+            Some(name) if !name.is_empty() => name,
+            _ => self.path.as_str(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SpaceOverrides {
     #[serde(default)]
     pub startup_url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_project: Option<String>,
+}
+
+impl SpaceOverrides {
+    pub fn normalize(&mut self) {
+        if let Some(legacy) = self.startup_dir.take()
+            && !legacy.trim().is_empty()
+            && !self.projects.iter().any(|p| p.path == legacy)
+        {
+            self.projects.push(SpaceProject::at(legacy.clone()));
+            if self.active_project.is_none() {
+                self.active_project = Some(legacy);
+            }
+        }
+    }
+
+    pub fn active_dir(&self) -> Option<&str> {
+        if let Some(active) = self.active_project.as_deref()
+            && self.projects.iter().any(|p| p.path == active)
+        {
+            return Some(active);
+        }
+        self.projects
+            .first()
+            .map(|p| p.path.as_str())
+            .or(self.startup_dir.as_deref())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -440,8 +508,7 @@ pub fn resolve_startup_dir_for_tab_with_source(
     if let Some(p) = pick(tab_dir) {
         return Some((p, DirSource::Tab));
     }
-    if let Some(p) = pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
-    {
+    if let Some(p) = pick(space_override(settings, space_id).and_then(SpaceOverrides::active_dir)) {
         return Some((p, DirSource::Space));
     }
     if let Some(p) = pick(
@@ -794,6 +861,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     if let Some(spaces) = partial.spaces {
         settings.spaces = spaces;
+    }
+    for overrides in settings.spaces.values_mut() {
+        overrides.normalize();
     }
     if let Some(recording) = partial.recording {
         settings.recording = recording;
@@ -1572,6 +1642,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().to_string()),
+                ..Default::default()
             },
         );
         assert_eq!(resolve_startup_dir(&s, "mistralai/dashboard"), Some(dir));
@@ -1592,6 +1663,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
         assert_eq!(resolve_startup_url(&s, "work"), "https://work.example");
@@ -1607,6 +1679,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("   ".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
         assert_eq!(resolve_startup_url(&s, "work"), "https://global.example");
@@ -1754,6 +1827,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: Some("/tmp/work".into()),
+                ..Default::default()
             },
         );
         let ron = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
@@ -1802,6 +1876,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         assert_eq!(resolve_startup_dir(&s, "work").as_deref(), Some(per.path()));
@@ -1826,6 +1901,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -1846,6 +1922,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
             },
         );
         assert_eq!(resolve_startup_dir(&s, "work"), None);
@@ -1866,6 +1943,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         let tab_dir = tab.path().to_string_lossy().into_owned();
@@ -1888,6 +1966,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -1905,6 +1984,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
@@ -1935,6 +2015,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         let tab_dir = tab.path().to_string_lossy().into_owned();
@@ -1960,6 +2041,81 @@ mod tests {
         assert_eq!(
             resolve_startup_dir_for_tab_with_source(&s, "nospace", None),
             None
+        );
+    }
+
+    #[test]
+    fn a_legacy_startup_dir_becomes_the_first_project() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).unwrap();
+        let space = settings.spaces.get("work").expect("space");
+
+        assert_eq!(
+            space.projects,
+            vec![SpaceProject::at("/tmp/alpha")],
+            "the one directory a space remembered has to survive as its first project"
+        );
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+        assert_eq!(
+            space.startup_dir, None,
+            "the legacy field is consumed, not left to disagree with the list"
+        );
+    }
+
+    #[test]
+    fn a_migrated_space_survives_a_write_and_reload() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).expect("legacy");
+        let written = sparse_settings_ron(&settings).expect("serialize");
+
+        let space = parse_settings(&written)
+            .expect("reload")
+            .spaces
+            .remove("work")
+            .expect("space");
+
+        assert_eq!(space.projects, vec![SpaceProject::at("/tmp/alpha")]);
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+    }
+
+    #[test]
+    fn a_legacy_space_still_resolves_through_the_space_rung() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut overrides = SpaceOverrides {
+            startup_dir: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        overrides.normalize();
+        let mut settings = base_settings();
+        settings.spaces.insert("work".to_string(), overrides);
+
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&settings, "work", None),
+            Some((dir.path().to_path_buf(), DirSource::Space))
+        );
+    }
+
+    #[test]
+    fn the_space_rung_follows_the_active_project() {
+        let first = tempfile::tempdir().expect("tempdir");
+        let second = tempfile::tempdir().expect("tempdir");
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![
+                    SpaceProject::at(first.path().to_string_lossy().to_string()),
+                    SpaceProject::at(second.path().to_string_lossy().to_string()),
+                ],
+                active_project: Some(second.path().to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&settings, "work", None).map(|(path, _)| path),
+            Some(second.path().to_path_buf()),
+            "the space rung follows the active project, not merely the first one"
         );
     }
 
