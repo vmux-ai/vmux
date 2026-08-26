@@ -493,28 +493,7 @@ pub struct FileFoldToggle {
     pub line: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ProjectRow {
-    pub path: String,
-    pub label: String,
-    pub display_path: String,
-    pub depth: u32,
-    pub is_active: bool,
-    pub is_worktree: bool,
-    pub missing: bool,
-    pub branch: String,
-}
+pub use vmux_wire::space::{ProjectBranch, ProjectRow};
 
 #[derive(
     Debug,

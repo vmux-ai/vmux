@@ -11,6 +11,37 @@ impl Plugin for SpaceProjectPlugin {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SpaceProjects<'w, 's> {
+    settings: Option<Res<'w, vmux_setting::AppSettings>>,
+    active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
+    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+}
+
+impl SpaceProjects<'_, '_> {
+    pub fn rows(&self, entity: Entity) -> Vec<vmux_core::event::ProjectRow> {
+        let Some(settings) = self.settings.as_deref() else {
+            return Vec::new();
+        };
+        let space_id =
+            vmux_layout::space::space_id_of(entity, &self.child_of, &self.spaces, &self.space_ids)
+                .or_else(|| {
+                    self.active_space
+                        .as_deref()
+                        .map(|space| space.record.id.clone())
+                });
+        let Some(space_id) = space_id else {
+            return Vec::new();
+        };
+        let Some(overrides) = settings.space(&space_id) else {
+            return Vec::new();
+        };
+        overrides.project_rows()
+    }
+}
+
 fn remember_space_project(
     bound: Query<
         (Entity, &vmux_layout::tab::TabWorkspace),

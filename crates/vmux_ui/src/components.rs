@@ -22,6 +22,7 @@ pub mod menubar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
+pub mod project_picker;
 pub mod prompt_box;
 pub mod prompt_media_options;
 pub mod radio_group;

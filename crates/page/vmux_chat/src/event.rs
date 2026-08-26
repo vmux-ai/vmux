@@ -284,23 +284,7 @@ pub struct ChatProjectBranches {
     pub branches: Vec<ChatBranch>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatBranch {
-    pub branch: String,
-    pub checkout: String,
-    pub label: String,
-}
+pub use vmux_core::event::ProjectBranch as ChatBranch;
 
 #[derive(
     Clone,

@@ -4,7 +4,8 @@ use crate::event::{
     COMMAND_BAR_KEY_EVENT, CommandBarActionEvent, CommandBarKey, CommandBarOpenEvent,
     CommandBarQuery, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
     HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
-    PathCompleteResponse, PathEntry, StartSelectWorkspace, is_data_uri,
+    PathCompleteResponse, PathEntry, START_PROJECT_BRANCHES_EVENT, StartBranchesRequest,
+    StartGoToBranch, StartProjectBranches, StartSelectWorkspace, is_data_uri,
 };
 use crate::open_target::OpenTarget;
 use crate::prompt_media::{
@@ -24,6 +25,7 @@ use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::project_picker::{ProjectPick, ProjectPicker};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::focus::FocusClaim;
@@ -296,9 +298,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         on_activity.call(());
     });
 
+    let mut project_menu_open = use_signal(|| false);
+    let mut project_expanded = use_signal(String::new);
+    let mut project_branches = use_signal(Vec::<vmux_core::event::ProjectBranch>::new);
+    let mut project_branches_for = use_signal(String::new);
+    let _project_branches =
+        use_listener::<StartProjectBranches, _>(START_PROJECT_BRANCHES_EVENT, move |incoming| {
+            project_branches.set(incoming.branches.clone());
+            project_branches_for.set(incoming.project.clone());
+        });
+
     let state_val = state();
     let space_name = state_val.space_name.clone();
     let prompt_context = state_val.prompt_context.clone();
+    let picker_projects = prompt_context.projects.clone();
+    let picker_cwd = prompt_context.cwd.clone();
     let open_target = state_val.target;
     let space_switch = state_val.space_switch;
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
@@ -627,15 +641,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                     "Ask"
                 }
-                button {
+                div { class: "relative shrink-0",
+                    button {
                         class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
                         title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| {
-                            let _ = send(&StartSelectWorkspace {
-                                current_dir: prompt_context.cwd.clone(),
-                            });
-                            focus_prompt_end(PROMPT_INPUT_ID);
+                            let showing = *project_menu_open.peek();
+                            project_menu_open.set(!showing);
                         },
                         svg {
                             class: "h-3.5 w-3.5 shrink-0",
@@ -646,6 +659,41 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
                         }
                         span { class: "truncate", "{workspace_label}" }
+                    }
+                    if project_menu_open() {
+                        ProjectPicker {
+                            projects: picker_projects.clone(),
+                            expanded: project_expanded(),
+                            branches: project_branches(),
+                            branches_for: project_branches_for(),
+                            on_expand: move |path: String| {
+                                if *project_expanded.peek() == path {
+                                    project_expanded.set(String::new());
+                                    return;
+                                }
+                                project_expanded.set(path.clone());
+                                if *project_branches_for.peek() != path {
+                                    project_branches.set(Vec::new());
+                                }
+                                let _ = send(&StartBranchesRequest { project: path });
+                            },
+                            on_pick: move |pick: ProjectPick| {
+                                project_menu_open.set(false);
+                                let _ = send(&StartGoToBranch {
+                                    project: pick.project,
+                                    branch: pick.branch,
+                                    checkout: pick.checkout,
+                                });
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            on_choose_another: move |()| {
+                                project_menu_open.set(false);
+                                let _ = send(&StartSelectWorkspace { current_dir: picker_cwd.clone() });
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            on_dismiss: move |()| project_menu_open.set(false),
+                        }
+                    }
                 }
                 if prompt_context.is_git_repo {
                     span {

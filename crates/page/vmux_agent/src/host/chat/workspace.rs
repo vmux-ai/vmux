@@ -39,35 +39,7 @@ struct ComposerContextInput {
     projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct SpaceProjects<'w, 's> {
-    settings: Option<Res<'w, vmux_setting::AppSettings>>,
-    active_space: Option<Res<'w, vmux_space::ActiveSpace>>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
-    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
-}
-
-impl SpaceProjects<'_, '_> {
-    fn rows(&self, stack: Entity, child_of: &Query<&ChildOf>) -> Vec<vmux_core::event::ProjectRow> {
-        let Some(settings) = self.settings.as_deref() else {
-            return Vec::new();
-        };
-        let space_id =
-            vmux_layout::space::space_id_of(stack, child_of, &self.spaces, &self.space_ids)
-                .or_else(|| {
-                    self.active_space
-                        .as_deref()
-                        .map(|space| space.record.id.clone())
-                });
-        let Some(space_id) = space_id else {
-            return Vec::new();
-        };
-        let Some(overrides) = settings.space(&space_id) else {
-            return Vec::new();
-        };
-        overrides.project_rows()
-    }
-}
+use vmux_space::SpaceProjects;
 
 #[derive(Default)]
 struct ComposerContextCache {
@@ -111,7 +83,7 @@ fn push_composer_context_to_page(
             continue;
         };
         let mut input = composer_context_input(stack, acp, policy, &child_of, &tabs);
-        input.projects = space_projects.rows(stack, &child_of);
+        input.projects = space_projects.rows(stack);
         let info = (!input.cwd.as_os_str().is_empty())
             .then(|| {
                 repo_info

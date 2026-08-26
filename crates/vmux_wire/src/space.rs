@@ -94,6 +94,53 @@ pub struct ProjectCommandEvent {
     pub path: Option<String>,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectRow {
+    pub path: String,
+    pub label: String,
+    pub display_path: String,
+    pub depth: u32,
+    pub is_active: bool,
+    pub is_worktree: bool,
+    pub missing: bool,
+    pub branch: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectBranch {
+    pub branch: String,
+    pub checkout: String,
+    pub label: String,
+}
+
+impl ProjectBranch {
+    pub fn held(&self) -> bool {
+        !self.checkout.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

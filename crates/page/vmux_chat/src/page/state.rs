@@ -930,13 +930,6 @@ impl ProjectPicker {
             project: project.to_string(),
         });
     }
-
-    pub fn listed(&self, project: &str) -> Option<Vec<ChatBranch>> {
-        if self.branches_for.read().as_str() != project {
-            return None;
-        }
-        Some(self.branches.read().clone())
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
