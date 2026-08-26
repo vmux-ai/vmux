@@ -1,8 +1,8 @@
 cask "vmux" do
-  version "0.0.30"
-  sha256 "eca282cdc344b6349c7c8eb17949ab4734b7fc2dfdc491dcb3205605bcfc6626"
+  version "0.0.31"
+  sha256 "a191bc1fd233eef4e2c67ec2a57ec28c0d3f1237abbf1fe9d17d560eff5b8605"
 
-  url "https://github.com/vmux-ai/vmux/releases/download/v0.0.30/Vmux_0.0.30_aarch64.dmg"
+  url "https://github.com/vmux-ai/vmux/releases/download/v0.0.31/Vmux_0.0.31_aarch64.dmg"
   name "Vmux"
   desc "AI-native workspace combining browser and terminal panes"
   homepage "https://vmux.ai/"
