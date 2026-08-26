@@ -127,6 +127,7 @@ pub fn Page() -> Element {
     let mut explorer_resizing = use_signal(|| false);
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
+    let explorer_reflowed_at = use_signal(|| 0u32);
     let explorer = ExplorerPane {
         visible: explorer_visible,
         preferred_visible: explorer_preferred_visible,
@@ -134,6 +135,7 @@ pub fn Page() -> Element {
         page_width,
         client_id: explorer_client_id,
         request_id: explorer_request_id,
+        reflowed_at: explorer_reflowed_at,
     };
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
@@ -3804,6 +3806,7 @@ pub struct ExplorerPane {
     pub page_width: Signal<u32>,
     pub client_id: Signal<u64>,
     pub request_id: Signal<u64>,
+    pub reflowed_at: Signal<u32>,
 }
 
 impl ExplorerPane {
@@ -3812,9 +3815,11 @@ impl ExplorerPane {
     }
 
     fn sync(mut self) {
-        if (self.page_width)() == 0 {
+        let page_width = (self.page_width)();
+        if page_width == 0 || (self.reflowed_at)() == page_width {
             return;
         }
+        self.reflowed_at.set(page_width);
         let next = (self.preferred_visible)() && self.has_room();
         if (self.visible)() != next {
             self.visible.set(next);
@@ -3825,7 +3830,8 @@ impl ExplorerPane {
         let request_id = (self.request_id)().wrapping_add(1);
         self.request_id.set(request_id);
         self.preferred_visible.set(next);
-        self.visible.set(next && self.has_room());
+        self.visible.set(next);
+        self.reflowed_at.set((self.page_width)());
         let _ = send(&ExplorerPanelSetVisible {
             visible: next,
             client_id: (self.client_id)(),
