@@ -16,6 +16,7 @@ fn remember_space_project(
         (Entity, &vmux_layout::tab::TabWorkspace),
         Changed<vmux_layout::tab::TabWorkspace>,
     >,
+    worktrees: Query<&vmux_layout::tab::TabWorktree>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<vmux_layout::space::Space>>,
     ids: Query<&vmux_layout::space::SpaceId>,
@@ -36,11 +37,23 @@ fn remember_space_project(
         let Some(space_id) = vmux_layout::space::space_id_of(tab, &child_of, &spaces, &ids) else {
             continue;
         };
-        if settings
-            .bypass_change_detection()
-            .remember_space_project(&space_id, vmux_setting::SpaceProject::at(dir))
-        {
-            settings.set_changed();
+        let repo_root = worktrees
+            .get(tab)
+            .ok()
+            .map(|worktree| worktree.repo_root.trim())
+            .filter(|root| !root.is_empty() && *root != dir);
+        let settings = settings.bypass_change_detection();
+        let mut changed = false;
+        if let Some(root) = repo_root {
+            changed |=
+                settings.remember_space_project(&space_id, vmux_setting::SpaceProject::at(root));
+        }
+        let project = match repo_root {
+            Some(root) => vmux_setting::SpaceProject::under(dir, root),
+            None => vmux_setting::SpaceProject::at(dir),
+        };
+        changed |= settings.remember_space_project(&space_id, project);
+        if changed {
             saves.write(vmux_setting::SettingsSaveRequest);
         }
     }
@@ -80,6 +93,31 @@ mod tests {
                     project_dir: project_dir.to_string(),
                 });
             self.app.update();
+        }
+
+        fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
+            self.app.world_mut().entity_mut(self.tab).insert((
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: project_dir.to_string(),
+                },
+                vmux_layout::tab::TabWorktree {
+                    repo_root: repo_root.to_string(),
+                    checkout_dir: project_dir.to_string(),
+                    branch: "vmux/test".to_string(),
+                    base_ref: "main".to_string(),
+                },
+            ));
+            self.app.update();
+        }
+
+        fn parents(&self, space_id: &str) -> Vec<Option<String>> {
+            self.app
+                .world()
+                .resource::<vmux_setting::AppSettings>()
+                .spaces
+                .get(space_id)
+                .map(|space| space.projects.iter().map(|p| p.parent.clone()).collect())
+                .unwrap_or_default()
         }
 
         fn remembered(&self, space_id: &str) -> Option<String> {
@@ -173,6 +211,47 @@ mod tests {
             fixture.known(),
             ["/tmp/beta", "/tmp/alpha"],
             "the global list is most-recent-first so a new space can offer them"
+        );
+    }
+
+    #[test]
+    fn a_worktree_registers_under_the_repository_it_came_from() {
+        let mut fixture = Fixture::start("work");
+        fixture.select_worktree("/worktrees/a1b2", "/repo/dashboard");
+
+        assert_eq!(
+            fixture.listed("work"),
+            ["/repo/dashboard", "/worktrees/a1b2"],
+            "the repository is listed too, or the worktree has nothing to nest under"
+        );
+        assert_eq!(
+            fixture.parents("work"),
+            [None, Some("/repo/dashboard".to_string())]
+        );
+        assert_eq!(
+            fixture.remembered("work").as_deref(),
+            Some("/worktrees/a1b2"),
+            "the tab is working in the worktree, so that is what the space is on"
+        );
+    }
+
+    #[test]
+    fn a_worktree_that_arrives_after_its_repository_gains_the_link() {
+        let mut fixture = Fixture::start("work");
+        fixture.select("/worktrees/a1b2");
+        assert_eq!(fixture.parents("work"), [None]);
+
+        fixture.select_worktree("/worktrees/a1b2", "/repo/dashboard");
+
+        assert_eq!(
+            fixture.listed("work"),
+            ["/worktrees/a1b2", "/repo/dashboard"],
+            "the directory keeps the place it was first seen in"
+        );
+        assert_eq!(
+            fixture.parents("work"),
+            [Some("/repo/dashboard".to_string()), None],
+            "a directory already listed plainly gains its parent in place"
         );
     }
 
