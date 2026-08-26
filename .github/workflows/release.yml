@@ -10,6 +10,10 @@ on:
         description: "Publish current Cargo.toml version even if unchanged from previous commit"
         type: boolean
         default: false
+      upload_ios:
+        description: "Send the iOS build to App Store Connect. Off by default, and unavailable to the push trigger, because an upload cannot be withdrawn"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -58,13 +62,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   testflight:
-    name: Upload iOS to TestFlight
+    name: Build iOS for release
     needs: detect-version
     if: needs.detect-version.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
-      # The job builds and uploads to Apple; it never pushes. The workflow token carries
-      # contents: write for the publish job, so leaving it in the checkout would hand a
+      # The job builds, signs, and may upload to Apple; it never pushes. The workflow token
+      # carries contents: write for the publish job, so leaving it in the checkout would hand a
       # write-capable credential to every build step for no reason.
       - uses: actions/checkout@v5
         with:
@@ -81,7 +85,7 @@ jobs:
       - name: Install dioxus CLI
         run: ./scripts/install-dioxus-cli.sh
 
-      - name: Build, sign and upload
+      - name: Build, sign and conditionally upload
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -94,9 +98,10 @@ jobs:
           # version alone cannot carry a resubmission. run_number is monotonic and needs no
           # committed state, which would otherwise trip update-release-metadata.sh --check.
           VMUX_IOS_BUILD_NUMBER: ${{ github.run_number }}
-          # The script builds and signs but will not send unless asked. This is the only place
-          # that asks, so an upload can only come from a release run.
-          VMUX_IOS_UPLOAD: "1"
+          # An upload cannot be withdrawn and burns its CFBundleVersion, so asking is a deliberate
+          # act: only a hand-started run can set this. The push trigger leaves the input empty,
+          # which is why a version bump still builds and signs iOS without sending it anywhere.
+          VMUX_IOS_UPLOAD: ${{ inputs.upload_ios && '1' || '' }}
         run: ./scripts/build-ios-release.sh
 
       - name: Verify bundle layout
