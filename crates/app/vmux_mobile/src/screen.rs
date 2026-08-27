@@ -1,6 +1,6 @@
 use vmux_wire::protocol::layout::{LayoutNode, LayoutSnapshot, Stack, Tab};
 
-use crate::nav::Screen;
+use crate::nav::Route;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shown {
@@ -10,7 +10,26 @@ pub enum Shown {
     Mirror(Stack),
 }
 
-impl Screen for Shown {
+#[derive(Clone, Copy, PartialEq)]
+pub enum Name {
+    Chat,
+    Team,
+    Launcher,
+    Mirror,
+}
+
+impl Route for Shown {
+    type Name = Name;
+
+    fn name(&self) -> Name {
+        match self {
+            Self::Chat { sid: Some(_), .. } => Name::Chat,
+            Self::Chat { sid: None, .. } | Self::Launcher => Name::Launcher,
+            Self::Team => Name::Team,
+            Self::Mirror(_) => Name::Mirror,
+        }
+    }
+
     fn title(&self) -> String {
         match self {
             Self::Chat { title, .. } if !title.is_empty() => title.clone(),

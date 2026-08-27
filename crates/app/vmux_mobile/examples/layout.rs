@@ -4,18 +4,27 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use vmux_mobile::nav::{
-    Back, Dismiss, Dropped, Local, NavPlugin, Open, OpenBlank, Present, Report, Screen, Select,
+    Dismiss, Dropped, GoBack, Local, NavPlugin, OpenBlank, Present, Push, Report, Route, Select,
     Selected, Sheet, Shows, Tab,
 };
 
 #[derive(Clone, PartialEq)]
 struct Page(&'static str);
 
-impl Screen for Page {
+impl Route for Page {
+    type Name = Name;
+
+    fn name(&self) -> Name {
+        Name(self.0)
+    }
+
     fn title(&self) -> String {
         self.0.to_string()
     }
 }
+
+#[derive(Clone, Copy, PartialEq)]
+struct Name(&'static str);
 
 fn main() {
     let mut app = App::new();
@@ -36,10 +45,10 @@ fn main() {
     );
 
     step(&mut app, "push twice into Notes", |world| {
-        world.write_message(Open(Page("Groceries")));
+        world.write_message(Push(Page("Groceries")));
     });
     step(&mut app, "", |world| {
-        world.write_message(Open(Page("Edit")));
+        world.write_message(Push(Page("Edit")));
     });
 
     step(&mut app, "a sheet, then a sheet over it", |world| {
@@ -70,10 +79,10 @@ fn main() {
     });
 
     step(&mut app, "back, twice", |world| {
-        world.write_message(Back);
+        world.write_message(GoBack);
     });
     step(&mut app, "", |world| {
-        world.write_message(Back);
+        world.write_message(GoBack);
     });
 
     step(&mut app, "a tab of the phone's own", |world| {

@@ -15,7 +15,7 @@ use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
-use crate::nav::Open;
+use crate::nav::Push;
 use crate::runtime::World;
 use crate::screen::Shown;
 use vmux_ui::hooks::EventListenerError;
@@ -277,7 +277,7 @@ impl MobileHost {
                 Ok(())
             }
             CommandBarActionEvent::Open { value, .. } => {
-                crate::runtime::World::with(|world| world.send(Open(Shown::addressed(&value))));
+                crate::runtime::World::with(|world| world.send(Push(Shown::addressed(&value))));
                 Ok(())
             }
             CommandBarActionEvent::Dismiss => Ok(()),
