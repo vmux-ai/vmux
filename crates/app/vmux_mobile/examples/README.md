@@ -15,14 +15,14 @@ read it with a query.
 | [`minimal`](minimal.rs) | host, simulator | The phone, as one plugin |
 
 ```sh
-make example                                                  # layout
+make layout-mobile                                            # layout
 cargo run -p vmux_mobile --example minimal --features mobile   # the app itself
 ```
 
 `-p` is not optional when reaching for cargo directly: this workspace names its
 default members, so without it cargo looks for the example only among those and
-reports it missing while listing it. `make example` is that line already written
-down.
+reports it missing while listing it. `make layout-mobile` is that line already
+written down.
 
 `layout` needs no Mac, no relay, no pairing and no UIKit. It sends the messages a
 phone would and draws the result out of the ECS:

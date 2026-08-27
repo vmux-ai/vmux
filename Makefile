@@ -1,4 +1,4 @@
-.PHONY: example dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: layout-mobile dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -54,6 +54,13 @@ build: ensure-mac-deps
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release --features vmux_desktop/package
 
 ios: mobile-ios-run
+
+# The phone's navigation with no phone: it sends the messages a paired app would and draws
+# what the ECS made of them, so tabs, a stack and stacked sheets can be read without a Mac, a
+# relay or a simulator. `-p` because this workspace names its default members, and without it
+# cargo hunts the example only among those and reports it missing while listing it.
+layout-mobile:
+	"$(CARGO_BIN)" run -p vmux_mobile --example layout
 
 android: mobile-android-run
 
@@ -165,11 +172,6 @@ lint-fix:
 test:
 	$(CARGO_WITH_CEF_CACHE) test --workspace --exclude bevy_cef_core
 
-# The phone's navigation, with no phone: it sends the messages a paired app would and draws
-# what the ECS made of them. `-p` because this workspace names its default members, and
-# without it cargo hunts the example only among those and reports it missing while listing it.
-example:
-	"$(CARGO_BIN)" run -p vmux_mobile --example layout
 
 # Reset vmux *dev* storage for a clean test. Removes the layout store, session,
 # logs, the saved profile display name, and stale dev service sockets (all
