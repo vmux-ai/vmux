@@ -4,7 +4,7 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ExpandedProjectDirs>()
+        app.register_type::<ExpandedProjectDirs>()
             .init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
@@ -21,9 +21,23 @@ impl Plugin for SpaceProjectPlugin {
 
 fn on_project_tree_toggle(
     trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::ProjectTreeToggle>>,
-    mut expanded: ResMut<ExpandedProjectDirs>,
+    child_of: Query<&ChildOf>,
+    spaces: Query<(), With<vmux_layout::space::Space>>,
+    mut expanded: Query<&mut ExpandedProjectDirs>,
+    mut commands: Commands,
 ) {
-    expanded.toggle(&trigger.event().payload.path);
+    let Some(space) = vmux_layout::space::space_of(trigger.event().webview, &child_of, &spaces)
+    else {
+        return;
+    };
+    let path = &trigger.event().payload.path;
+    if let Ok(mut dirs) = expanded.get_mut(space) {
+        dirs.toggle(path);
+        return;
+    }
+    let mut dirs = ExpandedProjectDirs::default();
+    dirs.toggle(path);
+    commands.entity(space).insert(dirs);
 }
 
 fn publish_project_roots(
@@ -42,18 +56,23 @@ fn publish_project_roots(
     }
 }
 
-#[derive(Resource, Default)]
-pub struct ExpandedProjectDirs(std::collections::BTreeSet<String>);
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::space::project"]
+#[require(moonshine_save::prelude::Save)]
+pub struct ExpandedProjectDirs(Vec<String>);
 
 impl ExpandedProjectDirs {
     fn toggle(&mut self, path: &str) {
-        if !self.0.remove(path) {
-            self.0.insert(path.to_string());
+        if let Some(index) = self.0.iter().position(|held| held == path) {
+            self.0.remove(index);
+            return;
         }
+        self.0.push(path.to_string());
     }
 
     fn holds(&self, path: &str) -> bool {
-        self.0.contains(path)
+        self.0.iter().any(|held| held == path)
     }
 
     fn children_of(&self, dir: &std::path::Path, depth: u32) -> Vec<vmux_core::event::ProjectRow> {
@@ -119,10 +138,18 @@ const UNLISTED_DIRS: &[&str] = &[
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
     active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
-    expanded: Option<Res<'w, ExpandedProjectDirs>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+    expanded: Query<
+        'w,
+        's,
+        (
+            &'static vmux_layout::space::SpaceId,
+            &'static ExpandedProjectDirs,
+        ),
+        With<vmux_layout::space::Space>,
+    >,
 }
 
 impl SpaceProjects<'_, '_> {
@@ -142,6 +169,15 @@ impl SpaceProjects<'_, '_> {
         self.rows_of(&active.record.id)
     }
 
+    fn expanded_of(&self, space_id: &str) -> Option<&ExpandedProjectDirs> {
+        for (id, dirs) in &self.expanded {
+            if id.0 == space_id {
+                return Some(dirs);
+            }
+        }
+        None
+    }
+
     fn rows_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
         let Some(settings) = self.settings.as_deref() else {
             return Vec::new();
@@ -150,7 +186,7 @@ impl SpaceProjects<'_, '_> {
             return Vec::new();
         };
         let listed = overrides.project_rows();
-        let Some(expanded) = self.expanded.as_deref() else {
+        let Some(expanded) = self.expanded_of(space_id) else {
             return listed;
         };
         let mut rows = Vec::new();

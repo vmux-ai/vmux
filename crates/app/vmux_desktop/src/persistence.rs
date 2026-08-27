@@ -106,6 +106,19 @@ struct TabPersistenceChanges<'w, 's> {
     removed_worktrees: RemovedComponents<'w, 's, TabWorktree>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct ViewStateChanges<'w, 's> {
+    explorer: Query<'w, 's, (), Changed<vmux_editor::StackExplorerVisibility>>,
+    sections: Query<'w, 's, (), Changed<vmux_layout::side_sheet::SideSheetSectionsExpanded>>,
+    project_dirs: Query<'w, 's, (), Changed<vmux_space::ExpandedProjectDirs>>,
+}
+
+impl ViewStateChanges<'_, '_> {
+    fn any(&self) -> bool {
+        !self.explorer.is_empty() || !self.sections.is_empty() || !self.project_dirs.is_empty()
+    }
+}
+
 const STORE_SCHEMA_VERSION: u32 = 4;
 
 pub(crate) fn store_path() -> PathBuf {
@@ -150,7 +163,7 @@ fn mark_dirty_on_change(
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
     changed_geometry: Query<(), Changed<WindowGeometry>>,
-    changed_explorer_visibility: Query<(), Changed<vmux_editor::StackExplorerVisibility>>,
+    view_state: ViewStateChanges,
     added_archived: Query<(), Added<ArchivedPage>>,
     mut removed_archived: RemovedComponents<ArchivedPage>,
     added_visits: Query<(), Added<vmux_history::Visit>>,
@@ -169,7 +182,7 @@ fn mark_dirty_on_change(
         || !changed_size.is_empty()
         || !changed_children.is_empty()
         || !changed_geometry.is_empty()
-        || !changed_explorer_visibility.is_empty()
+        || view_state.any()
         || !added_archived.is_empty()
         || removed_archived.read().count() > 0
         || !added_visits.is_empty()
@@ -246,6 +259,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_core::TransitionType>()
         .allow::<vmux_core::Order>()
         .allow::<vmux_editor::StackExplorerVisibility>()
+        .allow::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
+        .allow::<vmux_space::ExpandedProjectDirs>()
         .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
