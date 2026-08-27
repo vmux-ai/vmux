@@ -37,6 +37,118 @@ pub struct WorktreeRegistration {
 pub struct BranchHolder {
     pub branch: String,
     pub checkout: Option<PathBuf>,
+    pub change: BranchChange,
+}
+
+impl BranchHolder {
+    pub fn checkout_path(&self) -> String {
+        let Some(path) = &self.checkout else {
+            return String::new();
+        };
+        path.to_string_lossy().into_owned()
+    }
+
+    pub fn checkout_label(&self) -> String {
+        let Some(path) = &self.checkout else {
+            return String::new();
+        };
+        let Some(name) = path.file_name() else {
+            return String::new();
+        };
+        name.to_string_lossy().into_owned()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BranchChange {
+    pub insertions: u32,
+    pub deletions: u32,
+}
+
+impl BranchChange {
+    const WORKERS: usize = 8;
+
+    fn fill(root: &Path, holders: &mut [BranchHolder]) {
+        let Some(base) = BaseRef::of(root) else {
+            return;
+        };
+        let mut measured = Vec::new();
+        for holder in holders.iter_mut() {
+            if holder.checkout.is_some() {
+                measured.push(holder);
+            }
+        }
+        if measured.is_empty() {
+            return;
+        }
+        let base = &base;
+        let per_worker = measured.len().div_ceil(Self::WORKERS);
+        std::thread::scope(|scope| {
+            for chunk in measured.chunks_mut(per_worker) {
+                scope.spawn(move || {
+                    for holder in chunk {
+                        holder.change = Self::against(root, base, &holder.branch);
+                    }
+                });
+            }
+        });
+    }
+
+    fn against(root: &Path, base: &BaseRef, branch: &str) -> Self {
+        let Ok((merge_base, _, true)) = git(root, &["merge-base", branch, base.as_str()]) else {
+            return Self::default();
+        };
+        let range = format!("{}..{branch}", merge_base.trim());
+        let Ok((numstat, _, true)) = git(root, &["diff", "--numstat", &range]) else {
+            return Self::default();
+        };
+        Self::summed(&numstat)
+    }
+
+    fn summed(numstat: &str) -> Self {
+        let mut total = Self::default();
+        for line in numstat.lines() {
+            let mut fields = line.split('\t');
+            let Some(added) = fields.next() else {
+                continue;
+            };
+            let Some(removed) = fields.next() else {
+                continue;
+            };
+            total.insertions += added.parse::<u32>().unwrap_or_default();
+            total.deletions += removed.parse::<u32>().unwrap_or_default();
+        }
+        total
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BaseRef(String);
+
+impl BaseRef {
+    const FALLBACKS: &'static [&'static str] = &["origin/main", "origin/master", "main", "master"];
+
+    pub fn of(root: &Path) -> Option<Self> {
+        if let Ok((stdout, _, true)) = git(
+            root,
+            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        ) {
+            let name = stdout.trim();
+            if !name.is_empty() {
+                return Some(Self(name.to_string()));
+            }
+        }
+        for candidate in Self::FALLBACKS {
+            if let Ok((_, _, true)) = git(root, &["rev-parse", "--verify", "--quiet", candidate]) {
+                return Some(Self((*candidate).to_string()));
+            }
+        }
+        None
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 struct RepositoryWorktreeLock(File);
@@ -406,16 +518,23 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
 
 pub fn branch_holders(root: &Path) -> Result<Vec<BranchHolder>, GitError> {
     let registrations = worktree_registrations(root)?;
-    Ok(local_branches(root)?
-        .into_iter()
-        .map(|branch| {
-            let checkout = registrations
-                .iter()
-                .find(|registration| registration.branch.as_deref() == Some(branch.as_str()))
-                .map(|registration| registration.path.clone());
-            BranchHolder { branch, checkout }
-        })
-        .collect())
+    let mut holders = Vec::new();
+    for branch in local_branches(root)? {
+        let mut checkout = None;
+        for registration in &registrations {
+            if registration.branch.as_deref() == Some(branch.as_str()) {
+                checkout = Some(registration.path.clone());
+                break;
+            }
+        }
+        holders.push(BranchHolder {
+            branch,
+            checkout,
+            change: BranchChange::default(),
+        });
+    }
+    BranchChange::fill(root, &mut holders);
+    Ok(holders)
 }
 
 pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
@@ -832,6 +951,73 @@ mod tests {
             held("spare"),
             None,
             "a branch nothing has checked out is free for a new worktree"
+        );
+    }
+
+    #[test]
+    fn a_numstat_sums_its_files_and_counts_a_binary_as_nothing() {
+        let change = BranchChange::summed("3\t1\tsrc/a.rs\n10\t0\tsrc/b.rs\n-\t-\tlogo.png\n");
+
+        assert_eq!(change.insertions, 13);
+        assert_eq!(change.deletions, 1);
+    }
+
+    #[test]
+    fn a_held_branch_reports_what_it_changed_since_the_base() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        test_repo::write(&wt, "added.txt", "one\ntwo\nthree\n");
+        test_repo::write(&wt, "seed.txt", "");
+        test_repo::run(&wt, &["add", "added.txt", "seed.txt"]);
+        test_repo::run(&wt, &["commit", "-qm", "work"]);
+
+        let holders = branch_holders(repo.path()).unwrap();
+        let change = |branch: &str| {
+            holders
+                .iter()
+                .find(|holder| holder.branch == branch)
+                .unwrap_or_else(|| panic!("{branch} listed"))
+                .change
+        };
+
+        assert_eq!(
+            change("vmux/feat"),
+            BranchChange {
+                insertions: 3,
+                deletions: 1,
+            },
+            "a worktree branch is measured from where it left the base, in that direction"
+        );
+        assert_eq!(
+            change("main"),
+            BranchChange::default(),
+            "the base branch has nothing to report against itself"
+        );
+    }
+
+    #[test]
+    fn an_unheld_branch_is_left_unmeasured() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(repo.path(), &["branch", "spare", "main"]);
+        test_repo::write(repo.path(), "later.txt", "a\nb\n");
+        test_repo::run(repo.path(), &["add", "later.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "later"]);
+        test_repo::run(repo.path(), &["branch", "-f", "spare", "HEAD"]);
+
+        let holders = branch_holders(repo.path()).unwrap();
+        let spare = holders
+            .iter()
+            .find(|holder| holder.branch == "spare")
+            .expect("spare listed");
+
+        assert_eq!(spare.checkout, None);
+        assert_eq!(
+            spare.change,
+            BranchChange::default(),
+            "measuring every local branch would cost two git calls each, so only worktrees pay"
         );
     }
 

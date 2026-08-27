@@ -179,11 +179,17 @@ pub struct ProjectBranch {
     pub branch: String,
     pub checkout: String,
     pub label: String,
+    pub insertions: u32,
+    pub deletions: u32,
 }
 
 impl ProjectBranch {
     pub fn held(&self) -> bool {
         !self.checkout.is_empty()
+    }
+
+    pub fn changed(&self) -> bool {
+        self.insertions > 0 || self.deletions > 0
     }
 }
 

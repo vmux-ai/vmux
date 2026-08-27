@@ -820,4 +820,5 @@ agent-project-none = 프로젝트가 없습니다
 agent-project-loading-branches = 브랜치 불러오는 중…
 agent-project-no-branches = 브랜치가 없습니다
 agent-project-open-worktree = 이 워크트리 열기
+agent-project-branch-change = 기준 브랜치 대비 변경 사항
 agent-project-create-worktree = 이 브랜치에 워크트리 만들기

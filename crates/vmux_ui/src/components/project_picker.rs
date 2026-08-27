@@ -175,10 +175,35 @@ fn ProjectBranchRow(
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_pick.call(pick.clone()),
             span { class: "truncate font-mono text-foreground", "{branch.branch}" }
-            if held {
-                span { class: "ml-auto shrink-0 truncate rounded bg-violet-500/[0.10] px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-300", "{branch.label}" }
-            } else {
-                span { class: "ml-auto shrink-0 text-[10px] text-muted-foreground/70", "+" }
+            div { class: "ml-auto flex min-w-0 shrink-0 items-center gap-2",
+                BranchChangeStat {
+                    insertions: branch.insertions,
+                    deletions: branch.deletions,
+                }
+                if held {
+                    span { class: "shrink-0 truncate rounded bg-violet-500/[0.10] px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-300", "{branch.label}" }
+                } else {
+                    span { class: "shrink-0 text-[10px] text-muted-foreground/70", "+" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BranchChangeStat(insertions: u32, deletions: u32) -> Element {
+    if insertions == 0 && deletions == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "flex shrink-0 items-center gap-1 font-mono text-[10px] tabular-nums",
+            title: translate("agent-project-branch-change"),
+            if insertions > 0 {
+                span { class: "text-emerald-600 dark:text-emerald-400", "+{insertions}" }
+            }
+            if deletions > 0 {
+                span { class: "text-rose-600 dark:text-rose-400", "−{deletions}" }
             }
         }
     }

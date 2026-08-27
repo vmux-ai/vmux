@@ -820,4 +820,5 @@ agent-project-none = Проєктів ще немає
 agent-project-loading-branches = Завантаження гілок…
 agent-project-no-branches = Немає гілок
 agent-project-open-worktree = Відкрити це робоче дерево
+agent-project-branch-change = Зміни відносно базової гілки
 agent-project-create-worktree = Створити робоче дерево на цій гілці

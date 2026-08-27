@@ -820,4 +820,5 @@ agent-project-none = 尚無專案
 agent-project-loading-branches = 正在載入分支…
 agent-project-no-branches = 沒有分支
 agent-project-open-worktree = 開啟此工作樹
+agent-project-branch-change = 相對於基礎分支的變更
 agent-project-create-worktree = 在此分支建立工作樹

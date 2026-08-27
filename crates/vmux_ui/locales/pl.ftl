@@ -820,4 +820,5 @@ agent-project-none = Brak projektów
 agent-project-loading-branches = Ładowanie gałęzi…
 agent-project-no-branches = Brak gałęzi
 agent-project-open-worktree = Otwórz to drzewo robocze
+agent-project-branch-change = Zmiany względem gałęzi bazowej
 agent-project-create-worktree = Utwórz drzewo robocze na tej gałęzi

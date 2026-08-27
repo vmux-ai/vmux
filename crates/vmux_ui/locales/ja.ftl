@@ -805,4 +805,5 @@ agent-project-none = プロジェクトがありません
 agent-project-loading-branches = ブランチを読み込み中…
 agent-project-no-branches = ブランチがありません
 agent-project-open-worktree = このワークツリーを開く
+agent-project-branch-change = ベースブランチとの差分
 agent-project-create-worktree = このブランチでワークツリーを作成

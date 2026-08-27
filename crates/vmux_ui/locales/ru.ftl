@@ -820,4 +820,5 @@ agent-project-none = Проектов пока нет
 agent-project-loading-branches = Загрузка веток…
 agent-project-no-branches = Нет веток
 agent-project-open-worktree = Открыть это рабочее дерево
+agent-project-branch-change = Изменения относительно базовой ветки
 agent-project-create-worktree = Создать рабочее дерево на этой ветке

@@ -820,4 +820,5 @@ agent-project-none = Aucun projet
 agent-project-loading-branches = Chargement des branches…
 agent-project-no-branches = Aucune branche
 agent-project-open-worktree = Ouvrir ce worktree
+agent-project-branch-change = Modifications par rapport à la branche de base
 agent-project-create-worktree = Créer un worktree sur cette branche

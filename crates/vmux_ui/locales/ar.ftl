@@ -820,4 +820,5 @@ agent-project-none = لا توجد مشاريع بعد
 agent-project-loading-branches = جارٍ تحميل الفروع…
 agent-project-no-branches = لا توجد فروع
 agent-project-open-worktree = فتح شجرة العمل هذه
+agent-project-branch-change = التغييرات مقارنةً بالفرع الأساسي
 agent-project-create-worktree = إنشاء شجرة عمل على هذا الفرع

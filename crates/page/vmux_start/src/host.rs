@@ -276,21 +276,14 @@ fn on_start_branches_request(
         };
         let mut branches = Vec::with_capacity(holders.len());
         for holder in holders {
-            let checkout = holder
-                .checkout
-                .as_ref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let label = holder
-                .checkout
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            let checkout = holder.checkout_path();
+            let label = holder.checkout_label();
             branches.push(vmux_wire::space::ProjectBranch {
                 branch: holder.branch,
                 checkout,
                 label,
+                insertions: holder.change.insertions,
+                deletions: holder.change.deletions,
             });
         }
         branches
