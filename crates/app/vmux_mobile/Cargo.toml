@@ -35,20 +35,11 @@ category = "Mobile"
 [[example]]
 name = "layout"
 path = "examples/layout.rs"
-
-[[example]]
-name = "layout_ios"
-path = "examples/layout_ios.rs"
 required-features = ["mobile"]
-
-[package.metadata.example.layout_ios]
-name = "Layout (simulator)"
-description = "The same navigation on a phone, driven by hand instead of by a Mac"
-category = "Navigation"
 
 [package.metadata.example.layout]
 name = "Layout"
-description = "Tabs, a stack within one, and sheets on top — drawn from the ECS"
+description = "Tabs, a stack and stacked sheets, driven by hand instead of by a Mac"
 category = "Navigation"
 
 [dependencies]

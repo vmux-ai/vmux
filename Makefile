@@ -1,4 +1,4 @@
-.PHONY: layout-mobile layout-mobile-sim dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: layout-mobile dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -55,26 +55,20 @@ build: ensure-mac-deps
 
 ios: mobile-ios-run
 
-# The phone's navigation with no phone: it sends the messages a paired app would and draws
-# what the ECS made of them, so tabs, a stack and stacked sheets can be read without a Mac, a
-# relay or a simulator. `-p` because this workspace names its default members, and without it
-# cargo hunts the example only among those and reports it missing while listing it.
-layout-mobile:
-	"$(CARGO_BIN)" run -p vmux_mobile --example layout
-
-# The same navigation on a simulator, where the parts CI cannot reach live: a real push
-# animation, the interactive back-swipe, a sheet you can drag down.
+# The navigation on a simulator: a real push animation, the interactive back-swipe, a sheet
+# you can drag down — the parts no test reaches and CI cannot run. Its tabs are canned rather
+# than reported, so this needs no Mac and no pairing.
 #
 # dx writes the app's own Info.plist into every bundle it makes, so the example inherits
 # `ai.vmux.mobile` and an executable name that is not the one it built. Installed as-is it
 # would replace the real app and then fail to launch, so both are corrected here rather than
 # by giving the example a plist of its own — one file to keep in step is enough.
-layout-mobile-sim: ensure-mobile-ios-deps ensure-booted-simulator
+layout-mobile: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
-	"$(DX_BIN)" build --ios -p vmux_mobile --example layout_ios --features mobile; \
+	"$(DX_BIN)" build --ios -p vmux_mobile --example layout --features mobile; \
 	. ./scripts/cargo-target-paths.sh; \
-	bundle="$$(vmux_cargo_target_dir .)/dx/layout_ios/debug/ios/LayoutIos.app"; \
-	plutil -replace CFBundleExecutable -string layout_ios "$$bundle/Info.plist"; \
+	bundle="$$(vmux_cargo_target_dir .)/dx/layout/debug/ios/Layout.app"; \
+	plutil -replace CFBundleExecutable -string layout "$$bundle/Info.plist"; \
 	plutil -replace CFBundleIdentifier -string ai.vmux.mobile.layout "$$bundle/Info.plist"; \
 	xcrun simctl install booted "$$bundle"; \
 	xcrun simctl launch booted ai.vmux.mobile.layout
