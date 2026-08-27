@@ -128,6 +128,7 @@ pub fn Page() -> Element {
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
     let explorer_reflowed_at = use_signal(|| Option::<ExplorerReflowKey>::None);
+    let explorer_user_chose = use_signal(|| false);
     let explorer = ExplorerPane {
         visible: explorer_visible,
         preferred_visible: explorer_preferred_visible,
@@ -136,6 +137,7 @@ pub fn Page() -> Element {
         client_id: explorer_client_id,
         request_id: explorer_request_id,
         reflowed_at: explorer_reflowed_at,
+        user_chose: explorer_user_chose,
     };
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
@@ -3851,6 +3853,7 @@ pub struct ExplorerPane {
     pub client_id: Signal<u64>,
     pub request_id: Signal<u64>,
     pub reflowed_at: Signal<Option<ExplorerReflowKey>>,
+    pub user_chose: Signal<bool>,
 }
 
 impl ExplorerPane {
@@ -3871,7 +3874,7 @@ impl ExplorerPane {
             return;
         }
         self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible && self.has_room();
+        let next = key.preferred_visible && ((self.user_chose)() || self.has_room());
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -3897,16 +3900,18 @@ impl ExplorerPane {
         }
     }
 
-    pub(crate) fn toggle(self, mode: Signal<Mode>) {
-        self.set_visible(!(self.preferred_visible)(), mode);
+    pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
+        self.user_chose.set(true);
+        self.set_visible(!(self.visible)(), mode);
     }
 
-    pub(crate) fn reveal_current(self, mode: Signal<Mode>) {
+    pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {
         if (self.visible)() {
             let _ = send(&ExplorerRevealCurrent);
-        } else {
-            self.set_visible(true, mode);
+            return;
         }
+        self.user_chose.set(true);
+        self.set_visible(true, mode);
     }
 
     fn show_if_room(self, mode: Signal<Mode>) {
