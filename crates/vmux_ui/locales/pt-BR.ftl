@@ -239,6 +239,7 @@ tray-resume-recording = Retomar gravação
 tray-finish-recording = Finalizar gravação
 tray-quit = Sair do Vmux
 
+composer-agent = Agente
 composer-attach-files = Anexar arquivos (/upload)
 composer-remove-attachment = Remover anexo
 

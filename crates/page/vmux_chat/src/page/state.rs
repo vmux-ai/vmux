@@ -24,6 +24,9 @@ use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
 };
+use vmux_ui::components::composer_bar::{
+    ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
+};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
@@ -47,6 +50,7 @@ pub struct Chat {
     pub projects: ProjectPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
+    pub menu: ComposerMenu,
     pub activity_counts: Memo<(usize, usize)>,
     pub latest_tool: Memo<Option<(usize, usize)>>,
 }
@@ -69,6 +73,7 @@ pub fn use_chat() -> Chat {
         projects: use_project_picker(),
         slash: use_slash_commands(),
         resume: use_resume(),
+        menu: use_composer_menu(),
         activity_counts: use_memo(move || vmux_wire::chat::activity_counts(&items.read())),
         latest_tool: use_memo(move || latest_tool_location(&items.read())),
     };
@@ -123,6 +128,7 @@ impl Chat {
             let mut models = chat.models.models;
             let mut current_model_id = chat.models.current_model_id;
             let mut current_model = chat.models.current_model;
+            let mut loaded = chat.models.loaded;
             let mut levels = chat.effort.levels;
             let mut current = chat.effort.current;
             let mut agent_key = chat.effort.agent_key;
@@ -134,10 +140,13 @@ impl Chat {
             current.set(state.effort_current.clone());
             agent_key.set(state.agent_key.clone());
             menu_sel.set(0);
+            loaded.set(true);
         });
         let _context = use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
             let mut composer_context = chat.slash.composer_context;
+            let mut loaded = chat.projects.loaded;
             composer_context.set(context.clone());
+            loaded.set(true);
         });
         let _branches =
             use_listener::<ChatProjectBranches, _>(CHAT_PROJECT_BRANCHES_EVENT, move |incoming| {
@@ -462,6 +471,13 @@ impl Chat {
         matches!(selector_mode(&self.draft()), SelectorMode::Models(_))
     }
 
+    pub fn selector_open(&self) -> bool {
+        self.media_menu_open()
+            || self.command_menu_open()
+            || self.resume_menu_open()
+            || self.model_menu_open()
+    }
+
     pub fn resume_state(&self) -> Option<ResumeMenuState> {
         if !self.resume_menu_open() {
             return None;
@@ -557,6 +573,90 @@ impl Chat {
 
     pub fn choice_pending(&self) -> bool {
         !self.run.choice_options.read().is_empty() || self.run.approval.read().is_some()
+    }
+}
+
+impl Chat {
+    pub fn model_chip(&self) -> Option<ComposerChip> {
+        if !(self.models.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let name = (self.models.current_model)();
+        if name.is_empty() {
+            return None;
+        }
+        let chat = *self;
+        let open = EventHandler::new(move |()| {
+            let mut draft = chat.composer.draft;
+            let mut menu_sel = chat.slash.menu_sel;
+            chat.menu.close();
+            draft.set("/model ".to_string());
+            menu_sel.set(0);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        Some(ComposerChip::ready(name, translate("agent-change-model")).opens(open))
+    }
+
+    pub fn effort_chip(&self) -> Option<ComposerChip> {
+        if !(self.models.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        if self.effort.levels.read().is_empty() {
+            return None;
+        }
+        let selected = (self.effort.current)();
+        let label = if selected.is_empty() {
+            translate("agent-effort")
+        } else {
+            selected
+        };
+        let chat = *self;
+        let open = EventHandler::new(move |()| {
+            chat.open_menu(ComposerMenuKind::Effort);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        Some(ComposerChip::ready(label, translate("agent-effort-tooltip")).opens(open))
+    }
+
+    pub fn project_chip(&self) -> Option<ComposerChip> {
+        if !(self.projects.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let context = (self.slash.composer_context)();
+        let label = if context.workspace_selected && !context.workspace_name.is_empty() {
+            context.workspace_name.clone()
+        } else {
+            translate("agent-project-select")
+        };
+        if context.can_manage_workspace {
+            let title = if context.cwd.is_empty() {
+                translate("agent-project-choose")
+            } else {
+                format!("{} · {}", translate("agent-project-choose"), context.cwd)
+            };
+            let chat = *self;
+            let open = EventHandler::new(move |()| chat.open_menu(ComposerMenuKind::Project));
+            return Some(ComposerChip::ready(label, title).opens(open));
+        }
+        if context.cwd.is_empty() {
+            return None;
+        }
+        Some(ComposerChip::ready(label, context.cwd))
+    }
+
+    pub fn branch_chip(&self) -> Option<ComposerChip> {
+        if !(self.projects.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let context = (self.slash.composer_context)();
+        if !context.is_git_repo {
+            return None;
+        }
+        if context.branch.is_empty() {
+            return Some(ComposerChip::ready("Git", "Git repository"));
+        }
+        let title = format!("Branch {}", context.branch);
+        Some(ComposerChip::ready(context.branch, title))
     }
 }
 
@@ -715,14 +815,11 @@ impl Chat {
         }
     }
 
-    pub fn open_only(&self, menu: ComposerMenu) {
-        if !matches!(menu, ComposerMenu::Effort) {
-            self.effort.close();
+    pub fn open_menu(&self, kind: ComposerMenuKind) {
+        if self.selector_open() {
+            self.dismiss_selector();
         }
-        if !matches!(menu, ComposerMenu::Projects) {
-            self.projects.close();
-        }
-        self.dismiss_selector();
+        self.menu.toggle(kind);
     }
 
     pub fn dismiss_selector(&self) {
@@ -743,6 +840,7 @@ impl Chat {
         let mut history_cursor = self.composer.history_cursor;
         let mut history_scratch = self.composer.history_scratch;
         let mut menu_sel = self.slash.menu_sel;
+        self.menu.close();
         draft.set(value);
         history_cursor.set(None);
         history_scratch.set(String::new());
@@ -899,6 +997,7 @@ pub struct ModelPicker {
     pub models: Signal<Vec<ModelOptionEntry>>,
     pub current_model_id: Signal<String>,
     pub current_model: Signal<String>,
+    pub loaded: Signal<bool>,
 }
 
 pub fn use_model_picker() -> ModelPicker {
@@ -906,12 +1005,13 @@ pub fn use_model_picker() -> ModelPicker {
         models: use_signal(Vec::new),
         current_model_id: use_signal(String::new),
         current_model: use_signal(String::new),
+        loaded: use_signal(|| false),
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ProjectPicker {
-    pub open: Signal<bool>,
+    pub loaded: Signal<bool>,
     pub expanded: Signal<String>,
     pub branches: Signal<Vec<ChatBranch>>,
     pub branches_for: Signal<String>,
@@ -919,7 +1019,7 @@ pub struct ProjectPicker {
 
 pub fn use_project_picker() -> ProjectPicker {
     ProjectPicker {
-        open: use_signal(|| false),
+        loaded: use_signal(|| false),
         expanded: use_signal(String::new),
         branches: use_signal(Vec::new),
         branches_for: use_signal(String::new),
@@ -927,21 +1027,6 @@ pub fn use_project_picker() -> ProjectPicker {
 }
 
 impl ProjectPicker {
-    pub fn is_open(&self) -> bool {
-        (self.open)()
-    }
-
-    pub fn toggle(&self) {
-        let mut open = self.open;
-        let showing = *open.peek();
-        open.set(!showing);
-    }
-
-    pub fn close(&self) {
-        let mut open = self.open;
-        open.set(false);
-    }
-
     pub fn expand(&self, project: &str) {
         let mut expanded = self.expanded;
         if expanded.peek().as_str() == project {
@@ -959,40 +1044,15 @@ impl ProjectPicker {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ComposerMenu {
-    Effort,
-    Projects,
-}
-
 #[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
-    pub open: Signal<bool>,
     pub levels: Signal<Vec<String>>,
     pub current: Signal<String>,
     pub agent_key: Signal<String>,
 }
 
-impl EffortPicker {
-    pub fn is_open(&self) -> bool {
-        (self.open)()
-    }
-
-    pub fn toggle(&self) {
-        let mut open = self.open;
-        let showing = *open.peek();
-        open.set(!showing);
-    }
-
-    pub fn close(&self) {
-        let mut open = self.open;
-        open.set(false);
-    }
-}
-
 pub fn use_effort_picker() -> EffortPicker {
     EffortPicker {
-        open: use_signal(|| false),
         levels: use_signal(Vec::new),
         current: use_signal(String::new),
         agent_key: use_signal(String::new),

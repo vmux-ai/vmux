@@ -239,6 +239,7 @@ tray-resume-recording = استئناف التسجيل
 tray-finish-recording = إنهاء التسجيل
 tray-quit = إنهاء Vmux
 
+composer-agent = وكيل
 composer-attach-files = إرفاق ملفات (/upload)
 composer-remove-attachment = إزالة المرفق
 

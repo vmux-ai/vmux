@@ -21,16 +21,17 @@ use std::rc::Rc;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, TextCaret};
+use vmux_ui::components::agent_menu::ComposerAgentOption;
 use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
-use vmux_ui::components::icon::Icon;
-use vmux_ui::components::model_menu::{ModelMenu, ModelPill};
-use vmux_ui::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker};
-use vmux_ui::components::prompt_box::{
-    PROMPT_MENU_ROW, PROMPT_MENU_ROW_IDLE, PROMPT_MENU_ROW_SELECTED, PromptBox, PromptPopup,
-    PromptPopupPlacement,
+use vmux_ui::components::composer_bar::{
+    AgentMenuData, BranchMenuData, ComposerBar, ComposerChip, ComposerMenuKind, ComposerMenus,
+    ModelMenuData, ProjectMenuData, use_composer_menu,
 };
+use vmux_ui::components::icon::Icon;
+use vmux_ui::components::project_picker::ProjectPick;
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
@@ -86,10 +87,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         loading: mut media_loading,
         selected: mut media_selected,
     } = use_prompt_media();
-    let PromptTarget {
-        url: mut start_target_url,
-        menu_open: mut target_menu_open,
-    } = use_prompt_target();
+    let mut start_target_url = use_signal(String::new);
+    let menu = use_composer_menu();
 
     let keys = use_key_claim(Unclaimed::Types, move || match variant {
         PaletteVariant::Modal => vec!["command-bar".to_string()],
@@ -302,10 +301,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         on_activity.call(());
     });
 
-    let mut model_menu_open = use_signal(|| false);
     let mut model_menu_sel = use_signal(|| 0usize);
-    let mut project_menu_open = use_signal(|| false);
-    let mut branch_menu_open = use_signal(|| false);
     let mut project_expanded = use_signal(String::new);
     let mut project_branches = use_signal(Vec::<vmux_core::event::ProjectBranch>::new);
     let mut project_branches_for = use_signal(String::new);
@@ -603,10 +599,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         None => String::new(),
     };
 
+    let context_loading = state_val.pages.is_empty();
     let workspace_label = if prompt_context.workspace_name.is_empty() {
-        "Select project".to_string()
+        translate("agent-project-select")
     } else {
         prompt_context.workspace_name.clone()
+    };
+    let workspace_title = if prompt_context.cwd.is_empty() {
+        translate("agent-project-choose")
+    } else {
+        format!(
+            "{} \u{00b7} {}",
+            translate("agent-project-choose"),
+            prompt_context.cwd
+        )
     };
     let branch_title = if prompt_context.branch.is_empty() {
         "Git repository".to_string()
@@ -618,130 +624,174 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     } else {
         format!("Worktree from {}", prompt_context.base_ref)
     };
+    let agent_chip = if context_loading {
+        ComposerChip::loading()
+    } else {
+        ComposerChip::ready(selected_target_title, "Choose agent").opens(EventHandler::new(
+            move |()| {
+                menu.toggle(ComposerMenuKind::Agent);
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+        ))
+    };
+    let model_chip = if context_loading {
+        Some(ComposerChip::loading())
+    } else if selected_model_name.is_empty() {
+        None
+    } else {
+        let open = EventHandler::new(move |()| {
+            model_menu_sel.set(0);
+            menu.toggle(ComposerMenuKind::Model);
+        });
+        Some(ComposerChip::ready(selected_model_name, translate("agent-change-model")).opens(open))
+    };
+    let project_chip = if context_loading {
+        ComposerChip::loading()
+    } else {
+        let open = EventHandler::new(move |()| {
+            menu.toggle(ComposerMenuKind::Project);
+        });
+        ComposerChip::ready(workspace_label, workspace_title).opens(open)
+    };
+    let branch_chip = if context_loading {
+        Some(ComposerChip::loading())
+    } else if !prompt_context.is_git_repo {
+        None
+    } else {
+        let label = if prompt_context.branch.is_empty() {
+            "Git".to_string()
+        } else {
+            prompt_context.branch.clone()
+        };
+        let project = branch_project.clone();
+        let open = EventHandler::new(move |()| {
+            if menu.toggle(ComposerMenuKind::Branch) && !project.is_empty() {
+                let _ = send(&StartBranchesRequest {
+                    project: project.clone(),
+                });
+            }
+        });
+        Some(ComposerChip::ready(label, branch_title).opens(open))
+    };
+    let start_badges = rsx! {
+        if prompt_context.is_git_repo {
+            if prompt_context.is_worktree {
+                span {
+                    class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
+                    title: "{worktree_title}",
+                    "Worktree"
+                }
+            }
+            if prompt_context.uncommitted > 0 {
+                span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "\u{25cf} {prompt_context.uncommitted}" }
+            }
+            if prompt_context.ahead > 0 {
+                span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "\u{2191}{prompt_context.ahead}" }
+            }
+        } else if !prompt_context.cwd.is_empty() {
+            span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+        }
+    };
+    let start_status = rsx! {
+        span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
+            span { class: "h-1.5 w-1.5 rounded-full bg-success" }
+            "Ready"
+        }
+    };
     let start_composer_footer = rsx! {
-        div { class: "flex min-w-0 items-center justify-between gap-1",
-            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
-                button {
-                    id: "start-agent-selector-trigger",
-                    class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: "Choose agent",
-                    onmousedown: move |event| event.prevent_default(),
-                    onclick: move |_| {
-                        let showing = target_menu_open();
-                        model_menu_open.set(false);
-                        project_menu_open.set(false);
-                        branch_menu_open.set(false);
-                        target_menu_open.set(!showing);
-                        focus_prompt_end(PROMPT_INPUT_ID);
-                    },
-                    svg {
-                        class: "h-3.5 w-3.5 shrink-0",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
-                        path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
-                    }
-                    span { class: "truncate", "{selected_target_title}" }
-                    svg {
-                        class: "h-3 w-3 shrink-0 opacity-50",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        path { d: "m8 10 4 4 4-4" }
-                    }
-                }
-                ModelPill {
-                    name: selected_model_name.clone(),
-                    on_open: move |()| {
-                        model_menu_sel.set(0);
-                        let showing = *model_menu_open.peek();
-                        target_menu_open.set(false);
-                        project_menu_open.set(false);
-                        branch_menu_open.set(false);
-                        model_menu_open.set(!showing);
-                    },
-                }
-                button {
-                    class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
-                    onmousedown: move |event| event.prevent_default(),
-                    onclick: move |_| {
-                        let showing = *project_menu_open.peek();
-                        target_menu_open.set(false);
-                        model_menu_open.set(false);
-                        branch_menu_open.set(false);
-                        project_menu_open.set(!showing);
-                    },
-                    svg {
-                        class: "h-3.5 w-3.5 shrink-0",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
-                    }
-                    span { class: "truncate", "{workspace_label}" }
-                }
-                if prompt_context.is_git_repo {
-                    button {
-                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
-                        title: "{branch_title}",
-                        onmousedown: move |event| event.prevent_default(),
-                        onclick: {
-                            let project = branch_project.clone();
-                            move |_| {
-                                let showing = *branch_menu_open.peek();
-                                target_menu_open.set(false);
-                                model_menu_open.set(false);
-                                project_menu_open.set(false);
-                                branch_menu_open.set(!showing);
-                                if !showing && !project.is_empty() {
-                                    let _ = send(&StartBranchesRequest { project: project.clone() });
-                                }
-                            }
-                        },
-                        svg {
-                            class: "h-3.5 w-3.5 shrink-0",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "1.8",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            circle { cx: "6", cy: "5", r: "2" }
-                            circle { cx: "6", cy: "19", r: "2" }
-                            circle { cx: "18", cy: "12", r: "2" }
-                            path { d: "M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3" }
-                            path { d: "M6 7v10" }
-                        }
-                        span { class: "truncate", if prompt_context.branch.is_empty() { "Git" } else { "{prompt_context.branch}" } }
-                    }
-                    if prompt_context.is_worktree {
-                        span {
-                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
-                            title: "{worktree_title}",
-                            "Worktree"
-                        }
-                    }
-                    if prompt_context.uncommitted > 0 {
-                        span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "● {prompt_context.uncommitted}" }
-                    }
-                    if prompt_context.ahead > 0 {
-                        span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "↑{prompt_context.ahead}" }
-                    }
-                } else if !prompt_context.cwd.is_empty() {
-                    span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
-                }
+        ComposerBar {
+            agent: Some(agent_chip),
+            model: model_chip,
+            project: Some(project_chip),
+            branch: branch_chip,
+            badges: Some(start_badges),
+            status: Some(start_status),
+        }
+    };
+    let mut agent_options = Vec::new();
+    for item in prompt_targets.iter() {
+        if let ResultItem::Page { url, title, .. } = item {
+            agent_options.push(ComposerAgentOption {
+                url: url.clone(),
+                title: title.clone(),
+            });
+        }
+    }
+    let agent_menu = AgentMenuData {
+        options: agent_options,
+        selected_url: selected_target_url,
+        on_select: EventHandler::new(move |url: String| {
+            start_target_url.set(url);
+            selected.set(0);
+            nav_mode.set(false);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }),
+    };
+    let model_menu = ModelMenuData {
+        models: model_options,
+        current_model_id: model_current_id,
+        selected: model_menu_sel(),
+        on_hover: EventHandler::new(move |index| model_menu_sel.set(index)),
+        on_select: EventHandler::new(move |model: vmux_wire::room::ModelOptionEntry| {
+            let _ = send(&crate::event::StartSelectModel {
+                agent_key: model_agent_key.clone(),
+                model_id: model.id,
+            });
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }),
+    };
+    let project_menu = ProjectMenuData {
+        projects: picker_projects,
+        expanded: project_expanded(),
+        branches: project_branches(),
+        branches_for: project_branches_for(),
+        on_expand: EventHandler::new(move |path: String| {
+            if *project_expanded.peek() == path {
+                project_expanded.set(String::new());
+                return;
             }
-            span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
-                span { class: "h-1.5 w-1.5 rounded-full bg-success" }
-                "Ready"
+            project_expanded.set(path.clone());
+            if *project_branches_for.peek() != path {
+                project_branches.set(Vec::new());
             }
+            let _ = send(&StartBranchesRequest { project: path });
+        }),
+        on_pick: EventHandler::new(move |pick: ProjectPick| {
+            let _ = send(&StartGoToBranch {
+                project: pick.project,
+                branch: pick.branch,
+                checkout: pick.checkout,
+            });
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }),
+        on_choose_another: EventHandler::new(move |()| {
+            let _ = send(&StartSelectWorkspace {
+                current_dir: picker_cwd.clone(),
+            });
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }),
+    };
+    let branch_menu = BranchMenuData {
+        project: branch_project.clone(),
+        branches: project_branches(),
+        loaded: project_branches_for() == branch_project,
+        on_pick: EventHandler::new(move |pick: ProjectPick| {
+            let _ = send(&StartGoToBranch {
+                project: pick.project,
+                branch: pick.branch,
+                checkout: pick.checkout,
+            });
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }),
+    };
+    let start_menus = rsx! {
+        ComposerMenus {
+            menu,
+            placement: PromptPopupPlacement::Downward,
+            agent: Some(agent_menu),
+            model: Some(model_menu),
+            project: Some(project_menu),
+            branch: Some(branch_menu),
         }
     };
     let start_keydown_q = q.clone();
@@ -789,9 +839,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let go_down = direction == Some(MenuDirection::Next);
         let go_up = direction == Some(MenuDirection::Previous);
 
-        if target_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
+        if menu.opened().is_some() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
             e.prevent_default();
-            target_menu_open.set(false);
+            menu.close();
             return;
         }
 
@@ -965,122 +1015,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             if is_start {
-                if target_menu_open() {
-                    PromptPopup {
-                        placement: PromptPopupPlacement::Downward,
-                        id: "start-agent-selector",
-                        div { class: "p-1.5",
-                            div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", "Agent" }
-                            for item in prompt_targets.iter() {
-                                if let ResultItem::Page { url, title, .. } = item {
-                                    {
-                                        let option_url = url.clone();
-                                        let option_selected = url == &selected_target_url;
-                                        rsx! {
-                                            button {
-                                                key: "{url}",
-                                                class: if option_selected { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED} text-foreground") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} text-foreground/75 hover:text-foreground") },
-                                                onmousedown: move |event| event.prevent_default(),
-                                                onclick: move |_| {
-                                                    start_target_url.set(option_url.clone());
-                                                    target_menu_open.set(false);
-                                                    selected.set(0);
-                                                    nav_mode.set(false);
-                                                    focus_prompt_end(PROMPT_INPUT_ID);
-                                                },
-                                                span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.07] text-[10px] font-semibold uppercase", "{title.chars().next().unwrap_or('A')}" }
-                                                span { class: "min-w-0 flex-1 truncate", "{title}" }
-                                                if option_selected {
-                                                    svg {
-                                                        class: "h-3.5 w-3.5 shrink-0 text-success",
-                                                        view_box: "0 0 24 24",
-                                                        fill: "none",
-                                                        stroke: "currentColor",
-                                                        stroke_width: "2.2",
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        path { d: "m5 12 4 4L19 6" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if model_menu_open() {
-                    ModelMenu {
-                        placement: PromptPopupPlacement::Downward,
-                        models: model_options.clone(),
-                        current_model_id: model_current_id.clone(),
-                        selected: model_menu_sel(),
-                        on_hover: move |index| model_menu_sel.set(index),
-                        on_select: move |model: vmux_wire::room::ModelOptionEntry| {
-                            model_menu_open.set(false);
-                            let _ = send(&crate::event::StartSelectModel {
-                                agent_key: model_agent_key.clone(),
-                                model_id: model.id,
-                            });
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_dismiss: move |()| model_menu_open.set(false),
-                    }
-                }
-                if branch_menu_open() {
-                    BranchPicker {
-                        placement: PromptPopupPlacement::Downward,
-                        project: branch_project.clone(),
-                        branches: project_branches(),
-                        loaded: project_branches_for() == branch_project,
-                        on_pick: move |pick: ProjectPick| {
-                            branch_menu_open.set(false);
-                            let _ = send(&StartGoToBranch {
-                                project: pick.project,
-                                branch: pick.branch,
-                                checkout: pick.checkout,
-                            });
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_dismiss: move |()| branch_menu_open.set(false),
-                    }
-                }
-                if project_menu_open() {
-                    ProjectPicker {
-                        placement: PromptPopupPlacement::Downward,
-                        projects: picker_projects.clone(),
-                        expanded: project_expanded(),
-                        branches: project_branches(),
-                        branches_for: project_branches_for(),
-                        on_expand: move |path: String| {
-                            if *project_expanded.peek() == path {
-                                project_expanded.set(String::new());
-                                return;
-                            }
-                            project_expanded.set(path.clone());
-                            if *project_branches_for.peek() != path {
-                                project_branches.set(Vec::new());
-                            }
-                            let _ = send(&StartBranchesRequest { project: path });
-                        },
-                        on_pick: move |pick: ProjectPick| {
-                            project_menu_open.set(false);
-                            let _ = send(&StartGoToBranch {
-                                project: pick.project,
-                                branch: pick.branch,
-                                checkout: pick.checkout,
-                            });
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_choose_another: move |()| {
-                            project_menu_open.set(false);
-                            let _ = send(&StartSelectWorkspace { current_dir: picker_cwd.clone() });
-                            focus_prompt_end(PROMPT_INPUT_ID);
-                        },
-                        on_dismiss: move |()| project_menu_open.set(false),
-                    }
-                }
+                {start_menus}
                 PromptComposer {
                     value: display_text.clone(),
                     completion: ghost_text.clone(),
@@ -1094,7 +1029,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     action_title: translate("command-send"),
                     action_enabled: start_action_enabled,
                     on_input: move |value| {
-                        target_menu_open.set(false);
+                        menu.close();
                         query.set(value);
                         selected.set(0);
                         nav_mode.set(false);
@@ -1263,7 +1198,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !target_menu_open() && media_menu_open {
+            if menu.opened().is_none() && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -1282,7 +1217,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !target_menu_open() && !media_menu_open && !results.is_empty() {
+            if menu.opened().is_none() && !media_menu_open && !results.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
@@ -1633,18 +1568,6 @@ fn use_prompt_media() -> PromptMedia {
         timer: use_hook(|| Rc::new(RefCell::new(None))),
         loading: use_signal(|| false),
         selected: use_signal(|| 0usize),
-    }
-}
-
-struct PromptTarget {
-    url: Signal<String>,
-    menu_open: Signal<bool>,
-}
-
-fn use_prompt_target() -> PromptTarget {
-    PromptTarget {
-        url: use_signal(String::new),
-        menu_open: use_signal(|| false),
     }
 }
 

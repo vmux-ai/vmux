@@ -239,6 +239,7 @@ tray-resume-recording = Opname hervatten
 tray-finish-recording = Opname afronden
 tray-quit = Vmux afsluiten
 
+composer-agent = Agent
 composer-attach-files = Bestanden toevoegen (/upload)
 composer-remove-attachment = Bijlage verwijderen
 
