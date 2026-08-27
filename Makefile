@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: example dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -60,10 +60,10 @@ android: mobile-android-run
 # `inject-ios-resources.sh` reads VMUX_IOS_PROFILE to decide which bundle to write into, so the
 # build has to be told the same thing or the script looks for a bundle dx never produced.
 #
-# `--features mobile` is passed rather than left to dx. The bin is `required-features =
-# ["mobile"]`, and cargo skips a target whose features are unmet without saying so — which used
-# to be covered by dx turning on `dioxus/mobile` for an iOS build. That feature is gone, so the
-# name is ours now and nothing else will set it.
+# `--features mobile` is passed here and to `serve` below rather than left to dx. The bin is
+# `required-features = ["mobile"]`, and cargo skips a target whose features are unmet without
+# saying so — which used to be covered by dx turning on `dioxus/mobile` for an iOS build. That
+# feature is gone, so the name is ours now and nothing else will set it.
 mobile-ios: ensure-mobile-ios-deps
 	"$(DX_BIN)" build --ios -p vmux_mobile --features mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh
@@ -107,7 +107,7 @@ ensure-booted-simulator:
 	open -a Simulator --args -CurrentDeviceUDID "$$udid"
 
 mobile-ios-run: ensure-mobile-ios-deps ensure-booted-simulator
-	"$(DX_BIN)" serve --ios -p vmux_mobile
+	"$(DX_BIN)" serve --ios -p vmux_mobile --features mobile
 
 mobile-android-run: ensure-mobile-android-deps
 	"$(DX_BIN)" serve --android -p vmux_mobile
@@ -164,6 +164,12 @@ lint-fix:
 
 test:
 	$(CARGO_WITH_CEF_CACHE) test --workspace --exclude bevy_cef_core
+
+# The phone's navigation, with no phone: it sends the messages a paired app would and draws
+# what the ECS made of them. `-p` because this workspace names its default members, and
+# without it cargo hunts the example only among those and reports it missing while listing it.
+example:
+	"$(CARGO_BIN)" run -p vmux_mobile --example layout
 
 # Reset vmux *dev* storage for a clean test. Removes the layout store, session,
 # logs, the saved profile display name, and stale dev service sockets (all
