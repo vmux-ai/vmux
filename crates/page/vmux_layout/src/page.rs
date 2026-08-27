@@ -988,10 +988,8 @@ fn BookmarksSection(
             "data-bookmark-drop": "root",
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
-                if pointer_landed_on_self(&e.data()) {
-                    e.prevent_default();
-                    request_bookmark_menu();
-                }
+                e.prevent_default();
+                request_bookmark_menu();
             },
             div {
                 "data-bookmark-drop": "root",
@@ -2397,10 +2395,6 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
     }
 }
 
-fn pointer_landed_on_self(_data: &MouseData) -> bool {
-    false
-}
-
 fn set_root_radius_px(_radius: f32) {}
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
@@ -2508,7 +2502,10 @@ fn BookmarkNameInput(
             placeholder,
             value: "{draft}",
             autofocus: true,
-            oncontextmenu: move |event| event.prevent_default(),
+            oncontextmenu: move |event: Event<MouseData>| {
+                event.prevent_default();
+                event.stop_propagation();
+            },
             onmounted: move |event| {
                 set_bookmark_text_input_active(true);
                 focus_and_select_inline_rename(event);
@@ -2593,10 +2590,14 @@ fn BookmarkFolder(
     let drop_target = BookmarkDropTarget::Folder(uuid.clone());
     let folder_targeted = bookmark_drop_targeted(drag_state, &drop_target);
     let drag_item = BookmarkDragItem::Folder { uuid: uuid.clone() };
-    let has_child_folders = folder_rows
-        .iter()
-        .any(|child| child.parent.as_deref() == Some(folder.uuid.as_str()));
-    let folder_is_empty = !has_child_folders && folder.children.is_empty();
+    let mut child_folders = 0usize;
+    for child in folder_rows.iter() {
+        if child.parent.as_deref() == Some(folder.uuid.as_str()) {
+            child_folders += 1;
+        }
+    }
+    let child_count = child_folders + folder.children.len();
+    let folder_is_empty = child_count == 0;
 
     rsx! {
         div {
@@ -2632,23 +2633,29 @@ fn BookmarkFolder(
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
-                            SheetEntryRow {
-                                active: false,
-                                onclick: {
+                            SidebarTreeRow {
+                                path: uuid.clone(),
+                                label: folder.name.clone(),
+                                is_dir: true,
+                                expanded: !collapsed,
+                                emphasis: true,
+                                title: folder.name.clone(),
+                                on_activate: {
                                     let id = uuid.clone();
-                                    move |event: MouseEvent| {
+                                    move |()| {
                                         if bookmark_drag_blocks_click(drag_state) {
-                                            event.prevent_default();
-                                            event.stop_propagation();
                                             return;
                                         }
                                         bookmark_cmd("toggle_folder", Some(id.clone()));
                                     }
                                 },
-                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                    path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
-                                }
-                                span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
+                                trailing: rsx! {
+                                    if child_count > 0 {
+                                        span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground/70",
+                                            "{child_count}"
+                                        }
+                                    }
+                                },
                             }
                         }
                     }
@@ -2974,7 +2981,11 @@ fn commit_folder_rename(uuid: String, name: String) {
 fn LayoutContextMenu(children: Element) -> Element {
     rsx! {
         ContextMenu {
-            attributes: vec![],
+            attributes: vec![
+                dioxus_elements::events::oncontextmenu(move |event: Event<MouseData>| {
+                    event.stop_propagation();
+                }),
+            ],
             on_open_change: set_bookmark_context_menu_active,
             {children}
         }
