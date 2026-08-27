@@ -29,7 +29,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::components::tree_row::{SidebarTreeChildren, SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
@@ -2602,11 +2602,16 @@ fn BookmarkFolder(
     rsx! {
         div {
             "data-bookmark-drop": "{uuid}",
-            class: "flex flex-col gap-1",
+            class: "flex flex-col",
             if editing() {
                 div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                        path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    Icon {
+                        class: if collapsed {
+                            "h-4 w-4 shrink-0 rotate-0 text-muted-foreground transition-transform duration-200 ease-out"
+                        } else {
+                            "h-4 w-4 shrink-0 rotate-90 text-muted-foreground transition-transform duration-200 ease-out"
+                        },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                     BookmarkNameInput {
                         draft,
@@ -2760,7 +2765,7 @@ fn BookmarkFolder(
                     }
                 }
             }
-            if !collapsed {
+            SidebarTreeChildren { expanded: !collapsed,
                 div { class: "ml-3 flex flex-col gap-1",
                     for child_folder in folder_rows
                         .iter()
@@ -3099,7 +3104,7 @@ fn KnowledgeEntryRow(
         let children = entries_by_parent.get(&entry.path);
         let has_children = children.is_some_and(|children| !children.is_empty());
         rsx! {
-            div { class: "flex flex-col gap-0.5",
+            div { class: "flex flex-col",
                 LayoutContextMenu {
                     ContextMenuTrigger { attributes: vec![],
                         SidebarTreeRowGroup {
@@ -3126,7 +3131,7 @@ fn KnowledgeEntryRow(
                         disabled: false,
                     }
                 }
-                if expanded() {
+                SidebarTreeChildren { expanded: expanded(),
                     div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
                         if let Some(current) = prompt().filter(|current| current.parent == entry.path) {
                             KnowledgeCreateInput {

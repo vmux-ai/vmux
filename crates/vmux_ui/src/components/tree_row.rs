@@ -8,10 +8,43 @@ pub const SIDEBAR_TREE_ROW_GROUP: &str =
 
 pub const SIDEBAR_TREE_ROW: &str = "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground group-hover/row:text-foreground";
 
+pub const SIDEBAR_TREE_CHEVRON_OPEN: &str =
+    "h-3 w-3 shrink-0 rotate-90 transition-transform duration-200 ease-out";
+
+pub const SIDEBAR_TREE_CHEVRON_CLOSED: &str =
+    "h-3 w-3 shrink-0 rotate-0 transition-transform duration-200 ease-out";
+
+pub const SIDEBAR_TREE_CHILDREN_OPEN: &str = "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out";
+
+pub const SIDEBAR_TREE_CHILDREN_CLOSED: &str =
+    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out";
+
 #[component]
 pub fn SidebarTreeRowGroup(children: Element) -> Element {
     rsx! {
         div { class: SIDEBAR_TREE_ROW_GROUP, {children} }
+    }
+}
+
+#[component]
+pub fn SidebarTreeChildren(expanded: bool, children: Element) -> Element {
+    let mut opened = use_signal(|| expanded);
+
+    use_effect(use_reactive!(|expanded| {
+        if expanded {
+            opened.set(true);
+        }
+    }));
+
+    rsx! {
+        div {
+            class: if expanded { SIDEBAR_TREE_CHILDREN_OPEN } else { SIDEBAR_TREE_CHILDREN_CLOSED },
+            div { class: "overflow-hidden pt-0.5",
+                if opened() {
+                    {children}
+                }
+            }
+        }
     }
 }
 
@@ -37,11 +70,9 @@ pub fn SidebarTreeRow(
             style: "padding-left:{indent}rem;",
             onclick: move |_| on_activate.call(()),
             if is_dir {
-                Icon { class: "h-3 w-3 shrink-0",
-                    path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
-                }
-                Icon { class: "h-3.5 w-3.5 shrink-0",
-                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                Icon {
+                    class: if expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                    path { d: "m9 18 6-6-6-6" }
                 }
             } else {
                 span { class: "w-3 shrink-0" }
