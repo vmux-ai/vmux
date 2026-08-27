@@ -43,11 +43,17 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "std",
     "UIInterface",
     "UIResponder",
     "UIView",
+    "objc2-core-foundation",
     # `UIView::layer` is gated on this, and `raise_above_layers` is the whole reason we reach for
     # a view at all.
     "objc2-quartz-core",

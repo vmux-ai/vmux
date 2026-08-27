@@ -789,6 +789,14 @@ mobile-start-search-placeholder = Zoek of vraag…
 mobile-start-new-chat = Start chat
 mobile-start-starting = Starten…
 
+mobile-nav-untitled-chat = Naamloze chat
+mobile-nav-launcher = Start
+mobile-nav-new-tab = Nieuw tabblad
+mobile-nav-unsupported = Niet beschikbaar op dit apparaat
+mobile-nav-read-only = Alleen-lezen
+mobile-nav-open-on-mac = Open het op je Mac
+mobile-nav-url-placeholder = Stel een vraag of plak een URL…
+
 mobile-chat-back = Terug
 mobile-chat-back-to-stacks = Terug naar stapels
 mobile-chat-no-messages = Nog geen berichten.

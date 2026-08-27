@@ -7,7 +7,11 @@ publish = false
 
 [features]
 default = []
-mobile = ["dioxus/mobile"]
+# Kept as the name every build script and CI job already passes, but it no longer pulls
+# `dioxus/mobile`. That feature brought tao and a webview to launch the app in; the runner is
+# `bevy_winit` now, and linking tao as well would put two things in the binary that each assert on
+# being the one to call `UIApplicationMain`.
+mobile = []
 
 [[bin]]
 name = "vmux_mobile"
@@ -15,15 +19,19 @@ path = "src/main.rs"
 required-features = ["mobile"]
 
 [dependencies]
-# The phone's ECS host, ticked from the event loop Dioxus already owns rather than a thread of its
-# own. `bevy_window` is here for `AppLifecycle` alone: it carries no winit, so taking Bevy's own
-# type costs nothing and keeps one vocabulary across the desktop and the phone.
+# The phone runs the desktop's runner: `bevy_winit` owns the loop and `app.run()` turns it. These
+# are the plugins `WinitPlugin` needs around it and no more — there is no renderer, because wry
+# paints every pixel this app shows.
+bevy_a11y = "0.19.0"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
-# Only to drive the pools while plugins report themselves ready, which is what `App`'s own
-# `run_once` does and the one part of a runner this crate has to reimplement.
+bevy_input = { version = "0.19.0", default-features = false }
+bevy_time = { version = "0.19.0", default-features = false, features = ["std"] }
+# Only to drive the pools while the page world's plugins report themselves ready. That world is
+# not the one the runner turns, so it still has to be brought up by hand.
 bevy_tasks = "0.19"
 bevy_window = { workspace = true }
+bevy_winit = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
@@ -46,6 +54,8 @@ vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
 vmux_chat = { path = "../../page/vmux_chat" }
 vmux_start = { path = "../../page/vmux_start" }
 vmux_team = { path = "../../page/vmux_team" }
+vmux_native = { path = "../../vmux_native" }
+wry = { version = "0.53", default-features = false }
 vmux_ui = { path = "../../vmux_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -104,6 +114,9 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "UIFont",
     "UILabel",
     "UIGeometry",
+    "UIGestureRecognizer",
+    "UINavigationController",
+    "UINavigationItem",
     "UIPresentationController",
     "UIResponder",
     "UISheetPresentationController",

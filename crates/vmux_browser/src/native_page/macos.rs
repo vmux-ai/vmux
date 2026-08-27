@@ -363,6 +363,7 @@ impl PageEmbedder {
                 waker: self.waker.clone(),
             }),
             waker: Rc::new(self.waker.clone()),
+            layer: None,
         }
     }
 }

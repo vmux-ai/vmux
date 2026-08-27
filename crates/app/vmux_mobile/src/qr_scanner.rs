@@ -6,7 +6,6 @@ mod platform {
     use std::sync::{LazyLock, Mutex};
 
     use block2::RcBlock;
-    use dioxus::mobile::tao::platform::ios::WindowExtIOS;
     use dispatch2::DispatchQueue;
     use objc2::rc::Retained;
     use objc2::runtime::{Bool, NSObjectProtocol, ProtocolObject};
@@ -248,8 +247,8 @@ mod platform {
         }
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext) {
-        ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
+    pub fn install(root_controller: &UIViewController) {
+        ROOT_CONTROLLER.set((root_controller as *const UIViewController).cast_mut());
     }
 
     pub enum ScannerSupport {
@@ -403,9 +402,11 @@ mod platform {
 
 #[cfg(not(target_os = "ios"))]
 mod platform {
+    #![allow(dead_code)]
+
     use vmux_ui::i18n::translate;
 
-    pub fn install(_: &dioxus::mobile::DesktopContext) {}
+    pub fn install(_: &()) {}
 
     pub enum ScannerSupport {
         Available,

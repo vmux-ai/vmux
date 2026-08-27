@@ -789,6 +789,14 @@ mobile-start-search-placeholder = 搜索或提问…
 mobile-start-new-chat = 开始聊天
 mobile-start-starting = 正在启动…
 
+mobile-nav-untitled-chat = 未命名对话
+mobile-nav-launcher = 开始
+mobile-nav-new-tab = 新标签页
+mobile-nav-unsupported = 此设备不支持
+mobile-nav-read-only = 只读
+mobile-nav-open-on-mac = 请在 Mac 上打开
+mobile-nav-url-placeholder = 提问或粘贴网址…
+
 mobile-chat-back = 后退
 mobile-chat-back-to-stacks = 返回堆栈
 mobile-chat-no-messages = 暂无消息。

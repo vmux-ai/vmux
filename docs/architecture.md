@@ -413,6 +413,52 @@ and subscriptions are still polled. `ListAgents` and `ListTeam` are brokered int
 client's ECS rather than read from the server, so they answer `NoDesktop` until a window is
 there to ask.
 
+### The phone navigates by what is open on the Mac
+
+The phone's tabs **are** the Mac's tabs. The wire already modelled this — `Tab` → `Pane` →
+`Stack`, a stack carrying its url, title, kind and icon — so nothing was invented for the
+phone. A phone has room for one stack at a time, so the pane tree flattens and the splits go
+away; reading order survives. A stack's kind is only ever `terminal`, `files` or `browser`, so
+the **url** decides which page draws it, and a stack the phone cannot draw is mirrored rather
+than dropped — otherwise the two tab bars would quietly disagree.
+
+`ReadLayout` and `ReadTerminal` are the read-only half of the shared surface, enumerated rather
+than a blanket `AgentQuery` pass-through: that enum also carries `RecordStart`, `BrowserScroll`
+and their siblings, which act rather than report, so forwarding it wholesale would hand a paired
+phone the desktop's whole control surface. `ReadTerminal` is answered by the daemon itself,
+which owns the terminals; `ReadLayout` is brokered into the GUI's ECS.
+
+### Who owns the phone's event loop
+
+`bevy_winit` owns it, exactly as on the desktop, and the shell is a `NativePage` in a webview of
+its own. Dioxus is demoted to what diffs a tree: a `vmux_native` page is a real `VirtualDom`
+with a real reactor, so signals and futures still work. Adopting the desktop's runner deleted a
+hand-written `UIApplication` observer, an unmeasured `CFRunLoop` nudge, and tao from the iOS tree
+— `dioxus/mobile` has to *go* rather than merely stop being called, because tao and winit both
+assert on `UIApplicationMain`.
+
+Two things this needs that the desktop does not. Winit installs no `UIApplicationDelegate`,
+passing nil deliberately so the app can supply one — and the app needs two mechanisms, because a
+cold-start url rides the launch notification, which fires before any delegate exists, while a
+warm-start tap reaches only the delegate. And a surface installs its own host per entry into its
+`VirtualDom`, filing subscriptions locally so only `send` reaches the embedder; the phone leans
+the other way, kicking the first refresh when a page subscribes. On a surface that host is never
+reached, so a page would mount and stay empty — no crash, just something that reads as a slow
+link. An embedder therefore layers itself in front of the host the surface would have installed.
+
+**There is still one webview**, which is what the transition ordering exists for. Only the top
+controller can hold it, so every level below holds a still taken as it was covered. A push covers
+the live screen *before* the page changes and moves it *after*, and the still goes **over** the
+webview rather than in place of it — replacing it would leave the webview windowless for the
+whole paint wait, and WebKit does not promise to keep drawing a view with no window. A back-swipe
+inverts this: UIKit runs it and tells the delegate afterwards, so it is reported through a counter
+the shell drains.
+
+One webview is also why the phone cannot yet swipe between two conversations. Giving each screen
+its own view is the open question, and the cost is memory: the answer is a measurement, not an
+opinion. Three mounted — current and both neighbours — is the floor a swipe needs; anything wider
+is a switch-latency optimisation.
+
 ---
 
 ## Agents

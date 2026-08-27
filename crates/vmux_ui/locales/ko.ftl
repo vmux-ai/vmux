@@ -789,6 +789,14 @@ mobile-start-search-placeholder = 검색하거나 질문하기…
 mobile-start-new-chat = 채팅 시작
 mobile-start-starting = 시작하는 중…
 
+mobile-nav-untitled-chat = 제목 없는 대화
+mobile-nav-launcher = 시작
+mobile-nav-new-tab = 새 탭
+mobile-nav-unsupported = 이 기기에서는 사용할 수 없습니다
+mobile-nav-read-only = 읽기 전용
+mobile-nav-open-on-mac = Mac에서 여세요
+mobile-nav-url-placeholder = 질문하거나 URL을 붙여넣으세요…
+
 mobile-chat-back = 뒤로
 mobile-chat-back-to-stacks = 스택으로 돌아가기
 mobile-chat-no-messages = 아직 메시지가 없습니다.

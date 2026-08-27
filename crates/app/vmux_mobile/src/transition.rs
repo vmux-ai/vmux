@@ -1,128 +1,237 @@
 #[cfg(target_os = "ios")]
 mod platform {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
+    use std::time::Duration;
 
-    use dioxus::mobile::tao::platform::ios::WindowExtIOS;
-    use dioxus::mobile::wry::WebViewExtIOS;
-    use dioxus::prelude::*;
+    use dispatch2::{DispatchQueue, DispatchTime};
+    use objc2::Message;
     use objc2::rc::Retained;
-    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2::runtime::NSObject;
+    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+    use objc2_foundation::{NSObjectProtocol, NSString};
     use objc2_ui_kit::{
-        UIModalPresentationStyle, UIModalTransitionStyle, UIView, UIViewAutoresizing,
-        UIViewController,
+        UIGestureRecognizer, UIGestureRecognizerDelegate, UINavigationController,
+        UINavigationControllerDelegate, UIView, UIViewAutoresizing, UIViewController,
     };
 
     thread_local! {
-        static SHEET: RefCell<Option<NativeSheet>> = const { RefCell::new(None) };
+        static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
+        static POPPED: Cell<usize> = const { Cell::new(0) };
     }
 
-    pub struct NativeSheet {
-        root_controller: Retained<UIViewController>,
+    pub struct NativeStack {
         root_view: Retained<UIView>,
         web_view: Retained<UIView>,
-        presented: Option<Retained<UIViewController>>,
+        navigation: Retained<UINavigationController>,
+        levels: Vec<Retained<UIViewController>>,
+        covered: Option<Retained<UIView>>,
+        _delegate: Retained<NavDelegate>,
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext) {
-        let controller: *mut UIViewController = window.window.ui_view_controller().cast();
-        let root: *mut UIView = window.window.ui_view().cast();
-        let webview = window.webview.webview();
-        let web: &UIView = &webview;
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "VmuxNavigationDelegate"]
+        struct NavDelegate;
 
-        let adopted = unsafe {
-            (
-                Retained::retain(controller),
-                Retained::retain(root),
-                Retained::retain(ptr_to_mut(web)),
-            )
-        };
-        let (Some(root_controller), Some(root_view), Some(web_view)) = adopted else {
+        impl NavDelegate {}
+
+        unsafe impl NSObjectProtocol for NavDelegate {}
+
+        unsafe impl UIGestureRecognizerDelegate for NavDelegate {
+            #[unsafe(method(gestureRecognizerShouldBegin:))]
+            fn should_begin(&self, _gesture: &UIGestureRecognizer) -> bool {
+                STACK.with_borrow(|stack| stack.as_ref().is_some_and(|stack| stack.levels.len() > 1))
+            }
+        }
+
+        unsafe impl UINavigationControllerDelegate for NavDelegate {
+            #[unsafe(method(navigationController:didShowViewController:animated:))]
+            fn did_show(
+                &self,
+                navigation: &UINavigationController,
+                _shown: &UIViewController,
+                _animated: bool,
+            ) {
+                let shown: usize = unsafe {
+                    let controllers: Retained<objc2_foundation::NSArray<UIViewController>> =
+                        msg_send![navigation, viewControllers];
+                    controllers.count()
+                };
+                STACK.with_borrow_mut(|stack| {
+                    let Some(stack) = stack.as_mut() else {
+                        return;
+                    };
+                    if shown >= stack.levels.len() {
+                        return;
+                    }
+                    let dropped = stack.levels.len() - shown;
+                    stack.levels.truncate(shown);
+                    stack.uncover();
+                    stack.occupy_top();
+                    POPPED.set(POPPED.get() + dropped);
+                });
+            }
+        }
+    );
+
+    pub fn install(root_controller: &UIViewController, root_view: &UIView, web_view: &UIView) {
+        if STACK.with_borrow(Option::is_some) {
+            return;
+        }
+        let Some(marker) = MainThreadMarker::new() else {
             return;
         };
-        SHEET.set(Some(NativeSheet {
-            root_controller,
+        let (root_controller, root_view, web_view) = (
+            root_controller.retain(),
+            root_view.retain(),
+            web_view.retain(),
+        );
+
+        let first =
+            UIViewController::initWithNibName_bundle(UIViewController::alloc(marker), None, None);
+        first.setView(Some(&*web_view));
+        let navigation = UINavigationController::initWithRootViewController(
+            UINavigationController::alloc(marker),
+            &first,
+        );
+        let delegate = NavDelegate::new(marker);
+        unsafe {
+            navigation.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
+        }
+
+        navigation.setNavigationBarHidden(true);
+        if let Some(gesture) = navigation.interactivePopGestureRecognizer() {
+            gesture.setEnabled(true);
+            gesture.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
+        }
+
+        root_controller.addChildViewController(&navigation);
+        let Some(navigation_view) = navigation.view() else {
+            return;
+        };
+        size_to_parent(&navigation_view, &root_view);
+        root_view.addSubview(&navigation_view);
+        navigation.didMoveToParentViewController(Some(&root_controller));
+
+        STACK.set(Some(NativeStack {
+            covered: None,
             root_view,
             web_view,
-            presented: None,
+            navigation,
+            levels: vec![first],
+            _delegate: delegate,
         }));
     }
 
-    fn ptr_to_mut(view: &UIView) -> *mut UIView {
-        std::ptr::from_ref(view).cast_mut()
+    impl NavDelegate {
+        fn new(marker: MainThreadMarker) -> Retained<Self> {
+            unsafe { objc2::msg_send![Self::alloc(marker), init] }
+        }
     }
 
-    impl NativeSheet {
-        pub fn open() {
-            SHEET.with_borrow_mut(|sheet| {
-                let Some(sheet) = sheet.as_mut() else {
-                    return;
-                };
-                if sheet.presented.is_some() {
-                    return;
-                }
-                let Some(modal) = sheet.modal_controller() else {
-                    return;
-                };
-                sheet.web_view.removeFromSuperview();
-                size_to_parent(&sheet.web_view, &sheet.root_view);
-                configure_sheet(&modal);
-                sheet
-                    .root_controller
-                    .presentViewController_animated_completion(&modal, true, None);
-                sheet.presented = Some(modal);
-            });
+    impl NativeStack {
+        pub fn push() -> Pushing {
+            Pushing(STACK.with_borrow_mut(|stack| stack.as_mut().is_some_and(NativeStack::cover)))
         }
 
-        pub fn close() -> Dismissing {
-            Dismissing(SHEET.with_borrow_mut(|sheet| {
-                let sheet = sheet.as_mut()?;
-                let modal = sheet.presented.take()?;
-                let snapshot = sheet.web_view.snapshotViewAfterScreenUpdates(false);
-                sheet.web_view.removeFromSuperview();
-                if let Some(snapshot) = snapshot {
-                    modal.setView(Some(&snapshot));
+        pub fn pop() -> Popping {
+            Popping(STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return false;
+                };
+                if stack.levels.len() < 2 {
+                    return false;
                 }
-                size_to_parent(&sheet.web_view, &sheet.root_view);
-                sheet.root_view.addSubview(&sheet.web_view);
-                Some(modal)
+                stack.cover()
             }))
         }
 
-        fn modal_controller(&self) -> Option<Retained<UIViewController>> {
-            let marker = MainThreadMarker::new()?;
-            let controller = UIViewController::initWithNibName_bundle(
-                UIViewController::alloc(marker),
-                None,
-                None,
-            );
-            controller.setView(Some(&*self.web_view));
-            Some(controller)
+        fn cover(&mut self) -> bool {
+            self.uncover();
+            let Some(snapshot) = self.web_view.snapshotViewAfterScreenUpdates(false) else {
+                return false;
+            };
+            size_to_parent(&snapshot, &self.root_view);
+            self.web_view.addSubview(&snapshot);
+            self.covered = Some(snapshot);
+            true
+        }
+
+        fn uncover(&mut self) -> Option<Retained<UIView>> {
+            let snapshot = self.covered.take()?;
+            snapshot.removeFromSuperview();
+            Some(snapshot)
+        }
+
+        fn occupy_top(&mut self) {
+            let Some(top) = self.levels.last() else {
+                return;
+            };
+            size_to_parent(&self.web_view, &self.root_view);
+            top.setView(Some(&*self.web_view));
         }
     }
 
-    pub struct Dismissing(Option<Retained<UIViewController>>);
+    pub struct Pushing(bool);
 
-    impl Dismissing {
-        pub fn finish(self) {
-            let Some(modal) = self.0 else {
+    impl Pushing {
+        pub fn finish(self, title: String) {
+            if !self.0 {
                 return;
-            };
-            spawn(async move {
-                wait_for_paint().await;
-                modal.dismissViewControllerAnimated_completion(true, None);
+            }
+            after_paint(move || {
+                let pending = STACK.with_borrow_mut(|stack| {
+                    let stack = stack.as_mut()?;
+                    let marker = MainThreadMarker::new()?;
+                    let cover = stack.uncover()?;
+                    stack.levels.last()?.setView(Some(&cover));
+
+                    let next = UIViewController::initWithNibName_bundle(
+                        UIViewController::alloc(marker),
+                        None,
+                        None,
+                    );
+                    next.navigationItem()
+                        .setTitle(Some(&NSString::from_str(&title)));
+                    stack.levels.push(next);
+                    stack.occupy_top();
+                    Some((stack.navigation.clone(), stack.levels.last()?.clone()))
+                });
+                let Some((navigation, top)) = pending else {
+                    return;
+                };
+                navigation.pushViewController_animated(&top, true);
             });
         }
     }
 
-    fn configure_sheet(controller: &UIViewController) {
-        controller.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
-        controller.setModalTransitionStyle(UIModalTransitionStyle::CoverVertical);
-        controller.setModalInPresentation(true);
-        if let Some(sheet) = controller.sheetPresentationController() {
-            sheet.setPrefersGrabberVisible(true);
-            sheet.setPreferredCornerRadius(24.0);
-            sheet.setPrefersEdgeAttachedInCompactHeight(true);
+    pub struct Popping(bool);
+
+    impl Popping {
+        pub fn finish(self) {
+            if !self.0 {
+                return;
+            }
+            after_paint(move || {
+                let pending = STACK.with_borrow_mut(|stack| {
+                    let stack = stack.as_mut()?;
+                    let cover = stack.uncover()?;
+                    let departing = stack.levels.pop()?;
+                    departing.setView(Some(&cover));
+                    stack.occupy_top();
+                    Some(stack.navigation.clone())
+                });
+                let Some(navigation) = pending else {
+                    return;
+                };
+                let _ = navigation.popViewControllerAnimated(true);
+            });
         }
+    }
+
+    pub fn take_popped() -> usize {
+        POPPED.replace(0)
     }
 
     fn size_to_parent(view: &UIView, parent: &UIView) {
@@ -132,29 +241,47 @@ mod platform {
         );
     }
 
-    async fn wait_for_paint() {
-        vmux_ui::platform::sleep_ms(48).await;
+    fn after_paint<F: Send + FnOnce() + 'static>(work: F) {
+        let Ok(when) = DispatchTime::try_from(Duration::from_millis(48)) else {
+            return;
+        };
+        let _ = DispatchQueue::main().after(when, work);
     }
 }
 
 #[cfg(not(target_os = "ios"))]
+#[allow(dead_code)]
 mod platform {
-    pub struct NativeSheet;
-    pub struct Dismissing;
 
-    pub fn install(_: &dioxus::mobile::DesktopContext) {}
+    pub struct NativeStack;
+    pub struct Pushing;
+    pub struct Popping;
 
-    impl NativeSheet {
-        pub fn open() {}
+    pub fn install(_: &(), _: &(), _: &()) {}
 
-        pub fn close() -> Dismissing {
-            Dismissing
+    pub fn take_popped() -> usize {
+        0
+    }
+
+    impl NativeStack {
+        pub fn push() -> Pushing {
+            Pushing
+        }
+
+        pub fn pop() -> Popping {
+            Popping
         }
     }
 
-    impl Dismissing {
+    impl Pushing {
+        pub fn finish(self, _title: String) {}
+    }
+
+    impl Popping {
         pub fn finish(self) {}
     }
 }
 
-pub use platform::{NativeSheet, install};
+#[cfg(target_os = "ios")]
+pub use platform::install;
+pub use platform::{NativeStack, take_popped};

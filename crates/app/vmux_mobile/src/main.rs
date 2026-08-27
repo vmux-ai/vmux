@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 
 mod credentials;
-mod lifecycle;
+mod deep_link;
 mod logs;
+mod nav;
 mod page_host;
 mod pairing;
 mod plugins;
@@ -11,9 +12,12 @@ mod quic;
 mod remote;
 mod runtime;
 mod session;
+mod shell;
+mod surface;
 mod transition;
 
 use crate::logs::Logs;
+use crate::nav::{Nav, Screen, use_nav};
 use crate::pairing::{Credentials, PairCard};
 use crate::plugins::PagePlugins;
 use crate::remote::{Api, ApiError};
@@ -25,69 +29,71 @@ use vmux_start::roster::Roster;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
+use bevy_a11y::AccessibilityPlugin;
+use bevy_app::{App, TaskPoolPlugin};
+use bevy_input::InputPlugin;
+use bevy_time::TimePlugin;
+use bevy_window::WindowPlugin;
+use bevy_winit::{UpdateMode, WinitPlugin, WinitSettings};
 use dioxus::prelude::*;
 use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
 use vmux_wire::room::{RemoteAgent, RemoteSession};
 
-const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
-const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
-
-#[cfg(target_os = "ios")]
-fn webview_background() -> (u8, u8, u8, u8) {
-    use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
-
-    let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
-    if style == UIUserInterfaceStyle::Dark {
-        DARK_BACKGROUND
-    } else {
-        LIGHT_BACKGROUND
-    }
-}
-
-#[cfg(not(target_os = "ios"))]
-fn webview_background() -> (u8, u8, u8, u8) {
-    LIGHT_BACKGROUND
-}
-
 fn main() {
     Logs::start();
+    deep_link::install();
 
     World::new(|app| {
         app.add_plugins(PagePlugins);
     })
     .install();
-    lifecycle::install();
 
-    let config = dioxus::mobile::Config::new()
-        .with_background_color(webview_background())
-        .with_custom_event_handler(|event, _| {
-            use dioxus::mobile::tao::event::Event;
-            match event {
-                Event::Opened { urls } => {
-                    let mut opened = OPENED_URLS
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    opened.extend(
-                        urls.iter()
-                            .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
-                            .map(ToString::to_string),
-                    );
-                }
-                Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
-                Event::MainEventsCleared => {
-                    World::with(World::tick);
-                }
-                _ => {}
-            }
-        });
-    dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
+    App::new()
+        .add_plugins((
+            TaskPoolPlugin::default(),
+            TimePlugin,
+            InputPlugin,
+            WindowPlugin {
+                primary_window: Some(bevy_window::Window {
+                    mode: bevy_window::WindowMode::BorderlessFullscreen(
+                        bevy_window::MonitorSelection::Primary,
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            AccessibilityPlugin,
+            WinitPlugin::default(),
+        ))
+        .insert_resource(WinitSettings {
+            focused_mode: UpdateMode::Reactive {
+                wait: Duration::from_millis(250),
+                react_to_device_events: false,
+                react_to_user_events: true,
+                react_to_window_events: true,
+            },
+            unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(1)),
+        })
+        .add_plugins(shell::ShellPlugin)
+        .run();
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn offer_opened_url(url: String) {
+    OPENED_URLS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(url);
+}
+
+pub(crate) fn mark_resumed() {
+    RESUMED.store(true, std::sync::atomic::Ordering::Release);
 }
 
 pub(crate) fn take_resumed() -> bool {
@@ -95,17 +101,7 @@ pub(crate) fn take_resumed() -> bool {
 }
 
 #[component]
-fn App() -> Element {
-    rsx! {
-        AppHead {}
-        AppBody {}
-    }
-}
-
-#[component]
-fn AppBody() -> Element {
-    transition::install(&dioxus::mobile::window());
-    qr_scanner::install(&dioxus::mobile::window());
+fn Shell() -> Element {
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);
     let mut error = use_signal(String::new);
@@ -118,18 +114,17 @@ fn AppBody() -> Element {
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
-    let mut team_open = use_signal(|| false);
+    let nav = use_nav();
 
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
-            team_open.set(false);
-            session.leave();
+            nav.back();
         }))
     });
 
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, session, composer);
+            page_host::install(client, sessions, session, nav, composer);
         }
     });
 
@@ -197,7 +192,9 @@ fn AppBody() -> Element {
         match client.sessions().await {
             Ok(next) => {
                 sessions.set(next);
-                agents.set(client.agents().await.unwrap_or_default());
+                if let Ok(next) = client.agents().await {
+                    agents.set(next);
+                }
                 reachable.set(true);
             }
             Err(ApiError::Unauthorized) => {
@@ -299,11 +296,54 @@ fn AppBody() -> Element {
             let Some(client) = api() else {
                 continue;
             };
+            match client.layout().await {
+                Ok(snapshot) => nav.apply(&snapshot),
+                Err(error) => tracing::warn!(%error, "the Mac would not report its layout"),
+            }
+        }
+    });
+
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            for _ in 0..transition::take_popped() {
+                nav.pop();
+            }
+        }
+    });
+
+    use_effect(move || {
+        let Screen::Chat { sid: Some(sid), .. } = nav.current() else {
+            return;
+        };
+        if session.sid() == sid {
+            return;
+        }
+        for known in sessions.read().iter() {
+            if known.sid == sid {
+                session.open(known.clone());
+                return;
+            }
+        }
+    });
+
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            if auth() != AuthState::Paired {
+                continue;
+            }
+            let Some(client) = api() else {
+                continue;
+            };
             match client.sessions().await {
                 Ok(next) => {
                     sessions.set(next);
                     reachable.set(true);
                     error.set(String::new());
+                    if let Ok(next) = client.agents().await {
+                        agents.set(next);
+                    }
                 }
                 Err(ApiError::Unauthorized) => {
                     reachable.set(false);
@@ -350,59 +390,88 @@ fn AppBody() -> Element {
         };
     }
 
-    if team_open() {
-        return rsx! {
-            div { class: "flex h-dvh flex-col bg-background text-foreground",
-                div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
-                    button {
-                        class: "rounded-lg px-3 py-2 text-sm text-muted-foreground active:bg-accent",
-                        r#type: "button",
-                        onclick: move |_| team_open.set(false),
-                        {translate("mobile-chat-back")}
+    let at_root = nav.depth() == 0;
+    let wants_a_bar = at_root && !nav.current().has_own_input();
+    rsx! {
+        div { class: "relative flex h-dvh flex-col bg-background text-foreground",
+            div { class: "flex min-h-0 flex-1 flex-col", CurrentScreen { nav, api } }
+            div { class: "shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))]",
+                if wants_a_bar {
+                    CommandBar {
+                        on_submit: move |typed: String| {
+                            let typed = typed.trim().to_string();
+                            if typed.is_empty() {
+                                return;
+                            }
+                            match Destination::of(&typed) {
+                                Destination::Url(screen) => nav.open(screen),
+                                Destination::Prompt(text) => {
+                                    let Some(client) = api() else { return };
+                                    session.start_chat(client, sessions, nav, text, None);
+                                }
+                            }
+                        },
                     }
                 }
-                div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
+                TabBar { nav }
             }
-        };
-    }
-
-    if session.is_open() {
-        return rsx! {
-            vmux_chat::page::Page {}
-        };
-    }
-
-    rsx! {
-        div { class: "relative h-dvh bg-background",
-            div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                vmux_start::page::Page {}
-            }
-            LinkStatus {
-                reachable: reachable(),
-                on_team: move |_| team_open.set(true),
-                on_disconnect: move |_| {
-                    credentials::StoredCredentials::clear();
-                    session.leave();
-                    let displaced = api.peek().clone();
-                    api.set(None);
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    sessions.set(Vec::new());
-                    agents.set(Vec::new());
-                    auth.set(AuthState::Unpaired);
-                },
+            if at_root {
+                LinkStatus {
+                    reachable: reachable(),
+                    on_disconnect: move |_| {
+                        credentials::StoredCredentials::clear();
+                        session.leave();
+                        let displaced = api.peek().clone();
+                        api.set(None);
+                        if let Some(displaced) = displaced {
+                            displaced.close();
+                        }
+                        sessions.set(Vec::new());
+                        agents.set(Vec::new());
+                        auth.set(AuthState::Unpaired);
+                    },
+                }
             }
         }
     }
 }
 
 #[component]
-fn LinkStatus(
-    reachable: bool,
-    on_team: EventHandler<()>,
-    on_disconnect: EventHandler<()>,
-) -> Element {
+fn CurrentScreen(nav: Nav, api: Signal<Option<Api>>) -> Element {
+    match nav.current() {
+        Screen::Chat { sid: Some(_), .. } => rsx! {
+            vmux_chat::page::Page {}
+        },
+        Screen::Chat { sid: None, .. } | Screen::Launcher => rsx! {
+            div { class: "flex min-h-0 flex-1 flex-col pt-[calc(3rem+env(safe-area-inset-top))] pb-2",
+                vmux_start::page::Page {}
+            }
+        },
+        Screen::Team => rsx! {
+            div { class: "flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]", vmux_team::page::Page {} }
+        },
+        Screen::Mirror(stack) => rsx! {
+            MirrorScreen { stack, api }
+        },
+    }
+}
+
+enum Destination {
+    Url(Screen),
+    Prompt(String),
+}
+
+impl Destination {
+    fn of(typed: &str) -> Self {
+        if !typed.contains("://") || typed.split_whitespace().count() > 1 {
+            return Self::Prompt(typed.to_string());
+        }
+        Self::Url(Screen::addressed(typed))
+    }
+}
+
+#[component]
+fn LinkStatus(reachable: bool, on_disconnect: EventHandler<()>) -> Element {
     let (dot, pill, label) = if reachable {
         (
             "h-1.5 w-1.5 rounded-full bg-success",
@@ -418,7 +487,6 @@ fn LinkStatus(
     };
     rsx! {
         header { class: "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
-            span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
             span { class: "pointer-events-auto ml-auto {pill}",
                 span { class: "{dot}" }
                 {label}
@@ -426,14 +494,123 @@ fn LinkStatus(
             button {
                 class: "pointer-events-auto ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                 r#type: "button",
-                onclick: move |_| on_team.call(()),
-                {translate("mobile-start-team")}
-            }
-            button {
-                class: "pointer-events-auto rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
-                r#type: "button",
                 onclick: move |_| on_disconnect.call(()),
                 {translate("mobile-pair-disconnect")}
+            }
+        }
+    }
+}
+
+#[component]
+fn TabBar(nav: Nav) -> Element {
+    let tabs = nav.tabs();
+    let current = nav.selected().map(|tab| tab.id);
+    rsx! {
+        nav { class: "flex shrink-0 items-stretch gap-1 overflow-x-auto border-t border-border px-2 py-1",
+            for tab in tabs {
+                {
+                    let selected = current.as_deref() == Some(tab.id.as_str());
+                    let tone = if selected {
+                        "text-foreground"
+                    } else {
+                        "text-muted-foreground"
+                    };
+                    let id = tab.id.clone();
+                    rsx! {
+                        button {
+                            key: "{tab.id}",
+                            class: "min-w-0 flex-1 truncate rounded-lg px-2 py-2 text-xs font-medium active:bg-accent {tone}",
+                            r#type: "button",
+                            onclick: move |_| nav.select(&id),
+                            "{tab.name}"
+                        }
+                    }
+                }
+            }
+            button {
+                class: "shrink-0 rounded-lg px-3 py-2 text-base leading-none font-medium text-muted-foreground active:bg-accent",
+                r#type: "button",
+                "aria-label": translate("mobile-nav-new-tab"),
+                onclick: move |_| nav.open_blank(),
+                "+"
+            }
+        }
+    }
+}
+
+#[component]
+fn CommandBar(on_submit: EventHandler<String>) -> Element {
+    let mut typed = use_signal(String::new);
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-2 px-3 py-2",
+            input {
+                class: "min-w-0 flex-1 rounded-full border border-border bg-muted px-4 py-2.5 text-base text-foreground shadow-sm placeholder:text-muted-foreground focus:outline-none",
+                r#type: "text",
+                autocapitalize: "none",
+                autocorrect: "off",
+                spellcheck: "false",
+                enterkeyhint: "go",
+                value: "{typed}",
+                placeholder: translate("mobile-nav-url-placeholder"),
+                oninput: move |event| typed.set(event.value()),
+                onkeydown: move |event| {
+                    if event.key() != Key::Enter {
+                        return;
+                    }
+                    let value = typed();
+                    typed.set(String::new());
+                    on_submit.call(value);
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn MirrorScreen(stack: vmux_wire::protocol::layout::Stack, api: Signal<Option<Api>>) -> Element {
+    let title = if stack.title.is_empty() {
+        stack.url.clone()
+    } else {
+        stack.title.clone()
+    };
+    let process_id = stack.process_id.clone();
+    let screen = use_resource(move || {
+        let (client, process_id) = (api(), process_id.clone());
+        async move {
+            let (Some(api), Some(process_id)) = (client, process_id) else {
+                return None;
+            };
+            loop {
+                if let Ok(text) = api.terminal(&process_id).await {
+                    return Some(text);
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    });
+    let mirrored = screen.read().clone().flatten();
+    rsx! {
+        div { class: "flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 pb-8 pt-[calc(1.5rem+env(safe-area-inset-top))]",
+            div { class: "flex shrink-0 items-center gap-2",
+                vmux_ui::back::BackButton {}
+                span { class: "truncate text-sm font-semibold text-foreground", "{title}" }
+            }
+            match mirrored {
+                Some(text) => rsx! {
+                    div { class: "min-h-0 flex-1 overflow-auto rounded-2xl border border-border bg-muted/40 p-3",
+                        pre { class: "whitespace-pre font-mono text-[11px] leading-tight text-foreground", "{text}" }
+                    }
+                    p { class: "shrink-0 text-center text-[11px] text-muted-foreground", {translate("mobile-nav-read-only")} }
+                },
+                None => rsx! {
+                    div { class: "shrink-0 rounded-2xl border border-border bg-muted/40 p-4",
+                        p { class: "text-sm font-medium text-foreground", {translate("mobile-nav-unsupported")} }
+                        p { class: "mt-1 text-xs text-muted-foreground", {translate("mobile-nav-open-on-mac")} }
+                        if !stack.url.is_empty() {
+                            p { class: "mt-3 break-all font-mono text-[11px] text-muted-foreground", "{stack.url}" }
+                        }
+                    }
+                },
             }
         }
     }
@@ -462,16 +639,6 @@ fn PairScreen(
                 }
             }
         }
-    }
-}
-
-#[component]
-fn AppHead() -> Element {
-    rsx! {
-        document::Title { "Vmux" }
-        document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" }
-        document::Meta { name: "color-scheme", content: "light dark" }
-        document::Stylesheet { href: TAILWIND_CSS }
     }
 }
 

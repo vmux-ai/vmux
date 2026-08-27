@@ -14,4 +14,6 @@ pub use shell::InterpreterShell;
 mod webview;
 
 #[cfg(ui)]
-pub use webview::{Appearance, AssetReply, Assets, Embedding, Outbox, SiblingOrder, Wake, WebView};
+pub use webview::{
+    Appearance, AssetReply, Assets, Embedding, HostLayer, Outbox, SiblingOrder, Wake, WebView,
+};

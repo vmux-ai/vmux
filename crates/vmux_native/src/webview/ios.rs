@@ -1,3 +1,4 @@
+use objc2::rc::Retained;
 use objc2_ui_kit::{UIUserInterfaceStyle, UIView};
 use tracing::warn;
 use wry::WebViewExtIOS;
@@ -5,6 +6,24 @@ use wry::WebViewExtIOS;
 use super::{Appearance, SiblingOrder, WebView};
 
 impl WebView {
+    pub fn ui_view(&self) -> Retained<UIView> {
+        Retained::into_super(Retained::into_super(self.webview.webview()))
+    }
+
+    pub fn fill_parent(&self) {
+        use objc2_ui_kit::UIViewAutoresizing;
+
+        let view = self.ui_view();
+        let Some(parent) = view.superview() else {
+            warn!("vmux_native: a view with no parent cannot fill one");
+            return;
+        };
+        view.setAutoresizingMask(
+            UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+        );
+        view.setFrame(parent.bounds());
+    }
+
     pub fn order_among_siblings(&self, order: SiblingOrder) {
         let wk = self.webview.webview();
         let view: &UIView = &wk;

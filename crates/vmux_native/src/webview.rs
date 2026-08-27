@@ -13,7 +13,7 @@ mod report;
 mod route;
 mod shim;
 
-pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
+pub use embed::{AssetReply, Assets, Embedding, HostLayer, Outbox, Wake};
 
 use tracing::error;
 

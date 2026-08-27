@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use dioxus::core::ReactiveContext;
@@ -15,9 +15,10 @@ use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
+use crate::nav::{Nav, Screen};
 use crate::runtime::World;
 use vmux_ui::hooks::EventListenerError;
-use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
+use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost};
 use vmux_ui::platform::sleep_ms;
 use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
@@ -45,17 +46,25 @@ pub(crate) struct MobileHost {
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
+    nav: Nav,
     composer: ComposerExchange,
 }
 
 thread_local! {
     static EPOCH: Cell<u64> = const { Cell::new(0) };
+
+    static INSTALLED: RefCell<Option<Rc<MobileHost>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn installed() -> Option<Rc<MobileHost>> {
+    INSTALLED.with_borrow(Clone::clone)
 }
 
 pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
+    nav: Nav,
     composer: ComposerExchange,
 ) {
     let epoch = EPOCH.with(|epoch| {
@@ -63,13 +72,15 @@ pub(crate) fn install(
         epoch.set(next);
         next
     });
-    install_host(Rc::new(MobileHost {
+    let host = Rc::new(MobileHost {
         epoch,
         api,
         sessions,
         session,
+        nav,
         composer,
-    }));
+    });
+    INSTALLED.with_borrow_mut(|slot| *slot = Some(host));
 }
 
 fn superseded(epoch: u64) -> bool {
@@ -256,20 +267,28 @@ impl MobileHost {
             CommandBarActionEvent::Prompt {
                 text, target_url, ..
             } => {
-                self.session
-                    .start_chat(self.api.clone(), self.sessions, text, target_url);
+                self.session.start_chat(
+                    self.api.clone(),
+                    self.sessions,
+                    self.nav,
+                    text,
+                    target_url,
+                );
                 Ok(())
             }
             CommandBarActionEvent::SwitchTab { index, .. } => {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
-                self.session.open(session);
+                self.session.attach(self.nav, session);
+                Ok(())
+            }
+            CommandBarActionEvent::Open { value, .. } => {
+                self.nav.open(Screen::addressed(&value));
                 Ok(())
             }
             CommandBarActionEvent::Dismiss => Ok(()),
-            CommandBarActionEvent::Open { .. }
-            | CommandBarActionEvent::Terminal { .. }
+            CommandBarActionEvent::Terminal { .. }
             | CommandBarActionEvent::Command { .. }
             | CommandBarActionEvent::Space { .. } => Err(EventListenerError::Unsupported),
         }
