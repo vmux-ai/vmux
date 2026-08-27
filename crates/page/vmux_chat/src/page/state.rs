@@ -140,7 +140,9 @@ impl Chat {
             current.set(state.effort_current.clone());
             agent_key.set(state.agent_key.clone());
             menu_sel.set(0);
-            loaded.set(true);
+            if !state.models.is_empty() || !state.current_model_name.is_empty() {
+                loaded.set(true);
+            }
         });
         let _context = use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
             let mut composer_context = chat.slash.composer_context;
