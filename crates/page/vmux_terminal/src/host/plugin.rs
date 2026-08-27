@@ -1218,6 +1218,8 @@ fn resolve_pending_terminal_cwd(
     >,
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
+    spaces: Query<(), With<vmux_layout::space::Space>>,
+    space_ids: Query<&vmux_layout::space::SpaceId>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
 ) {
@@ -1226,8 +1228,9 @@ fn resolve_pending_terminal_cwd(
             continue;
         }
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
-        let Ok(Some(cwd)) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
-        else {
+        let space_id = vmux_layout::space::space_id_of(entity, &child_of, &spaces, &space_ids)
+            .unwrap_or_else(|| active_space.record.id.clone());
+        let Ok(Some(cwd)) = settings.workspace_dir(&space_id, tab_dir.as_deref()) else {
             continue;
         };
         launch.cwd = cwd.to_string_lossy().into_owned();
