@@ -18,8 +18,7 @@ pub fn EffortMenu(
         return rsx! {};
     }
     rsx! {
-        PromptPopup { placement, on_dismiss,
-            div { class: "px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
+        PromptPopup { placement, heading: translate("agent-effort"), on_dismiss,
             EffortOption {
                 level: None,
                 selected: selected.is_empty(),

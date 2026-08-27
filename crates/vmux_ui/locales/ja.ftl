@@ -228,6 +228,9 @@ tray-finish-recording = 録画を終了
 tray-quit = Vmux を終了
 
 composer-agent = エージェント
+composer-model = モデル
+composer-project = プロジェクト
+composer-branch = ブランチ
 composer-attach-files = ファイルを添付（/upload）
 composer-remove-attachment = 添付ファイルを削除
 

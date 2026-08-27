@@ -47,7 +47,10 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
         .cloned()
         .collect::<Vec<_>>();
     rsx! {
-        PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
+        PromptPopup {
+            placement,
+            heading: translate("composer-project"),
+            on_dismiss: move |()| on_dismiss.call(()),
             if roots.is_empty() {
                 div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-project-none")} }
             }
@@ -96,7 +99,10 @@ pub fn BranchPicker(
     on_dismiss: EventHandler<()>,
 ) -> Element {
     rsx! {
-        PromptPopup { placement, on_dismiss: move |()| on_dismiss.call(()),
+        PromptPopup {
+            placement,
+            heading: translate("composer-branch"),
+            on_dismiss: move |()| on_dismiss.call(()),
             if !loaded {
                 div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-project-loading-branches")} }
             } else if branches.is_empty() {

@@ -18,7 +18,7 @@ pub fn ModelMenu(
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
-        PromptPopup { placement, on_dismiss,
+        PromptPopup { placement, heading: translate("composer-model"), on_dismiss,
             if models.is_empty() {
                 div { class: "{PROMPT_MENU_ROW} text-muted-foreground", {translate("agent-no-matching-models")} }
             } else {

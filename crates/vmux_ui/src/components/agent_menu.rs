@@ -23,10 +23,10 @@ pub fn AgentMenu(
     rsx! {
         PromptPopup {
             placement,
+            heading: translate("composer-agent"),
             on_dismiss,
             id: "start-agent-selector",
             div { class: "p-1.5",
-                div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("composer-agent")} }
                 for option in options.into_iter() {
                     AgentMenuRow {
                         key: "{option.url}",

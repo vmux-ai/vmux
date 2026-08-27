@@ -240,6 +240,9 @@ tray-finish-recording = Finalizar grabación
 tray-quit = Salir de Vmux
 
 composer-agent = Agente
+composer-model = Modelo
+composer-project = Proyecto
+composer-branch = Rama
 composer-attach-files = Adjuntar archivos (/upload)
 composer-remove-attachment = Quitar adjunto
 
