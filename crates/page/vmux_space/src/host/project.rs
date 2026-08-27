@@ -233,18 +233,21 @@ fn remember_space_project(
             .ok()
             .map(|worktree| worktree.repo_root.trim())
             .filter(|root| !root.is_empty() && *root != dir);
-        let settings = settings.bypass_change_detection();
         let mut changed = false;
-        if let Some(root) = repo_root {
-            changed |=
-                settings.remember_space_project(&space_id, vmux_setting::SpaceProject::at(root));
+        {
+            let settings = settings.bypass_change_detection();
+            if let Some(root) = repo_root {
+                changed |= settings
+                    .remember_space_project(&space_id, vmux_setting::SpaceProject::at(root));
+            }
+            let project = match repo_root {
+                Some(root) => vmux_setting::SpaceProject::under(dir, root),
+                None => vmux_setting::SpaceProject::at(dir),
+            };
+            changed |= settings.remember_space_project(&space_id, project);
         }
-        let project = match repo_root {
-            Some(root) => vmux_setting::SpaceProject::under(dir, root),
-            None => vmux_setting::SpaceProject::at(dir),
-        };
-        changed |= settings.remember_space_project(&space_id, project);
         if changed {
+            settings.set_changed();
             saves.write(vmux_setting::SettingsSaveRequest);
         }
     }
@@ -253,6 +256,16 @@ fn remember_space_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource, Default)]
+    struct SawSettingsChange(bool);
+
+    fn record_settings_change(
+        settings: Res<vmux_setting::AppSettings>,
+        mut saw: ResMut<SawSettingsChange>,
+    ) {
+        saw.0 = settings.is_changed();
+    }
 
     struct Fixture {
         app: App,
@@ -266,6 +279,8 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(SpaceProjectPlugin)
                 .add_message::<vmux_setting::SettingsSaveRequest>()
+                .init_resource::<SawSettingsChange>()
+                .add_systems(Update, record_settings_change.after(remember_space_project))
                 .insert_resource(vmux_setting::AppSettings::embedded());
             let space = app
                 .world_mut()
@@ -279,6 +294,7 @@ mod tests {
                 .world_mut()
                 .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
                 .id();
+            app.update();
             Self {
                 app,
                 tab,
@@ -408,6 +424,23 @@ mod tests {
         assert!(
             fixture.open_dirs().is_empty(),
             "the side sheet names its pane, and the space is reached through it"
+        );
+    }
+
+    #[test]
+    fn recording_a_project_marks_the_settings_changed() {
+        let mut fixture = Fixture::start("work");
+
+        fixture.select("/tmp/alpha");
+        assert!(
+            fixture.app.world().resource::<SawSettingsChange>().0,
+            "the effective startup dir is recomputed off this flag, so a bypassed write strands it"
+        );
+
+        fixture.select("/tmp/alpha");
+        assert!(
+            !fixture.app.world().resource::<SawSettingsChange>().0,
+            "reselecting the same project changes nothing and must not churn"
         );
     }
 
