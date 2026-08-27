@@ -6,15 +6,15 @@ use vmux_wire::protocol::layout::{LayoutNode, LayoutSnapshot, Stack, Tab};
 use crate::transition::NativeStack;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NavTab {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) screen: Screen,
-    pub(crate) local: bool,
+pub struct NavTab {
+    pub id: String,
+    pub name: String,
+    pub screen: Screen,
+    pub local: bool,
 }
 
 impl NavTab {
-    fn all_in(tab: &Tab) -> Vec<Self> {
+    pub fn all_in(tab: &Tab) -> Vec<Self> {
         let mut stacks = Vec::new();
         collect(&tab.root, &mut stacks);
         let mut entries = Vec::with_capacity(stacks.len());
@@ -69,7 +69,7 @@ fn collect(node: &LayoutNode, out: &mut Vec<Stack>) {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Screen {
+pub enum Screen {
     Chat { sid: Option<String>, title: String },
     Team,
     Launcher,
