@@ -9,7 +9,7 @@ use vmux_native::{Instance, NativePage, WebView};
 use crate::runtime::World as PageWorld;
 use crate::surface::{PageWaker, Surfaces, embedding};
 
-static SHELL_PAGE: NativePage = NativePage {
+pub static SHELL_PAGE: NativePage = NativePage {
     url: "vmux://shell/",
     document_url: None,
     component: crate::Shell,
@@ -36,11 +36,15 @@ thread_local! {
     static MOUNTED: RefCell<Option<WebView>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct ShellPlugin;
+pub(crate) struct ShellPlugin(pub &'static NativePage);
+
+#[derive(Resource)]
+struct Root(&'static NativePage);
 
 impl Plugin for ShellPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Last, (Shell::mount, Shell::pump).chain());
+        app.insert_resource(Root(self.0))
+            .add_systems(Last, (Shell::mount, Shell::pump).chain());
     }
 }
 
@@ -50,6 +54,7 @@ impl Shell {
     fn mount(
         windows: Query<Entity, With<PrimaryWindow>>,
         proxy: Option<Res<EventLoopProxyWrapper>>,
+        root: Res<Root>,
     ) {
         if MOUNTED.with_borrow(Option::is_some) {
             return;
@@ -62,7 +67,7 @@ impl Shell {
             let windows = windows.borrow();
             let window = windows.get_window(entity)?;
             Some(WebView::build(
-                &SHELL_PAGE,
+                root.0,
                 &**window,
                 wry::Rect::default(),
                 embedding(waker),
