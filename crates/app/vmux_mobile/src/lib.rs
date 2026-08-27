@@ -11,17 +11,19 @@ mod qr_scanner;
 mod quic;
 mod remote;
 mod runtime;
+pub mod screen;
 mod session;
 mod shell;
 mod surface;
 mod transition;
 
 use crate::logs::Logs;
-use crate::nav::{Nav, Screen, use_nav};
+use crate::nav::{Back, Dropped, Open, OpenBlank, Report, Select, View};
 use crate::pairing::{Credentials, PairCard};
 use crate::plugins::PagePlugins;
 use crate::remote::{Api, ApiError};
 use crate::runtime::World;
+use crate::screen::{Mac, Shown};
 use crate::session::{AuthState, use_session};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
@@ -116,17 +118,17 @@ pub fn Shell() -> Element {
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
-    let nav = use_nav();
+    let mut nav = use_signal(View::<Shown>::default);
 
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
-            nav.back();
+            World::with(|world| world.send(Back));
         }))
     });
 
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, session, nav, composer);
+            page_host::install(client, sessions, session, composer);
         }
     });
 
@@ -302,7 +304,11 @@ pub fn Shell() -> Element {
                 continue;
             };
             match client.layout().await {
-                Ok(snapshot) => nav.apply(&snapshot),
+                Ok(snapshot) => {
+                    let focused = snapshot.focused.stack.clone();
+                    let tabs = Mac::tabs(&snapshot);
+                    World::with(|world| world.send(Report { tabs, focused }));
+                }
                 Err(error) => tracing::warn!(%error, "the Mac would not report its layout"),
             }
         }
@@ -311,14 +317,21 @@ pub fn Shell() -> Element {
     use_future(move || async move {
         loop {
             tokio::time::sleep(Duration::from_millis(80)).await;
-            for _ in 0..transition::take_popped() {
-                nav.pop();
+            let dropped = transition::take_popped() + transition::take_dismissed();
+            if dropped > 0 {
+                World::with(|world| world.send(Dropped(dropped)));
+            }
+            let seen = World::with(|world| world.read(crate::nav::Nav::view::<Shown>));
+            if let Some(seen) = seen
+                && *nav.peek() != seen
+            {
+                nav.set(seen);
             }
         }
     });
 
     use_effect(move || {
-        let Screen::Chat { sid: Some(sid), .. } = nav.current() else {
+        let Some(Shown::Chat { sid: Some(sid), .. }) = nav().current else {
             return;
         };
         if session.sid() == sid {
@@ -395,11 +408,12 @@ pub fn Shell() -> Element {
         };
     }
 
-    let at_root = nav.depth() == 0;
-    let wants_a_bar = at_root && !nav.current().has_own_input();
+    let seen = nav();
+    let at_root = seen.depth == 0;
+    let wants_a_bar = at_root && !seen.current.as_ref().is_some_and(Shown::has_own_input);
     rsx! {
         div { class: "relative flex h-dvh flex-col bg-background text-foreground",
-            div { class: "flex min-h-0 flex-1 flex-col", CurrentScreen { nav, api } }
+            div { class: "flex min-h-0 flex-1 flex-col", CurrentScreen { seen: seen.clone(), api } }
             div { class: "shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))]",
                 if wants_a_bar {
                     CommandBar {
@@ -409,16 +423,18 @@ pub fn Shell() -> Element {
                                 return;
                             }
                             match Destination::of(&typed) {
-                                Destination::Url(screen) => nav.open(screen),
+                                Destination::Url(screen) => {
+                                    World::with(|world| world.send(Open(screen)));
+                                }
                                 Destination::Prompt(text) => {
                                     let Some(client) = api() else { return };
-                                    session.start_chat(client, sessions, nav, text, None);
+                                    session.start_chat(client, sessions, text, None);
                                 }
                             }
                         },
                     }
                 }
-                TabBar { nav }
+                TabBar { seen }
             }
             if at_root {
                 LinkStatus {
@@ -442,27 +458,30 @@ pub fn Shell() -> Element {
 }
 
 #[component]
-fn CurrentScreen(nav: Nav, api: Signal<Option<Api>>) -> Element {
-    match nav.current() {
-        Screen::Chat { sid: Some(_), .. } => rsx! {
+fn CurrentScreen(seen: View<Shown>, api: Signal<Option<Api>>) -> Element {
+    let Some(current) = seen.current.clone() else {
+        return rsx! {};
+    };
+    match current {
+        Shown::Chat { sid: Some(_), .. } => rsx! {
             vmux_chat::page::Page {}
         },
-        Screen::Chat { sid: None, .. } | Screen::Launcher => rsx! {
+        Shown::Chat { sid: None, .. } | Shown::Launcher => rsx! {
             div { class: "flex min-h-0 flex-1 flex-col pt-[calc(3rem+env(safe-area-inset-top))] pb-2",
                 vmux_start::page::Page {}
             }
         },
-        Screen::Team => rsx! {
+        Shown::Team => rsx! {
             div { class: "flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]", vmux_team::page::Page {} }
         },
-        Screen::Mirror(stack) => rsx! {
+        Shown::Mirror(stack) => rsx! {
             MirrorScreen { stack, api }
         },
     }
 }
 
 enum Destination {
-    Url(Screen),
+    Url(Shown),
     Prompt(String),
 }
 
@@ -471,7 +490,7 @@ impl Destination {
         if !typed.contains("://") || typed.split_whitespace().count() > 1 {
             return Self::Prompt(typed.to_string());
         }
-        Self::Url(Screen::addressed(typed))
+        Self::Url(Shown::addressed(typed))
     }
 }
 
@@ -507,9 +526,9 @@ fn LinkStatus(reachable: bool, on_disconnect: EventHandler<()>) -> Element {
 }
 
 #[component]
-fn TabBar(nav: Nav) -> Element {
-    let tabs = nav.tabs();
-    let current = nav.selected().map(|tab| tab.id);
+fn TabBar(seen: View<Shown>) -> Element {
+    let tabs = seen.tabs.clone();
+    let current = seen.selected.clone();
     rsx! {
         nav { class: "flex shrink-0 items-stretch gap-1 overflow-x-auto border-t border-border px-2 py-1",
             for tab in tabs {
@@ -526,7 +545,7 @@ fn TabBar(nav: Nav) -> Element {
                             key: "{tab.id}",
                             class: "min-w-0 flex-1 truncate rounded-lg px-2 py-2 text-xs font-medium active:bg-accent {tone}",
                             r#type: "button",
-                            onclick: move |_| nav.select(&id),
+                            onclick: move |_| { World::with(|world| world.send(Select(id.clone()))); },
                             "{tab.name}"
                         }
                     }
@@ -536,7 +555,7 @@ fn TabBar(nav: Nav) -> Element {
                 class: "shrink-0 rounded-lg px-3 py-2 text-base leading-none font-medium text-muted-foreground active:bg-accent",
                 r#type: "button",
                 "aria-label": translate("mobile-nav-new-tab"),
-                onclick: move |_| nav.open_blank(),
+                onclick: move |_| { World::with(|world| world.send(OpenBlank(Shown::Launcher))); },
                 "+"
             }
         }

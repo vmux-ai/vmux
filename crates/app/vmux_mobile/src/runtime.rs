@@ -69,6 +69,10 @@ impl World {
         self.app.world_mut().write_message(message);
     }
 
+    pub fn read<R>(&mut self, act: impl FnOnce(&mut bevy_ecs::world::World) -> R) -> R {
+        act(self.app.world_mut())
+    }
+
     pub fn refresh<R: Resource<Mutability = Mutable>>(&mut self) {
         if let Some(mut resource) = self.app.world_mut().get_resource_mut::<R>() {
             resource.set_changed();

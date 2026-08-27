@@ -15,8 +15,9 @@ use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
-use crate::nav::{Nav, Screen};
+use crate::nav::Open;
 use crate::runtime::World;
+use crate::screen::Shown;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost};
 use vmux_ui::platform::sleep_ms;
@@ -46,7 +47,6 @@ pub(crate) struct MobileHost {
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
-    nav: Nav,
     composer: ComposerExchange,
 }
 
@@ -64,7 +64,6 @@ pub(crate) fn install(
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
-    nav: Nav,
     composer: ComposerExchange,
 ) {
     let epoch = EPOCH.with(|epoch| {
@@ -77,7 +76,6 @@ pub(crate) fn install(
         api,
         sessions,
         session,
-        nav,
         composer,
     });
     INSTALLED.with_borrow_mut(|slot| *slot = Some(host));
@@ -267,24 +265,19 @@ impl MobileHost {
             CommandBarActionEvent::Prompt {
                 text, target_url, ..
             } => {
-                self.session.start_chat(
-                    self.api.clone(),
-                    self.sessions,
-                    self.nav,
-                    text,
-                    target_url,
-                );
+                self.session
+                    .start_chat(self.api.clone(), self.sessions, text, target_url);
                 Ok(())
             }
             CommandBarActionEvent::SwitchTab { index, .. } => {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
-                self.session.attach(self.nav, session);
+                self.session.attach(session);
                 Ok(())
             }
             CommandBarActionEvent::Open { value, .. } => {
-                self.nav.open(Screen::addressed(&value));
+                crate::runtime::World::with(|world| world.send(Open(Shown::addressed(&value))));
                 Ok(())
             }
             CommandBarActionEvent::Dismiss => Ok(()),

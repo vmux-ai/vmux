@@ -170,7 +170,12 @@ thread_local! {
 pub(crate) struct Surfaces;
 
 impl Surfaces {
-    pub(crate) fn show(entry: &str, screen: &crate::nav::Screen, bounds: Rect, waker: &PageWaker) {
+    pub(crate) fn show(
+        entry: &str,
+        screen: &crate::screen::Shown,
+        bounds: Rect,
+        waker: &PageWaker,
+    ) {
         let Some(page) = screen.page() else {
             return;
         };
@@ -224,7 +229,7 @@ impl Surfaces {
     }
 }
 
-impl crate::nav::Screen {
+impl crate::screen::Shown {
     pub(crate) fn page(&self) -> Option<&'static NativePage> {
         let url = match self {
             Self::Launcher | Self::Chat { sid: None, .. } => "vmux://start/",
