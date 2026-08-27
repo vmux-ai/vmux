@@ -152,6 +152,9 @@ impl Chat {
         });
         let _branches =
             use_listener::<ChatProjectBranches, _>(CHAT_PROJECT_BRANCHES_EVENT, move |incoming| {
+                if !chat.projects.awaits(&incoming.project) {
+                    return;
+                }
                 let mut branches = chat.projects.branches;
                 let mut branches_for = chat.projects.branches_for;
                 branches.set(incoming.branches.clone());
@@ -1029,6 +1032,10 @@ pub fn use_project_picker() -> ProjectPicker {
 }
 
 impl ProjectPicker {
+    pub fn awaits(&self, project: &str) -> bool {
+        self.expanded.peek().as_str() == project
+    }
+
     pub fn expand(&self, project: &str) {
         let mut expanded = self.expanded;
         if expanded.peek().as_str() == project {

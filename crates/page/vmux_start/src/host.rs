@@ -92,6 +92,9 @@ struct StartPromptContextParams<'w, 's> {
 
 impl StartPromptContextParams<'_, '_> {
     fn changed(&self, tab: Option<Entity>) -> bool {
+        if self.agent_models.is_changed() {
+            return true;
+        }
         let Some(tab) = tab else {
             return false;
         };
