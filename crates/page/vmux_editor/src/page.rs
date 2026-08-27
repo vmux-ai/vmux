@@ -2284,6 +2284,7 @@ fn EditorLineRow(
                 }
             }
             span { class: "{text_class}", style: "{text_style}",
+                IndentGuides { levels: line.indent_levels }
                 for (i, s) in line.spans.iter().enumerate() {
                     span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
                 }
@@ -2309,6 +2310,19 @@ fn EditorLineRow(
                 if fold == FoldGutter::Collapsed {
                     span { class: "ml-1 rounded bg-white/10 px-1 text-foreground/40", "⋯" }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn IndentGuides(levels: u16) -> Element {
+    rsx! {
+        for level in 0..levels {
+            div {
+                key: "{level}",
+                class: "pointer-events-none absolute inset-y-0 w-px bg-foreground/[0.09]",
+                style: "left:calc(var(--cw, 1ch) * {u32::from(level) * 4});",
             }
         }
     }

@@ -1261,12 +1261,14 @@ fn emit_window(
             .into_iter()
             .map(Some)
             .collect();
+        let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
         for layout in &layouts {
             let index = (layout.line_no - first_line) as usize;
             let Some(mut line) = window.get_mut(index).and_then(Option::take) else {
                 continue;
             };
             line.fold = edit.folds.gutter(layout.line_no);
+            line.indent_levels = guides.levels(layout.line_no as usize);
             lines.push(line);
         }
     }

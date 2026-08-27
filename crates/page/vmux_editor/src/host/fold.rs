@@ -264,6 +264,40 @@ fn indent_width(line: &str) -> Option<usize> {
     None
 }
 
+pub struct IndentGuides<'a> {
+    rope: &'a Rope,
+}
+
+impl<'a> IndentGuides<'a> {
+    const COLUMNS: usize = 4;
+
+    pub fn of(rope: &'a Rope) -> Self {
+        Self { rope }
+    }
+
+    pub fn levels(&self, line: usize) -> u16 {
+        let total = self.rope.len_lines();
+        let mut probe = line;
+        while probe < total {
+            if let Some(width) = self.width(probe) {
+                return (width / Self::COLUMNS) as u16;
+            }
+            probe += 1;
+        }
+        0
+    }
+
+    fn width(&self, line: usize) -> Option<usize> {
+        let text: String = self
+            .rope
+            .line(line)
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .collect();
+        indent_width(&text)
+    }
+}
+
 pub fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
     let total = rope.len_lines();
     let indents: Vec<Option<usize>> = (0..total)
@@ -331,6 +365,30 @@ mod indent_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {
+        let rope = Rope::from_str("fn a() {\n    let x = 1;\n\n        deep();\n}\n");
+        let guides = IndentGuides::of(&rope);
+
+        assert_eq!(guides.levels(0), 0);
+        assert_eq!(guides.levels(1), 1);
+        assert_eq!(
+            guides.levels(2),
+            2,
+            "a blank line takes the next non-blank line's depth so the guide does not break"
+        );
+        assert_eq!(guides.levels(3), 2);
+    }
+
+    #[test]
+    fn trailing_blank_lines_have_no_guide_to_carry() {
+        let rope = Rope::from_str("fn a() {\n    x;\n}\n\n\n");
+        let guides = IndentGuides::of(&rope);
+
+        assert_eq!(guides.levels(3), 0);
+        assert_eq!(guides.levels(4), 0);
+    }
 
     fn state() -> FoldState {
         let mut s = FoldState::default();

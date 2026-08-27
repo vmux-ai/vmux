@@ -141,6 +141,8 @@ pub struct FileLine {
     pub line_no: u32,
     pub fold: FoldGutter,
     pub spans: Vec<StyledSpan>,
+    #[serde(default)]
+    pub indent_levels: u16,
 }
 
 #[derive(
@@ -1405,6 +1407,7 @@ mod file_event_tests {
                     bold: false,
                     italic: false,
                 }],
+                indent_levels: 0,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).expect("ser");

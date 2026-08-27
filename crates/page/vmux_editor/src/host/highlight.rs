@@ -78,6 +78,7 @@ pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
             FileLine {
                 line_no: idx as u32,
                 fold: vmux_core::event::FoldGutter::None,
+                indent_levels: 0,
                 spans: ranges
                     .into_iter()
                     .map(|(style, text)| to_styled_span(style, text))
@@ -132,6 +133,7 @@ impl Highlighter {
             lines.push(FileLine {
                 line_no: idx as u32,
                 fold: vmux_core::event::FoldGutter::None,
+                indent_levels: 0,
                 spans,
             });
         }
@@ -172,6 +174,7 @@ impl Highlighter {
             .map(|(idx, line)| FileLine {
                 line_no: idx as u32,
                 fold: vmux_core::event::FoldGutter::None,
+                indent_levels: 0,
                 spans: vec![StyledSpan {
                     text: line.trim_end_matches(['\n', '\r']).to_string(),
                     fg,
