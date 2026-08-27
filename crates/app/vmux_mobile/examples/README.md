@@ -12,10 +12,12 @@ read it with a query.
 | Example | Runs on | Shows |
 | --- | --- | --- |
 | [`layout`](layout.rs) | host | Tabs, a stack within one, and sheets on top |
+| [`layout_ios`](layout_ios.rs) | simulator | The same, with real push, swipe and sheets |
 | [`minimal`](minimal.rs) | host, simulator | The phone, as one plugin |
 
 ```sh
-make layout-mobile                                            # layout
+make layout-mobile                                            # layout, as text
+make layout-mobile-sim                                        # layout, on a simulator
 cargo run -p vmux_mobile --example minimal --features mobile   # the app itself
 ```
 
@@ -61,3 +63,9 @@ impl Screen for Page {
 `is` is the second half, and it defaults to equality. Override it when two screens
 are the same thing arrived at twice — vmux compares session ids, so a conversation
 the phone started stops being its own tab once the Mac reports it.
+
+`layout_ios` is the same model with the UIKit half attached, and it is the only way to
+see the parts CI cannot reach: a real push animation, the interactive back-swipe, a
+sheet you can drag down. Its tabs are canned rather than reported, so it needs no Mac
+either. It installs beside the real app under its own bundle id rather than replacing
+it.

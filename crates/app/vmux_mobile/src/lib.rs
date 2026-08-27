@@ -50,7 +50,19 @@ static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(V
 
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-pub struct MobilePlugin;
+pub struct MobilePlugin(&'static vmux_native::NativePage);
+
+impl Default for MobilePlugin {
+    fn default() -> Self {
+        Self(&shell::SHELL_PAGE)
+    }
+}
+
+impl MobilePlugin {
+    pub fn showing(page: &'static vmux_native::NativePage) -> Self {
+        Self(page)
+    }
+}
 
 impl Plugin for MobilePlugin {
     fn build(&self, app: &mut App) {
@@ -87,7 +99,7 @@ impl Plugin for MobilePlugin {
             },
             unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(shell::ShellPlugin);
+        .add_plugins(shell::ShellPlugin(self.0));
     }
 }
 
