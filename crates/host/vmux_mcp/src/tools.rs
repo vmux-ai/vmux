@@ -1041,6 +1041,7 @@ pub fn dispatch_with_anchor(
                 AgentCommand::CreateWorktreeOnBranch {
                     anchor,
                     branch: branch.to_string(),
+                    project: None,
                 },
             ));
         }
@@ -2045,7 +2046,7 @@ mod tests {
         ));
         assert!(matches!(
             create,
-            DispatchTarget::Command(AgentCommand::CreateWorktreeOnBranch { anchor: got, branch })
+            DispatchTarget::Command(AgentCommand::CreateWorktreeOnBranch { anchor: got, branch, .. })
                 if got == anchor && branch == "feature/fun-terminal"
         ));
         assert!(matches!(

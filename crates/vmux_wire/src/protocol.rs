@@ -196,6 +196,7 @@ pub enum AgentCommand {
     CreateWorktreeOnBranch {
         anchor: ProcessId,
         branch: String,
+        project: Option<String>,
     },
     BookmarkCommand {
         command: String,
@@ -1490,6 +1491,7 @@ mod tests {
         let cmd = AgentCommand::CreateWorktreeOnBranch {
             anchor: ProcessId::new(),
             branch: "  ".to_string(),
+            project: None,
         };
         assert!(validate_agent_command(&cmd).is_err());
     }
@@ -1503,6 +1505,7 @@ mod tests {
             AgentCommand::CreateWorktreeOnBranch {
                 anchor: ProcessId::new(),
                 branch: "feature/fun-terminal".into(),
+                project: None,
             },
             AgentCommand::RequestUserChoice {
                 anchor: ProcessId::new(),

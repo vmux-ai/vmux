@@ -271,9 +271,11 @@ fn on_chat_go_to_branch(
     };
     let checkout = evt.checkout.trim();
     let command = if checkout.is_empty() {
+        let project = evt.project.trim();
         ServiceAgentCommand::CreateWorktreeOnBranch {
             anchor: session.anchor,
             branch: evt.branch.clone(),
+            project: (!project.is_empty()).then(|| project.to_string()),
         }
     } else {
         ServiceAgentCommand::ChooseWorkspaceAtPath {
@@ -377,5 +379,49 @@ mod tests {
             requests[1].command,
             ServiceAgentCommand::CreateWorktree { anchor: got } if got == anchor
         ));
+    }
+
+    #[test]
+    fn an_unheld_branch_names_the_project_it_was_picked_from() {
+        let mut app = App::new();
+        app.add_message::<AgentCommandRequest>()
+            .add_observer(on_chat_go_to_branch);
+        let anchor = vmux_core::ProcessId::new();
+        let stack = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "claude".into(),
+                sid: "s1".into(),
+                cwd: "/tmp/here".into(),
+                anchor,
+                resume: None,
+            })
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ChatGoToBranch {
+                project: "/tmp/elsewhere".into(),
+                branch: "feature/x".into(),
+                checkout: String::new(),
+            },
+        });
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        let ServiceAgentCommand::CreateWorktreeOnBranch { project, .. } = &requests[0].command
+        else {
+            panic!("an unheld branch creates a worktree");
+        };
+        assert_eq!(
+            project.as_deref(),
+            Some("/tmp/elsewhere"),
+            "without it the worktree lands under whatever project the tab happens to hold"
+        );
     }
 }
