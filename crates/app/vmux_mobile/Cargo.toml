@@ -13,10 +13,33 @@ default = []
 # being the one to call `UIApplicationMain`.
 mobile = []
 
+[lib]
+name = "vmux_mobile"
+path = "src/lib.rs"
+
 [[bin]]
 name = "vmux_mobile"
 path = "src/main.rs"
 required-features = ["mobile"]
+
+[[example]]
+name = "minimal"
+path = "examples/minimal.rs"
+required-features = ["mobile"]
+
+[package.metadata.example.minimal]
+name = "Minimal"
+description = "The whole phone runtime as one plugin"
+category = "Mobile"
+
+[[example]]
+name = "navigation"
+path = "examples/navigation.rs"
+
+[package.metadata.example.navigation]
+name = "Navigation"
+description = "Flatten a Mac layout into the phone's tabs, with no Mac"
+category = "Mobile"
 
 [dependencies]
 # The phone runs the desktop's runner: `bevy_winit` owns the loop and `app.run()` turns it. These
