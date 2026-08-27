@@ -28,14 +28,52 @@ const UNINTERESTING_DIRS: &[&str] = &[
     "venv",
 ];
 
-#[derive(Default)]
+#[derive(bevy::prelude::Resource, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
+    asked: Option<String>,
+    answered_with: usize,
 }
 
 impl ProjectIndex {
     pub fn matches(&mut self, roots: &[PathBuf], query: &str) -> Option<Vec<PathEntry>> {
         self.sync(roots);
+        self.asked = Some(query.to_string());
+        self.answered_with = self.ready_count();
+        self.rank(query)
+    }
+
+    pub fn settled(&mut self, roots: &[PathBuf]) -> Option<(String, Vec<PathEntry>)> {
+        let query = self.asked.clone()?;
+        self.sync(roots);
+        let ready = self.ready_count();
+        if ready == self.answered_with {
+            return None;
+        }
+        self.answered_with = ready;
+        let ranked = self.rank(&query)?;
+        Some((query, ranked))
+    }
+
+    pub fn forget(&mut self) {
+        self.asked = None;
+    }
+
+    pub fn asked_query(&self) -> Option<String> {
+        self.asked.clone()
+    }
+
+    fn ready_count(&self) -> usize {
+        let mut ready = 0;
+        for index in &self.roots {
+            if matches!(index, RootIndex::Ready { .. }) {
+                ready += 1;
+            }
+        }
+        ready
+    }
+
+    fn rank(&self, query: &str) -> Option<Vec<PathEntry>> {
         let mut ready = Vec::new();
         for index in &self.roots {
             let RootIndex::Ready { root, files, .. } = index else {

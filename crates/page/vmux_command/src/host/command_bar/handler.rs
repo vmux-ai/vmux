@@ -75,6 +75,8 @@ impl Plugin for CommandBarInputPlugin {
             .add_observer(on_command_bar_ready)
             .add_observer(on_command_bar_rendered)
             .add_observer(on_command_bar_size)
+            .init_resource::<crate::command_bar::project_files::ProjectIndex>()
+            .add_systems(Update, answer_settled_project_index)
             .add_systems(
                 Update,
                 prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
@@ -1100,7 +1102,7 @@ fn on_path_complete_request(
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
     browsers: NonSend<Browsers>,
-    mut index: Local<crate::command_bar::project_files::ProjectIndex>,
+    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
 ) {
     let query = &trigger.event().payload.query;
@@ -1113,7 +1115,9 @@ fn on_path_complete_request(
 
     let mut completions = None;
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
-    if !roots.is_empty() {
+    if roots.is_empty() {
+        index.forget();
+    } else {
         completions = index.matches(&roots, query);
     }
     let completions = completions.unwrap_or_else(|| complete_path(query));
@@ -1122,6 +1126,37 @@ fn on_path_complete_request(
         modal_e,
         PATH_COMPLETE_RESPONSE,
         &payload,
+    ));
+}
+
+fn answer_settled_project_index(
+    modal_q: Query<Entity, With<CommandBar>>,
+    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
+    projects: Res<crate::snapshot::CommandBarProjectRoots>,
+    browsers: NonSend<Browsers>,
+    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
+    mut commands: Commands,
+) {
+    let Ok(modal_e) = modal_q.single() else {
+        return;
+    };
+    if !browsers.can_emit_to(&modal_e) {
+        return;
+    }
+    let Some(query) = index.asked_query() else {
+        return;
+    };
+    let roots = ProjectQuery::roots_for(&query, workspace.project_root.as_deref(), &projects.roots);
+    if roots.is_empty() {
+        return;
+    }
+    let Some((_, completions)) = index.settled(&roots) else {
+        return;
+    };
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        modal_e,
+        PATH_COMPLETE_RESPONSE,
+        &PathCompleteResponse { completions },
     ));
 }
 

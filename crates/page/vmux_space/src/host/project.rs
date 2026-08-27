@@ -44,7 +44,7 @@ fn publish_project_roots(
 ) {
     let mut next = Vec::new();
     for project in projects.active_rows() {
-        if project.missing {
+        if project.missing || !matches!(project.kind, vmux_core::event::ProjectRowKind::Project) {
             continue;
         }
         next.push(project.path);
