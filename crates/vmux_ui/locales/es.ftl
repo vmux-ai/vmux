@@ -605,6 +605,9 @@ agent-working-mulling = Sopesando
 agent-working-spelunking = Explorando a fondo
 
 editor-toggle-explorer = Mostrar/ocultar Explorador (Cmd+B)
+editor-status-position = Ln { $line }, Col { $col }
+editor-status-spaces = Espacios: { $width }
+editor-status-tabs = Tabulación: { $width }
 editor-cannot-open = No se pudo abrir este archivo
 editor-edit-failed = No se pudo renombrar
 editor-go-to-declaration = Ir a la declaración

@@ -605,6 +605,9 @@ agent-working-mulling = Зважує
 agent-working-spelunking = Досліджує глибини
 
 editor-toggle-explorer = Показати/сховати Провідник (Cmd+B)
+editor-status-position = Ряд { $line }, Стовп { $col }
+editor-status-spaces = Пробіли: { $width }
+editor-status-tabs = Ширина табуляції: { $width }
 editor-cannot-open = Не вдалося відкрити цей файл
 editor-edit-failed = Не вдалося перейменувати
 editor-go-to-declaration = Перейти до оголошення

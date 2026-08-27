@@ -590,6 +590,9 @@ agent-working-mulling = 検討中
 agent-working-spelunking = 探索中
 
 editor-toggle-explorer = エクスプローラーを切り替え（Cmd+B）
+editor-status-position = { $line } 行、{ $col } 列
+editor-status-spaces = スペース: { $width }
+editor-status-tabs = タブ幅: { $width }
 editor-cannot-open = このファイルを開けませんでした
 editor-edit-failed = 名前の変更に失敗しました
 editor-go-to-declaration = 宣言へ移動

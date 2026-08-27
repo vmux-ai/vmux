@@ -605,6 +605,9 @@ agent-working-mulling = 斟酌中
 agent-working-spelunking = 深入探查中
 
 editor-toggle-explorer = 切換檔案總管（Cmd+B）
+editor-status-position = 第 { $line } 行，第 { $col } 欄
+editor-status-spaces = 空格: { $width }
+editor-status-tabs = 定位點大小: { $width }
 editor-cannot-open = 無法開啟此檔案
 editor-edit-failed = 重新命名失敗
 editor-go-to-declaration = 移至宣告

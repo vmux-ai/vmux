@@ -605,6 +605,9 @@ agent-working-mulling = 고민 중
 agent-working-spelunking = 깊이 탐색 중
 
 editor-toggle-explorer = 탐색기 토글(Cmd+B)
+editor-status-position = { $line }행, { $col }열
+editor-status-spaces = 공백: { $width }
+editor-status-tabs = 탭 크기: { $width }
 editor-cannot-open = 이 파일을 열 수 없습니다
 editor-edit-failed = 이름 바꾸기에 실패했습니다
 editor-go-to-declaration = 선언으로 이동

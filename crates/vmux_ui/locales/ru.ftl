@@ -605,6 +605,9 @@ agent-working-mulling = Обмозговывает
 agent-working-spelunking = Копается
 
 editor-toggle-explorer = Показать/скрыть проводник (Cmd+B)
+editor-status-position = Стр { $line }, Стлб { $col }
+editor-status-spaces = Пробелы: { $width }
+editor-status-tabs = Ширина табуляции: { $width }
 editor-cannot-open = Не удалось открыть этот файл
 editor-edit-failed = Не удалось переименовать
 editor-go-to-declaration = Перейти к объявлению

@@ -160,6 +160,47 @@ pub struct FileMetaEvent {
     pub abs_path: String,
     pub language: String,
     pub total_lines: u32,
+    #[serde(default)]
+    pub indent: FileIndent,
+    #[serde(default)]
+    pub line_ending: FileLineEnding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileIndent {
+    pub spaces: bool,
+    pub width: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileLineEnding {
+    #[default]
+    Lf,
+    Crlf,
 }
 
 #[derive(
@@ -179,6 +220,8 @@ pub struct FileViewportPatch {
     pub wrap_columns: u16,
     pub layouts: Vec<FileLineLayout>,
     pub lines: Vec<FileLine>,
+    #[serde(default)]
+    pub sticky: Vec<FileLine>,
 }
 
 #[derive(
@@ -1389,6 +1432,7 @@ mod file_event_tests {
     #[test]
     fn file_viewport_patch_rkyv_roundtrip() {
         let patch = FileViewportPatch {
+            sticky: Vec::new(),
             first_row: 100,
             total_rows: 4000,
             total_lines: 5000,

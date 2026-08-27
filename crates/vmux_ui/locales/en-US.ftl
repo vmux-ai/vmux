@@ -618,6 +618,9 @@ agent-working-spelunking = Spelunking
 agents-terminal-coding-agent = Terminal-based coding agent
 
 editor-toggle-explorer = Toggle Explorer (Cmd+B)
+editor-status-position = Ln { $line }, Col { $col }
+editor-status-spaces = Spaces: { $width }
+editor-status-tabs = Tab Size: { $width }
 editor-cannot-open = This file could not be opened
 editor-edit-failed = Rename failed
 editor-go-to-declaration = Go to Declaration

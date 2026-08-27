@@ -605,6 +605,9 @@ agent-working-mulling = Overwegen
 agent-working-spelunking = Diep graven
 
 editor-toggle-explorer = Verkenner tonen/verbergen (Cmd+B)
+editor-status-position = Rg { $line }, Kol { $col }
+editor-status-spaces = Spaties: { $width }
+editor-status-tabs = Tabgrootte: { $width }
 editor-cannot-open = Dit bestand kon niet worden geopend
 editor-edit-failed = Hernoemen mislukt
 editor-go-to-declaration = Ga naar declaratie

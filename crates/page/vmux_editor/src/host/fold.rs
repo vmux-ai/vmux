@@ -43,6 +43,21 @@ impl FoldState {
             .min_by_key(|r| r.end - r.start)
     }
 
+    pub fn sticky(&self, line: u32, depth: usize) -> Vec<u32> {
+        let mut headers = Vec::new();
+        for region in &self.regions {
+            if region.contains_body(line) && !self.collapsed.contains(&region.start) {
+                headers.push(region.start);
+            }
+        }
+        headers.sort_unstable();
+        headers.dedup();
+        if headers.len() > depth {
+            headers.drain(..headers.len() - depth);
+        }
+        headers
+    }
+
     pub fn gutter(&self, line: u32) -> FoldGutter {
         match self.region_at_start(line) {
             Some(_) if self.collapsed.contains(&line) => FoldGutter::Collapsed,
@@ -365,6 +380,50 @@ mod indent_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sticky_names_the_enclosing_headers_outermost_first() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 0, end: 20 },
+            FoldRegion { start: 4, end: 12 },
+            FoldRegion { start: 6, end: 8 },
+            FoldRegion { start: 30, end: 40 },
+        ]);
+
+        assert_eq!(s.sticky(7, 5), vec![0, 4, 6]);
+        assert_eq!(
+            s.sticky(4, 5),
+            vec![0],
+            "a header is not pinned above itself, it is already the top line"
+        );
+        assert_eq!(s.sticky(25, 5), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn sticky_keeps_the_innermost_headers_when_nesting_runs_deep() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 0, end: 50 },
+            FoldRegion { start: 1, end: 40 },
+            FoldRegion { start: 2, end: 30 },
+        ]);
+
+        assert_eq!(
+            s.sticky(10, 2),
+            vec![1, 2],
+            "the closest scopes are the ones worth the space"
+        );
+    }
+
+    #[test]
+    fn a_collapsed_scope_is_not_pinned() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![FoldRegion { start: 0, end: 20 }]);
+        s.toggle(0);
+
+        assert_eq!(s.sticky(5, 5), Vec::<u32>::new());
+    }
 
     #[test]
     fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {

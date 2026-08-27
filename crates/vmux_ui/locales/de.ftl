@@ -605,6 +605,9 @@ agent-working-mulling = Wälzt
 agent-working-spelunking = Gräbt sich durch
 
 editor-toggle-explorer = Explorer ein-/ausblenden (Cmd+B)
+editor-status-position = Z { $line }, Sp { $col }
+editor-status-spaces = Leerzeichen: { $width }
+editor-status-tabs = Tabbreite: { $width }
 editor-cannot-open = Diese Datei konnte nicht geöffnet werden
 editor-edit-failed = Umbenennen fehlgeschlagen
 editor-go-to-declaration = Zur Deklaration

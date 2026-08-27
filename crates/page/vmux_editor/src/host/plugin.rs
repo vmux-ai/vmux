@@ -495,6 +495,7 @@ struct PendingGlobalSearchRequest {
 }
 
 const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
+const STICKY_SCROLL_DEPTH: usize = 5;
 
 #[derive(Component)]
 struct FileViewModeSent;
@@ -926,6 +927,7 @@ fn send_initial_text_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
+        let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_META_EVENT,
@@ -934,6 +936,8 @@ fn send_initial_text_meta(
                 abs_path: fv.path.to_string_lossy().into_owned(),
                 language: edit.core.buffer.language.clone(),
                 total_lines: edit.core.buffer.len_lines() as u32,
+                indent: shape.indent,
+                line_ending: shape.line_ending,
             },
         ));
         if vp.rows > 0 {
@@ -1272,6 +1276,21 @@ fn emit_window(
             lines.push(line);
         }
     }
+    let mut sticky = Vec::new();
+    if let Some(top) = layouts.first().map(|layout| layout.line_no) {
+        let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
+        for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
+            let at = header as usize;
+            let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
+            if window.is_empty() {
+                continue;
+            }
+            let mut line = window.remove(0);
+            line.fold = edit.folds.gutter(header);
+            line.indent_levels = guides.levels(at);
+            sticky.push(line);
+        }
+    }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
@@ -1282,6 +1301,7 @@ fn emit_window(
             wrap_columns,
             layouts,
             lines,
+            sticky,
         },
     ));
 }

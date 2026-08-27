@@ -41,7 +41,11 @@ pub fn Page() -> Element {
     let mut total_rows = use_signal(|| 0u32);
     let mut first_row = use_signal(|| 0u32);
     let mut gutter_hover = use_signal(|| false);
+    let mut language = use_signal(String::new);
+    let mut indent = use_signal(vmux_core::event::FileIndent::default);
+    let mut line_ending = use_signal(vmux_core::event::FileLineEnding::default);
     let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut sticky_lines = use_signal(Vec::<FileLine>::new);
     let mut line_layouts = use_signal(Vec::<FileLineLayout>::new);
     let mut wrap_columns = use_signal(|| 0u16);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
@@ -201,6 +205,9 @@ pub fn Page() -> Element {
         }
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
+        language.set(m.language);
+        indent.set(m.indent);
+        line_ending.set(m.line_ending);
         mode.set(Mode::Text);
         lsp_install_notice.set(None);
         lsp_install_request.set(None);
@@ -228,6 +235,9 @@ pub fn Page() -> Element {
         }
         if lines.peek().as_slice() != p.lines.as_slice() {
             lines.set(p.lines);
+        }
+        if sticky_lines.peek().as_slice() != p.sticky.as_slice() {
+            sticky_lines.set(p.sticky);
         }
         lsp_hover.set(None);
     });
@@ -1421,6 +1431,12 @@ pub fn Page() -> Element {
                                             let _ = send(&FileScrollEvent { top_row: vis_first });
                                         }
                                     },
+                                    StickyScope {
+                                        lines: sticky_lines(),
+                                        cell_height: ch,
+                                        gutter_chars: gw,
+                                        on_pick: move |row: u32| viewport.center_row(row, ch),
+                                    }
                                     div { class: "relative", style: "height:{spacer}px;",
                                         EditorLines {
                                             lines,
@@ -1973,6 +1989,13 @@ pub fn Page() -> Element {
                         }
                     })
                 }
+                FileStatusInfo {
+                    line: cursor().line + 1,
+                    col: cursor().col + 1,
+                    indent: indent(),
+                    line_ending: line_ending(),
+                    language: language(),
+                }
             }
         }
         }
@@ -2309,6 +2332,99 @@ fn EditorLineRow(
                 }
                 if fold == FoldGutter::Collapsed {
                     span { class: "ml-1 rounded bg-white/10 px-1 text-foreground/40", "⋯" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn FileStatusInfo(
+    line: u32,
+    col: u32,
+    indent: vmux_core::event::FileIndent,
+    line_ending: vmux_core::event::FileLineEnding,
+    language: String,
+) -> Element {
+    let position = translate_with(
+        "editor-status-position",
+        &[
+            ("line", TranslationValue::Number(i64::from(line))),
+            ("col", TranslationValue::Number(i64::from(col))),
+        ],
+    );
+    let indent_id = match indent.spaces {
+        true => "editor-status-spaces",
+        false => "editor-status-tabs",
+    };
+    let indent_label = translate_with(
+        indent_id,
+        &[("width", TranslationValue::Number(i64::from(indent.width)))],
+    );
+    let eol = match line_ending {
+        vmux_core::event::FileLineEnding::Crlf => "CRLF",
+        vmux_core::event::FileLineEnding::Lf => "LF",
+    };
+    rsx! {
+        span { class: "flex shrink-0 items-center gap-3 tabular-nums", "{position}" }
+        span { class: "shrink-0", "{indent_label}" }
+        span { class: "shrink-0", "UTF-8" }
+        span { class: "shrink-0", "{eol}" }
+        if !language.is_empty() {
+            span { class: "shrink-0", "{language}" }
+        }
+    }
+}
+
+#[component]
+fn StickyScope(
+    lines: Vec<FileLine>,
+    cell_height: f64,
+    gutter_chars: usize,
+    on_pick: EventHandler<u32>,
+) -> Element {
+    if lines.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "sticky top-0 z-[12] h-0",
+            div { class: "absolute inset-x-0 top-0 border-b border-foreground/10 bg-background/95 backdrop-blur",
+                for line in lines {
+                    StickyScopeRow {
+                        key: "{line.line_no}",
+                        line,
+                        cell_height,
+                        gutter_chars,
+                        on_pick,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StickyScopeRow(
+    line: FileLine,
+    cell_height: f64,
+    gutter_chars: usize,
+    on_pick: EventHandler<u32>,
+) -> Element {
+    let row = line.line_no;
+    rsx! {
+        div {
+            class: "flex cursor-default whitespace-pre hover:bg-foreground/[0.05]",
+            style: "height:{cell_height}px;",
+            onclick: move |_| on_pick.call(row),
+            span {
+                class: "sticky left-0 flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums text-muted-foreground/60",
+                style: "min-width:calc(var(--cw, 1ch) * {gutter_chars} + 3rem);height:{cell_height}px;",
+                "{row + 1}"
+            }
+            span { class: "pointer-events-none relative whitespace-pre pr-8",
+                IndentGuides { levels: line.indent_levels }
+                for (i, s) in line.spans.iter().enumerate() {
+                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
                 }
             }
         }

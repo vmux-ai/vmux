@@ -605,6 +605,9 @@ agent-working-mulling = يمعن النظر
 agent-working-spelunking = ينقّب
 
 editor-toggle-explorer = تبديل المستكشف (Cmd+B)
+editor-status-position = سطر { $line }، عمود { $col }
+editor-status-spaces = مسافات: { $width }
+editor-status-tabs = حجم الجدولة: { $width }
 editor-cannot-open = تعذّر فتح هذا الملف
 editor-edit-failed = تعذّرت إعادة التسمية
 editor-go-to-declaration = الانتقال إلى التصريح

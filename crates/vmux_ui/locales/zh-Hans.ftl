@@ -605,6 +605,9 @@ agent-working-mulling = 正在权衡
 agent-working-spelunking = 正在深入探索
 
 editor-toggle-explorer = 切换资源管理器（Cmd+B）
+editor-status-position = 第 { $line } 行，第 { $col } 列
+editor-status-spaces = 空格: { $width }
+editor-status-tabs = 制表符长度: { $width }
 editor-cannot-open = 无法打开此文件
 editor-edit-failed = 重命名失败
 editor-go-to-declaration = 转到声明
