@@ -1600,8 +1600,7 @@ fn on_file_keymap_set(
     if settings.editor.keymap == keymap {
         return;
     }
-    match vmux_setting::apply_settings_update(
-        settings.as_mut(),
+    match settings.apply_update(
         "editor.keymap",
         serde_json::to_value(keymap).unwrap_or_default(),
     ) {

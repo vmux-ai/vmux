@@ -109,8 +109,7 @@ pub(super) fn handle_agent_queries(
                 });
             }
             AgentQuery::GetSettings => {
-                let result =
-                    AgentQueryResult::Settings(vmux_setting::serialize_settings_to_json(&settings));
+                let result = AgentQueryResult::Settings(settings.to_json());
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result,

@@ -96,7 +96,7 @@ fn update_effective_startup_url(
         return;
     };
     if settings.is_changed() || active.is_changed() || effective.0.is_empty() {
-        effective.0 = vmux_setting::resolve_startup_url(&settings, &active.record.id);
+        effective.0 = settings.startup_url(&active.record.id);
     }
 }
 
@@ -141,7 +141,7 @@ fn update_effective_startup_dir(
     }
     let path = settings
         .as_deref()
-        .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id.0));
+        .and_then(|settings| settings.startup_dir(&id.0));
     let next = (entity, path);
     if effective.0.as_ref() != Some(&next) {
         effective.0 = Some(next);
@@ -213,7 +213,7 @@ fn space_rows_from_world(
             .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
             .unwrap_or(0) as u32;
         let startup_dir = settings
-            .and_then(|s| vmux_setting::resolve_startup_dir(s, &sid.0))
+            .and_then(|s| s.startup_dir(&sid.0))
             .map(|path| display_dir(&path))
             .unwrap_or_default();
         rows.push((
@@ -565,7 +565,7 @@ fn on_space_command(
             active_id.0 = Some(id.clone());
             let startup_dir = settings
                 .as_deref()
-                .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
+                .and_then(|settings| settings.startup_dir(&id));
             layout_requests.write(TabLayoutSpawnRequest {
                 space,
                 primary_window: *primary_window,
@@ -631,7 +631,7 @@ fn handle_open_in_new_space(
         active_id.0 = Some(id.clone());
         let startup_dir = settings
             .as_deref()
-            .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
+            .and_then(|settings| settings.startup_dir(&id));
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())

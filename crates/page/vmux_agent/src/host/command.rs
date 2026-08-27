@@ -353,9 +353,9 @@ pub(super) fn handle_agent_commands(
                     Ok(cwd_opt) => {
                         let activate = !origin_is_agent(&request.origin);
                         let cwd_path = cwd_opt.or_else(|| {
-                            active_space.as_ref().and_then(|space| {
-                                vmux_setting::resolve_startup_dir(&sp.settings, &space.record.id)
-                            })
+                            active_space
+                                .as_ref()
+                                .and_then(|space| sp.settings.startup_dir(&space.record.id))
                         });
                         if command.trim().is_empty() {
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
@@ -486,7 +486,7 @@ pub(super) fn handle_agent_commands(
                 match serde_json::from_str::<serde_json::Value>(value_json) {
                     Ok(value) => {
                         let mut updated = (*sp.settings).clone();
-                        match vmux_setting::apply_settings_update(&mut updated, path, value) {
+                        match updated.apply_update(path, value) {
                             Ok(ron_bytes) => {
                                 if origin_is_agent(&request.origin)
                                     && updated.agent.allow_run_placement_override
@@ -682,12 +682,12 @@ mod tests {
     #[test]
     pub(crate) fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
-        let ron_bytes = vmux_setting::apply_settings_update(
-            &mut settings,
-            "browser.startup_url",
-            serde_json::json!("https://example.com/custom"),
-        )
-        .expect("apply ok");
+        let ron_bytes = settings
+            .apply_update(
+                "browser.startup_url",
+                serde_json::json!("https://example.com/custom"),
+            )
+            .expect("apply ok");
         assert_eq!(settings.browser.startup_url, "https://example.com/custom");
         assert!(ron_bytes.contains("https://example.com/custom"));
     }

@@ -502,11 +502,8 @@ fn spawn_layout_requested_content(
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
                 let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(*stack, &child_of, &tabs);
-                let Ok(cwd) = vmux_setting::resolve_tab_workspace_dir(
-                    &settings,
-                    &active_space.record.id,
-                    tab_dir.as_deref(),
-                ) else {
+                let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
+                else {
                     continue;
                 };
                 let terminal = commands
@@ -593,11 +590,7 @@ fn open_terminal_page(
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
-        vmux_setting::resolve_tab_workspace_dir(
-            settings,
-            &active_space.record.id,
-            tab_dir.as_deref(),
-        )?
+        settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
     clear_stack_children(task.stack, children_q, commands);
     let title = cwd
@@ -1233,11 +1226,8 @@ fn resolve_pending_terminal_cwd(
             continue;
         }
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
-        let Ok(Some(cwd)) = vmux_setting::resolve_tab_workspace_dir(
-            &settings,
-            &active_space.record.id,
-            tab_dir.as_deref(),
-        ) else {
+        let Ok(Some(cwd)) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
+        else {
             continue;
         };
         launch.cwd = cwd.to_string_lossy().into_owned();

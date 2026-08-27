@@ -966,10 +966,7 @@ pub(super) fn handle_agent_self_commands(
                                     Ok(stored) => 'create_worktree: {
                                         let configured_dir =
                                             active_space.as_deref().and_then(|space| {
-                                                vmux_setting::resolve_startup_dir(
-                                                    &settings,
-                                                    &space.record.id,
-                                                )
+                                                settings.startup_dir(&space.record.id)
                                             });
                                         let workspace_dir =
                                             tab_worktree.workspaces.get(tab_e).ok().and_then(

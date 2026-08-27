@@ -507,7 +507,7 @@ fn apply_effort_setting(
                 continue;
             }
         };
-        match vmux_setting::apply_settings_update(settings.as_mut(), "agent.effort", value) {
+        match settings.apply_update("agent.effort", value) {
             Ok(ron_bytes) => {
                 writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
             }

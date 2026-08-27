@@ -94,10 +94,10 @@ fn resolved_space_startup_dir(
     space_ids: &Query<&vmux_layout::space::SpaceId>,
     settings: &AppSettings,
     active_space: Option<&ActiveSpace>,
-) -> Option<(PathBuf, vmux_setting::DirSource)> {
+) -> Option<vmux_setting::StartupDir> {
     let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
         .or_else(|| active_space.map(|space| space.record.id.clone()))?;
-    vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &space_id, None)
+    vmux_setting::StartupDir::resolve(settings, &space_id, None)
 }
 
 fn prepare_agent_tab_worktrees(
@@ -137,7 +137,7 @@ fn prepare_agent_tab_worktrees(
                 settings,
                 active_space.as_deref(),
             )
-            .map(|(path, _)| path.to_string_lossy().into_owned())
+            .map(|dir| dir.path.to_string_lossy().into_owned())
         });
         let outcome = if let Some(outcome) = outcomes.get(&tab_entity) {
             outcome.clone()
@@ -320,7 +320,7 @@ fn handle_agent_page_open(
         let default_cwd = match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
             Ok(None) => space_startup_dir
-                .map(|(path, _)| path)
+                .map(|dir| dir.path)
                 .unwrap_or_else(AgentCwd::process),
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });

@@ -259,14 +259,12 @@ fn on_install_request(
     let mut acp = settings.agent.acp.clone();
     upsert_acp_version(&mut acp, &agent.id, &agent.name, version.clone());
     match serde_json::to_value(&acp) {
-        Ok(value) => {
-            match vmux_setting::apply_settings_update(settings.as_mut(), "agent.acp", value) {
-                Ok(ron_bytes) => {
-                    writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
-                }
-                Err(error) => bevy::log::warn!("agents: persist version for {id} failed: {error}"),
+        Ok(value) => match settings.apply_update("agent.acp", value) {
+            Ok(ron_bytes) => {
+                writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
             }
-        }
+            Err(error) => bevy::log::warn!("agents: persist version for {id} failed: {error}"),
+        },
         Err(error) => bevy::log::warn!("agents: serialize acp config failed: {error}"),
     }
 

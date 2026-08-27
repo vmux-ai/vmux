@@ -371,18 +371,18 @@ fn push_tab_boundary_emit(
     }
     let boundary = focus.tab.and_then(|tab_e| {
         let tab = tabs.get(tab_e).ok()?;
-        let (path, source) = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
+        let dir = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
         let info = repo_info
             .as_mut()
-            .and_then(|cache| cache.bypass_change_detection().get(&path));
+            .and_then(|cache| cache.bypass_change_detection().get(&dir.path));
         let wt = worktrees.get(tab_e).ok();
         let branch = info.as_ref().map(|i| i.branch.clone()).unwrap_or_default();
         let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
         let mut leaves = Vec::new();
         collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
         Some(TabBoundary {
-            effective_dir: abbreviate_home(&path),
-            source: match source {
+            effective_dir: abbreviate_home(&dir.path),
+            source: match dir.source {
                 vmux_setting::DirSource::Tab => "tab",
                 vmux_setting::DirSource::Space => "space",
                 vmux_setting::DirSource::Global => "global",
