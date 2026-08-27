@@ -269,6 +269,19 @@ fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) 
 }
 
 #[component]
+fn TreeIndentGuides(depth: u16, base: u32) -> Element {
+    rsx! {
+        for level in 0..depth {
+            div {
+                key: "{level}",
+                class: "pointer-events-none absolute inset-y-0 w-px bg-foreground/20 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100",
+                style: "left:{u32::from(level) * 12 + base}px;",
+            }
+        }
+    }
+}
+
+#[component]
 fn Chevron(expanded: bool, loading: bool) -> Element {
     if loading {
         return rsx! {
@@ -424,7 +437,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             div { class: "flex h-9 shrink-0 items-center px-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
                 {translate("editor-explorer")}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
+            div { class: "group/tree min-h-0 flex-1 overflow-y-auto pb-4",
                 SectionHeader { title: translate("editor-open-editors"), open: show_open, on_toggle: EventHandler::new(move |_| show_open.set(!show_open())) }
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
@@ -556,9 +569,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 id: "{tree_row_id(&row.path)}",
                                                 tabindex: "-1",
                                                 class: if active {
-                                                    "flex h-[22px] items-center gap-1 px-1 cursor-default bg-cyan-400/12 text-foreground outline-none transition-colors duration-100"
+                                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default bg-cyan-400/12 text-foreground outline-none transition-colors duration-100"
                                                 } else {
-                                                    "flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 outline-none transition-colors duration-100 hover:bg-foreground/[0.08]"
+                                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 outline-none transition-colors duration-100 hover:bg-foreground/[0.08]"
                                                 },
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
@@ -593,6 +606,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                         open_file(path_click.clone());
                                                     }
                                                 },
+                                                TreeIndentGuides { depth: row.depth, base: 14 }
                                                 if is_dir {
                                                     Chevron { expanded: row.expanded, loading: row.loading }
                                                 } else {
@@ -621,9 +635,10 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                 rsx! {
                                     div {
                                         key: "{s.line}-{s.name}",
-                                        class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                                        class: "relative flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 transition-colors duration-100 hover:bg-foreground/[0.08]",
                                         style: "padding-left:{pad}px;",
                                         onclick: move |_| goto_line(line),
+                                        TreeIndentGuides { depth: s.depth, base: 26 }
                                         OutlineGlyph { kind: s.kind }
                                         span { class: "truncate", "{s.name}" }
                                     }
