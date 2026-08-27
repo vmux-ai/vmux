@@ -2,6 +2,7 @@ use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use vmux_ui::i18n::translate;
+use vmux_wire::protocol::layout::LayoutSnapshot;
 use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
@@ -111,6 +112,20 @@ impl Api {
 
     pub(crate) async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
         broker_json(&self.quic, SharedAgentCommand::ListTeam).await
+    }
+
+    pub(crate) async fn layout(&self) -> Result<LayoutSnapshot, ApiError> {
+        broker_json(&self.quic, SharedAgentCommand::ReadLayout).await
+    }
+
+    pub(crate) async fn terminal(&self, process_id: &str) -> Result<String, ApiError> {
+        broker_json(
+            &self.quic,
+            SharedAgentCommand::ReadTerminal {
+                process_id: process_id.to_string(),
+            },
+        )
+        .await
     }
 
     pub(crate) async fn subscribe(&self, sid: &str) -> Result<crate::quic::Subscription, ApiError> {

@@ -49,6 +49,10 @@ impl Dom {
             reads: reads.clone(),
             selection: selection.clone(),
         });
+        let host = match &embed.layer {
+            Some(layer) => layer.wrap(host),
+            None => host,
+        };
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(component, instance))),
@@ -69,10 +73,10 @@ impl Dom {
             static REACTOR: Rc<tokio::runtime::Runtime> = Rc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(1)
-                    .enable_time()
+                    .enable_all()
                     .thread_name("vmux-page")
                     .build()
-                    .expect("a reactor for a page's timers"),
+                    .expect("a reactor for a page's waiting"),
             );
         }
 

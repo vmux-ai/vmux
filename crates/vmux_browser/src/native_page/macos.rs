@@ -480,6 +480,7 @@ impl PageEmbedder {
                 simulator_frames: SimulatorFrameProxy::default(),
             }),
             waker: Rc::new(self.waker.clone()),
+            layer: None,
         }
     }
 }
