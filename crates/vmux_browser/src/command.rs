@@ -21,7 +21,6 @@ use vmux_layout::{
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetSectionsExpanded},
     stack::{ActiveTabParam, Stack, focused_stack},
-    tab::Tab,
 };
 
 use vmux_terminal::{RestartPty, Terminal};
@@ -245,9 +244,7 @@ fn on_side_sheet_command_emit(
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
     mut last_activated: Query<&mut LastActivatedAt>,
-    child_of: Query<&ChildOf>,
-    tabs: Query<(), With<Tab>>,
-    section_states: Query<&SideSheetSectionsExpanded, With<Tab>>,
+    sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut messages: ResMut<Messages<AppCommand>>,
@@ -342,27 +339,17 @@ fn on_side_sheet_command_emit(
                 }
                 return;
             }
-            let mut current = target_pane;
-            let tab = loop {
-                if tabs.contains(current) {
-                    break Some(current);
-                }
-                let Ok(parent) = child_of.get(current) else {
-                    break None;
-                };
-                current = parent.parent();
-            };
-            let Some(tab) = tab else {
+            let Some(space) = sections_of.space_of(target_pane) else {
                 return;
             };
-            let mut state = section_states.get(tab).copied().unwrap_or_default();
+            let mut state = sections_of.under(target_pane);
             if !state.set(&evt.path, expanded) {
                 return;
             }
             if state.is_empty() {
-                commands.entity(tab).remove::<SideSheetSectionsExpanded>();
+                commands.entity(space).remove::<SideSheetSectionsExpanded>();
             } else {
-                commands.entity(tab).insert(state);
+                commands.entity(space).insert(state);
             }
         }
         "open_knowledge_path" => {
@@ -412,8 +399,11 @@ fn on_side_sheet_command_emit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_layout::pane::Pane;
+    use vmux_layout::space::{Space, SpaceId};
     use vmux_layout::stack::stack_bundle;
+    use vmux_layout::tab::Tab;
 
     #[test]
     fn side_sheet_close_routes_through_the_stack_command() {
@@ -449,5 +439,95 @@ mod tests {
             ))],
         );
         assert!(app.world().get::<LastActivatedAt>(stack).is_some());
+    }
+
+    struct SideSheetSpaces {
+        app: App,
+        pane_in_first_tab: Entity,
+        second_tab: Entity,
+        tab_in_other_space: Entity,
+    }
+
+    impl SideSheetSpaces {
+        fn start() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+                .add_message::<AppCommand>()
+                .add_message::<vmux_command::CommandIssued>()
+                .init_resource::<PaneHoverIntent>()
+                .add_observer(on_side_sheet_command_emit);
+
+            let space = app
+                .world_mut()
+                .spawn((Space, SpaceId("work".to_string())))
+                .id();
+            let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
+            app.world_mut()
+                .spawn((stack_bundle(), ChildOf(pane_in_first_tab)));
+            let second_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let other_space = app
+                .world_mut()
+                .spawn((Space, SpaceId("play".to_string())))
+                .id();
+            let tab_in_other_space = app
+                .world_mut()
+                .spawn((Tab::default(), ChildOf(other_space)))
+                .id();
+
+            Self {
+                app,
+                pane_in_first_tab,
+                second_tab,
+                tab_in_other_space,
+            }
+        }
+
+        fn expand(&mut self, section: &str) {
+            self.app
+                .world_mut()
+                .trigger(BinReceive::<SideSheetCommandEvent> {
+                    webview: Entity::PLACEHOLDER,
+                    payload: SideSheetCommandEvent {
+                        command: "expand_section".to_string(),
+                        pane_id: self.pane_in_first_tab.to_bits().to_string(),
+                        stack_index: 0,
+                        path: section.to_string(),
+                    },
+                });
+            self.app.world_mut().flush();
+        }
+
+        fn sections_under(&mut self, entity: Entity) -> SideSheetSectionsExpanded {
+            self.app
+                .world_mut()
+                .run_system_once(
+                    move |sections: vmux_layout::side_sheet::SideSheetSections| {
+                        sections.under(entity)
+                    },
+                )
+                .expect("the reader runs")
+        }
+    }
+
+    #[test]
+    fn an_expanded_card_stays_expanded_on_another_tab_of_the_same_space() {
+        let mut spaces = SideSheetSpaces::start();
+        spaces.expand("projects");
+
+        let second_tab = spaces.second_tab;
+        assert!(
+            spaces.sections_under(second_tab).projects,
+            "a card is expanded for the whole space, so switching tab must not fold it"
+        );
+    }
+
+    #[test]
+    fn expanding_a_card_leaves_the_other_spaces_alone() {
+        let mut spaces = SideSheetSpaces::start();
+        spaces.expand("projects");
+
+        let elsewhere = spaces.tab_in_other_space;
+        assert!(!spaces.sections_under(elsewhere).projects);
     }
 }

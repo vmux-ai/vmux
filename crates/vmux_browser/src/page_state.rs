@@ -13,7 +13,7 @@ use vmux_layout::{
         UpdateReadyEvent,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPosition, SideSheetSectionsExpanded, SideSheetWidth},
+    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     tab::{Tab, TabWorktree},
     window::VmuxWindow,
@@ -238,7 +238,7 @@ fn push_pane_tree_emit(
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
-    tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
+    sections_of: vmux_layout::side_sheet::SideSheetSections,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
@@ -264,7 +264,7 @@ fn push_pane_tree_emit(
     if !tab_q.contains(tab_e) {
         return;
     }
-    let sections = tab_sections.get(tab_e).copied().unwrap_or_default();
+    let sections = sections_of.under(tab_e);
     let mut tab_leaf_panes = Vec::new();
     collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut tab_leaf_panes);
 
