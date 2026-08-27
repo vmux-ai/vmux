@@ -59,19 +59,21 @@ ios: mobile-ios-run
 # you can drag down — the parts no test reaches and CI cannot run. Its tabs are canned rather
 # than reported, so this needs no Mac and no pairing.
 #
-# dx writes the app's own Info.plist into every bundle it makes, so the example inherits
-# `ai.vmux.mobile` and an executable name that is not the one it built. Installed as-is it
-# would replace the real app and then fail to launch, so both are corrected here rather than
-# by giving the example a plist of its own — one file to keep in step is enough.
+# Built and installed rather than served. `dx serve` ignores whichever simulator is booted and
+# reaches for the last device it can enumerate, which is an iPad; `--device` does not redirect
+# it, because a name or a UDID there puts dx on the physical-device path and it starts asking
+# for provisioning profiles. `simctl install booted` has no opinion, so the iPhone
+# `ensure-booted-simulator` brought up is the one that gets it.
+#
+# No plist surgery here: the demo is its own crate with its own `Dioxus.toml`, so dx already
+# writes the right identifier and the right executable name.
 layout-mobile: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
-	"$(DX_BIN)" build --ios -p vmux_mobile --example layout --features mobile; \
+	"$(DX_BIN)" build --ios -p vmux_layout_demo; \
 	. ./scripts/cargo-target-paths.sh; \
-	bundle="$$(vmux_cargo_target_dir .)/dx/layout/debug/ios/Layout.app"; \
-	plutil -replace CFBundleExecutable -string layout "$$bundle/Info.plist"; \
-	plutil -replace CFBundleIdentifier -string ai.vmux.mobile.layout "$$bundle/Info.plist"; \
+	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_layout_demo/debug/ios/VmuxLayoutDemo.app"; \
 	xcrun simctl install booted "$$bundle"; \
-	xcrun simctl launch booted ai.vmux.mobile.layout
+	xcrun simctl launch booted ai.vmux.layout
 
 android: mobile-android-run
 

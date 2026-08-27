@@ -50,17 +50,35 @@ static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(V
 
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-pub struct MobilePlugin(&'static vmux_native::NativePage);
+type Pages = Box<dyn Fn(&mut App) + Send + Sync>;
+
+pub struct MobilePlugin {
+    root: &'static vmux_native::NativePage,
+    pages: Pages,
+}
 
 impl Default for MobilePlugin {
     fn default() -> Self {
-        Self(&shell::SHELL_PAGE)
+        Self {
+            root: &shell::SHELL_PAGE,
+            pages: Box::new(|world| {
+                world.add_plugins(PagePlugins);
+            }),
+        }
     }
 }
 
 impl MobilePlugin {
-    pub fn showing(page: &'static vmux_native::NativePage) -> Self {
-        Self(page)
+    pub fn showing(root: &'static vmux_native::NativePage) -> Self {
+        Self {
+            root,
+            ..Self::default()
+        }
+    }
+
+    pub fn serving(mut self, pages: impl Fn(&mut App) + Send + Sync + 'static) -> Self {
+        self.pages = Box::new(pages);
+        self
     }
 }
 
@@ -69,10 +87,7 @@ impl Plugin for MobilePlugin {
         Logs::start();
         deep_link::install();
 
-        World::new(|world| {
-            world.add_plugins(PagePlugins);
-        })
-        .install();
+        World::new(|world| (self.pages)(world)).install();
 
         app.add_plugins((
             TaskPoolPlugin::default(),
@@ -99,7 +114,7 @@ impl Plugin for MobilePlugin {
             },
             unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(shell::ShellPlugin(self.0));
+        .add_plugins(shell::ShellPlugin(self.root));
     }
 }
 

@@ -11,7 +11,7 @@ read it with a query, and declare which screen draws what in rsx.
 
 | Example | Shows |
 | --- | --- |
-| [`layout`](layout.rs) | Tabs, a stack within one, and sheets on top |
+| [`layout`](../../../../examples/layout) | Tabs, a stack within one, and sheets on top |
 | [`minimal`](minimal.rs) | The phone, as one plugin |
 
 ```sh
@@ -21,8 +21,12 @@ make layout-mobile    # from client/, or `make <worktree> layout-mobile` from vm
 `layout` is a real app on a simulator, and the only way to see the parts no test
 reaches and CI cannot run: a push that animates, a back-swipe that follows your
 finger, a sheet you can drag down. Its tabs are canned rather than reported over
-QUIC, so it needs no Mac, no relay and no pairing. It installs beside the real app
-under its own bundle id rather than replacing it.
+QUIC, so it needs no Mac, no relay and no pairing.
+
+It is a crate of its own, in `examples/layout/`, and `Dioxus.toml` is why: that file
+is per-crate, so an example living inside `vmux_mobile` is bundled under the app's
+identifier and installs *over* the real thing. Its own crate means its own
+identifier, `ai.vmux.layout`, and the two sit side by side on the simulator.
 
 `minimal` is the app itself, and wants a paired Mac to be worth looking at:
 

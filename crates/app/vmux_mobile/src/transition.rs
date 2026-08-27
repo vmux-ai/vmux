@@ -70,8 +70,13 @@ mod platform {
                     if shown >= stack.levels.len() {
                         return;
                     }
+                    let Some(marker) = MainThreadMarker::new() else {
+                        return;
+                    };
                     let dropped = stack.levels.len() - shown;
-                    stack.levels.truncate(shown);
+                    for level in stack.levels.drain(shown..) {
+                        level.setView(Some(&UIView::new(marker)));
+                    }
                     stack.uncover();
                     stack.occupy_top();
                     POPPED.set(POPPED.get() + dropped);
@@ -86,9 +91,13 @@ mod platform {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
-                    if stack.sheets.pop().is_none() {
+                    let Some(marker) = MainThreadMarker::new() else {
                         return;
-                    }
+                    };
+                    let Some(departing) = stack.sheets.pop() else {
+                        return;
+                    };
+                    departing.setView(Some(&UIView::new(marker)));
                     stack.uncover();
                     stack.occupy_top();
                     DISMISSED.set(DISMISSED.get() + 1);
@@ -190,6 +199,36 @@ mod platform {
             }))
         }
 
+        pub fn settle(depth: usize) {
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                for sheet in std::mem::take(&mut stack.sheets) {
+                    sheet.dismissViewControllerAnimated_completion(false, None);
+                }
+                while stack.levels.len() > depth + 1 {
+                    stack.levels.pop();
+                }
+                while stack.levels.len() < depth + 1 {
+                    stack.levels.push(UIViewController::initWithNibName_bundle(
+                        UIViewController::alloc(marker),
+                        None,
+                        None,
+                    ));
+                }
+                stack.uncover();
+                stack.occupy_top();
+                let controllers = objc2_foundation::NSArray::from_retained_slice(&stack.levels);
+                stack
+                    .navigation
+                    .setViewControllers_animated(&controllers, false);
+            });
+        }
+
         fn cover(&mut self) -> bool {
             self.uncover();
             let Some(snapshot) = self.web_view.snapshotViewAfterScreenUpdates(false) else {
@@ -220,6 +259,12 @@ mod platform {
                 Some(sheet) => sheet.clone(),
                 None => Retained::into_super(self.navigation.clone()),
             }
+        }
+
+        fn covered_by(&self, still: &UIView) -> Option<()> {
+            let holder = self.sheets.last().or_else(|| self.levels.last())?;
+            holder.setView(Some(still));
+            Some(())
         }
     }
 
@@ -292,8 +337,8 @@ mod platform {
                     let stack = stack.as_mut()?;
                     let marker = MainThreadMarker::new()?;
                     let cover = stack.uncover()?;
+                    stack.covered_by(&cover)?;
                     let presenter = stack.presenter();
-                    presenter.setView(Some(&cover));
 
                     let sheet = UIViewController::initWithNibName_bundle(
                         UIViewController::alloc(marker),
@@ -416,6 +461,8 @@ mod platform {
         pub fn dismiss() -> Dismissing {
             Dismissing
         }
+
+        pub fn settle(_depth: usize) {}
     }
 
     impl Pushing {

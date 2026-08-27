@@ -1,0 +1,18 @@
+[application]
+name = "Layout"
+default_platform = "ios"
+
+# No `ios_info_plist`. The app supplies its own so it can set UIDeviceFamily and the
+# orientations; this wants none of that, and letting dx generate one keeps the executable name
+# matching the target it actually built.
+
+[bundle]
+identifier = "ai.vmux.layout"
+publisher = "Vmux"
+short_description = "The phone's navigation, with no phone."
+
+# The whole point of the separate crate: a different identifier, so installing the demo does
+# not uninstall the app it is demonstrating.
+[ios]
+deployment_target = "15.0"
+identifier = "ai.vmux.layout"
