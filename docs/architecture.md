@@ -446,13 +446,44 @@ the other way, kicking the first refresh when a page subscribes. On a surface th
 reached, so a page would mount and stay empty — no crash, just something that reads as a slow
 link. An embedder therefore layers itself in front of the host the surface would have installed.
 
-**There is still one webview**, which is what the transition ordering exists for. Only the top
-controller can hold it, so every level below holds a still taken as it was covered. A push covers
-the live screen *before* the page changes and moves it *after*, and the still goes **over** the
-webview rather than in place of it — replacing it would leave the webview windowless for the
-whole paint wait, and WebKit does not promise to keep drawing a view with no window. A back-swipe
-inverts this: UIKit runs it and tells the delegate afterwards, so it is reported through a counter
-the shell drains.
+### How a push actually works
+
+Two stacks are kept in step. `nav.rs` holds the phone's own — tabs, a selection, and a
+`Vec<Screen>` of pushed levels per tab — and knows nothing about UIKit. `transition.rs` holds a
+`UINavigationController` and knows nothing about `Screen`. The join is three lines in
+`Nav::open`.
+
+**The view controllers in that navigation stack are empty.** There is one webview, the shell's,
+and a controller's view is either that live webview — only ever the top one — or a still taken
+when it was covered. `occupy_top` is the whole idea: hand the live webview to whichever level is
+now on top.
+
+```mermaid
+sequenceDiagram
+    participant N as Nav (Rust)
+    participant U as UIKit
+    N->>U: push() — snapshot the webview,<br/>add the still OVER it
+    N->>N: pushed[tab].push(screen)
+    Note over N: the webview repaints to the new<br/>screen behind the still
+    N->>U: finish(title) — after 48ms
+    U->>U: still → the outgoing level
+    U->>U: live webview → a new top level
+    U->>U: pushViewController(animated)
+```
+
+By the time UIKit animates, the outgoing level shows the picture it always showed and the
+incoming one is already painted. A pop is the mirror: the still goes to the level being left,
+`occupy_top` returns the webview to the one beneath.
+
+The still goes **over** the webview rather than in place of it. Replacing it would leave the
+webview windowless for the whole paint wait, and WebKit does not promise to keep drawing a view
+with no window — the incoming screen could arrive blank. The 48ms is a guess, erring long,
+because nothing reports when an out-of-process paint has landed.
+
+A back-swipe runs the other way: UIKit drives it and only tells the delegate afterwards, so it
+cannot be bracketed. `didShowViewController:` compares the controller count against the levels
+it knows about, drops the difference, and bumps a counter the shell drains into `Nav::pop`.
+The gesture is refused at the root, where there is nothing to go back to.
 
 One webview is also why the phone cannot yet swipe between two conversations. Giving each screen
 its own view is the open question, and the cost is memory: the answer is a measurement, not an
