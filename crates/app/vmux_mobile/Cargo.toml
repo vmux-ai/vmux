@@ -33,30 +33,12 @@ description = "The whole phone runtime as one plugin"
 category = "Mobile"
 
 [[example]]
-name = "tabs"
-path = "examples/tabs.rs"
+name = "layout"
+path = "examples/layout.rs"
 
-[package.metadata.example.tabs]
-name = "Tabs"
-description = "Tabs are entities: reported, selected, and the phone's own"
-category = "Navigation"
-
-[[example]]
-name = "stack"
-path = "examples/stack.rs"
-
-[package.metadata.example.stack]
-name = "Stack"
-description = "Push, pop, and a back-swipe reported after UIKit ran it"
-category = "Navigation"
-
-[[example]]
-name = "modal"
-path = "examples/modal.rs"
-
-[package.metadata.example.modal]
-name = "Modal"
-description = "Sheets stack, and dismissing takes the top one only"
+[package.metadata.example.layout]
+name = "Layout"
+description = "Tabs, a stack within one, and sheets on top — drawn from the ECS"
 category = "Navigation"
 
 [dependencies]
