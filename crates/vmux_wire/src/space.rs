@@ -161,6 +161,8 @@ impl ProjectRowKind {
 )]
 pub struct ProjectTreeToggle {
     pub path: String,
+    #[serde(default)]
+    pub pane_id: String,
 }
 
 #[derive(

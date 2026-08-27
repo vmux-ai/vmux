@@ -94,13 +94,11 @@ impl ExpandedKnowledgeDirs {
 
 fn on_knowledge_tree_toggle(
     trigger: On<BinReceive<KnowledgeTreeToggle>>,
-    child_of: Query<&ChildOf>,
-    spaces: Query<(), With<vmux_layout::space::Space>>,
+    space_of_pane: vmux_layout::space::SpaceOfPane,
     mut expanded: Query<&mut ExpandedKnowledgeDirs>,
     mut commands: Commands,
 ) {
-    let Some(space) = vmux_layout::space::space_of(trigger.event().webview, &child_of, &spaces)
-    else {
+    let Some(space) = space_of_pane.resolve(&trigger.event().payload.pane_id) else {
         return;
     };
     let path = &trigger.event().payload.path;

@@ -58,6 +58,8 @@ pub struct KnowledgeEntry {
 )]
 pub struct KnowledgeTreeToggle {
     pub path: String,
+    #[serde(default)]
+    pub pane_id: String,
 }
 
 #[derive(

@@ -21,13 +21,11 @@ impl Plugin for SpaceProjectPlugin {
 
 fn on_project_tree_toggle(
     trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::ProjectTreeToggle>>,
-    child_of: Query<&ChildOf>,
-    spaces: Query<(), With<vmux_layout::space::Space>>,
+    space_of_pane: vmux_layout::space::SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,
     mut commands: Commands,
 ) {
-    let Some(space) = vmux_layout::space::space_of(trigger.event().webview, &child_of, &spaces)
-    else {
+    let Some(space) = space_of_pane.resolve(&trigger.event().payload.pane_id) else {
         return;
     };
     let path = &trigger.event().payload.path;
@@ -259,6 +257,8 @@ mod tests {
     struct Fixture {
         app: App,
         tab: Entity,
+        space: Entity,
+        pane: Entity,
     }
 
     impl Fixture {
@@ -275,7 +275,39 @@ mod tests {
                 ))
                 .id();
             let tab = app.world_mut().spawn(ChildOf(space)).id();
-            Self { app, tab }
+            let pane = app
+                .world_mut()
+                .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
+                .id();
+            Self {
+                app,
+                tab,
+                space,
+                pane,
+            }
+        }
+
+        fn toggle(&mut self, path: &str, pane_id: String) {
+            self.app
+                .world_mut()
+                .trigger(
+                    bevy_cef::prelude::BinReceive::<vmux_core::event::ProjectTreeToggle> {
+                        webview: Entity::PLACEHOLDER,
+                        payload: vmux_core::event::ProjectTreeToggle {
+                            path: path.to_string(),
+                            pane_id,
+                        },
+                    },
+                );
+            self.app.update();
+        }
+
+        fn open_dirs(&self) -> Vec<String> {
+            self.app
+                .world()
+                .get::<ExpandedProjectDirs>(self.space)
+                .map(|dirs| dirs.0.clone())
+                .unwrap_or_default()
         }
 
         fn select(&mut self, project_dir: &str) {
@@ -350,6 +382,33 @@ mod tests {
                 .drain()
                 .count()
         }
+    }
+
+    #[test]
+    fn a_toggle_opens_the_directory_on_the_space_that_owns_the_pane() {
+        let mut fixture = Fixture::start("work");
+        let pane = fixture.pane.to_bits().to_string();
+
+        fixture.toggle("/tmp/alpha/src", pane.clone());
+        assert_eq!(fixture.open_dirs(), vec!["/tmp/alpha/src".to_string()]);
+
+        fixture.toggle("/tmp/alpha/src", pane);
+        assert!(
+            fixture.open_dirs().is_empty(),
+            "toggling the same directory again closes it"
+        );
+    }
+
+    #[test]
+    fn a_toggle_that_names_no_pane_opens_nothing() {
+        let mut fixture = Fixture::start("work");
+
+        fixture.toggle("/tmp/alpha/src", String::new());
+
+        assert!(
+            fixture.open_dirs().is_empty(),
+            "the side sheet names its pane, and the space is reached through it"
+        );
     }
 
     #[test]

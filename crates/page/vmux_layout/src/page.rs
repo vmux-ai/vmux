@@ -733,7 +733,12 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
                 title: project.display_path.clone(),
                 on_activate: move |()| match tree {
                     true => {
-                        let _ = send(&vmux_core::event::ProjectTreeToggle { path: activate.clone() });
+                        let _ = send(
+                            &vmux_core::event::ProjectTreeToggle {
+                                path: activate.clone(),
+                                pane_id: pane_id.to_string(),
+                            },
+                        );
                     }
                     false => open_project_path(pane_id, activate.clone()),
                 },
@@ -1687,8 +1692,11 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
     output
 }
 
-fn toggle_knowledge_dir(path: String) {
-    let _ = send(&vmux_core::knowledge::KnowledgeTreeToggle { path });
+fn toggle_knowledge_dir(pane_id: u64, path: String) {
+    let _ = send(&vmux_core::knowledge::KnowledgeTreeToggle {
+        path,
+        pane_id: pane_id.to_string(),
+    });
 }
 
 fn open_project_path(pane_id: u64, path: String) {
@@ -3140,7 +3148,7 @@ fn KnowledgeEntryRow(
                                 is_dir: true,
                                 expanded,
                                 emphasis: true,
-                                on_activate: move |()| toggle_knowledge_dir(toggle_path.clone()),
+                                on_activate: move |()| toggle_knowledge_dir(pane_id, toggle_path.clone()),
                                 trailing: rsx! {
                                     KnowledgeGitIndicator { status: entry.git_status }
                                 },
@@ -3155,7 +3163,7 @@ fn KnowledgeEntryRow(
                         expand: Some(
                             EventHandler::new(move |()| {
                                 if !expanded {
-                                    toggle_knowledge_dir(open_path.clone());
+                                    toggle_knowledge_dir(pane_id, open_path.clone());
                                 }
                             }),
                         ),
