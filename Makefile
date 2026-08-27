@@ -59,8 +59,13 @@ android: mobile-android-run
 
 # `inject-ios-resources.sh` reads VMUX_IOS_PROFILE to decide which bundle to write into, so the
 # build has to be told the same thing or the script looks for a bundle dx never produced.
+#
+# `--features mobile` is passed rather than left to dx. The bin is `required-features =
+# ["mobile"]`, and cargo skips a target whose features are unmet without saying so — which used
+# to be covered by dx turning on `dioxus/mobile` for an iOS build. That feature is gone, so the
+# name is ours now and nothing else will set it.
 mobile-ios: ensure-mobile-ios-deps
-	"$(DX_BIN)" build --ios -p vmux_mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
+	"$(DX_BIN)" build --ios -p vmux_mobile --features mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh
 	./scripts/test-ios-bundle-layout.sh
 
