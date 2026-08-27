@@ -706,6 +706,17 @@ fn should_emit_update(
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
 }
 
+fn project_path_url(requested: &Path) -> Option<String> {
+    let metadata = std::fs::symlink_metadata(requested).ok()?;
+    if metadata.file_type().is_symlink() {
+        return None;
+    }
+    let path = requested.canonicalize().ok()?;
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
+}
+
 fn knowledge_path_url(root: &Path, requested: &Path) -> Option<String> {
     let root = root.canonicalize().ok()?;
     let metadata = std::fs::symlink_metadata(requested).ok()?;

@@ -29,7 +29,10 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::tree_row::{SidebarTreeChildren, SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::components::tree_row::{
+    SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren, SidebarTreeRow,
+    SidebarTreeRowGroup,
+};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
@@ -682,9 +685,13 @@ fn ProjectsCard(
                 },
                 div { class: "overflow-hidden",
                     if !projects.is_empty() {
-                        div { class: "flex flex-col gap-0.5 border-t border-foreground/10 p-1.5",
-                            for project in projects.iter().cloned() {
-                                ProjectListRow { project, pane_id }
+                        div { class: "border-t border-foreground/10 p-1.5",
+                            div { class: SIDEBAR_TREE_SCROLLER,
+                                div { class: "{SIDEBAR_TREE_COLUMN} gap-0.5",
+                                    for project in projects.iter().cloned() {
+                                        ProjectListRow { project, pane_id }
+                                    }
+                                }
                             }
                         }
                     } else if let Some(boundary) = boundary {
@@ -728,7 +735,7 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
                     true => {
                         let _ = send(&vmux_core::event::ProjectTreeToggle { path: activate.clone() });
                     }
-                    false => open_knowledge_path(pane_id, activate.clone()),
+                    false => open_project_path(pane_id, activate.clone()),
                 },
                 trailing: rsx! {
                     if !project.branch.is_empty() {
@@ -1077,7 +1084,8 @@ fn BookmarksSection(
                         if pins.is_empty() && roots.is_empty() && !creating_folder() {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
-                            div { class: "flex flex-col gap-1",
+                            div { class: SIDEBAR_TREE_SCROLLER,
+                            div { class: "{SIDEBAR_TREE_COLUMN} gap-1",
                                 for node in roots.iter() {
                                     match node {
                                         BookmarkNode::Folder(f) if f.parent.is_none() => rsx! {
@@ -1101,6 +1109,7 @@ fn BookmarksSection(
                                         },
                                     }
                                 }
+                            }
                             }
                         }
                     }
@@ -1333,16 +1342,18 @@ fn KnowledgeCard(
                                         }
                                     }
                                 } else {
-                                    div { class: "flex flex-col gap-0.5",
-                                        for entry in entries_by_parent.get(&knowledge.root).into_iter().flatten() {
-                                            KnowledgeEntryRow {
-                                                key: "{entry.path}",
-                                                entry: entry.clone(),
-                                                entries_by_parent: entries_by_parent.clone(),
-                                                pane_id,
-                                                prompt: create_prompt,
-                                                draft: create_draft,
-                                                error: create_error,
+                                    div { class: SIDEBAR_TREE_SCROLLER,
+                                        div { class: "{SIDEBAR_TREE_COLUMN} gap-0.5",
+                                            for entry in entries_by_parent.get(&knowledge.root).into_iter().flatten() {
+                                                KnowledgeEntryRow {
+                                                    key: "{entry.path}",
+                                                    entry: entry.clone(),
+                                                    entries_by_parent: entries_by_parent.clone(),
+                                                    pane_id,
+                                                    prompt: create_prompt,
+                                                    draft: create_draft,
+                                                    error: create_error,
+                                                }
                                             }
                                         }
                                     }
@@ -1674,6 +1685,15 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
         &mut output,
     );
     output
+}
+
+fn open_project_path(pane_id: u64, path: String) {
+    let _ = send(&crate::event::SideSheetCommandEvent {
+        command: "open_project_path".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path,
+    });
 }
 
 fn open_knowledge_path(pane_id: u64, path: String) {

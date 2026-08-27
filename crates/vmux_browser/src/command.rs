@@ -25,7 +25,7 @@ use vmux_layout::{
 
 use vmux_terminal::{RestartPty, Terminal};
 
-use crate::{knowledge_path_url, normalize_vmux_url};
+use crate::{knowledge_path_url, normalize_vmux_url, project_path_url};
 pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
@@ -351,6 +351,18 @@ fn on_side_sheet_command_emit(
             } else {
                 commands.entity(space).insert(state);
             }
+        }
+        "open_project_path" => {
+            let Some(url) = project_path_url(Path::new(&evt.path)) else {
+                return;
+            };
+            open_beside.write(vmux_layout::OpenBesideRequest {
+                pane: target_pane,
+                direction: None,
+                url,
+                request_id: [0; 16],
+                focus: true,
+            });
         }
         "open_knowledge_path" => {
             let Some(mut url) = knowledge_path_url(
