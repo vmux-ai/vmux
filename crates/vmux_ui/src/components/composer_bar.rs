@@ -11,10 +11,12 @@ use crate::components::prompt_box::PromptPopupPlacement;
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_INTERACTIVE: &str =
     "transition hover:bg-foreground/[0.08] hover:text-foreground";
+const COMPOSER_CHIP_OPEN: &str = "transition bg-foreground/[0.12] text-foreground";
 const COMPOSER_CHIP_SKELETON: &str = "h-7 shrink-0 animate-pulse rounded-lg bg-foreground/[0.06]";
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerBarProps {
+    pub menu: ComposerMenu,
     #[props(default)]
     pub agent: Option<ComposerChip>,
     #[props(default)]
@@ -34,6 +36,7 @@ pub struct ComposerBarProps {
 #[component]
 pub fn ComposerBar(props: ComposerBarProps) -> Element {
     let ComposerBarProps {
+        menu,
         agent,
         model,
         effort,
@@ -46,19 +49,39 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
         div { class: "flex min-w-0 items-center justify-between gap-1",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
                 if let Some(chip) = agent {
-                    ComposerChipSlot { kind: ComposerMenuKind::Agent, chip }
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Agent,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Agent),
+                    }
                 }
                 if let Some(chip) = model {
-                    ComposerChipSlot { kind: ComposerMenuKind::Model, chip }
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Model,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Model),
+                    }
                 }
                 if let Some(chip) = effort {
-                    ComposerChipSlot { kind: ComposerMenuKind::Effort, chip }
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Effort,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Effort),
+                    }
                 }
                 if let Some(chip) = project {
-                    ComposerChipSlot { kind: ComposerMenuKind::Project, chip }
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Project,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Project),
+                    }
                 }
                 if let Some(chip) = branch {
-                    ComposerChipSlot { kind: ComposerMenuKind::Branch, chip }
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Branch,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Branch),
+                    }
                 }
                 if let Some(badges) = badges {
                     {badges}
@@ -184,7 +207,7 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
 }
 
 #[component]
-fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip) -> Element {
+fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> Element {
     if chip.loading {
         let width = kind.skeleton_width();
         return rsx! {
@@ -200,16 +223,20 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip) -> Element {
             }
         };
     };
+    let state = match open {
+        true => COMPOSER_CHIP_OPEN,
+        false => COMPOSER_CHIP_INTERACTIVE,
+    };
     rsx! {
         button {
-            class: "{COMPOSER_CHIP} {COMPOSER_CHIP_INTERACTIVE}",
+            class: "{COMPOSER_CHIP} {state}",
             title: "{chip.title}",
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_open.call(()),
             ComposerChipIcon { kind }
             span { class: label_class, "{chip.label}" }
             svg {
-                class: "h-3 w-3 shrink-0 opacity-50",
+                class: if open { "h-3 w-3 shrink-0 rotate-180 opacity-70 transition-transform duration-200 ease-out" } else { "h-3 w-3 shrink-0 opacity-50 transition-transform duration-200 ease-out" },
                 view_box: "0 0 24 24",
                 fill: "none",
                 stroke: "currentColor",

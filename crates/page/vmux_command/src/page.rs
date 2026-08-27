@@ -200,6 +200,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let start_composer_footer = rsx! {
         ComposerBar {
+            menu,
             agent: Some(chips.agent),
             model: chips.model,
             project: Some(chips.project),

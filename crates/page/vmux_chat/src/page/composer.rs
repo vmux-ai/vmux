@@ -84,6 +84,7 @@ fn ChatComposer(chat: Chat) -> Element {
 fn ComposerFooter(chat: Chat) -> Element {
     rsx! {
         ComposerBar {
+            menu: chat.menu,
             model: chat.model_chip(),
             effort: chat.effort_chip(),
             project: chat.project_chip(),
