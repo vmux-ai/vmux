@@ -95,10 +95,11 @@ impl BranchChange {
     }
 
     fn against(root: &Path, base: &BaseRef, branch: &str) -> Self {
-        let Ok((merge_base, _, true)) = git(root, &["merge-base", branch, base.as_str()]) else {
+        let head = format!("refs/heads/{branch}");
+        let Ok((merge_base, _, true)) = git(root, &["merge-base", &head, base.as_str()]) else {
             return Self::default();
         };
-        let range = format!("{}..{branch}", merge_base.trim());
+        let range = format!("{}..{head}", merge_base.trim());
         let Ok((numstat, _, true)) = git(root, &["diff", "--numstat", &range]) else {
             return Self::default();
         };
@@ -126,13 +127,15 @@ impl BranchChange {
 pub struct BaseRef(String);
 
 impl BaseRef {
-    const FALLBACKS: &'static [&'static str] = &["origin/main", "origin/master", "main", "master"];
+    const FALLBACKS: &'static [&'static str] = &[
+        "refs/remotes/origin/main",
+        "refs/remotes/origin/master",
+        "refs/heads/main",
+        "refs/heads/master",
+    ];
 
     pub fn of(root: &Path) -> Option<Self> {
-        if let Ok((stdout, _, true)) = git(
-            root,
-            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        ) {
+        if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
             let name = stdout.trim();
             if !name.is_empty() {
                 return Some(Self(name.to_string()));

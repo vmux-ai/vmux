@@ -175,7 +175,7 @@ fn ProjectBranchRow(
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_pick.call(pick.clone()),
             span { class: "truncate font-mono text-foreground", "{branch.branch}" }
-            div { class: "ml-auto flex min-w-0 shrink-0 items-center gap-2",
+            div { class: "ml-auto flex shrink-0 items-center gap-2",
                 BranchChangeStat {
                     insertions: branch.insertions,
                     deletions: branch.deletions,
