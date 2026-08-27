@@ -155,7 +155,7 @@ pub fn GitBar(
                     onclick: move |_| {
                         let _ = send(&GitStageRequest { path: path() });
                     },
-                    {translate("git-accept-all")}
+                    {translate("git-stage-file")}
                 }
             }
             if can_unstage {
@@ -175,7 +175,7 @@ pub fn GitBar(
                             let _ = send(&GitDiscardRequest { path: path() });
                             confirming.set(false);
                         },
-                        {translate("git-confirm-deny-all")}
+                        {translate("git-confirm-discard")}
                     }
                     button {
                         class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
@@ -186,7 +186,7 @@ pub fn GitBar(
                     button {
                         class: "shrink-0 rounded px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                         onclick: move |_| confirming.set(true),
-                        {translate("git-deny-all")}
+                        {translate("git-discard-file")}
                     }
                 }
             }
@@ -400,14 +400,14 @@ pub fn DiffView(
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
                                             },
-                                            {translate("git-accept")}
+                                            {translate("git-stage-hunk")}
                                         }
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
                                             },
-                                            {translate("git-deny")}
+                                            {translate("git-revert-hunk")}
                                         }
                                     }
                                 }
