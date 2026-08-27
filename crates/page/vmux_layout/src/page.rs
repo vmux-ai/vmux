@@ -1687,6 +1687,10 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
     output
 }
 
+fn toggle_knowledge_dir(path: String) {
+    let _ = send(&vmux_core::knowledge::KnowledgeTreeToggle { path });
+}
+
 fn open_project_path(pane_id: u64, path: String) {
     let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_project_path".to_string(),
@@ -3025,7 +3029,7 @@ fn KnowledgeCreateMenu(
     prompt: Signal<Option<KnowledgeCreatePrompt>>,
     draft: Signal<String>,
     error: Signal<String>,
-    expand: Option<Signal<bool>>,
+    expand: Option<EventHandler<()>>,
     expand_section_for_pane: Option<u64>,
     disabled: bool,
 ) -> Element {
@@ -3039,8 +3043,8 @@ fn KnowledgeCreateMenu(
                 on_select: {
                     let parent = parent.clone();
                     move |_: String| {
-                        if let Some(mut expanded) = expand {
-                            expanded.set(true);
+                        if let Some(expand) = expand {
+                            expand.call(());
                         }
                         if let Some(pane_id) = expand_section_for_pane {
                             set_side_sheet_section(pane_id, "knowledge", true);
@@ -3064,8 +3068,8 @@ fn KnowledgeCreateMenu(
                 on_select: {
                     let parent = parent.clone();
                     move |_: String| {
-                        if let Some(mut expanded) = expand {
-                            expanded.set(true);
+                        if let Some(expand) = expand {
+                            expand.call(());
                         }
                         if let Some(pane_id) = expand_section_for_pane {
                             set_side_sheet_section(pane_id, "knowledge", true);
@@ -3119,10 +3123,12 @@ fn KnowledgeEntryRow(
     draft: Signal<String>,
     error: Signal<String>,
 ) -> Element {
-    let mut expanded = use_signal(|| false);
+    let expanded = entry.expanded;
     if entry.is_directory {
         let children = entries_by_parent.get(&entry.path);
         let has_children = children.is_some_and(|children| !children.is_empty());
+        let toggle_path = entry.path.clone();
+        let open_path = entry.path.clone();
         rsx! {
             div { class: "flex flex-col",
                 LayoutContextMenu {
@@ -3132,9 +3138,9 @@ fn KnowledgeEntryRow(
                                 path: entry.path.clone(),
                                 label: entry.name.clone(),
                                 is_dir: true,
-                                expanded: expanded(),
+                                expanded,
                                 emphasis: true,
-                                on_activate: move |()| expanded.set(!expanded()),
+                                on_activate: move |()| toggle_knowledge_dir(toggle_path.clone()),
                                 trailing: rsx! {
                                     KnowledgeGitIndicator { status: entry.git_status }
                                 },
@@ -3146,12 +3152,18 @@ fn KnowledgeEntryRow(
                         prompt,
                         draft,
                         error,
-                        expand: Some(expanded),
+                        expand: Some(
+                            EventHandler::new(move |()| {
+                                if !expanded {
+                                    toggle_knowledge_dir(open_path.clone());
+                                }
+                            }),
+                        ),
                         expand_section_for_pane: None,
                         disabled: false,
                     }
                 }
-                SidebarTreeChildren { expanded: expanded(),
+                SidebarTreeChildren { expanded,
                     div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
                         if let Some(current) = prompt().filter(|current| current.parent == entry.path) {
                             KnowledgeCreateInput {

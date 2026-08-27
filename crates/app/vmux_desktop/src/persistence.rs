@@ -111,11 +111,15 @@ struct ViewStateChanges<'w, 's> {
     explorer: Query<'w, 's, (), Changed<vmux_editor::StackExplorerVisibility>>,
     sections: Query<'w, 's, (), Changed<vmux_layout::side_sheet::SideSheetSectionsExpanded>>,
     project_dirs: Query<'w, 's, (), Changed<vmux_space::ExpandedProjectDirs>>,
+    knowledge_dirs: Query<'w, 's, (), Changed<vmux_knowledge::ExpandedKnowledgeDirs>>,
 }
 
 impl ViewStateChanges<'_, '_> {
     fn any(&self) -> bool {
-        !self.explorer.is_empty() || !self.sections.is_empty() || !self.project_dirs.is_empty()
+        !self.explorer.is_empty()
+            || !self.sections.is_empty()
+            || !self.project_dirs.is_empty()
+            || !self.knowledge_dirs.is_empty()
     }
 }
 
@@ -259,6 +263,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_core::TransitionType>()
         .allow::<vmux_core::Order>()
         .allow::<vmux_editor::StackExplorerVisibility>()
+        .allow::<vmux_knowledge::ExpandedKnowledgeDirs>()
         .allow::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
         .allow::<vmux_space::ExpandedProjectDirs>()
         .allow::<vmux_terminal::launch::TerminalLaunch>();
