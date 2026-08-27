@@ -272,6 +272,9 @@ fn Shell() -> Element {
                         displaced.close();
                     }
                     sessions.set(next);
+                    if let Ok(next) = client.agents().await {
+                        agents.set(next);
+                    }
                     auth.set(AuthState::Paired);
                 }
                 Err(ApiError::Unauthorized) => {
@@ -566,6 +569,10 @@ fn CommandBar(on_submit: EventHandler<String>) -> Element {
     }
 }
 
+const MIRROR_ATTEMPTS: u8 = 5;
+
+const MIRROR_RETRY: Duration = Duration::from_secs(2);
+
 #[component]
 fn MirrorScreen(stack: vmux_wire::protocol::layout::Stack, api: Signal<Option<Api>>) -> Element {
     let title = if stack.title.is_empty() {
@@ -580,11 +587,18 @@ fn MirrorScreen(stack: vmux_wire::protocol::layout::Stack, api: Signal<Option<Ap
             let (Some(api), Some(process_id)) = (client, process_id) else {
                 return None;
             };
+            let mut remaining = MIRROR_ATTEMPTS;
             loop {
-                if let Ok(text) = api.terminal(&process_id).await {
-                    return Some(text);
+                match api.terminal(&process_id).await {
+                    Ok(text) => return Some(text),
+                    Err(ApiError::NotFound) => return None,
+                    Err(error) => tracing::warn!("mirroring the terminal failed: {error:?}"),
                 }
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                remaining -= 1;
+                if remaining == 0 {
+                    return None;
+                }
+                tokio::time::sleep(MIRROR_RETRY).await;
             }
         }
     });

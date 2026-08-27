@@ -1871,8 +1871,8 @@ impl ProcessManager {
             return Some(String::new());
         };
         let mut text = String::new();
-        for line in &lines {
-            if !text.is_empty() {
+        for (index, line) in lines.iter().enumerate() {
+            if index > 0 {
                 text.push('\n');
             }
             for span in &line.spans {
