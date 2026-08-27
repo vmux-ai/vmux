@@ -184,6 +184,14 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       case 'focus':
         el.focus({ preventScroll: true });
         break;
+      // A `popover` element is display:none until it is shown, and showing it is what puts it in
+      // the top layer — the only way out of the `overflow-hidden`, `backdrop-filter` card a menu
+      // is anchored inside. Guarded because a second show on an open popover throws.
+      case 'showPopover':
+        if (el.isConnected && !el.matches(':popover-open')) {
+          try { el.showPopover(); } catch (e) {}
+        }
+        break;
       case 'clearText':
         el.value = '';
         break;

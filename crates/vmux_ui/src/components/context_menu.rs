@@ -23,7 +23,25 @@ impl ContextMenuState {
     }
 }
 
-fn mount_context_menu_top_layer(_event: Event<MountedData>) {}
+#[derive(Clone)]
+struct ContextMenuOverlay(String);
+
+impl ContextMenuOverlay {
+    fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        Self(format!("vmux-context-menu-{serial}"))
+    }
+
+    fn id(&self) -> String {
+        self.0.clone()
+    }
+
+    fn raise(&self) {
+        crate::transport::Host::show_element_popover(&self.0);
+    }
+}
 
 #[component]
 pub fn ContextMenu(props: ContextMenuProps) -> Element {
@@ -91,6 +109,7 @@ pub fn ContextMenuTrigger(props: ContextMenuTriggerProps) -> Element {
 #[component]
 pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
     let mut state: ContextMenuState = use_context();
+    let overlay = use_hook(ContextMenuOverlay::next);
     let (x, y) = (state.position)();
 
     if !(state.open)() {
@@ -99,11 +118,12 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
 
     rsx! {
         div {
+            id: overlay.id(),
             popover: "manual",
             class: "fixed inset-0 z-[1000] m-0 h-screen w-screen max-h-none max-w-none border-0 bg-transparent p-0 outline-none",
             tabindex: "-1",
             onmounted: move |event| {
-                mount_context_menu_top_layer(event.clone());
+                overlay.raise();
                 let data = event.data();
                 spawn(async move {
                     if let Err(error) = data.set_focus(true).await {
