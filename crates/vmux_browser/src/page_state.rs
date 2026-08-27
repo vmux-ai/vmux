@@ -358,6 +358,7 @@ fn push_tab_boundary_emit(
     worktrees: Query<&TabWorktree>,
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
+    space_projects: vmux_space::SpaceProjects,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last: Local<String>,
@@ -397,11 +398,7 @@ fn push_tab_boundary_emit(
             pane_count: leaves.len() as u32,
         })
     });
-    let mut projects = active_space
-        .as_deref()
-        .and_then(|space| settings.space(&space.record.id))
-        .map(vmux_setting::SpaceOverrides::project_rows)
-        .unwrap_or_default();
+    let mut projects = space_projects.active_rows();
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         for row in &mut projects {
