@@ -29,7 +29,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::tree_row::SidebarTreeRow;
+use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
@@ -715,7 +715,7 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
     let forget_title = translate("layout-project-forget");
     let activate_title = translate("layout-project-activate");
     rsx! {
-        div { class: "group/project flex items-center rounded-md hover:bg-glass-hover",
+        SidebarTreeRowGroup {
             SidebarTreeRow {
                 path: project.path.clone(),
                 label: project.label.clone(),
@@ -741,7 +741,7 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
                     r#type: "button",
                     aria_label: "{activate_title}",
                     title: "{activate_title}",
-                    class: if project.is_active { "mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-foreground" } else { "mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
+                    class: if project.is_active { "mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-foreground" } else { "mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
                     onclick: move |_| emit_project_command("activate", Some(activate_target.clone())),
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
                         path { d: "M12 17v5" }
@@ -752,7 +752,7 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
                     r#type: "button",
                     aria_label: "{forget_title}",
                     title: "{forget_title}",
-                    class: "mr-1.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
+                    class: "mr-1.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
                     onclick: move |_| emit_project_command("forget", Some(forget.clone())),
                     Icon { class: "h-3 w-3 pointer-events-none",
                         path { d: "M18 6 6 18M6 6l12 12" }
@@ -2633,29 +2633,31 @@ fn BookmarkFolder(
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
-                            SidebarTreeRow {
-                                path: uuid.clone(),
-                                label: folder.name.clone(),
-                                is_dir: true,
-                                expanded: !collapsed,
-                                emphasis: true,
-                                title: folder.name.clone(),
-                                on_activate: {
-                                    let id = uuid.clone();
-                                    move |()| {
-                                        if bookmark_drag_blocks_click(drag_state) {
-                                            return;
+                            SidebarTreeRowGroup {
+                                SidebarTreeRow {
+                                    path: uuid.clone(),
+                                    label: folder.name.clone(),
+                                    is_dir: true,
+                                    expanded: !collapsed,
+                                    emphasis: true,
+                                    title: folder.name.clone(),
+                                    on_activate: {
+                                        let id = uuid.clone();
+                                        move |()| {
+                                            if bookmark_drag_blocks_click(drag_state) {
+                                                return;
+                                            }
+                                            bookmark_cmd("toggle_folder", Some(id.clone()));
                                         }
-                                        bookmark_cmd("toggle_folder", Some(id.clone()));
-                                    }
-                                },
-                                trailing: rsx! {
-                                    if child_count > 0 {
-                                        span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground/70",
-                                            "{child_count}"
+                                    },
+                                    trailing: rsx! {
+                                        if child_count > 0 {
+                                            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground/70",
+                                                "{child_count}"
+                                            }
                                         }
-                                    }
-                                },
+                                    },
+                                }
                             }
                         }
                     }
@@ -3100,19 +3102,18 @@ fn KnowledgeEntryRow(
             div { class: "flex flex-col gap-0.5",
                 LayoutContextMenu {
                     ContextMenuTrigger { attributes: vec![],
-                        button {
-                            r#type: "button",
-                            title: "{entry.path}",
-                            class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                            onclick: move |_| expanded.set(!expanded()),
-                            Icon { class: "h-3 w-3 shrink-0",
-                                path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                        SidebarTreeRowGroup {
+                            SidebarTreeRow {
+                                path: entry.path.clone(),
+                                label: entry.name.clone(),
+                                is_dir: true,
+                                expanded: expanded(),
+                                emphasis: true,
+                                on_activate: move |()| expanded.set(!expanded()),
+                                trailing: rsx! {
+                                    KnowledgeGitIndicator { status: entry.git_status }
+                                },
                             }
-                            Icon { class: "h-3.5 w-3.5 shrink-0",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            }
-                            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
-                            KnowledgeGitIndicator { status: entry.git_status }
                         }
                     }
                     KnowledgeCreateMenu {
@@ -3163,14 +3164,16 @@ fn KnowledgeEntryRow(
         rsx! {
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![],
-                    button {
-                        r#type: "button",
-                        title: "{entry.path}",
-                        class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                        onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                        {rsx! { TypeIcon { path: entry.path.to_string(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" } }}
-                        span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
-                        KnowledgeGitIndicator { status: entry.git_status }
+                    SidebarTreeRowGroup {
+                        SidebarTreeRow {
+                            path: entry.path.clone(),
+                            label: title.clone(),
+                            is_dir: false,
+                            on_activate: move |()| open_knowledge_path(pane_id, path.clone()),
+                            trailing: rsx! {
+                                KnowledgeGitIndicator { status: entry.git_status }
+                            },
+                        }
                     }
                 }
                 KnowledgeCreateMenu {

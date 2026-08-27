@@ -3,7 +3,17 @@ use dioxus::prelude::*;
 use crate::components::icon::Icon;
 use crate::file_icon::TypeIcon;
 
-pub const SIDEBAR_TREE_ROW: &str = "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground group-hover/project:text-foreground hover:bg-glass-hover hover:text-foreground";
+pub const SIDEBAR_TREE_ROW_GROUP: &str =
+    "group/row flex items-center rounded-md hover:bg-glass-hover";
+
+pub const SIDEBAR_TREE_ROW: &str = "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground group-hover/row:text-foreground";
+
+#[component]
+pub fn SidebarTreeRowGroup(children: Element) -> Element {
+    rsx! {
+        div { class: SIDEBAR_TREE_ROW_GROUP, {children} }
+    }
+}
 
 #[component]
 pub fn SidebarTreeRow(
