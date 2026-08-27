@@ -15,9 +15,12 @@ read it with a query.
 | [`minimal`](minimal.rs) | host, simulator | The phone, as one plugin |
 
 ```sh
-cargo run --example layout
-cargo run --example minimal --features mobile
+cargo run -p vmux_mobile --example layout
+cargo run -p vmux_mobile --example minimal --features mobile
 ```
+
+`-p` is not optional: this workspace names its default members, and without it cargo
+looks for the example only among those and reports it missing while listing it.
 
 `layout` needs no Mac, no relay, no pairing and no UIKit. It sends the messages a
 phone would and draws the result out of the ECS:
