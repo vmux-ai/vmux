@@ -20,6 +20,31 @@ curl -fsSL https://vmux.ai/install | sh
 
 Requires macOS 13.0 (Ventura) or later.
 
+## From your phone
+
+The iOS app is the same workspace, one stack at a time. Your Mac is behind NAT,
+so it dials a relay and holds the connection open; the phone dials the relay
+too, and datagrams are forwarded between them.
+
+```mermaid
+flowchart LR
+  phone["iPhone<br/>vmux_mobile"] -->|"QUIC, pinned cert"| relay["relay"]
+  mac["Mac<br/>daemon + GUI"] -->|"dials out, held open"| relay
+  relay -.->|"forwarded datagrams"| mac
+```
+
+The inner QUIC session terminates on the Mac — same certificate, same
+admission, same dispatch a phone dialling directly would have reached. The
+relay only forwards; it holds no key that could decode a payload.
+
+Pairing is a QR code carrying the relay endpoint, a bearer token and the
+Mac's certificate fingerprint. The phone pins that fingerprint and trusts
+nothing else. A link without one is refused rather than downgraded.
+
+What crosses is deliberately narrow: prompts, approvals and a read-only view
+of what is open. The phone can read the layout and mirror a terminal it has no
+page for; it cannot drive the desktop.
+
 ## Development
 
 ```sh
