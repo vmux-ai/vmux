@@ -8,9 +8,8 @@ use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use crate::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
 };
-use vmux_command::page::{
-    CommandPalette, PaletteVariant, StartInlineTransition, focus_prompt_input,
-};
+use vmux_command::page::{CommandPalette, StartInlineTransition, focus_prompt_input};
+use vmux_ui::launcher::palette::PaletteSurface;
 
 #[component]
 pub fn Page(
@@ -47,7 +46,7 @@ pub fn Page(
                     div { class: "relative w-full",
                         CommandPalette {
                             state,
-                            variant: PaletteVariant::Start,
+                            surface: PaletteSurface::Start,
                             on_close: move |_| {},
                             on_dismiss: move |_| {},
                             on_activity: move |_| {},
