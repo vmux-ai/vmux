@@ -87,20 +87,24 @@ impl BranchChange {
             for chunk in measured.chunks_mut(per_worker) {
                 scope.spawn(move || {
                     for holder in chunk {
-                        holder.change = Self::against(root, base, &holder.branch);
+                        let Some(checkout) = holder.checkout.clone() else {
+                            continue;
+                        };
+                        let change = Self::against(root, base, &checkout, &holder.branch);
+                        holder.change = change;
                     }
                 });
             }
         });
     }
 
-    fn against(root: &Path, base: &BaseRef, branch: &str) -> Self {
+    fn against(root: &Path, base: &BaseRef, checkout: &Path, branch: &str) -> Self {
         let head = format!("refs/heads/{branch}");
         let Ok((merge_base, _, true)) = git(root, &["merge-base", &head, base.as_str()]) else {
             return Self::default();
         };
-        let range = format!("{}..{head}", merge_base.trim());
-        let Ok((numstat, _, true)) = git(root, &["diff", "--numstat", &range]) else {
+        let Ok((numstat, _, true)) = git(checkout, &["diff", "--numstat", merge_base.trim()])
+        else {
             return Self::default();
         };
         Self::summed(&numstat)
@@ -997,6 +1001,30 @@ mod tests {
             change("main"),
             BranchChange::default(),
             "the base branch has nothing to report against itself"
+        );
+    }
+
+    #[test]
+    fn a_worktree_counts_the_work_it_has_not_committed_yet() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        test_repo::write(&wt, "seed.txt", "seed\nscratch\n");
+
+        let holders = branch_holders(repo.path()).unwrap();
+        let feat = holders
+            .iter()
+            .find(|holder| holder.branch == "vmux/feat")
+            .expect("vmux/feat listed");
+
+        assert_eq!(
+            feat.change,
+            BranchChange {
+                insertions: 1,
+                deletions: 0,
+            },
+            "an agent's work sits in the working tree long before it is a commit"
         );
     }
 
