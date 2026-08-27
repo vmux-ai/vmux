@@ -249,7 +249,31 @@ impl Nav {
             return;
         };
         let id = id.clone();
-        commands.queue(move |world: &mut World| Nav::mark(world, &id));
+        commands.queue(move |world: &mut World| {
+            Nav::mark(world, &id);
+            NativeStack::settle(Nav::depth_of(world, &id));
+        });
+    }
+
+    fn depth_of(world: &mut World, id: &str) -> usize {
+        let mut tabs = world.query::<(Entity, &Tab)>();
+        let Some(mut at) = tabs
+            .iter(world)
+            .find(|(_, tab)| tab.id == id)
+            .map(|(entity, _)| entity)
+        else {
+            return 0;
+        };
+        let mut children = world.query::<&Children>();
+        let mut depth = 0;
+        while let Ok(kids) = children.get(world, at) {
+            let Some(next) = kids.last().copied() else {
+                break;
+            };
+            at = next;
+            depth += 1;
+        }
+        depth
     }
 
     fn open_blank<S: Route>(

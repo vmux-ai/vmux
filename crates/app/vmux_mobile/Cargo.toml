@@ -32,16 +32,6 @@ name = "Minimal"
 description = "The whole phone runtime as one plugin"
 category = "Mobile"
 
-[[example]]
-name = "layout"
-path = "examples/layout.rs"
-required-features = ["mobile"]
-
-[package.metadata.example.layout]
-name = "Layout"
-description = "Tabs, a stack and stacked sheets, driven by hand instead of by a Mac"
-category = "Navigation"
-
 [dependencies]
 # The phone runs the desktop's runner: `bevy_winit` owns the loop and `app.run()` turns it. These
 # are the plugins `WinitPlugin` needs around it and no more — there is no renderer, because wry

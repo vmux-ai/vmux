@@ -1,0 +1,29 @@
+[package]
+name = "vmux_layout_demo"
+version.workspace = true
+edition.workspace = true
+description = "The phone's navigation, driven by hand instead of by a Mac"
+publish = false
+
+# Its own crate, and the reason is `Dioxus.toml`: that file is per-crate, so an example living
+# inside `vmux_mobile` is bundled under the app's own identifier and installs over the real
+# thing. A demo you cannot keep beside what it demonstrates is not much of a demo.
+
+[[bin]]
+name = "vmux_layout_demo"
+path = "src/main.rs"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+vmux_mobile = { path = "../../crates/app/vmux_mobile", features = ["mobile"] }
+vmux_native = { path = "../../crates/vmux_native" }
+
+[lints]
+workspace = true
