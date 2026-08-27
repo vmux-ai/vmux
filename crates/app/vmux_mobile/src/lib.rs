@@ -4,6 +4,7 @@ mod credentials;
 mod deep_link;
 mod logs;
 pub mod nav;
+pub mod navigator;
 mod page_host;
 mod pairing;
 mod plugins;
@@ -12,18 +13,20 @@ mod quic;
 mod remote;
 mod runtime;
 pub mod screen;
+
 mod session;
 mod shell;
 mod surface;
 mod transition;
 
 use crate::logs::Logs;
-use crate::nav::{Back, Dropped, Open, OpenBlank, Report, Select, View};
+use crate::nav::{OpenBlank, Push, Report, Select};
+use crate::navigator::{NavigationContainer, Screen, TabNavigator, use_navigation};
 use crate::pairing::{Credentials, PairCard};
 use crate::plugins::PagePlugins;
 use crate::remote::{Api, ApiError};
 use crate::runtime::World;
-use crate::screen::{Mac, Shown};
+use crate::screen::{Mac, Name, Shown};
 use crate::session::{AuthState, use_session};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
@@ -118,11 +121,10 @@ pub fn Shell() -> Element {
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
-    let mut nav = use_signal(View::<Shown>::default);
 
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
-            World::with(|world| world.send(Back));
+            World::with(|world| world.send(crate::nav::GoBack));
         }))
     });
 
@@ -316,37 +318,6 @@ pub fn Shell() -> Element {
 
     use_future(move || async move {
         loop {
-            tokio::time::sleep(Duration::from_millis(80)).await;
-            let dropped = transition::take_popped() + transition::take_dismissed();
-            if dropped > 0 {
-                World::with(|world| world.send(Dropped(dropped)));
-            }
-            let seen = World::with(|world| world.read(crate::nav::Nav::view::<Shown>));
-            if let Some(seen) = seen
-                && *nav.peek() != seen
-            {
-                nav.set(seen);
-            }
-        }
-    });
-
-    use_effect(move || {
-        let Some(Shown::Chat { sid: Some(sid), .. }) = nav().current else {
-            return;
-        };
-        if session.sid() == sid {
-            return;
-        }
-        for known in sessions.read().iter() {
-            if known.sid == sid {
-                session.open(known.clone());
-                return;
-            }
-        }
-    });
-
-    use_future(move || async move {
-        loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
             if auth() != AuthState::Paired {
                 continue;
@@ -408,12 +379,46 @@ pub fn Shell() -> Element {
         };
     }
 
-    let seen = nav();
+    rsx! {
+        NavigationContainer::<Shown> {
+            TabNavigator {
+                Paired { api, sessions, agents, session, reachable, auth }
+            }
+        }
+    }
+}
+
+#[component]
+fn Paired(
+    api: Signal<Option<Api>>,
+    sessions: Signal<Vec<RemoteSession>>,
+    agents: Signal<Vec<RemoteAgent>>,
+    session: crate::session::Session,
+    reachable: Signal<bool>,
+    auth: Signal<AuthState>,
+) -> Element {
+    let navigation = use_navigation::<Shown>();
+    use_effect(move || {
+        let Some(Shown::Chat { sid: Some(sid), .. }) = navigation.route() else {
+            return;
+        };
+        if session.sid() == sid {
+            return;
+        }
+        for known in sessions.read().iter() {
+            if known.sid == sid {
+                session.open(known.clone());
+                return;
+            }
+        }
+    });
+
+    let seen = navigation.view();
     let at_root = seen.depth == 0;
     let wants_a_bar = at_root && !seen.current.as_ref().is_some_and(Shown::has_own_input);
     rsx! {
         div { class: "relative flex h-dvh flex-col bg-background text-foreground",
-            div { class: "flex min-h-0 flex-1 flex-col", CurrentScreen { seen: seen.clone(), api } }
+            div { class: "flex min-h-0 flex-1 flex-col", CurrentScreen { api } }
             div { class: "shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))]",
                 if wants_a_bar {
                     CommandBar {
@@ -424,7 +429,7 @@ pub fn Shell() -> Element {
                             }
                             match Destination::of(&typed) {
                                 Destination::Url(screen) => {
-                                    World::with(|world| world.send(Open(screen)));
+                                    World::with(|world| world.send(Push(screen)));
                                 }
                                 Destination::Prompt(text) => {
                                     let Some(client) = api() else { return };
@@ -434,7 +439,7 @@ pub fn Shell() -> Element {
                         },
                     }
                 }
-                TabBar { seen }
+                TabBar {}
             }
             if at_root {
                 LinkStatus {
@@ -458,25 +463,23 @@ pub fn Shell() -> Element {
 }
 
 #[component]
-fn CurrentScreen(seen: View<Shown>, api: Signal<Option<Api>>) -> Element {
-    let Some(current) = seen.current.clone() else {
-        return rsx! {};
-    };
-    match current {
-        Shown::Chat { sid: Some(_), .. } => rsx! {
-            vmux_chat::page::Page {}
-        },
-        Shown::Chat { sid: None, .. } | Shown::Launcher => rsx! {
+fn CurrentScreen(api: Signal<Option<Api>>) -> Element {
+    let navigation = use_navigation::<Shown>();
+    rsx! {
+        Screen::<Shown> { name: Name::Chat, vmux_chat::page::Page {} }
+        Screen::<Shown> { name: Name::Launcher,
             div { class: "flex min-h-0 flex-1 flex-col pt-[calc(3rem+env(safe-area-inset-top))] pb-2",
                 vmux_start::page::Page {}
             }
-        },
-        Shown::Team => rsx! {
+        }
+        Screen::<Shown> { name: Name::Team,
             div { class: "flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]", vmux_team::page::Page {} }
-        },
-        Shown::Mirror(stack) => rsx! {
-            MirrorScreen { stack, api }
-        },
+        }
+        Screen::<Shown> { name: Name::Mirror,
+            if let Some(Shown::Mirror(stack)) = navigation.route() {
+                MirrorScreen { stack, api }
+            }
+        }
     }
 }
 
@@ -526,7 +529,8 @@ fn LinkStatus(reachable: bool, on_disconnect: EventHandler<()>) -> Element {
 }
 
 #[component]
-fn TabBar(seen: View<Shown>) -> Element {
+fn TabBar() -> Element {
+    let seen = use_navigation::<Shown>().view();
     let tabs = seen.tabs.clone();
     let current = seen.selected.clone();
     rsx! {

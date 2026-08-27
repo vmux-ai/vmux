@@ -1,4 +1,4 @@
-use crate::nav::Open;
+use crate::nav::Push;
 use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
 use crate::runtime::World;
 use crate::screen::Shown;
@@ -63,7 +63,7 @@ impl Session {
             title: session.title.clone(),
         };
         self.open(session);
-        crate::runtime::World::with(|world| world.send(Open(screen)));
+        crate::runtime::World::with(|world| world.send(Push(screen)));
     }
 
     pub(crate) async fn stream(self, api: Api, sid: String, generation: u64) {

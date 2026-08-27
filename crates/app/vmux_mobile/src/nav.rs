@@ -3,7 +3,11 @@ use bevy_ecs::prelude::*;
 
 use crate::transition::NativeStack;
 
-pub trait Screen: Clone + PartialEq + Send + Sync + 'static {
+pub trait Route: Clone + PartialEq + Send + Sync + 'static {
+    type Name: Copy + PartialEq + Send + Sync + 'static;
+
+    fn name(&self) -> Self::Name;
+
     fn title(&self) -> String;
 
     fn is(&self, other: &Self) -> bool {
@@ -26,10 +30,10 @@ pub struct Selected;
 pub struct Sheet;
 
 #[derive(Component)]
-pub struct Shows<S: Screen>(pub S);
+pub struct Shows<S: Route>(pub S);
 
 #[derive(Message)]
-pub struct Report<S: Screen> {
+pub struct Report<S: Route> {
     pub tabs: Vec<(String, S)>,
     pub focused: Option<String>,
 }
@@ -38,16 +42,16 @@ pub struct Report<S: Screen> {
 pub struct Select(pub String);
 
 #[derive(Message)]
-pub struct OpenBlank<S: Screen>(pub S);
+pub struct OpenBlank<S: Route>(pub S);
 
 #[derive(Message)]
-pub struct Open<S: Screen>(pub S);
+pub struct Push<S: Route>(pub S);
 
 #[derive(Message)]
-pub struct Present<S: Screen>(pub S);
+pub struct Present<S: Route>(pub S);
 
 #[derive(Message)]
-pub struct Back;
+pub struct GoBack;
 
 #[derive(Message)]
 pub struct Dismiss;
@@ -58,23 +62,23 @@ pub struct Dropped(pub usize);
 #[derive(Resource)]
 struct Opened(u64);
 
-pub struct NavPlugin<S: Screen>(std::marker::PhantomData<S>);
+pub struct NavPlugin<S: Route>(std::marker::PhantomData<S>);
 
-impl<S: Screen> Default for NavPlugin<S> {
+impl<S: Route> Default for NavPlugin<S> {
     fn default() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-impl<S: Screen> Plugin for NavPlugin<S> {
+impl<S: Route> Plugin for NavPlugin<S> {
     fn build(&self, app: &mut App) {
         app.insert_resource(Opened(0))
             .add_message::<Report<S>>()
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
-            .add_message::<Open<S>>()
+            .add_message::<Push<S>>()
             .add_message::<Present<S>>()
-            .add_message::<Back>()
+            .add_message::<GoBack>()
             .add_message::<Dismiss>()
             .add_message::<Dropped>()
             .add_systems(
@@ -92,7 +96,7 @@ impl<S: Screen> Plugin for NavPlugin<S> {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Entry<S: Screen> {
+pub struct Entry<S: Route> {
     pub id: String,
     pub name: String,
     pub screen: S,
@@ -100,7 +104,7 @@ pub struct Entry<S: Screen> {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct View<S: Screen> {
+pub struct View<S: Route> {
     pub tabs: Vec<Entry<S>>,
     pub selected: Option<String>,
     pub current: Option<S>,
@@ -108,7 +112,7 @@ pub struct View<S: Screen> {
     pub sheet: bool,
 }
 
-impl<S: Screen> Default for View<S> {
+impl<S: Route> Default for View<S> {
     fn default() -> Self {
         Self {
             tabs: Vec::new(),
@@ -123,7 +127,7 @@ impl<S: Screen> Default for View<S> {
 pub struct Nav;
 
 impl Nav {
-    pub fn view<S: Screen>(world: &mut World) -> View<S> {
+    pub fn view<S: Route>(world: &mut World) -> View<S> {
         let mut view = View::default();
         let mut tabs =
             world.query::<(Entity, &Tab, &Shows<S>, Option<&Local>, Option<&Selected>)>();
@@ -177,7 +181,7 @@ impl Nav {
         at
     }
 
-    fn report<S: Screen>(
+    fn report<S: Route>(
         mut reported: MessageReader<Report<S>>,
         known: Query<(Entity, &Tab, Option<&Local>, &Shows<S>)>,
         selected: Query<Entity, With<Selected>>,
@@ -248,7 +252,7 @@ impl Nav {
         commands.queue(move |world: &mut World| Nav::mark(world, &id));
     }
 
-    fn open_blank<S: Screen>(
+    fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
         mut opened: ResMut<Opened>,
         mut commands: Commands,
@@ -262,8 +266,8 @@ impl Nav {
         }
     }
 
-    fn stack<S: Screen>(
-        mut pushes: MessageReader<Open<S>>,
+    fn stack<S: Route>(
+        mut pushes: MessageReader<Push<S>>,
         mut presents: MessageReader<Present<S>>,
         selected: Query<Entity, With<Selected>>,
         children: Query<&Children>,
@@ -272,7 +276,7 @@ impl Nav {
         let Some(tab) = selected.iter().next() else {
             return;
         };
-        for Open(screen) in pushes.read() {
+        for Push(screen) in pushes.read() {
             let onto = Self::top(tab, &children);
             let pushing = NativeStack::push();
             commands.spawn((Shows(screen.clone()), ChildOf(onto)));
@@ -287,7 +291,7 @@ impl Nav {
     }
 
     fn unstack(
-        mut backs: MessageReader<Back>,
+        mut backs: MessageReader<GoBack>,
         mut dismisses: MessageReader<Dismiss>,
         mut dropped: MessageReader<Dropped>,
         selected: Query<Entity, With<Selected>>,
@@ -338,6 +342,13 @@ impl Nav {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy, PartialEq)]
+    enum PageName {
+        Home,
+        Note,
+        Unsaved,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     enum Page {
         Home,
@@ -345,7 +356,17 @@ mod tests {
         Unsaved,
     }
 
-    impl Screen for Page {
+    impl Route for Page {
+        type Name = PageName;
+
+        fn name(&self) -> PageName {
+            match self {
+                Self::Home => PageName::Home,
+                Self::Note(_) => PageName::Note,
+                Self::Unsaved => PageName::Unsaved,
+            }
+        }
+
         fn title(&self) -> String {
             match self {
                 Self::Home => "Home".to_string(),
@@ -460,7 +481,7 @@ mod tests {
     fn a_pushed_level_dies_with_the_tab_that_held_it() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], None);
-        phone.sends(Open(Page::Note("Deeper")));
+        phone.sends(Push(Page::Note("Deeper")));
         assert_eq!(phone.depth(), 1);
 
         phone.reports(&[("tab:2", Page::Home)], None);
@@ -476,14 +497,14 @@ mod tests {
     fn back_pops_one_level_and_stops_at_the_root() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], None);
-        phone.sends(Open(Page::Note("One")));
-        phone.sends(Open(Page::Note("Two")));
+        phone.sends(Push(Page::Note("One")));
+        phone.sends(Push(Page::Note("Two")));
         assert_eq!(phone.depth(), 2);
 
-        phone.sends(Back);
+        phone.sends(GoBack);
         assert_eq!(phone.depth(), 1);
-        phone.sends(Back);
-        phone.sends(Back);
+        phone.sends(GoBack);
+        phone.sends(GoBack);
         assert_eq!(phone.depth(), 0);
         assert_eq!(phone.tabs(), vec!["tab:1"], "the tab itself survives");
     }
@@ -492,8 +513,8 @@ mod tests {
     fn a_swipe_reports_what_uikit_already_dropped() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], None);
-        phone.sends(Open(Page::Note("One")));
-        phone.sends(Open(Page::Note("Two")));
+        phone.sends(Push(Page::Note("One")));
+        phone.sends(Push(Page::Note("Two")));
         phone.sends(Dropped(2));
         assert_eq!(phone.depth(), 0);
     }
@@ -502,7 +523,7 @@ mod tests {
     fn modals_stack_on_top_of_the_pushed_level() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], None);
-        phone.sends(Open(Page::Note("Behind")));
+        phone.sends(Push(Page::Note("Behind")));
         phone.sends(Present(Page::Note("First sheet")));
         phone.sends(Present(Page::Note("Second sheet")));
         assert_eq!(phone.depth(), 3);
@@ -518,7 +539,7 @@ mod tests {
             &[("tab:1", Page::Home), ("tab:2", Page::Home)],
             Some("tab:1"),
         );
-        phone.sends(Open(Page::Note("Only in one")));
+        phone.sends(Push(Page::Note("Only in one")));
         assert_eq!(phone.depth(), 1);
 
         phone.sends(Select("tab:2".to_string()));
