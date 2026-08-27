@@ -11,18 +11,28 @@ read it with a query.
 
 | Example | Runs on | Shows |
 | --- | --- | --- |
-| [`tabs`](tabs.rs) | host | Reported tabs, selection, and the phone's own |
-| [`stack`](stack.rs) | host | Push, pop, and a swipe UIKit already ran |
-| [`modal`](modal.rs) | host | Sheets stacking, and dismissing the top one |
+| [`layout`](layout.rs) | host | Tabs, a stack within one, and sheets on top |
 | [`minimal`](minimal.rs) | host, simulator | The phone, as one plugin |
 
 ```sh
-cargo run --example tabs
+cargo run --example layout
 cargo run --example minimal --features mobile
 ```
 
-The first three need no Mac, no relay and no pairing, and no UIKit: they drive the
-plugin and print what it made of the messages.
+`layout` needs no Mac, no relay, no pairing and no UIKit. It sends the messages a
+phone would and draws the result out of the ECS:
+
+```
+a sheet, then a sheet over it
+    ╭──────────────────────────────╮
+    │ Really?                sheet │
+    │ Discard?               sheet │
+    │ Edit                  pushed │
+    │ Groceries             pushed │
+    │ Notes                   root │
+    ╰──────────────────────────────╯
+      Inbox  [Notes]
+```
 
 `minimal` opens a window. On the host that is winit and wry alone — push, pop and the
 back-swipe are `UINavigationController`, so they only happen on the simulator or a
