@@ -3839,7 +3839,6 @@ fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ExplorerReflowKey {
     page_width: u32,
-    width: u32,
     preferred_visible: bool,
 }
 
@@ -3862,7 +3861,6 @@ impl ExplorerPane {
     fn reflow_key(self) -> ExplorerReflowKey {
         ExplorerReflowKey {
             page_width: (self.page_width)(),
-            width: (self.width)(),
             preferred_visible: (self.preferred_visible)(),
         }
     }
