@@ -618,6 +618,8 @@ pub(super) fn handle_agent_commands(
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }
             }
+            ServiceAgentCommand::Shared(SharedAgentCommand::ReadLayout)
+            | ServiceAgentCommand::Shared(SharedAgentCommand::ReadTerminal { .. }) => continue,
             ServiceAgentCommand::Shared(SharedAgentCommand::ListTeam)
             | ServiceAgentCommand::Shared(SharedAgentCommand::ListModels { .. })
             | ServiceAgentCommand::Shared(SharedAgentCommand::SelectModel { .. })

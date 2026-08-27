@@ -462,6 +462,7 @@ mod live {
                 Default::default(),
             ),
             client_ops: Arc::new(Mutex::new(Default::default())),
+            processes: Arc::new(Mutex::new(Default::default())),
         };
         let identity = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
         let fingerprint = identity.fingerprint.clone();

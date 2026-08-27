@@ -68,6 +68,10 @@ pub enum SharedAgentCommand {
         sid: String,
         level: String,
     },
+    ReadLayout,
+    ReadTerminal {
+        process_id: String,
+    },
 }
 
 impl From<SharedAgentCommand> for AgentCommand {

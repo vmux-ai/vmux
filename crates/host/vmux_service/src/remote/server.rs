@@ -32,6 +32,7 @@ pub(crate) struct RemoteState {
     pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: Arc<Mutex<ClientOpDeduper>>,
+    pub(crate) processes: Arc<Mutex<crate::host::process::ProcessManager>>,
 }
 
 #[derive(Default)]
@@ -64,6 +65,7 @@ pub fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
     broker: AgentBroker,
+    processes: Arc<Mutex<crate::host::process::ProcessManager>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let token = match ensure_token() {
@@ -80,6 +82,7 @@ pub fn spawn(
             acp,
             broker,
             client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
+            processes,
         };
         if let Err(error) = super::quic::Supervisor::spawn(state).await {
             tracing::error!(%error, "remote quic: the relay supervisor ended");
