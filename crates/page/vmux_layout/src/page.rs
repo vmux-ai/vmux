@@ -682,7 +682,7 @@ fn ProjectsCard(
                 },
                 div { class: "overflow-hidden",
                     if !projects.is_empty() {
-                        div { class: "flex flex-col border-t border-foreground/10 py-1",
+                        div { class: "flex flex-col gap-0.5 border-t border-foreground/10 p-1.5",
                             for project in projects.iter().cloned() {
                                 ProjectListRow { project, pane_id }
                             }
@@ -715,7 +715,7 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
     let forget_title = translate("layout-project-forget");
     let activate_title = translate("layout-project-activate");
     rsx! {
-        div { class: "group/project flex items-center",
+        div { class: "group/project flex items-center rounded-md hover:bg-glass-hover",
             SidebarTreeRow {
                 path: project.path.clone(),
                 label: project.label.clone(),
@@ -741,17 +741,18 @@ fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Elemen
                     r#type: "button",
                     aria_label: "{activate_title}",
                     title: "{activate_title}",
-                    class: if project.is_active { "mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-success" } else { "mr-1 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
+                    class: if project.is_active { "mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-foreground" } else { "mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
                     onclick: move |_| emit_project_command("activate", Some(activate_target.clone())),
-                    Icon { class: "h-3 w-3 pointer-events-none",
-                        path { d: "m5 12 4 4L19 6" }
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: "M12 17v5" }
+                        path { d: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z" }
                     }
                 }
                 button {
                     r#type: "button",
                     aria_label: "{forget_title}",
                     title: "{forget_title}",
-                    class: "mr-2 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
+                    class: "mr-1.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
                     onclick: move |_| emit_project_command("forget", Some(forget.clone())),
                     Icon { class: "h-3 w-3 pointer-events-none",
                         path { d: "M18 6 6 18M6 6l12 12" }
