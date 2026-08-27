@@ -12,6 +12,9 @@ pub(crate) enum DomRequest {
     Focus {
         element: String,
     },
+    ShowPopover {
+        element: String,
+    },
     ScrollIntoView {
         element: String,
     },
@@ -163,6 +166,9 @@ mod tests {
     fn every_request_kind_is_a_case_the_shim_handles() {
         let requests = [
             DomRequest::Focus {
+                element: "e".into(),
+            },
+            DomRequest::ShowPopover {
                 element: "e".into(),
             },
             DomRequest::ScrollIntoView {

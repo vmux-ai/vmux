@@ -29,6 +29,10 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::tree_row::{
+    SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren, SidebarTreeRow,
+    SidebarTreeRowGroup,
+};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
@@ -158,7 +162,9 @@ pub fn Page() -> Element {
     let tabs = tabs_state();
     let PaneTreeEvent { panes } = pane_tree_state();
     let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
-    let tab_boundary = boundary_state().boundary;
+    let boundary_event = boundary_state();
+    let tab_boundary = boundary_event.boundary;
+    let space_projects = boundary_event.projects;
     let layout_error = (layout_listener.error)();
     let stacks_error = (stacks_listener.error)();
     let tabs_error = (tabs_listener.error)();
@@ -235,6 +241,7 @@ pub fn Page() -> Element {
                             panes,
                             active_space,
                             tab_boundary,
+                            space_projects,
                             remote: remote_state(),
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
@@ -276,6 +283,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
+    space_projects: Vec<vmux_core::event::ProjectRow>,
     remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
@@ -326,18 +334,18 @@ fn SideSheetView(
                 }
             }
             if let Some(pane) = active_pane {
-                ProjectsCard {
-                    boundary: project_boundary,
-                    pane_id: pane.id,
-                    expanded: pane.projects_expanded,
-                }
                 BookmarksSection {
                     bookmarks: bookmarks.clone(),
                     active_page,
                     pane_id: pane.id,
                     expanded: pane.bookmarks_expanded,
                 }
-                VaultCard { pane_id: pane.id, vault: tools.vault.clone(), loaded: tools_loaded }
+                ProjectsCard {
+                    boundary: project_boundary,
+                    projects: space_projects.clone(),
+                    pane_id: pane.id,
+                    expanded: pane.projects_expanded,
+                }
                 KnowledgeCard {
                     pane_id: pane.id,
                     knowledge,
@@ -347,10 +355,11 @@ fn SideSheetView(
                 }
                 ToolsCard {
                     pane_id: pane.id,
-                    tools,
+                    tools: tools.clone(),
                     loaded: tools_loaded,
                     expanded: pane.tools_expanded,
                 }
+                VaultCard { pane_id: pane.id, vault: tools.vault.clone(), loaded: tools_loaded }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
@@ -625,6 +634,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
 #[component]
 fn ProjectsCard(
     boundary: Option<crate::event::TabBoundary>,
+    projects: Vec<vmux_core::event::ProjectRow>,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
@@ -635,18 +645,10 @@ fn ProjectsCard(
     } else {
         translate("common-expand")
     };
-    let project_name = boundary
-        .as_ref()
-        .and_then(|boundary| {
-            boundary
-                .effective_dir
-                .trim_end_matches('/')
-                .rsplit('/')
-                .next()
-                .filter(|name| !name.is_empty())
-        })
-        .map(str::to_string)
-        .unwrap_or_else(|| empty.clone());
+    let project_name = match projects.iter().find(|project| project.is_active) {
+        Some(project) => project.label.clone(),
+        None => empty.clone(),
+    };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
@@ -682,7 +684,17 @@ fn ProjectsCard(
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
-                    if let Some(boundary) = boundary {
+                    if !projects.is_empty() {
+                        div { class: "border-t border-foreground/10 p-1.5",
+                            div { class: SIDEBAR_TREE_SCROLLER,
+                                div { class: "{SIDEBAR_TREE_COLUMN} gap-0.5",
+                                    for project in projects.iter().cloned() {
+                                        ProjectListRow { project, pane_id }
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(boundary) = boundary {
                         TabBoundaryPanel { boundary }
                     } else {
                         div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
@@ -693,8 +705,78 @@ fn ProjectsCard(
     }
 }
 
+fn emit_project_command(command: &str, path: Option<String>) {
+    let _ = send(&vmux_wire::space::ProjectCommandEvent {
+        command: command.to_string(),
+        path,
+    });
+}
+
+#[component]
+fn ProjectListRow(project: vmux_core::event::ProjectRow, pane_id: u64) -> Element {
+    let tree = project.kind.opens_a_tree();
+    let root = matches!(project.kind, vmux_core::event::ProjectRowKind::Project);
+    let activate = project.path.clone();
+    let activate_target = project.path.clone();
+    let forget = project.path.clone();
+    let forget_title = translate("layout-project-forget");
+    let activate_title = translate("layout-project-activate");
+    rsx! {
+        SidebarTreeRowGroup {
+            SidebarTreeRow {
+                path: project.path.clone(),
+                label: project.label.clone(),
+                is_dir: tree,
+                expanded: project.expanded,
+                depth: project.depth,
+                emphasis: root,
+                title: project.display_path.clone(),
+                on_activate: move |()| match tree {
+                    true => {
+                        let _ = send(
+                            &vmux_core::event::ProjectTreeToggle {
+                                path: activate.clone(),
+                                pane_id: pane_id.to_string(),
+                            },
+                        );
+                    }
+                    false => open_project_path(pane_id, activate.clone()),
+                },
+                trailing: rsx! {
+                    if !project.branch.is_empty() {
+                        span { class: "shrink-0 truncate text-[10px] text-muted-foreground/70", "{project.branch}" }
+                    }
+                },
+            }
+            if root {
+                button {
+                    r#type: "button",
+                    aria_label: "{activate_title}",
+                    title: "{activate_title}",
+                    class: if project.is_active { "mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-foreground" } else { "mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground" },
+                    onclick: move |_| emit_project_command("activate", Some(activate_target.clone())),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: "M12 17v5" }
+                        path { d: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    aria_label: "{forget_title}",
+                    title: "{forget_title}",
+                    class: "mr-1.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground",
+                    onclick: move |_| emit_project_command("forget", Some(forget.clone())),
+                    Icon { class: "h-3 w-3 pointer-events-none",
+                        path { d: "M18 6 6 18M6 6l12 12" }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn dir_truncate_class(title: &str) -> &'static str {
-    if title.starts_with('/') || title.starts_with("~/") {
+    if title.contains('/') {
         "truncate-start"
     } else {
         "truncate"
@@ -918,10 +1000,8 @@ fn BookmarksSection(
             "data-bookmark-drop": "root",
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
-                if pointer_landed_on_self(&e.data()) {
-                    e.prevent_default();
-                    request_bookmark_menu();
-                }
+                e.prevent_default();
+                request_bookmark_menu();
             },
             div {
                 "data-bookmark-drop": "root",
@@ -1009,7 +1089,8 @@ fn BookmarksSection(
                         if pins.is_empty() && roots.is_empty() && !creating_folder() {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
-                            div { class: "flex flex-col gap-1",
+                            div { class: SIDEBAR_TREE_SCROLLER,
+                            div { class: "{SIDEBAR_TREE_COLUMN} gap-1",
                                 for node in roots.iter() {
                                     match node {
                                         BookmarkNode::Folder(f) if f.parent.is_none() => rsx! {
@@ -1033,6 +1114,7 @@ fn BookmarksSection(
                                         },
                                     }
                                 }
+                            }
                             }
                         }
                     }
@@ -1265,16 +1347,18 @@ fn KnowledgeCard(
                                         }
                                     }
                                 } else {
-                                    div { class: "flex flex-col gap-0.5",
-                                        for entry in entries_by_parent.get(&knowledge.root).into_iter().flatten() {
-                                            KnowledgeEntryRow {
-                                                key: "{entry.path}",
-                                                entry: entry.clone(),
-                                                entries_by_parent: entries_by_parent.clone(),
-                                                pane_id,
-                                                prompt: create_prompt,
-                                                draft: create_draft,
-                                                error: create_error,
+                                    div { class: SIDEBAR_TREE_SCROLLER,
+                                        div { class: "{SIDEBAR_TREE_COLUMN} gap-0.5",
+                                            for entry in entries_by_parent.get(&knowledge.root).into_iter().flatten() {
+                                                KnowledgeEntryRow {
+                                                    key: "{entry.path}",
+                                                    entry: entry.clone(),
+                                                    entries_by_parent: entries_by_parent.clone(),
+                                                    pane_id,
+                                                    prompt: create_prompt,
+                                                    draft: create_draft,
+                                                    error: create_error,
+                                                }
                                             }
                                         }
                                     }
@@ -1606,6 +1690,22 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
         &mut output,
     );
     output
+}
+
+fn toggle_knowledge_dir(pane_id: u64, path: String) {
+    let _ = send(&vmux_core::knowledge::KnowledgeTreeToggle {
+        path,
+        pane_id: pane_id.to_string(),
+    });
+}
+
+fn open_project_path(pane_id: u64, path: String) {
+    let _ = send(&crate::event::SideSheetCommandEvent {
+        command: "open_project_path".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path,
+    });
 }
 
 fn open_knowledge_path(pane_id: u64, path: String) {
@@ -2327,10 +2427,6 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
     }
 }
 
-fn pointer_landed_on_self(_data: &MouseData) -> bool {
-    false
-}
-
 fn set_root_radius_px(_radius: f32) {}
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
@@ -2438,7 +2534,10 @@ fn BookmarkNameInput(
             placeholder,
             value: "{draft}",
             autofocus: true,
-            oncontextmenu: move |event| event.prevent_default(),
+            oncontextmenu: move |event: Event<MouseData>| {
+                event.prevent_default();
+                event.stop_propagation();
+            },
             onmounted: move |event| {
                 set_bookmark_text_input_active(true);
                 focus_and_select_inline_rename(event);
@@ -2523,19 +2622,28 @@ fn BookmarkFolder(
     let drop_target = BookmarkDropTarget::Folder(uuid.clone());
     let folder_targeted = bookmark_drop_targeted(drag_state, &drop_target);
     let drag_item = BookmarkDragItem::Folder { uuid: uuid.clone() };
-    let has_child_folders = folder_rows
-        .iter()
-        .any(|child| child.parent.as_deref() == Some(folder.uuid.as_str()));
-    let folder_is_empty = !has_child_folders && folder.children.is_empty();
+    let mut child_folders = 0usize;
+    for child in folder_rows.iter() {
+        if child.parent.as_deref() == Some(folder.uuid.as_str()) {
+            child_folders += 1;
+        }
+    }
+    let child_count = child_folders + folder.children.len();
+    let folder_is_empty = child_count == 0;
 
     rsx! {
         div {
             "data-bookmark-drop": "{uuid}",
-            class: "flex flex-col gap-1",
+            class: "flex flex-col",
             if editing() {
                 div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                        path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    Icon {
+                        class: if collapsed {
+                            "h-4 w-4 shrink-0 rotate-0 text-muted-foreground transition-transform duration-200 ease-out"
+                        } else {
+                            "h-4 w-4 shrink-0 rotate-90 text-muted-foreground transition-transform duration-200 ease-out"
+                        },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                     BookmarkNameInput {
                         draft,
@@ -2562,23 +2670,31 @@ fn BookmarkFolder(
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
-                            SheetEntryRow {
-                                active: false,
-                                onclick: {
-                                    let id = uuid.clone();
-                                    move |event: MouseEvent| {
-                                        if bookmark_drag_blocks_click(drag_state) {
-                                            event.prevent_default();
-                                            event.stop_propagation();
-                                            return;
+                            SidebarTreeRowGroup {
+                                SidebarTreeRow {
+                                    path: uuid.clone(),
+                                    label: folder.name.clone(),
+                                    is_dir: true,
+                                    expanded: !collapsed,
+                                    emphasis: true,
+                                    title: folder.name.clone(),
+                                    on_activate: {
+                                        let id = uuid.clone();
+                                        move |()| {
+                                            if bookmark_drag_blocks_click(drag_state) {
+                                                return;
+                                            }
+                                            bookmark_cmd("toggle_folder", Some(id.clone()));
                                         }
-                                        bookmark_cmd("toggle_folder", Some(id.clone()));
-                                    }
-                                },
-                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                    path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                                    },
+                                    trailing: rsx! {
+                                        if child_count > 0 {
+                                            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground/70",
+                                                "{child_count}"
+                                            }
+                                        }
+                                    },
                                 }
-                                span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
                             }
                         }
                     }
@@ -2681,7 +2797,7 @@ fn BookmarkFolder(
                     }
                 }
             }
-            if !collapsed {
+            SidebarTreeChildren { expanded: !collapsed,
                 div { class: "ml-3 flex flex-col gap-1",
                     for child_folder in folder_rows
                         .iter()
@@ -2904,7 +3020,11 @@ fn commit_folder_rename(uuid: String, name: String) {
 fn LayoutContextMenu(children: Element) -> Element {
     rsx! {
         ContextMenu {
-            attributes: vec![],
+            attributes: vec![
+                dioxus_elements::events::oncontextmenu(move |event: Event<MouseData>| {
+                    event.stop_propagation();
+                }),
+            ],
             on_open_change: set_bookmark_context_menu_active,
             {children}
         }
@@ -2917,7 +3037,7 @@ fn KnowledgeCreateMenu(
     prompt: Signal<Option<KnowledgeCreatePrompt>>,
     draft: Signal<String>,
     error: Signal<String>,
-    expand: Option<Signal<bool>>,
+    expand: Option<EventHandler<()>>,
     expand_section_for_pane: Option<u64>,
     disabled: bool,
 ) -> Element {
@@ -2931,8 +3051,8 @@ fn KnowledgeCreateMenu(
                 on_select: {
                     let parent = parent.clone();
                     move |_: String| {
-                        if let Some(mut expanded) = expand {
-                            expanded.set(true);
+                        if let Some(expand) = expand {
+                            expand.call(());
                         }
                         if let Some(pane_id) = expand_section_for_pane {
                             set_side_sheet_section(pane_id, "knowledge", true);
@@ -2956,8 +3076,8 @@ fn KnowledgeCreateMenu(
                 on_select: {
                     let parent = parent.clone();
                     move |_: String| {
-                        if let Some(mut expanded) = expand {
-                            expanded.set(true);
+                        if let Some(expand) = expand {
+                            expand.call(());
                         }
                         if let Some(pane_id) = expand_section_for_pane {
                             set_side_sheet_section(pane_id, "knowledge", true);
@@ -3011,27 +3131,28 @@ fn KnowledgeEntryRow(
     draft: Signal<String>,
     error: Signal<String>,
 ) -> Element {
-    let mut expanded = use_signal(|| false);
+    let expanded = entry.expanded;
     if entry.is_directory {
         let children = entries_by_parent.get(&entry.path);
         let has_children = children.is_some_and(|children| !children.is_empty());
+        let toggle_path = entry.path.clone();
+        let open_path = entry.path.clone();
         rsx! {
-            div { class: "flex flex-col gap-0.5",
+            div { class: "flex flex-col",
                 LayoutContextMenu {
                     ContextMenuTrigger { attributes: vec![],
-                        button {
-                            r#type: "button",
-                            title: "{entry.path}",
-                            class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                            onclick: move |_| expanded.set(!expanded()),
-                            Icon { class: "h-3 w-3 shrink-0",
-                                path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                        SidebarTreeRowGroup {
+                            SidebarTreeRow {
+                                path: entry.path.clone(),
+                                label: entry.name.clone(),
+                                is_dir: true,
+                                expanded,
+                                emphasis: true,
+                                on_activate: move |()| toggle_knowledge_dir(pane_id, toggle_path.clone()),
+                                trailing: rsx! {
+                                    KnowledgeGitIndicator { status: entry.git_status }
+                                },
                             }
-                            Icon { class: "h-3.5 w-3.5 shrink-0",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            }
-                            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
-                            KnowledgeGitIndicator { status: entry.git_status }
                         }
                     }
                     KnowledgeCreateMenu {
@@ -3039,12 +3160,18 @@ fn KnowledgeEntryRow(
                         prompt,
                         draft,
                         error,
-                        expand: Some(expanded),
+                        expand: Some(
+                            EventHandler::new(move |()| {
+                                if !expanded {
+                                    toggle_knowledge_dir(pane_id, open_path.clone());
+                                }
+                            }),
+                        ),
                         expand_section_for_pane: None,
                         disabled: false,
                     }
                 }
-                if expanded() {
+                SidebarTreeChildren { expanded,
                     div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
                         if let Some(current) = prompt().filter(|current| current.parent == entry.path) {
                             KnowledgeCreateInput {
@@ -3082,14 +3209,16 @@ fn KnowledgeEntryRow(
         rsx! {
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![],
-                    button {
-                        r#type: "button",
-                        title: "{entry.path}",
-                        class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                        onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                        {rsx! { TypeIcon { path: entry.path.to_string(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" } }}
-                        span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
-                        KnowledgeGitIndicator { status: entry.git_status }
+                    SidebarTreeRowGroup {
+                        SidebarTreeRow {
+                            path: entry.path.clone(),
+                            label: title.clone(),
+                            is_dir: false,
+                            on_activate: move |()| open_knowledge_path(pane_id, path.clone()),
+                            trailing: rsx! {
+                                KnowledgeGitIndicator { status: entry.git_status }
+                            },
+                        }
                     }
                 }
                 KnowledgeCreateMenu {

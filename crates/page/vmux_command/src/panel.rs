@@ -3,10 +3,11 @@ use crate::event::{
     LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT, PanelPlacement,
     clamp_panel_placement,
 };
-use crate::page::{CommandPalette, PaletteVariant};
+use crate::page::CommandPalette;
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::launcher::palette::PaletteSurface;
 
 fn set_command_bar_panel_active(active: bool) {
     let _ = send(&CommandBarPanelActiveEvent { active });
@@ -196,7 +197,7 @@ pub fn CommandBarPanel() -> Element {
                         class: "flex min-h-0 flex-1 flex-col",
                         CommandPalette {
                             state: ReadSignal::from(state),
-                            variant: PaletteVariant::Modal,
+                            surface: PaletteSurface::Modal,
                             on_close: move |_| set_open(false),
                             on_dismiss: move |_| set_open(false),
                             on_activity: move |_| {},

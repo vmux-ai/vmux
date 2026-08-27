@@ -65,7 +65,7 @@ pub struct BrowserPlugin;
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         let profile = vmux_core::profile::active_profile_name();
-        let startup_settings = vmux_setting::read_settings_from_disk();
+        let startup_settings = vmux_setting::AppSettings::from_disk();
         let startup_locale =
             Locale::requested(Some(&startup_settings.appearance.locale)).into_string();
         let startup_accept_language_list = browser_accept_language_list(&startup_locale);
@@ -644,20 +644,17 @@ fn tab_boundary_dir(
     tab: &Tab,
     settings: &AppSettings,
     active_space: Option<&vmux_space::spaces::ActiveSpace>,
-) -> Option<(std::path::PathBuf, vmux_setting::DirSource)> {
+) -> Option<vmux_setting::StartupDir> {
     match tab.startup_dir.as_deref() {
-        Some(path) => Some((
-            vmux_setting::validate_tab_workspace_dir(path)
-                .unwrap_or_else(|_| std::path::PathBuf::from(path)),
-            vmux_setting::DirSource::Tab,
-        )),
+        Some(path) => Some(
+            vmux_setting::StartupDir::from_tab(path).unwrap_or_else(|_| vmux_setting::StartupDir {
+                path: std::path::PathBuf::from(path),
+                source: vmux_setting::DirSource::Tab,
+            }),
+        ),
         None => {
             let active_space = active_space?;
-            vmux_setting::resolve_startup_dir_for_tab_with_source(
-                settings,
-                &active_space.record.id,
-                None,
-            )
+            vmux_setting::StartupDir::resolve(settings, &active_space.record.id, None)
         }
     }
 }
@@ -707,6 +704,17 @@ fn should_emit_update(
     page_ready_changed: bool,
 ) -> bool {
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
+}
+
+fn project_path_url(requested: &Path) -> Option<String> {
+    let metadata = std::fs::symlink_metadata(requested).ok()?;
+    if metadata.file_type().is_symlink() {
+        return None;
+    }
+    let path = requested.canonicalize().ok()?;
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
 }
 
 fn knowledge_path_url(root: &Path, requested: &Path) -> Option<String> {
@@ -882,10 +890,10 @@ mod tests {
 
         assert_eq!(
             tab_boundary_dir(&tab, &settings, None),
-            Some((
-                std::path::PathBuf::from("/tmp/agent-checkout"),
-                vmux_setting::DirSource::Tab,
-            ))
+            Some(vmux_setting::StartupDir {
+                path: std::path::PathBuf::from("/tmp/agent-checkout"),
+                source: vmux_setting::DirSource::Tab,
+            })
         );
     }
 
@@ -899,19 +907,20 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let tab = Tab::default();
 
-        let (path, source) = tab_boundary_dir(
+        let boundary = tab_boundary_dir(
             &tab,
             &settings,
             Some(&vmux_space::spaces::ActiveSpace { record }),
         )
         .unwrap();
 
-        assert_eq!(path, dir);
-        assert_eq!(source, vmux_setting::DirSource::Space);
+        assert_eq!(boundary.path, dir);
+        assert_eq!(boundary.source, vmux_setting::DirSource::Space);
         assert_eq!(tab.startup_dir, None);
     }
 
@@ -1061,6 +1070,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -1183,6 +1193,7 @@ mod tests {
                 auto_update: false,
                 agent: vmux_setting::AgentSettings::default(),
                 spaces: Default::default(),
+                projects: Default::default(),
                 recording: Default::default(),
                 editor: Default::default(),
                 appearance: Default::default(),

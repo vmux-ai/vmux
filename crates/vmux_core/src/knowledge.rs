@@ -1,6 +1,7 @@
 pub const KNOWLEDGE_TREE_EVENT: &str = "knowledge-tree";
 pub const KNOWLEDGE_SEARCH_EVENT: &str = "knowledge-search";
 pub const KNOWLEDGE_CREATE_RESULT_EVENT: &str = "knowledge-create-result";
+pub const KNOWLEDGE_TREE_TOGGLE_EVENT: &str = "knowledge-tree-toggle";
 
 #[derive(
     Clone,
@@ -39,6 +40,26 @@ pub struct KnowledgeEntry {
     pub parent: String,
     pub is_directory: bool,
     pub git_status: KnowledgeGitStatus,
+    #[serde(default)]
+    pub expanded: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeTreeToggle {
+    pub path: String,
+    #[serde(default)]
+    pub pane_id: String,
 }
 
 #[derive(

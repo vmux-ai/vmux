@@ -78,6 +78,123 @@ pub struct SpaceCommandEvent {
     pub name: Option<String>,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectCommandEvent {
+    pub command: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectRow {
+    pub path: String,
+    pub label: String,
+    pub display_path: String,
+    pub depth: u32,
+    pub is_active: bool,
+    pub is_worktree: bool,
+    pub missing: bool,
+    pub branch: String,
+    #[serde(default)]
+    pub kind: ProjectRowKind,
+    #[serde(default)]
+    pub expanded: bool,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ProjectRowKind {
+    #[default]
+    Project,
+    Directory,
+    File,
+}
+
+impl ProjectRowKind {
+    pub fn opens_a_tree(self) -> bool {
+        matches!(self, Self::Project | Self::Directory)
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectTreeToggle {
+    pub path: String,
+    #[serde(default)]
+    pub pane_id: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProjectBranch {
+    pub branch: String,
+    pub checkout: String,
+    pub label: String,
+    pub insertions: u32,
+    pub deletions: u32,
+}
+
+impl ProjectBranch {
+    pub fn held(&self) -> bool {
+        !self.checkout.is_empty()
+    }
+
+    pub fn changed(&self) -> bool {
+        self.insertions > 0 || self.deletions > 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -126,6 +126,7 @@ fn enrich_git_status(root: &Path, entries: &mut Vec<KnowledgeEntry>) {
                     parent: path.parent().unwrap_or(root).to_string_lossy().into_owned(),
                     is_directory: true,
                     git_status: KnowledgeGitStatus::Deleted,
+                    expanded: false,
                 });
             }
             parent = directory.parent();
@@ -146,6 +147,7 @@ fn enrich_git_status(root: &Path, entries: &mut Vec<KnowledgeEntry>) {
                     .into_owned(),
                 is_directory: false,
                 git_status: KnowledgeGitStatus::Deleted,
+                expanded: false,
             });
         }
     }
@@ -252,6 +254,7 @@ fn scan_directory(
                 parent: directory.to_string_lossy().into_owned(),
                 is_directory: true,
                 git_status: KnowledgeGitStatus::Clean,
+                expanded: false,
             });
         } else if file_type.is_file() && is_markdown(&path) {
             entries.push(KnowledgeEntry {
@@ -261,6 +264,7 @@ fn scan_directory(
                 parent: directory.to_string_lossy().into_owned(),
                 is_directory: false,
                 git_status: KnowledgeGitStatus::Clean,
+                expanded: false,
             });
         }
     }

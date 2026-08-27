@@ -182,6 +182,7 @@ pub fn command_bar_open_payload(
         recent_files,
         search_engines,
         prompt_context: default(),
+        agent_models: Vec::new(),
         target,
         space_switch: false,
     }

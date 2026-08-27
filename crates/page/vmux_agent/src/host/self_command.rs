@@ -966,10 +966,7 @@ pub(super) fn handle_agent_self_commands(
                                     Ok(stored) => 'create_worktree: {
                                         let configured_dir =
                                             active_space.as_deref().and_then(|space| {
-                                                vmux_setting::resolve_startup_dir(
-                                                    &settings,
-                                                    &space.record.id,
-                                                )
+                                                settings.startup_dir(&space.record.id)
                                             });
                                         let workspace_dir =
                                             tab_worktree.workspaces.get(tab_e).ok().and_then(
@@ -1047,50 +1044,61 @@ pub(super) fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::CreateWorktreeOnBranch { anchor, branch } => {
-                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                    None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((agent_entity, pane)) => {
-                        let Some(tab_entity) =
-                            ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
-                        else {
-                            failed_worktree_anchors.insert(*anchor);
-                            service.0.send(ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error("no tab for agent".to_string()),
-                            });
-                            continue;
-                        };
-                        let existing_branch = tab_worktree
-                            .worktrees
-                            .get(tab_entity)
-                            .ok()
-                            .map(|worktree| worktree.branch.clone())
-                            .or_else(|| worktree_created_this_batch.get(&tab_entity).cloned());
-                        if let Some(existing_branch) = existing_branch {
-                            if existing_branch != *branch {
-                                AgentCommandResult::Error(format!(
-                                    "Tab already has a worktree on branch {existing_branch}; requested {branch}"
-                                ))
-                            } else {
-                                let path = tab_worktree
-                                    .tabs
-                                    .get(tab_entity)
-                                    .ok()
-                                    .and_then(|tab| tab.startup_dir.clone());
-                                match path {
-                                    Some(path) => AgentCommandResult::Text(path),
-                                    None => AgentCommandResult::Error(
-                                        "tab worktree directory is missing".to_string(),
-                                    ),
-                                }
-                            }
+            ServiceAgentCommand::CreateWorktreeOnBranch {
+                anchor,
+                branch,
+                project,
+            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                None => AgentCommandResult::Error("agent pane not found".to_string()),
+                Some((agent_entity, pane)) => {
+                    let Some(tab_entity) =
+                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                    else {
+                        failed_worktree_anchors.insert(*anchor);
+                        service.0.send(ClientMessage::AgentCommandResponse {
+                            request_id: request.request_id,
+                            result: AgentCommandResult::Error("no tab for agent".to_string()),
+                        });
+                        continue;
+                    };
+                    let existing_branch = tab_worktree
+                        .worktrees
+                        .get(tab_entity)
+                        .ok()
+                        .map(|worktree| worktree.branch.clone())
+                        .or_else(|| worktree_created_this_batch.get(&tab_entity).cloned());
+                    if let Some(existing_branch) = existing_branch {
+                        if existing_branch != *branch {
+                            AgentCommandResult::Error(format!(
+                                "Tab already has a worktree on branch {existing_branch}; requested {branch}"
+                            ))
                         } else {
-                            let base_dir = tab_worktree
-                                .pending_projects
+                            let path = tab_worktree
+                                .tabs
                                 .get(tab_entity)
                                 .ok()
-                                .map(|project| project.0.clone())
+                                .and_then(|tab| tab.startup_dir.clone());
+                            match path {
+                                Some(path) => AgentCommandResult::Text(path),
+                                None => AgentCommandResult::Error(
+                                    "tab worktree directory is missing".to_string(),
+                                ),
+                            }
+                        }
+                    } else {
+                        let base_dir =
+                            project
+                                .as_ref()
+                                .and_then(|picked| {
+                                    AgentCwd::of_tab(Some(picked)).stored().ok().flatten()
+                                })
+                                .or_else(|| {
+                                    tab_worktree
+                                        .pending_projects
+                                        .get(tab_entity)
+                                        .ok()
+                                        .map(|project| project.0.clone())
+                                })
                                 .or_else(|| {
                                     tab_worktree.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
@@ -1101,51 +1109,48 @@ pub(super) fn handle_agent_self_commands(
                                         },
                                     )
                                 });
-                            let Some(base_dir) = base_dir else {
-                                failed_worktree_anchors.insert(*anchor);
-                                service.0.send(ClientMessage::AgentCommandResponse {
-                                    request_id: request.request_id,
-                                    result: AgentCommandResult::Error(
-                                        "No project selected. Call select_project first."
-                                            .to_string(),
-                                    ),
-                                });
-                                continue;
-                            };
-                            match vmux_layout::worktree::create_worktree_for_branch_blocking(
+                        let Some(base_dir) = base_dir else {
+                            failed_worktree_anchors.insert(*anchor);
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "No project selected. Call select_project first.".to_string(),
+                                ),
+                            });
+                            continue;
+                        };
+                        match vmux_layout::worktree::create_worktree_for_branch_blocking(
+                            &base_dir,
+                            branch,
+                            &managed_root,
+                        ) {
+                            Ok(activation) => match activate_agent_worktree(
+                                tab_entity,
+                                agent_entity,
                                 &base_dir,
-                                branch,
-                                &managed_root,
+                                activation,
+                                &mut tab_worktree.tabs,
+                                &mut acp_sessions,
+                                &ctx.child_of_q,
+                                &mut commands,
                             ) {
-                                Ok(activation) => match activate_agent_worktree(
-                                    tab_entity,
-                                    agent_entity,
-                                    &base_dir,
-                                    activation,
-                                    &mut tab_worktree.tabs,
-                                    &mut acp_sessions,
-                                    &ctx.child_of_q,
-                                    &mut commands,
-                                ) {
-                                    Ok((execution_dir, rebind)) => {
-                                        if let Some(message) = rebind {
-                                            service.0.send(message);
-                                        }
-                                        worktree_created_this_batch
-                                            .insert(tab_entity, branch.clone());
-                                        let path = execution_dir.to_string_lossy().into_owned();
-                                        AgentCommandResult::Text(format!(
-                                            "Worktree ready: {path}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools."
-                                        ))
+                                Ok((execution_dir, rebind)) => {
+                                    if let Some(message) = rebind {
+                                        service.0.send(message);
                                     }
-                                    Err(error) => AgentCommandResult::Error(error),
-                                },
+                                    worktree_created_this_batch.insert(tab_entity, branch.clone());
+                                    let path = execution_dir.to_string_lossy().into_owned();
+                                    AgentCommandResult::Text(format!(
+                                        "Worktree ready: {path}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools."
+                                    ))
+                                }
                                 Err(error) => AgentCommandResult::Error(error),
-                            }
+                            },
+                            Err(error) => AgentCommandResult::Error(error),
                         }
                     }
                 }
-            }
+            },
             _ => continue,
         };
         if matches!(
@@ -1215,6 +1220,7 @@ mod tests {
         let create = ServiceAgentCommand::CreateWorktreeOnBranch {
             anchor,
             branch: "feature/test".into(),
+            project: None,
         };
         let sibling = ServiceAgentCommand::OpenBeside {
             anchor,

@@ -1600,8 +1600,7 @@ fn on_file_keymap_set(
     if settings.editor.keymap == keymap {
         return;
     }
-    match vmux_setting::apply_settings_update(
-        settings.as_mut(),
+    match settings.apply_update(
         "editor.keymap",
         serde_json::to_value(keymap).unwrap_or_default(),
     ) {
@@ -1687,7 +1686,7 @@ fn on_file_fold_toggle(
     let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
         return;
     };
-    edit.folds.toggle(line);
+    edit.folds.toggle_header(line);
     sync_fold_view(&mut edit);
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);

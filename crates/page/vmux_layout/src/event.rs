@@ -696,6 +696,7 @@ pub struct TabBoundary {
 )]
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
+    pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
 #[derive(

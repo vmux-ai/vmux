@@ -8,7 +8,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::knowledge::{
     KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
-    KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent,
+    KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent, KnowledgeTreeToggle,
 };
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
@@ -50,9 +50,11 @@ impl Plugin for KnowledgePlugin {
         }
         app.init_resource::<KnowledgeState>()
             .init_resource::<KnowledgeIndex>()
+            .register_type::<ExpandedKnowledgeDirs>()
             .add_plugins(BinEventEmitterPlugin::<(
                 KnowledgeSearchRequest,
                 KnowledgeCreateRequest,
+                KnowledgeTreeToggle,
             )>::default())
             .add_systems(
                 Update,
@@ -65,8 +67,48 @@ impl Plugin for KnowledgePlugin {
                     .chain(),
             )
             .add_observer(on_knowledge_search)
-            .add_observer(on_knowledge_create);
+            .add_observer(on_knowledge_create)
+            .add_observer(on_knowledge_tree_toggle);
     }
+}
+
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::knowledge"]
+#[require(moonshine_save::prelude::Save)]
+pub struct ExpandedKnowledgeDirs(Vec<String>);
+
+impl ExpandedKnowledgeDirs {
+    fn toggle(&mut self, path: &str) {
+        if let Some(index) = self.0.iter().position(|held| held == path) {
+            self.0.remove(index);
+            return;
+        }
+        self.0.push(path.to_string());
+    }
+
+    fn holds(&self, path: &str) -> bool {
+        self.0.iter().any(|held| held == path)
+    }
+}
+
+fn on_knowledge_tree_toggle(
+    trigger: On<BinReceive<KnowledgeTreeToggle>>,
+    space_of_pane: vmux_layout::space::SpaceOfPane,
+    mut expanded: Query<&mut ExpandedKnowledgeDirs>,
+    mut commands: Commands,
+) {
+    let Some(space) = space_of_pane.resolve(&trigger.event().payload.pane_id) else {
+        return;
+    };
+    let path = &trigger.event().payload.path;
+    if let Ok(mut dirs) = expanded.get_mut(space) {
+        dirs.toggle(path);
+        return;
+    }
+    let mut dirs = ExpandedKnowledgeDirs::default();
+    dirs.toggle(path);
+    commands.entity(space).insert(dirs);
 }
 
 pub struct KnowledgePlugin;
@@ -178,10 +220,37 @@ fn drain_knowledge_tree_scan(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct KnowledgeExpansion<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
+    expanded: Query<'w, 's, &'static ExpandedKnowledgeDirs>,
+    toggled: Query<'w, 's, (), Changed<ExpandedKnowledgeDirs>>,
+}
+
+impl KnowledgeExpansion<'_, '_> {
+    fn just_toggled(&self) -> bool {
+        !self.toggled.is_empty()
+    }
+
+    fn stamp(&self, layout: Entity, tree: &mut KnowledgeTreeEvent) {
+        let Some(space) = vmux_layout::space::space_of(layout, &self.child_of, &self.spaces) else {
+            return;
+        };
+        let Ok(open) = self.expanded.get(space) else {
+            return;
+        };
+        for entry in &mut tree.entries {
+            entry.expanded = entry.is_directory && open.holds(&entry.path);
+        }
+    }
+}
+
 fn emit_knowledge_tree(
     state: Res<KnowledgeState>,
     browsers: NonSend<Browsers>,
     layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    expansion: KnowledgeExpansion,
     mut last_revision: Local<u64>,
     mut commands: Commands,
 ) {
@@ -191,16 +260,18 @@ fn emit_knowledge_tree(
     let Ok((entity, page_ready)) = layout.single() else {
         return;
     };
-    if state.revision == *last_revision && !page_ready.is_changed() {
+    if state.revision == *last_revision && !page_ready.is_changed() && !expansion.just_toggled() {
         return;
     }
     if !browsers.can_emit_to(&entity) {
         return;
     }
+    let mut tree = state.tree.clone();
+    expansion.stamp(entity, &mut tree);
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         KNOWLEDGE_TREE_EVENT,
-        &state.tree,
+        &tree,
     ));
     *last_revision = state.revision;
 }

@@ -10,6 +10,8 @@ pub trait PageHost {
 
     fn focus_element(&self, _element_id: &str) {}
 
+    fn show_element_popover(&self, _element_id: &str) {}
+
     fn scroll_element_into_view(&self, _element_id: &str) {}
 
     fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
@@ -80,6 +82,10 @@ impl Host {
 
     pub(crate) fn focus_element(id: &str) {
         let _ = Self::with_installed(|host| host.focus_element(id));
+    }
+
+    pub(crate) fn show_element_popover(id: &str) {
+        let _ = Self::with_installed(|host| host.show_element_popover(id));
     }
 
     pub(crate) fn select_element_text(id: &str) {

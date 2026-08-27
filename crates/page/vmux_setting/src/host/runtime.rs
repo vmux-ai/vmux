@@ -4,7 +4,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
-use vmux_command::event::SearchEngine;
+use vmux_command::event::{SearchEngine, SearchEngineSetting};
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
@@ -18,6 +18,7 @@ impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LastSelfWriteHash>()
             .init_resource::<SettingsSaveDebounce>()
+            .init_resource::<SearchEngineSetting>()
             .add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
             .configure_sets(
@@ -34,7 +35,8 @@ impl Plugin for SettingsRuntimePlugin {
                     reload_settings_on_change,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, sync_search_engine);
     }
 }
 
@@ -58,6 +60,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
     #[serde(default)]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default)]
     pub recording: RecordingSettings,
     #[serde(default)]
     pub editor: EditorSettings,
@@ -70,7 +74,59 @@ impl AppSettings {
         load_embedded_settings()
     }
 
-    pub fn remember_space_startup_dir(&mut self, space_id: &str, dir: &str) -> bool {
+    pub fn from_disk() -> Self {
+        read_settings_and_path().0
+    }
+
+    pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
+        space_override(self, space_id)
+    }
+
+    pub fn startup_url(&self, space_id: &str) -> String {
+        let per_space = space_override(self, space_id)
+            .and_then(|o| o.startup_url.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let chosen = per_space.unwrap_or_else(|| self.browser.startup_url.trim());
+        if chosen.is_empty() || chosen == "vmux://agent/" || chosen == "vmux://agent" {
+            default_browser_startup_url()
+        } else {
+            chosen.to_string()
+        }
+    }
+
+    pub fn startup_dir(&self, space_id: &str) -> Option<std::path::PathBuf> {
+        StartupDir::resolve(self, space_id, None).map(|dir| dir.path)
+    }
+
+    pub fn workspace_dir(
+        &self,
+        space_id: &str,
+        tab_dir: Option<&str>,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        match tab_dir {
+            Some(tab_dir) => StartupDir::from_tab(tab_dir).map(|dir| Some(dir.path)),
+            None => Ok(self.startup_dir(space_id)),
+        }
+    }
+
+    pub fn apply_update(&mut self, path: &str, value: serde_json::Value) -> Result<String, String> {
+        let mut value_json =
+            serde_json::to_value(&*self).map_err(|e| format!("settings to JSON failed: {e}"))?;
+        set_at_path(&mut value_json, path, value)?;
+        let new_settings: AppSettings = serde_json::from_value(value_json)
+            .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
+        let ron_bytes = sparse_settings_ron(&new_settings)?;
+        *self = new_settings;
+        Ok(ron_bytes)
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
+        let known = self.remember_known_project(&project);
         let target = normalize_space_key(space_id);
         let mut key = None;
         for existing in self.spaces.keys() {
@@ -81,13 +137,90 @@ impl AppSettings {
         }
         let key = key.unwrap_or_else(|| space_id.to_string());
         let overrides = self.spaces.entry(key).or_default();
-        if overrides.startup_dir.as_deref() == Some(dir) {
+        let listed = match overrides
+            .projects
+            .iter_mut()
+            .find(|p| p.path == project.path)
+        {
+            Some(existing) => {
+                let gained_parent = existing.parent.is_none() && project.parent.is_some();
+                if gained_parent {
+                    existing.parent = project.parent.clone();
+                }
+                gained_parent
+            }
+            None => {
+                overrides.projects.push(project.clone());
+                true
+            }
+        };
+        let promoted = overrides.active_project.as_deref() != Some(project.path.as_str());
+        if promoted {
+            overrides.active_project = Some(project.path);
+        }
+        known || listed || promoted
+    }
+
+    pub fn activate_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        if !overrides.projects.iter().any(|p| p.path == path) {
             return false;
         }
-        overrides.startup_dir = Some(dir.to_string());
+        if overrides.active_project.as_deref() == Some(path) {
+            return false;
+        }
+        overrides.active_project = Some(path.to_string());
         true
     }
+
+    pub fn forget_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        let Some(at) = overrides.projects.iter().position(|p| p.path == path) else {
+            return false;
+        };
+        overrides.projects.remove(at);
+        if overrides.active_project.as_deref() == Some(path) {
+            overrides.active_project = overrides.projects.first().map(|p| p.path.clone());
+        }
+        true
+    }
+
+    fn space_key(&self, space_id: &str) -> Option<String> {
+        let target = normalize_space_key(space_id);
+        self.spaces
+            .keys()
+            .find(|existing| normalize_space_key(existing) == target)
+            .cloned()
+    }
+
+    fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
+        match self.projects.iter().position(|p| p.path == project.path) {
+            Some(0) => false,
+            Some(at) => {
+                let existing = self.projects.remove(at);
+                self.projects.insert(0, existing);
+                true
+            }
+            None => {
+                self.projects.insert(0, project.clone());
+                self.projects.truncate(KNOWN_PROJECT_LIMIT);
+                true
+            }
+        }
+    }
 }
+
+const KNOWN_PROJECT_LIMIT: usize = 50;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -205,12 +338,118 @@ pub struct RecordingSettings {
     pub output_dir: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SpaceProject {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl SpaceProject {
+    pub fn at(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            parent: None,
+            label: None,
+        }
+    }
+
+    pub fn under(path: impl Into<String>, parent: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            parent: Some(parent.into()),
+            label: None,
+        }
+    }
+
+    pub fn display_label(&self) -> &str {
+        if let Some(label) = self.label.as_deref() {
+            return label;
+        }
+        let trimmed = self.path.trim_end_matches('/');
+        match trimmed.rsplit('/').next() {
+            Some(name) if !name.is_empty() => name,
+            _ => self.path.as_str(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SpaceOverrides {
     #[serde(default)]
     pub startup_url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_project: Option<String>,
+}
+
+impl SpaceOverrides {
+    pub fn normalize(&mut self) {
+        if let Some(legacy) = self.startup_dir.take()
+            && !legacy.trim().is_empty()
+            && !self.projects.iter().any(|p| p.path == legacy)
+        {
+            self.projects.push(SpaceProject::at(legacy.clone()));
+            if self.active_project.is_none() {
+                self.active_project = Some(legacy);
+            }
+        }
+    }
+
+    pub fn project_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
+        use vmux_core::event::ProjectRow;
+
+        let listed: std::collections::HashSet<&str> =
+            self.projects.iter().map(|p| p.path.as_str()).collect();
+        let active = self.active_dir();
+        let row = |project: &SpaceProject, depth: u32| ProjectRow {
+            path: project.path.clone(),
+            label: project.display_label().to_string(),
+            display_path: project.path.clone(),
+            depth,
+            is_active: active == Some(project.path.as_str()),
+            is_worktree: project.parent.is_some(),
+            missing: !std::path::Path::new(&project.path).is_dir(),
+            branch: String::new(),
+            kind: vmux_core::event::ProjectRowKind::Project,
+            expanded: false,
+        };
+
+        let mut rows = Vec::with_capacity(self.projects.len());
+        for project in &self.projects {
+            let rooted = project
+                .parent
+                .as_deref()
+                .is_none_or(|parent| !listed.contains(parent));
+            if !rooted {
+                continue;
+            }
+            rows.push(row(project, 0));
+            for child in &self.projects {
+                if child.parent.as_deref() == Some(project.path.as_str()) {
+                    rows.push(row(child, 1));
+                }
+            }
+        }
+        rows
+    }
+
+    pub fn active_dir(&self) -> Option<&str> {
+        if let Some(active) = self.active_project.as_deref()
+            && self.projects.iter().any(|p| p.path == active)
+        {
+            return Some(active);
+        }
+        self.projects
+            .first()
+            .map(|p| p.path.as_str())
+            .or(self.startup_dir.as_deref())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -359,58 +598,6 @@ fn space_override<'a>(settings: &'a AppSettings, space_id: &str) -> Option<&'a S
         .map(|(_, value)| value)
 }
 
-pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
-    let per_space = space_override(settings, space_id)
-        .and_then(|o| o.startup_url.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let chosen = per_space.unwrap_or_else(|| settings.browser.startup_url.trim());
-    if chosen.is_empty() || chosen == "vmux://agent/" || chosen == "vmux://agent" {
-        default_browser_startup_url()
-    } else {
-        chosen.to_string()
-    }
-}
-
-pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> Option<std::path::PathBuf> {
-    resolve_startup_dir_for_tab(settings, space_id, None)
-}
-
-pub fn validate_tab_workspace_dir(tab_dir: &str) -> Result<std::path::PathBuf, String> {
-    let trimmed = tab_dir.trim();
-    if trimmed.is_empty() {
-        return Err("tab workspace directory is empty".to_string());
-    }
-    let path = std::path::PathBuf::from(trimmed);
-    if !path.is_absolute() {
-        return Err(format!(
-            "tab workspace directory is not absolute: {}",
-            path.display()
-        ));
-    }
-    let path = path
-        .canonicalize()
-        .map_err(|error| format!("invalid tab workspace directory: {error}"))?;
-    if !path.is_dir() {
-        return Err(format!(
-            "tab workspace path is not a directory: {}",
-            path.display()
-        ));
-    }
-    Ok(path)
-}
-
-pub fn resolve_tab_workspace_dir(
-    settings: &AppSettings,
-    space_id: &str,
-    tab_dir: Option<&str>,
-) -> Result<Option<std::path::PathBuf>, String> {
-    match tab_dir {
-        Some(tab_dir) => validate_tab_workspace_dir(tab_dir).map(Some),
-        None => Ok(resolve_startup_dir(settings, space_id)),
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirSource {
     Tab,
@@ -418,41 +605,72 @@ pub enum DirSource {
     Global,
 }
 
-pub fn resolve_startup_dir_for_tab(
-    settings: &AppSettings,
-    space_id: &str,
-    tab_dir: Option<&str>,
-) -> Option<std::path::PathBuf> {
-    resolve_startup_dir_for_tab_with_source(settings, space_id, tab_dir).map(|(path, _)| path)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartupDir {
+    pub path: std::path::PathBuf,
+    pub source: DirSource,
 }
 
-pub fn resolve_startup_dir_for_tab_with_source(
-    settings: &AppSettings,
-    space_id: &str,
-    tab_dir: Option<&str>,
-) -> Option<(std::path::PathBuf, DirSource)> {
-    let pick = |opt: Option<&str>| -> Option<std::path::PathBuf> {
-        opt.map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_dir())
-    };
-    if let Some(p) = pick(tab_dir) {
-        return Some((p, DirSource::Tab));
-    }
-    if let Some(p) = pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
-    {
-        return Some((p, DirSource::Space));
-    }
-    if let Some(p) = pick(
-        settings
+impl StartupDir {
+    pub fn resolve(settings: &AppSettings, space_id: &str, tab_dir: Option<&str>) -> Option<Self> {
+        if let Some(path) = Self::existing(tab_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Tab,
+            });
+        }
+        let space_dir = space_override(settings, space_id).and_then(SpaceOverrides::active_dir);
+        if let Some(path) = Self::existing(space_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Space,
+            });
+        }
+        let global_dir = settings
             .terminal
             .as_ref()
-            .and_then(|t| t.startup_dir.as_deref()),
-    ) {
-        return Some((p, DirSource::Global));
+            .and_then(|t| t.startup_dir.as_deref());
+        if let Some(path) = Self::existing(global_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Global,
+            });
+        }
+        None
     }
-    None
+
+    pub fn from_tab(tab_dir: &str) -> Result<Self, String> {
+        let trimmed = tab_dir.trim();
+        if trimmed.is_empty() {
+            return Err("tab workspace directory is empty".to_string());
+        }
+        let path = std::path::PathBuf::from(trimmed);
+        if !path.is_absolute() {
+            return Err(format!(
+                "tab workspace directory is not absolute: {}",
+                path.display()
+            ));
+        }
+        let path = path
+            .canonicalize()
+            .map_err(|error| format!("invalid tab workspace directory: {error}"))?;
+        if !path.is_dir() {
+            return Err(format!(
+                "tab workspace path is not a directory: {}",
+                path.display()
+            ));
+        }
+        Ok(Self {
+            path,
+            source: DirSource::Tab,
+        })
+    }
+
+    fn existing(dir: Option<&str>) -> Option<std::path::PathBuf> {
+        let trimmed = dir.map(str::trim).filter(|s| !s.is_empty())?;
+        let path = std::path::PathBuf::from(trimmed);
+        if path.is_dir() { Some(path) } else { None }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -765,6 +983,8 @@ struct PartialAppSettings {
     #[serde(default)]
     spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
     #[serde(default)]
+    projects: Option<Vec<SpaceProject>>,
+    #[serde(default)]
     recording: Option<RecordingSettings>,
     #[serde(default)]
     editor: Option<EditorSettings>,
@@ -795,6 +1015,12 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     if let Some(spaces) = partial.spaces {
         settings.spaces = spaces;
     }
+    for overrides in settings.spaces.values_mut() {
+        overrides.normalize();
+    }
+    if let Some(projects) = partial.projects {
+        settings.projects = projects;
+    }
     if let Some(recording) = partial.recording {
         settings.recording = recording;
     }
@@ -812,10 +1038,6 @@ fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str::<PartialAppSettings>(text)
         .map(merge_over_embedded)
-}
-
-pub fn read_settings_from_disk() -> AppSettings {
-    read_settings_and_path().0
 }
 
 fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
@@ -843,7 +1065,7 @@ fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
     }
 }
 
-pub fn load_settings(mut commands: Commands) {
+fn load_settings(mut commands: Commands) {
     let (settings, config_path) = read_settings_and_path();
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
@@ -950,19 +1172,16 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     });
 }
 
-pub fn apply_settings_update(
-    settings: &mut AppSettings,
-    path: &str,
-    value: serde_json::Value,
-) -> Result<String, String> {
-    let mut value_json =
-        serde_json::to_value(&*settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
-    set_at_path(&mut value_json, path, value)?;
-    let new_settings: AppSettings = serde_json::from_value(value_json)
-        .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
-    let ron_bytes = sparse_settings_ron(&new_settings)?;
-    *settings = new_settings;
-    Ok(ron_bytes)
+fn sync_search_engine(
+    settings: Option<Res<AppSettings>>,
+    mut search_engine: ResMut<SearchEngineSetting>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if search_engine.0 != settings.browser.search_engine {
+        search_engine.0 = settings.browser.search_engine;
+    }
 }
 
 fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
@@ -1008,6 +1227,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     }
     if differs("spaces") {
         parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if differs("projects") {
+        parts.push(format!(
+            "    projects: {},",
+            section_ron(&settings.projects)?
+        ));
     }
     if differs("recording") {
         parts.push(format!(
@@ -1169,11 +1394,7 @@ fn sparse_theme_ron(theme: &TerminalTheme, base: Option<&TerminalTheme>) -> Resu
     Ok(format!("({})", fields.join(", ")))
 }
 
-pub fn serialize_settings_to_json(settings: &AppSettings) -> String {
-    serde_json::to_string(settings).unwrap_or_else(|_| "{}".to_string())
-}
-
-pub fn set_at_path(
+fn set_at_path(
     root: &mut serde_json::Value,
     path: &str,
     value: serde_json::Value,
@@ -1439,12 +1660,12 @@ mod tests {
     #[test]
     fn apply_update_enables_run_placement_override() {
         let mut settings = base_settings();
-        let ron = apply_settings_update(
-            &mut settings,
-            "agent.allow_run_placement_override",
-            serde_json::json!(true),
-        )
-        .expect("update ok");
+        let ron = settings
+            .apply_update(
+                "agent.allow_run_placement_override",
+                serde_json::json!(true),
+            )
+            .expect("update ok");
         assert!(settings.agent.allow_run_placement_override);
         let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
         assert!(reparsed.agent.allow_run_placement_override);
@@ -1454,7 +1675,8 @@ mod tests {
     fn apply_update_sets_tidy_auto_without_clobbering_siblings() {
         let mut s = base_settings();
         assert!(s.agent.follow_files);
-        let ron = apply_settings_update(&mut s, "agent.tidy_files_auto", serde_json::json!(true))
+        let ron = s
+            .apply_update("agent.tidy_files_auto", serde_json::json!(true))
             .expect("update ok");
         assert!(s.agent.tidy_files_auto);
         assert!(s.agent.follow_files, "sibling preserved");
@@ -1479,6 +1701,7 @@ mod tests {
             auto_update: false,
             agent: crate::host::runtime::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -1540,27 +1763,27 @@ mod tests {
     fn resolve_startup_url_returns_browser_override() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://services/".into();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://services/");
+        assert_eq!(s.startup_url("space-1"), "vmux://services/");
     }
 
     #[test]
     fn resolve_startup_url_defaults_to_start() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1"), "vmux://start/");
     }
 
     #[test]
     fn resolve_startup_url_uses_start_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1"), "vmux://start/");
     }
 
     #[test]
     fn resolve_startup_url_treats_legacy_agent_default_as_start() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1"), "vmux://start/");
     }
 
     #[test]
@@ -1572,15 +1795,16 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().to_string()),
+                ..Default::default()
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "mistralai/dashboard"), Some(dir));
+        assert_eq!(s.startup_dir("mistralai/dashboard"), Some(dir));
     }
 
     #[test]
     fn embedded_settings_default_to_start() {
         let s = load_embedded_settings();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1"), "vmux://start/");
     }
 
     #[test]
@@ -1592,10 +1816,11 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
-        assert_eq!(resolve_startup_url(&s, "work"), "https://work.example");
-        assert_eq!(resolve_startup_url(&s, "other"), "https://global.example");
+        assert_eq!(s.startup_url("work"), "https://work.example");
+        assert_eq!(s.startup_url("other"), "https://global.example");
     }
 
     #[test]
@@ -1607,9 +1832,10 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("   ".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
-        assert_eq!(resolve_startup_url(&s, "work"), "https://global.example");
+        assert_eq!(s.startup_url("work"), "https://global.example");
     }
 
     #[test]
@@ -1687,9 +1913,9 @@ mod tests {
     #[test]
     fn apply_settings_update_changes_pane_gap_and_returns_ron() {
         let mut settings = base_settings();
-        let ron_bytes =
-            apply_settings_update(&mut settings, "layout.pane.gap", serde_json::json!(16.0))
-                .expect("apply ok");
+        let ron_bytes = settings
+            .apply_update("layout.pane.gap", serde_json::json!(16.0))
+            .expect("apply ok");
         assert_eq!(settings.layout.pane.gap, 16.0);
         assert!(ron_bytes.contains("gap"));
         assert!(ron_bytes.contains("16"));
@@ -1700,7 +1926,9 @@ mod tests {
     #[test]
     fn apply_settings_update_changes_top_level_bool() {
         let mut settings = base_settings();
-        apply_settings_update(&mut settings, "auto_update", serde_json::json!(true)).unwrap();
+        settings
+            .apply_update("auto_update", serde_json::json!(true))
+            .unwrap();
         assert!(settings.auto_update);
     }
 
@@ -1708,8 +1936,9 @@ mod tests {
     fn apply_settings_update_unknown_path_errors_without_mutating() {
         let mut settings = base_settings();
         let original_gap = settings.layout.pane.gap;
-        let err =
-            apply_settings_update(&mut settings, "layout.nope", serde_json::json!(1)).unwrap_err();
+        let err = settings
+            .apply_update("layout.nope", serde_json::json!(1))
+            .unwrap_err();
         assert!(err.contains("layout.nope"));
         assert_eq!(settings.layout.pane.gap, original_gap);
     }
@@ -1718,7 +1947,8 @@ mod tests {
     fn apply_settings_update_type_mismatch_errors_without_mutating() {
         let mut settings = base_settings();
         let original_auto = settings.auto_update;
-        let err = apply_settings_update(&mut settings, "auto_update", serde_json::json!("yes"))
+        let err = settings
+            .apply_update("auto_update", serde_json::json!("yes"))
             .unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(settings.auto_update, original_auto);
@@ -1754,6 +1984,7 @@ mod tests {
             SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: Some("/tmp/work".into()),
+                ..Default::default()
             },
         );
         let ron = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
@@ -1802,15 +2033,13 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "work").as_deref(), Some(per.path()));
-        assert_eq!(
-            resolve_startup_dir(&s, "other").as_deref(),
-            Some(glob.path())
-        );
+        assert_eq!(s.startup_dir("work").as_deref(), Some(per.path()));
+        assert_eq!(s.startup_dir("other").as_deref(), Some(glob.path()));
         s.terminal = None;
-        assert_eq!(resolve_startup_dir(&s, "space-1"), None);
+        assert_eq!(s.startup_dir("space-1"), None);
     }
 
     #[test]
@@ -1826,12 +2055,10 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
             },
         );
-        assert_eq!(
-            resolve_startup_dir(&s, "work").as_deref(),
-            Some(glob.path())
-        );
+        assert_eq!(s.startup_dir("work").as_deref(), Some(glob.path()));
     }
 
     #[test]
@@ -1846,9 +2073,10 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "work"), None);
+        assert_eq!(s.startup_dir("work"), None);
     }
 
     #[test]
@@ -1866,15 +2094,16 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         let tab_dir = tab.path().to_string_lossy().into_owned();
         assert_eq!(
-            resolve_startup_dir_for_tab(&s, "work", Some(&tab_dir)),
+            StartupDir::resolve(&s, "work", Some(&tab_dir)).map(|dir| dir.path),
             Some(tab.path().to_path_buf())
         );
         assert_eq!(
-            resolve_startup_dir_for_tab(&s, "work", None),
+            StartupDir::resolve(&s, "work", None).map(|dir| dir.path),
             Some(per.path().to_path_buf())
         );
     }
@@ -1888,10 +2117,11 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         assert_eq!(
-            resolve_startup_dir_for_tab(&s, "work", Some("/no/such/tab/xyz-vmux")),
+            StartupDir::resolve(&s, "work", Some("/no/such/tab/xyz-vmux")).map(|dir| dir.path),
             Some(per.path().to_path_buf())
         );
     }
@@ -1905,19 +2135,23 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
-        assert!(resolve_tab_workspace_dir(&s, "work", Some("/no/such/tab/xyz-vmux")).is_err());
+        assert!(
+            s.workspace_dir("work", Some("/no/such/tab/xyz-vmux"))
+                .is_err()
+        );
         assert_eq!(
-            resolve_tab_workspace_dir(&s, "work", None).unwrap(),
+            s.workspace_dir("work", None).unwrap(),
             Some(per.path().to_path_buf())
         );
     }
 
     #[test]
     fn validate_tab_workspace_dir_rejects_relative_path() {
-        assert!(validate_tab_workspace_dir(".").is_err());
+        assert!(StartupDir::from_tab(".").is_err());
     }
 
     #[test]
@@ -1935,31 +2169,147 @@ mod tests {
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
         let tab_dir = tab.path().to_string_lossy().into_owned();
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "work", Some(&tab_dir))
+            StartupDir::resolve(&s, "work", Some(&tab_dir))
                 .unwrap()
-                .1,
+                .source,
             DirSource::Tab
         );
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "work", None)
-                .unwrap()
-                .1,
+            StartupDir::resolve(&s, "work", None).unwrap().source,
             DirSource::Space
         );
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "other", None)
-                .unwrap()
-                .1,
+            StartupDir::resolve(&s, "other", None).unwrap().source,
             DirSource::Global
         );
         s.terminal = None;
+        assert_eq!(StartupDir::resolve(&s, "nospace", None), None);
+    }
+
+    #[test]
+    fn a_legacy_startup_dir_becomes_the_first_project() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).unwrap();
+        let space = settings.spaces.get("work").expect("space");
+
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "nospace", None),
-            None
+            space.projects,
+            vec![SpaceProject::at("/tmp/alpha")],
+            "the one directory a space remembered has to survive as its first project"
+        );
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+        assert_eq!(
+            space.startup_dir, None,
+            "the legacy field is consumed, not left to disagree with the list"
+        );
+    }
+
+    #[test]
+    fn a_migrated_space_survives_a_write_and_reload() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).expect("legacy");
+        let written = sparse_settings_ron(&settings).expect("serialize");
+
+        let space = parse_settings(&written)
+            .expect("reload")
+            .spaces
+            .remove("work")
+            .expect("space");
+
+        assert_eq!(space.projects, vec![SpaceProject::at("/tmp/alpha")]);
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+    }
+
+    #[test]
+    fn a_legacy_space_still_resolves_through_the_space_rung() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut overrides = SpaceOverrides {
+            startup_dir: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        overrides.normalize();
+        let mut settings = base_settings();
+        settings.spaces.insert("work".to_string(), overrides);
+
+        assert_eq!(
+            StartupDir::resolve(&settings, "work", None),
+            Some(StartupDir {
+                path: dir.path().to_path_buf(),
+                source: DirSource::Space,
+            })
+        );
+    }
+
+    #[test]
+    fn worktrees_sit_under_the_repository_they_came_from() {
+        let space = SpaceOverrides {
+            projects: vec![
+                SpaceProject::at("/repo/dashboard"),
+                SpaceProject::at("/repo/vmux"),
+                SpaceProject::under("/worktrees/a1b2", "/repo/dashboard"),
+                SpaceProject::under("/worktrees/c3d4", "/repo/dashboard"),
+            ],
+            active_project: Some("/worktrees/a1b2".to_string()),
+            ..Default::default()
+        };
+
+        let rows: Vec<(String, u32, bool)> = space
+            .project_rows()
+            .into_iter()
+            .map(|row| (row.path, row.depth, row.is_active))
+            .collect();
+
+        assert_eq!(
+            rows,
+            vec![
+                ("/repo/dashboard".to_string(), 0, false),
+                ("/worktrees/a1b2".to_string(), 1, true),
+                ("/worktrees/c3d4".to_string(), 1, false),
+                ("/repo/vmux".to_string(), 0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_worktree_whose_repository_is_not_listed_still_shows_up() {
+        let space = SpaceOverrides {
+            projects: vec![SpaceProject::under("/worktrees/a1b2", "/repo/gone")],
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows.len(), 1, "an unlisted parent must not swallow the row");
+        assert_eq!(rows[0].path, "/worktrees/a1b2");
+        assert_eq!(rows[0].depth, 0);
+    }
+
+    #[test]
+    fn the_space_rung_follows_the_active_project() {
+        let first = tempfile::tempdir().expect("tempdir");
+        let second = tempfile::tempdir().expect("tempdir");
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![
+                    SpaceProject::at(first.path().to_string_lossy().to_string()),
+                    SpaceProject::at(second.path().to_string_lossy().to_string()),
+                ],
+                active_project: Some(second.path().to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            StartupDir::resolve(&settings, "work", None).map(|dir| dir.path),
+            Some(second.path().to_path_buf()),
+            "the space rung follows the active project, not merely the first one"
         );
     }
 
@@ -1988,12 +2338,12 @@ mod tests {
     #[test]
     fn apply_settings_update_writes_only_changed_section() {
         let mut settings = parse_settings("()").unwrap();
-        let ron = apply_settings_update(
-            &mut settings,
-            "browser.startup_url",
-            serde_json::json!("https://x.example"),
-        )
-        .unwrap();
+        let ron = settings
+            .apply_update(
+                "browser.startup_url",
+                serde_json::json!("https://x.example"),
+            )
+            .unwrap();
         assert!(ron.contains("browser"));
         assert!(ron.contains("https://x.example"));
         assert!(!ron.contains("shortcuts"));

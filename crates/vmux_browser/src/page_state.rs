@@ -13,7 +13,7 @@ use vmux_layout::{
         UpdateReadyEvent,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPosition, SideSheetSectionsExpanded, SideSheetWidth},
+    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     tab::{Tab, TabWorktree},
     window::VmuxWindow,
@@ -238,7 +238,7 @@ fn push_pane_tree_emit(
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
-    tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
+    sections_of: vmux_layout::side_sheet::SideSheetSections,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
@@ -264,7 +264,7 @@ fn push_pane_tree_emit(
     if !tab_q.contains(tab_e) {
         return;
     }
-    let sections = tab_sections.get(tab_e).copied().unwrap_or_default();
+    let sections = sections_of.under(tab_e);
     let mut tab_leaf_panes = Vec::new();
     collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut tab_leaf_panes);
 
@@ -358,9 +358,12 @@ fn push_tab_boundary_emit(
     worktrees: Query<&TabWorktree>,
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
+    space_projects: vmux_space::SpaceProjects,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    expansion_changed: Query<(), Changed<vmux_space::ExpandedProjectDirs>>,
     mut last: Local<String>,
+    mut listed: Local<Option<Vec<vmux_core::event::ProjectRow>>>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -371,18 +374,18 @@ fn push_tab_boundary_emit(
     }
     let boundary = focus.tab.and_then(|tab_e| {
         let tab = tabs.get(tab_e).ok()?;
-        let (path, source) = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
+        let dir = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
         let info = repo_info
             .as_mut()
-            .and_then(|cache| cache.bypass_change_detection().get(&path));
+            .and_then(|cache| cache.bypass_change_detection().get(&dir.path));
         let wt = worktrees.get(tab_e).ok();
         let branch = info.as_ref().map(|i| i.branch.clone()).unwrap_or_default();
         let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
         let mut leaves = Vec::new();
         collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
         Some(TabBoundary {
-            effective_dir: abbreviate_home(&path),
-            source: match source {
+            effective_dir: abbreviate_home(&dir.path),
+            source: match dir.source {
                 vmux_setting::DirSource::Tab => "tab",
                 vmux_setting::DirSource::Space => "space",
                 vmux_setting::DirSource::Global => "global",
@@ -397,7 +400,30 @@ fn push_tab_boundary_emit(
             pane_count: leaves.len() as u32,
         })
     });
-    let payload = TabBoundaryEvent { boundary };
+    let stale = listed.is_none()
+        || settings.is_changed()
+        || active_space.as_ref().is_some_and(Res::is_changed)
+        || !expansion_changed.is_empty();
+    if stale {
+        let mut rows = space_projects.active_rows();
+        for row in &mut rows {
+            row.display_path = abbreviate_home(std::path::Path::new(&row.path));
+        }
+        *listed = Some(rows);
+    }
+    let mut projects = listed.clone().unwrap_or_default();
+    if let Some(cache) = repo_info.as_mut() {
+        let cache = cache.bypass_change_detection();
+        for row in &mut projects {
+            if row.missing || !row.kind.opens_a_tree() {
+                continue;
+            }
+            if let Some(info) = cache.get(std::path::Path::new(&row.path)) {
+                row.branch = info.branch.clone();
+            }
+        }
+    }
+    let payload = TabBoundaryEvent { boundary, projects };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
         return;

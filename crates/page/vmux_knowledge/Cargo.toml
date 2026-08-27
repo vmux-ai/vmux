@@ -18,6 +18,8 @@ vmux_core = { path = "../../vmux_core" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+moonshine-save = { workspace = true }
 notify = { workspace = true }
 vmux_git = { path = "../../vmux_git" }
 vmux_layout = { path = "../vmux_layout" }

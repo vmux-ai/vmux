@@ -29,9 +29,38 @@ const UNINTERESTING_DIRS: &[&str] = &[
 ];
 
 #[derive(Default)]
-pub enum ProjectIndex {
-    #[default]
-    Idle,
+pub struct ProjectIndex {
+    roots: Vec<RootIndex>,
+}
+
+impl ProjectIndex {
+    pub fn matches(&mut self, roots: &[PathBuf], query: &str) -> Option<Vec<PathEntry>> {
+        self.sync(roots);
+        let mut ready = Vec::new();
+        for index in &self.roots {
+            let RootIndex::Ready { root, files, .. } = index else {
+                continue;
+            };
+            ready.push((root.as_path(), files.as_slice()));
+        }
+        if ready.is_empty() {
+            return None;
+        }
+        Some(FuzzyRank::across(&ready, query))
+    }
+
+    fn sync(&mut self, roots: &[PathBuf]) {
+        self.roots.retain(|index| roots.contains(index.root()));
+        for root in roots {
+            match self.roots.iter().position(|index| index.root() == root) {
+                Some(at) => self.roots[at].advance(),
+                None => self.roots.push(RootIndex::start(root)),
+            }
+        }
+    }
+}
+
+enum RootIndex {
     Building {
         root: PathBuf,
         task: Task<Vec<String>>,
@@ -43,52 +72,38 @@ pub enum ProjectIndex {
     },
 }
 
-impl ProjectIndex {
-    pub fn matches(&mut self, root: &Path, query: &str) -> Option<Vec<PathEntry>> {
-        self.advance(root);
-        let Self::Ready { files, .. } = self else {
-            return None;
-        };
-        Some(FuzzyRank::of(files, root, query))
-    }
-
-    fn advance(&mut self, root: &Path) {
-        match self {
-            Self::Building {
-                root: building,
-                task,
-            } => {
-                if building != root {
-                    *self = Self::start(root);
-                    return;
-                }
-                let Some(files) = block_on(future::poll_once(task)) else {
-                    return;
-                };
-                *self = Self::Ready {
-                    root: root.to_path_buf(),
-                    files,
-                    built_at: Instant::now(),
-                };
-            }
-            Self::Ready {
-                root: ready,
-                built_at,
-                ..
-            } => {
-                if ready != root || built_at.elapsed() > INDEX_TTL {
-                    *self = Self::start(root);
-                }
-            }
-            Self::Idle => *self = Self::start(root),
-        }
-    }
-
+impl RootIndex {
     fn start(root: &Path) -> Self {
         let walked = root.to_path_buf();
         Self::Building {
             root: root.to_path_buf(),
             task: IoTaskPool::get().spawn(async move { ProjectWalk::of(&walked) }),
+        }
+    }
+
+    fn root(&self) -> &PathBuf {
+        match self {
+            Self::Building { root, .. } | Self::Ready { root, .. } => root,
+        }
+    }
+
+    fn advance(&mut self) {
+        match self {
+            Self::Building { root, task } => {
+                let Some(files) = block_on(future::poll_once(task)) else {
+                    return;
+                };
+                *self = Self::Ready {
+                    root: std::mem::take(root),
+                    files,
+                    built_at: Instant::now(),
+                };
+            }
+            Self::Ready { root, built_at, .. } => {
+                if built_at.elapsed() > INDEX_TTL {
+                    *self = Self::start(&root.clone());
+                }
+            }
         }
     }
 }
@@ -144,30 +159,48 @@ impl ProjectWalk {
 struct FuzzyRank;
 
 impl FuzzyRank {
-    fn of(files: &[String], root: &Path, query: &str) -> Vec<PathEntry> {
+    fn across(roots: &[(&Path, &[String])], query: &str) -> Vec<PathEntry> {
         let needle = query.to_lowercase();
-        let mut scored: Vec<(i32, &String)> = Vec::new();
-        for file in files {
-            let Some(score) = FuzzyScore::of(file, &needle) else {
-                continue;
-            };
-            scored.push((score, file));
+        let mut scored: Vec<(i32, &Path, &String)> = Vec::new();
+        for (root, files) in roots {
+            for file in files.iter() {
+                let Some(score) = FuzzyScore::of(file, &needle) else {
+                    continue;
+                };
+                scored.push((score, root, file));
+            }
         }
         scored.sort_by(|a, b| {
             b.0.cmp(&a.0)
-                .then(a.1.len().cmp(&b.1.len()))
-                .then(a.1.cmp(b.1))
+                .then(a.2.len().cmp(&b.2.len()))
+                .then(a.2.cmp(b.2))
         });
         scored.truncate(MAX_RESULTS);
+        let qualify = roots.len() > 1;
         let mut entries = Vec::with_capacity(scored.len());
-        for (_, file) in scored {
+        for (_, root, file) in scored {
+            let name = match qualify {
+                true => format!("{}/{file}", ProjectLabel::of(root)),
+                false => file.clone(),
+            };
             entries.push(PathEntry {
-                name: file.clone(),
+                name,
                 is_dir: false,
                 full_path: root.join(file).to_string_lossy().into_owned(),
             });
         }
         entries
+    }
+}
+
+struct ProjectLabel;
+
+impl ProjectLabel {
+    fn of(root: &Path) -> String {
+        let Some(name) = root.file_name() else {
+            return root.to_string_lossy().into_owned();
+        };
+        name.to_string_lossy().into_owned()
     }
 }
 
@@ -239,7 +272,7 @@ mod tests {
             "crates/vmux_core/src/handler.rs".to_string(),
             "docs/h/a/n/dler.md".to_string(),
         ];
-        let ranked = FuzzyRank::of(&files, Path::new("/root"), "handler");
+        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "handler");
         assert_eq!(ranked[0].name, "crates/vmux_core/src/handler.rs");
     }
 
@@ -249,7 +282,7 @@ mod tests {
             "crates/page/vmux_command/src/page.rs".to_string(),
             "crates/vmux_ui/src/page.rs".to_string(),
         ];
-        let ranked = FuzzyRank::of(&files, Path::new("/root"), "command/page");
+        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "command/page");
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].name, "crates/page/vmux_command/src/page.rs");
     }
@@ -260,9 +293,45 @@ mod tests {
     }
 
     #[test]
+    fn a_hit_in_every_project_is_ranked_together_and_named_by_its_project() {
+        let dashboard = vec!["src/main.rs".to_string()];
+        let vmux = vec!["src/main.rs".to_string()];
+        let ranked = FuzzyRank::across(
+            &[
+                (Path::new("/code/dashboard"), &dashboard),
+                (Path::new("/code/vmux"), &vmux),
+            ],
+            "main",
+        );
+
+        let named: Vec<&str> = ranked.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(named, ["dashboard/src/main.rs", "vmux/src/main.rs"]);
+        let opened: Vec<&str> = ranked
+            .iter()
+            .map(|entry| entry.full_path.as_str())
+            .collect();
+        assert_eq!(
+            opened,
+            ["/code/dashboard/src/main.rs", "/code/vmux/src/main.rs"]
+        );
+    }
+
+    #[test]
+    fn a_better_hit_in_a_later_project_outranks_a_worse_hit_in_the_first() {
+        let first = vec!["src/unrelated_handler_helper.rs".to_string()];
+        let second = vec!["handler.rs".to_string()];
+        let ranked = FuzzyRank::across(
+            &[(Path::new("/a"), &first), (Path::new("/b"), &second)],
+            "handler",
+        );
+
+        assert_eq!(ranked[0].name, "b/handler.rs");
+    }
+
+    #[test]
     fn ranked_entries_carry_an_absolute_path_for_opening() {
         let files = vec!["src/main.rs".to_string()];
-        let ranked = FuzzyRank::of(&files, Path::new("/root"), "main");
+        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "main");
         assert_eq!(ranked[0].full_path, "/root/src/main.rs");
     }
 

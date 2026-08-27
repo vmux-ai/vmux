@@ -526,7 +526,7 @@ impl<'a> AgentCwd<'a> {
         let Some(tab_cwd) = self.tab_cwd else {
             return Ok(None);
         };
-        vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
+        vmux_setting::StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
     }
 
     pub(crate) fn or_agent_launch(

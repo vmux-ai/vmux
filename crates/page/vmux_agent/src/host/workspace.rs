@@ -132,10 +132,10 @@ pub(crate) fn workspace_picker_task(
     proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
 ) -> Task<Option<PathBuf>> {
     let wake = proxy.map(|proxy| (**proxy).clone());
-    let workspace_dir = vmux_core::profile::workspace_dir();
-    let initial_dir = std::fs::create_dir_all(&workspace_dir)
+    let projects_dir = vmux_core::profile::projects_dir();
+    let initial_dir = std::fs::create_dir_all(&projects_dir)
         .ok()
-        .map(|_| workspace_dir)
+        .map(|_| projects_dir)
         .filter(|path| path.is_dir())
         .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))

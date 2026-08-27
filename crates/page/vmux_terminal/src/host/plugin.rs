@@ -151,6 +151,7 @@ impl Plugin for TerminalUpdatePlugin {
                 Update,
                 (
                     try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    resolve_pending_terminal_cwd,
                     poll_service_messages
                         .in_set(WriteAppCommands)
                         .in_set(ServiceMessageSet),
@@ -501,11 +502,8 @@ fn spawn_layout_requested_content(
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
                 let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(*stack, &child_of, &tabs);
-                let Ok(cwd) = vmux_setting::resolve_tab_workspace_dir(
-                    &settings,
-                    &active_space.record.id,
-                    tab_dir.as_deref(),
-                ) else {
+                let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
+                else {
                     continue;
                 };
                 let terminal = commands
@@ -592,11 +590,7 @@ fn open_terminal_page(
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
-        vmux_setting::resolve_tab_workspace_dir(
-            settings,
-            &active_space.record.id,
-            tab_dir.as_deref(),
-        )?
+        settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
     clear_stack_children(task.stack, children_q, commands);
     let title = cwd
@@ -1214,6 +1208,32 @@ fn sync_agent_focus(
             }
             None => {}
         }
+    }
+}
+
+fn resolve_pending_terminal_cwd(
+    mut pending: Query<
+        (Entity, &mut crate::launch::TerminalLaunch),
+        (With<Terminal>, With<PendingServiceCreate>),
+    >,
+    child_of: Query<&ChildOf>,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    spaces: Query<(), With<vmux_layout::space::Space>>,
+    space_ids: Query<&vmux_layout::space::SpaceId>,
+    settings: Res<AppSettings>,
+    active_space: Res<vmux_space::spaces::ActiveSpace>,
+) {
+    for (entity, mut launch) in &mut pending {
+        if !launch.cwd.is_empty() {
+            continue;
+        }
+        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
+        let space_id = vmux_layout::space::space_id_of(entity, &child_of, &spaces, &space_ids)
+            .unwrap_or_else(|| active_space.record.id.clone());
+        let Ok(Some(cwd)) = settings.workspace_dir(&space_id, tab_dir.as_deref()) else {
+            continue;
+        };
+        launch.cwd = cwd.to_string_lossy().into_owned();
     }
 }
 
@@ -3722,6 +3742,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -3838,6 +3859,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
@@ -3907,6 +3929,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(space_dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
@@ -3956,6 +3979,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 
@@ -4008,6 +4032,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
+                ..Default::default()
             },
         );
 

@@ -128,6 +128,7 @@ pub fn Page() -> Element {
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
     let explorer_reflowed_at = use_signal(|| Option::<ExplorerReflowKey>::None);
+    let explorer_user_chose = use_signal(|| false);
     let explorer = ExplorerPane {
         visible: explorer_visible,
         preferred_visible: explorer_preferred_visible,
@@ -136,6 +137,7 @@ pub fn Page() -> Element {
         client_id: explorer_client_id,
         request_id: explorer_request_id,
         reflowed_at: explorer_reflowed_at,
+        user_chose: explorer_user_chose,
     };
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
@@ -997,6 +999,16 @@ pub fn Page() -> Element {
                         }
                     }
                 }
+                GitBar {
+                    path: git_path,
+                    has_diff: git_has_diff,
+                    nonce: git_nonce,
+                    branch: git_branch,
+                    ahead: git_ahead,
+                    behind: git_behind,
+                    staged_count: git_staged,
+                    message: git_message,
+                }
                 {
                     tidy_prompt().map(|count| {
                         rsx! {
@@ -1037,17 +1049,6 @@ pub fn Page() -> Element {
                         }
                     })
                 }
-            }
-
-            GitBar {
-                path: git_path,
-                has_diff: git_has_diff,
-                nonce: git_nonce,
-                branch: git_branch,
-                ahead: git_ahead,
-                behind: git_behind,
-                staged_count: git_staged,
-                message: git_message,
             }
 
             {
@@ -1439,6 +1440,34 @@ pub fn Page() -> Element {
                                             hover_pos,
                                             lsp_hover,
                                             hover_diag,
+                                        }
+                                        if sel().is_empty() {
+                                            {
+                                                let mut caret_rows = carets()
+                                                    .iter()
+                                                    .map(|caret| caret.row)
+                                                    .collect::<Vec<_>>();
+                                                caret_rows.push(cursor().row);
+                                                caret_rows.sort_unstable();
+                                                caret_rows.dedup();
+                                                rsx! {
+                                                    for row in caret_rows {
+                                                        {
+                                                            let top = row as f64 * ch;
+                                                            let style = format!(
+                                                                "left:{gutter}px;right:0;top:{top}px;height:{ch}px;",
+                                                            );
+                                                            rsx! {
+                                                                div {
+                                                                    key: "curline{row}",
+                                                                    class: "pointer-events-none absolute z-0 bg-foreground/[0.05]",
+                                                                    style: "{style}",
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                         for s in word_spans().iter() {
                                             {
@@ -2146,7 +2175,7 @@ fn EditorLineRow(
     };
     rsx! {
         div {
-            class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start hover:bg-foreground/[0.035]" },
+            class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start" },
             style: "position:absolute;left:0;right:0;top:{lt}px;height:{line_height}px;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.prevent_default();
@@ -2244,32 +2273,14 @@ fn EditorLineRow(
                     }
                 }
                 match fold {
-                    FoldGutter::Open => {
-                        let vis = if gutter_hover() { "opacity-100" } else { "opacity-0" };
-                        rsx! {
-                            span {
-                                class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 transition-opacity hover:!text-foreground {vis}",
-                                onmousedown: move |e: Event<MouseData>| {
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                    let _ = send(&FileFoldToggle { line: ln });
-                                },
-                                "⌄"
-                            }
-                        }
-                    }
-                    FoldGutter::Collapsed => rsx! {
-                        span {
-                            class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/70 hover:!text-foreground",
-                            onmousedown: move |e: Event<MouseData>| {
-                                e.stop_propagation();
-                                e.prevent_default();
-                                let _ = send(&FileFoldToggle { line: ln });
-                            },
-                            "›"
+                    FoldGutter::None => rsx! {},
+                    _ => rsx! {
+                        FoldMarker {
+                            line: ln,
+                            collapsed: fold == FoldGutter::Collapsed,
+                            revealed: gutter_hover(),
                         }
                     },
-                    FoldGutter::None => rsx! {},
                 }
             }
             span { class: "{text_class}", style: "{text_style}",
@@ -2298,6 +2309,35 @@ fn EditorLineRow(
                 if fold == FoldGutter::Collapsed {
                     span { class: "ml-1 rounded bg-white/10 px-1 text-foreground/40", "⋯" }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FoldMarker(line: u32, collapsed: bool, revealed: bool) -> Element {
+    let tone = match collapsed {
+        true => "text-foreground/60 opacity-100",
+        false if revealed => "text-foreground/35 opacity-100",
+        false => "text-foreground/35 opacity-0",
+    };
+    rsx! {
+        span {
+            class: "absolute right-0.5 flex h-full w-4 cursor-pointer items-center justify-center transition-opacity hover:!text-foreground {tone}",
+            onmousedown: move |e: Event<MouseData>| {
+                e.stop_propagation();
+                e.prevent_default();
+                let _ = send(&FileFoldToggle { line });
+            },
+            svg {
+                class: if collapsed { "h-3 w-3 -rotate-90" } else { "h-3 w-3" },
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2.5",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "m6 9 6 6 6-6" }
             }
         }
     }
@@ -3801,7 +3841,6 @@ fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ExplorerReflowKey {
     page_width: u32,
-    width: u32,
     preferred_visible: bool,
 }
 
@@ -3814,6 +3853,7 @@ pub struct ExplorerPane {
     pub client_id: Signal<u64>,
     pub request_id: Signal<u64>,
     pub reflowed_at: Signal<Option<ExplorerReflowKey>>,
+    pub user_chose: Signal<bool>,
 }
 
 impl ExplorerPane {
@@ -3824,7 +3864,6 @@ impl ExplorerPane {
     fn reflow_key(self) -> ExplorerReflowKey {
         ExplorerReflowKey {
             page_width: (self.page_width)(),
-            width: (self.width)(),
             preferred_visible: (self.preferred_visible)(),
         }
     }
@@ -3835,7 +3874,7 @@ impl ExplorerPane {
             return;
         }
         self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible && self.has_room();
+        let next = key.preferred_visible && ((self.user_chose)() || self.has_room());
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -3861,16 +3900,18 @@ impl ExplorerPane {
         }
     }
 
-    pub(crate) fn toggle(self, mode: Signal<Mode>) {
-        self.set_visible(!(self.preferred_visible)(), mode);
+    pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
+        self.user_chose.set(true);
+        self.set_visible(!(self.visible)(), mode);
     }
 
-    pub(crate) fn reveal_current(self, mode: Signal<Mode>) {
+    pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {
         if (self.visible)() {
             let _ = send(&ExplorerRevealCurrent);
-        } else {
-            self.set_visible(true, mode);
+            return;
         }
+        self.user_chose.set(true);
+        self.set_visible(true, mode);
     }
 
     fn show_if_room(self, mode: Signal<Mode>) {

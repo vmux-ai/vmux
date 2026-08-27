@@ -122,8 +122,8 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
-pub fn workspace_dir() -> PathBuf {
-    config_dir().join("workspace")
+pub fn projects_dir() -> PathBuf {
+    config_dir().join("projects")
 }
 
 fn recording_dir_for(data: &std::path::Path, profile: &str) -> PathBuf {

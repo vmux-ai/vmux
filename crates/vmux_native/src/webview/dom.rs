@@ -269,6 +269,12 @@ impl PageHost for SurfaceHost {
         });
     }
 
+    fn show_element_popover(&self, element_id: &str) {
+        self.request(DomRequest::ShowPopover {
+            element: element_id.to_string(),
+        });
+    }
+
     fn scroll_element_into_view(&self, element_id: &str) {
         self.request(DomRequest::ScrollIntoView {
             element: element_id.to_string(),

@@ -79,6 +79,21 @@ pub fn sync_active_space_id(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SpaceOfPane<'w, 's> {
+    leaf_panes: Query<'w, 's, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    spaces: Query<'w, 's, (), With<Space>>,
+}
+
+impl SpaceOfPane<'_, '_> {
+    pub fn resolve(&self, pane_id: &str) -> Option<Entity> {
+        let bits = pane_id.parse::<u64>().ok()?;
+        let pane = self.leaf_panes.iter().find(|pane| pane.to_bits() == bits)?;
+        space_of(pane, &self.child_of, &self.spaces)
+    }
+}
+
 pub fn space_of(
     entity: Entity,
     child_of: &Query<&ChildOf>,

@@ -17,7 +17,7 @@ use crate::event::{
     SettingsSchemaEvent, UPDATE_CHECK_STATUS_EVENT, UpdateCheckStatusEvent,
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
-use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
+use crate::{AppSettings, SettingsWriteRequest};
 use vmux_flex::prelude::*;
 
 pub struct SettingsViewPlugin;
@@ -140,7 +140,7 @@ fn broadcast_settings_to_views(
     mut commands: Commands,
 ) {
     let payload = SettingsListEvent {
-        json: serialize_settings_to_json(&settings),
+        json: settings.to_json(),
     };
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
@@ -261,7 +261,7 @@ fn on_settings_command(
             return;
         }
     };
-    match apply_settings_update(settings.as_mut(), &evt.path, value) {
+    match settings.apply_update(&evt.path, value) {
         Ok(ron_bytes) => {
             writes.write(SettingsWriteRequest { ron_bytes });
         }

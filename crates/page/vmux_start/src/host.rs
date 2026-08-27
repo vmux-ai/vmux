@@ -34,7 +34,8 @@ impl Plugin for StartPlugin {
                 title: "Start",
             },
         ));
-        app.add_message::<FocusLauncherInput>()
+        app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -48,12 +49,20 @@ impl Plugin for StartPlugin {
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
+            vmux_wire::command_bar::StartBranchesRequest,
+            vmux_wire::command_bar::StartGoToBranch,
         )>::for_hosts(&["start"]))
             .add_observer(on_start_data_request)
             .add_observer(on_start_select_workspace)
+            .add_observer(on_start_branches_request)
+            .add_observer(on_start_go_to_branch)
             .add_systems(
                 Update,
-                (sync_live_start_pages, drain_start_workspace_pickers),
+                (
+                    sync_live_start_pages,
+                    drain_start_workspace_pickers,
+                    drain_start_branch_reads,
+                ),
             );
     }
 }
@@ -78,10 +87,14 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
+    agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
 }
 
 impl StartPromptContextParams<'_, '_> {
     fn changed(&self, tab: Option<Entity>) -> bool {
+        if self.agent_models.is_changed() {
+            return true;
+        }
         let Some(tab) = tab else {
             return false;
         };
@@ -141,6 +154,7 @@ impl StartPromptContextParams<'_, '_> {
                 .unwrap_or_default(),
             uncommitted: info.map(|info| info.uncommitted).unwrap_or(0),
             ahead: info.map(|info| info.ahead).unwrap_or(0),
+            projects: Vec::new(),
         }
     }
 }
@@ -170,10 +184,10 @@ fn on_start_select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let workspace_dir = vmux_core::profile::workspace_dir();
-    let initial_dir = std::fs::create_dir_all(&workspace_dir)
+    let projects_dir = vmux_core::profile::projects_dir();
+    let initial_dir = std::fs::create_dir_all(&projects_dir)
         .ok()
-        .map(|_| workspace_dir)
+        .map(|_| projects_dir)
         .filter(|path| path.is_dir())
         .or_else(|| {
             std::path::PathBuf::from(&trigger.event().payload.current_dir)
@@ -236,30 +250,147 @@ fn drain_start_workspace_pickers(
             if initialize_git {
                 let _ = vmux_git::worktree::repository_init(&path);
             }
-            if let Ok(mut tab) = tabs.get_mut(picker.tab) {
-                tab.startup_dir = Some(path.to_string_lossy().into_owned());
-                if vmux_layout::worktree::is_generated_tab_name(&tab.name)
-                    && let Some(name) = path.file_name().and_then(|name| name.to_str())
-                    && !name.is_empty()
-                {
-                    tab.name = name.to_string();
-                }
-                commands
-                    .entity(picker.tab)
-                    .insert((
-                        TabWorkspace {
-                            project_dir: path.to_string_lossy().into_owned(),
-                        },
-                        vmux_layout::tab::TabDirDecided,
-                    ))
-                    .remove::<(
-                        TabWorktree,
-                        vmux_layout::worktree::TabWorktreeReady,
-                        vmux_layout::tab::TabWorktreeUnavailable,
-                    )>();
-            }
+            ChosenProject { path }.apply(picker.tab, &mut tabs, &mut commands);
         }
         commands.entity(entity).despawn();
+    }
+}
+
+#[derive(Component)]
+struct StartBranchRead {
+    webview: Entity,
+    project: String,
+    task: bevy::tasks::Task<Vec<vmux_wire::space::ProjectBranch>>,
+}
+
+fn on_start_branches_request(
+    trigger: On<BinReceive<vmux_wire::command_bar::StartBranchesRequest>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let project = trigger.event().payload.project.trim().to_string();
+    if project.is_empty() {
+        return;
+    }
+    let root = std::path::PathBuf::from(&project);
+    let task = IoTaskPool::get().spawn(async move {
+        let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {
+            return Vec::new();
+        };
+        let mut branches = Vec::with_capacity(holders.len());
+        for holder in holders {
+            let checkout = holder.checkout_path();
+            let label = holder.checkout_label();
+            branches.push(vmux_wire::space::ProjectBranch {
+                branch: holder.branch,
+                checkout,
+                label,
+                insertions: holder.change.insertions,
+                deletions: holder.change.deletions,
+            });
+        }
+        branches
+    });
+    commands.spawn(StartBranchRead {
+        webview,
+        project,
+        task,
+    });
+}
+
+fn drain_start_branch_reads(
+    mut reads: Query<(Entity, &mut StartBranchRead)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, mut read) in &mut reads {
+        let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if !browsers.can_emit_to(&read.webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            read.webview,
+            vmux_wire::command_bar::START_PROJECT_BRANCHES_EVENT,
+            &vmux_wire::command_bar::StartProjectBranches {
+                project: read.project.clone(),
+                branches,
+            },
+        ));
+    }
+}
+
+fn on_start_go_to_branch(
+    trigger: On<BinReceive<vmux_wire::command_bar::StartGoToBranch>>,
+    child_of: Query<&ChildOf>,
+    tab_query: Query<(), With<Tab>>,
+    mut tabs: Query<&mut Tab>,
+    mut commands: Commands,
+) {
+    let mut current = trigger.event().webview;
+    let tab = loop {
+        if tab_query.contains(current) {
+            break Some(current);
+        }
+        let Ok(parent) = child_of.get(current) else {
+            break None;
+        };
+        current = parent.parent();
+    };
+    let Some(tab) = tab else {
+        return;
+    };
+    let evt = &trigger.event().payload;
+    let checkout = evt.checkout.trim();
+    if !checkout.is_empty() {
+        let Ok(path) = std::path::PathBuf::from(checkout).canonicalize() else {
+            return;
+        };
+        ChosenProject { path }.apply(tab, &mut tabs, &mut commands);
+        return;
+    }
+    let Ok(root) = std::path::PathBuf::from(&evt.project).canonicalize() else {
+        return;
+    };
+    ChosenProject { path: root.clone() }.apply(tab, &mut tabs, &mut commands);
+    commands.entity(tab).insert(TabWorktree {
+        repo_root: root.to_string_lossy().into_owned(),
+        checkout_dir: String::new(),
+        branch: evt.branch.clone(),
+        base_ref: String::new(),
+    });
+}
+
+struct ChosenProject {
+    path: std::path::PathBuf,
+}
+
+impl ChosenProject {
+    fn apply(&self, tab_entity: Entity, tabs: &mut Query<&mut Tab>, commands: &mut Commands) {
+        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
+            return;
+        };
+        let dir = self.path.to_string_lossy().into_owned();
+        tab.startup_dir = Some(dir.clone());
+        if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+            && let Some(name) = self.path.file_name().and_then(|name| name.to_str())
+            && !name.is_empty()
+        {
+            tab.name = name.to_string();
+        }
+        commands
+            .entity(tab_entity)
+            .insert((
+                TabWorkspace { project_dir: dir },
+                vmux_layout::tab::TabDirDecided,
+            ))
+            .remove::<(
+                TabWorktree,
+                vmux_layout::worktree::TabWorktreeReady,
+                vmux_layout::tab::TabWorktreeUnavailable,
+            )>();
     }
 }
 
@@ -286,6 +417,7 @@ fn sync_live_start_pages(
     browsers: NonSend<Browsers>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
+    space_projects: vmux_space::SpaceProjects,
     mut commands: Commands,
 ) {
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
@@ -299,9 +431,6 @@ fn sync_live_start_pages(
         })
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
-    if git_changed {
-        *last_git = (cwd, git_info.clone());
-    }
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
@@ -337,6 +466,9 @@ fn sync_live_start_pages(
     if targets.is_empty() {
         return;
     }
+    if git_changed {
+        *last_git = (cwd.clone(), git_info.clone());
+    }
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -346,6 +478,8 @@ fn sync_live_start_pages(
         &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
+        space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        prompt_context.agent_models.agents.clone(),
         &locale,
     );
     for (e, focus_requested) in targets {
@@ -394,9 +528,21 @@ fn on_start_data_request(
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
+    space_projects: vmux_space::SpaceProjects,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
+    let cwd = prompt_context.cwd(tab_gather.active_tab.get());
+    let git_info = (!cwd.is_empty())
+        .then(|| {
+            repo_info.as_mut().and_then(|cache| {
+                cache
+                    .bypass_change_detection()
+                    .get(std::path::Path::new(&cwd))
+            })
+        })
+        .flatten();
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -405,7 +551,9 @@ fn on_start_data_request(
         &work_snapshot,
         &prompt_context,
         tab_gather.active_tab.get(),
-        None,
+        git_info.as_ref(),
+        space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        prompt_context.agent_models.agents.clone(),
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -434,6 +582,8 @@ fn build_start_payload(
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
+    projects: Vec<vmux_wire::space::ProjectRow>,
+    agent_models: Vec<vmux_wire::command_bar::AgentModels>,
     locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
@@ -466,6 +616,8 @@ fn build_start_payload(
         Some(OpenTarget::InPlace),
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
+    payload.prompt_context.projects = projects;
+    payload.agent_models = agent_models;
     payload
 }
 
@@ -531,6 +683,7 @@ mod tests {
         app.init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(capture_emit);

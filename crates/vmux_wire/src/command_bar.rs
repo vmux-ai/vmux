@@ -137,6 +137,8 @@ pub struct CommandBarOpenEvent {
     pub search_engines: Vec<SearchEngine>,
     #[serde(default)]
     pub prompt_context: CommandBarPromptContext,
+    #[serde(default)]
+    pub agent_models: Vec<AgentModels>,
     pub target: Option<crate::open_target::OpenTarget>,
     #[serde(default)]
     pub space_switch: bool,
@@ -163,6 +165,7 @@ pub struct CommandBarPromptContext {
     pub base_ref: String,
     pub uncommitted: u32,
     pub ahead: u32,
+    pub projects: Vec<crate::space::ProjectRow>,
 }
 
 #[derive(
@@ -330,6 +333,87 @@ pub enum CommandBarActionEvent {
 )]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
+}
+
+pub const START_PROJECT_BRANCHES_EVENT: &str = "start_project_branches";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartBranchesRequest {
+    pub project: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartProjectBranches {
+    pub project: String,
+    pub branches: Vec<crate::space::ProjectBranch>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartGoToBranch {
+    pub project: String,
+    pub branch: String,
+    #[serde(default)]
+    pub checkout: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentModels {
+    pub agent_key: String,
+    pub url: String,
+    pub selected: String,
+    pub models: Vec<crate::room::ModelOptionEntry>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartSelectModel {
+    pub agent_key: String,
+    pub model_id: String,
 }
 
 impl CommandBarActionEvent {

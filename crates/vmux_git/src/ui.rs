@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
@@ -145,7 +145,7 @@ pub fn GitBar(
 
     rsx! {
         div {
-            class: "flex h-8 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/10 px-4 font-sans text-xs text-muted-foreground",
+            class: "flex shrink-0 items-center gap-1.5 font-sans text-[11px] text-muted-foreground",
 
             span { class: "shrink-0 {status_dot_class(fs)}", "\u{25cf} {status_label(fs)}" }
 
@@ -293,7 +293,7 @@ pub fn DiffView(
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
     let mut lines = use_signal(Vec::<DiffLine>::new);
-    let mut expanded = use_signal(HashSet::<(usize, usize)>::new);
+    let mut expanded = use_signal(Vec::<(usize, usize)>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
     let mut requested_path = use_signal(String::new);
@@ -301,7 +301,7 @@ pub fn DiffView(
     let _vp = use_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
         markers.set(editor_diff_markers(&p.lines));
         lines.set(p.lines);
-        expanded.set(HashSet::new());
+        expanded.set(Vec::new());
         loading.set(false);
         error.set(String::new());
     });
@@ -322,7 +322,7 @@ pub fn DiffView(
             error.set(String::new());
             if path_changed {
                 lines.set(Vec::new());
-                expanded.set(HashSet::new());
+                expanded.set(Vec::new());
             }
             let _ = send(&GitDiffRequest {
                 path: p,
@@ -416,6 +416,14 @@ pub fn DiffView(
                     },
                     DiffViewRow::Gap { start, end } => {
                         let hidden = end - start;
+                        let upward = start == 0;
+                        let reveal = if hidden <= crate::view::GAP_REVEAL_CHUNK {
+                            (start, end)
+                        } else if upward {
+                            (end - crate::view::GAP_REVEAL_CHUNK, end)
+                        } else {
+                            (start, start + crate::view::GAP_REVEAL_CHUNK)
+                        };
                         rsx! {
                             div {
                                 key: "gap-{start}-{end}",
@@ -427,10 +435,10 @@ pub fn DiffView(
                                         &[("count", TranslationValue::Number(hidden as i64))],
                                     ),
                                     onclick: move |_| {
-                                        expanded.write().insert((start, end));
+                                        expanded.write().push(reveal);
                                     },
                                     svg {
-                                        class: "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5",
+                                        class: if upward { "h-3.5 w-3.5 shrink-0 rotate-180 transition-transform group-hover:-translate-y-0.5" } else { "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5" },
                                         view_box: "0 0 24 24",
                                         fill: "none",
                                         stroke: "currentColor",

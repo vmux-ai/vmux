@@ -3,14 +3,14 @@ use bevy::prelude::*;
 use std::time::Instant;
 use vmux_command::WriteAppCommands;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
-use vmux_setting::{AppSettings, load_settings};
+use vmux_setting::{AppSettings, SettingsLoadSet};
 
 pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::key_claim::KeyClaimPlugin)
-            .add_systems(Startup, init_shortcuts.after(load_settings))
+            .add_systems(Startup, init_shortcuts.after(SettingsLoadSet))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
 
         #[cfg(target_os = "macos")]
@@ -192,6 +192,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),

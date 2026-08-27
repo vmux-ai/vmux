@@ -1,6 +1,6 @@
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
-use self::options::{AccessPill, ChatEffortMenu, ChatModelMenu, ChatModelPill};
-use self::workspace::WorkspacePills;
+use self::options::{ChatComposerMenus, ChatModelMenu};
+use self::workspace::WorkspaceBadges;
 use super::agent::StatusDot;
 use super::approval::ChoiceList;
 use super::keys::ChatKeys;
@@ -10,6 +10,7 @@ use crate::event::{ChatPasteMedia, ChatPickFiles};
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::PromptComposer;
+use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -30,6 +31,7 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 if chat.model_menu_open() {
                     ChatModelMenu { chat }
                 }
+                ChatComposerMenus { chat }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
                 ChatComposer { chat }
@@ -81,19 +83,23 @@ fn ChatComposer(chat: Chat) -> Element {
 #[component]
 fn ComposerFooter(chat: Chat) -> Element {
     rsx! {
-        div { class: "flex min-w-0 items-center justify-between gap-1",
-            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
-                ChatModelPill { chat }
-                ChatEffortMenu { chat }
-                AccessPill { chat }
-                WorkspacePills { chat }
-            }
-            ComposerStatus {
-                status: chat.status(),
-                active_subagents: (chat.activity_counts)().0,
-                active_tasks: (chat.activity_counts)().1,
-                queued_count: chat.queue.queued.read().len(),
-            }
+        ComposerBar {
+            menu: chat.menu,
+            model: chat.model_chip(),
+            effort: chat.effort_chip(),
+            project: chat.project_chip(),
+            branch: chat.branch_chip(),
+            badges: Some(rsx! {
+                WorkspaceBadges { chat }
+            }),
+            status: Some(rsx! {
+                ComposerStatus {
+                    status: chat.status(),
+                    active_subagents: (chat.activity_counts)().0,
+                    active_tasks: (chat.activity_counts)().1,
+                    queued_count: chat.queue.queued.read().len(),
+                }
+            }),
         }
     }
 }
@@ -147,5 +153,5 @@ pub fn ComposerStatus(
 }
 
 mod menu;
-pub mod options;
+mod options;
 mod workspace;

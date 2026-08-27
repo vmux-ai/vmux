@@ -1098,6 +1098,7 @@ fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
     modal_q: Query<Entity, With<CommandBar>>,
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
+    projects: Res<crate::snapshot::CommandBarProjectRoots>,
     browsers: NonSend<Browsers>,
     mut index: Local<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
@@ -1111,8 +1112,9 @@ fn on_path_complete_request(
     }
 
     let mut completions = None;
-    if let Some(root) = ProjectQuery::root_for(query, workspace.project_root.as_deref()) {
-        completions = index.matches(&root, query);
+    let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
+    if !roots.is_empty() {
+        completions = index.matches(&roots, query);
     }
     let completions = completions.unwrap_or_else(|| complete_path(query));
     let payload = PathCompleteResponse { completions };
@@ -1127,16 +1129,27 @@ fn on_path_complete_request(
 struct ProjectQuery;
 
 impl ProjectQuery {
-    fn root_for(query: &str, project_root: Option<&str>) -> Option<std::path::PathBuf> {
+    fn roots_for(
+        query: &str,
+        project_root: Option<&str>,
+        registered: &[String],
+    ) -> Vec<std::path::PathBuf> {
         let query = query.trim();
         if query.is_empty() || Self::names_a_location(query) {
-            return None;
+            return Vec::new();
         }
-        let root = std::path::PathBuf::from(project_root?.trim());
-        if !root.is_dir() {
-            return None;
+        let mut roots = Vec::new();
+        for candidate in project_root
+            .into_iter()
+            .chain(registered.iter().map(String::as_str))
+        {
+            let root = std::path::PathBuf::from(candidate.trim());
+            if roots.contains(&root) || !root.is_dir() {
+                continue;
+            }
+            roots.push(root);
         }
-        Some(root)
+        roots
     }
 
     fn names_a_location(query: &str) -> bool {

@@ -55,6 +55,27 @@ impl SideSheetSectionsExpanded {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SideSheetSections<'w, 's> {
+    spaces: Query<'w, 's, (), With<super::space::Space>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    expanded: Query<'w, 's, &'static SideSheetSectionsExpanded, With<super::space::Space>>,
+}
+
+impl SideSheetSections<'_, '_> {
+    pub fn space_of(&self, entity: Entity) -> Option<Entity> {
+        super::space::space_of(entity, &self.child_of, &self.spaces)
+    }
+
+    pub fn under(&self, entity: Entity) -> SideSheetSectionsExpanded {
+        let Some(space) = self.space_of(entity) else {
+            return SideSheetSectionsExpanded::default();
+        };
+
+        self.expanded.get(space).copied().unwrap_or_default()
+    }
+}
+
 #[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::side_sheet"]

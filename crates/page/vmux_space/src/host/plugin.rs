@@ -9,7 +9,8 @@ use vmux_layout::stack::Stack;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 use crate::event::{
-    SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
+    ProjectCommandEvent, SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow,
+    SpacesListEvent,
 };
 use crate::spaces::{ActiveSpace, Spaces};
 
@@ -57,9 +58,14 @@ impl Plugin for SpacePlugin {
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
-                BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&["spaces", "layout"]),
+                BinEventEmitterPlugin::<(
+                    SpaceCommandEvent,
+                    ProjectCommandEvent,
+                    vmux_core::event::ProjectTreeToggle,
+                )>::for_hosts(&["spaces", "layout"]),
             ))
             .add_observer(on_space_command)
+            .add_observer(on_project_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
@@ -90,7 +96,7 @@ fn update_effective_startup_url(
         return;
     };
     if settings.is_changed() || active.is_changed() || effective.0.is_empty() {
-        effective.0 = vmux_setting::resolve_startup_url(&settings, &active.record.id);
+        effective.0 = settings.startup_url(&active.record.id);
     }
 }
 
@@ -135,7 +141,7 @@ fn update_effective_startup_dir(
     }
     let path = settings
         .as_deref()
-        .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id.0));
+        .and_then(|settings| settings.startup_dir(&id.0));
     let next = (entity, path);
     if effective.0.as_ref() != Some(&next) {
         effective.0 = Some(next);
@@ -207,7 +213,7 @@ fn space_rows_from_world(
             .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
             .unwrap_or(0) as u32;
         let startup_dir = settings
-            .and_then(|s| vmux_setting::resolve_startup_dir(s, &sid.0))
+            .and_then(|s| s.startup_dir(&sid.0))
             .map(|path| display_dir(&path))
             .unwrap_or_default();
         rows.push((
@@ -284,6 +290,35 @@ fn broadcast_spaces_to_views(
             ));
         }
         *last_body = Some(payload);
+    }
+}
+
+fn on_project_command(
+    trigger: On<BinReceive<ProjectCommandEvent>>,
+    active: Option<Res<ActiveSpace>>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
+) {
+    let evt = &trigger.event().payload;
+    let (Some(active), Some(mut settings)) = (active, settings) else {
+        return;
+    };
+    let Some(path) = evt.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let space_id = active.record.id.clone();
+    let changed = match evt.command.as_str() {
+        "activate" => settings
+            .bypass_change_detection()
+            .activate_space_project(&space_id, path),
+        "forget" => settings
+            .bypass_change_detection()
+            .forget_space_project(&space_id, path),
+        _ => false,
+    };
+    if changed {
+        settings.set_changed();
+        saves.write(vmux_setting::SettingsSaveRequest);
     }
 }
 
@@ -530,7 +565,7 @@ fn on_space_command(
             active_id.0 = Some(id.clone());
             let startup_dir = settings
                 .as_deref()
-                .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
+                .and_then(|settings| settings.startup_dir(&id));
             layout_requests.write(TabLayoutSpawnRequest {
                 space,
                 primary_window: *primary_window,
@@ -596,7 +631,7 @@ fn handle_open_in_new_space(
         active_id.0 = Some(id.clone());
         let startup_dir = settings
             .as_deref()
-            .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
+            .and_then(|settings| settings.startup_dir(&id));
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
@@ -667,6 +702,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            projects: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
@@ -706,6 +742,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: None,
+                ..Default::default()
             },
         );
 
@@ -735,6 +772,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(first.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -794,6 +832,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(active_dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         settings.spaces.insert(
@@ -801,6 +840,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(inactive_dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -828,6 +868,131 @@ mod tests {
                 .0,
             Some((active, Some(active_dir.path().to_path_buf())))
         );
+    }
+
+    fn project_command_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "work".into(),
+            vmux_setting::SpaceOverrides {
+                projects,
+                active_project: Some(active.to_string()),
+                ..Default::default()
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_setting::SettingsSaveRequest>()
+            .insert_resource(settings)
+            .insert_resource(ActiveSpace {
+                record: SpaceRecord {
+                    id: "work".into(),
+                    name: "Work".into(),
+                    profile: bootstrap_profile_name(),
+                },
+            })
+            .add_observer(on_project_command);
+        app
+    }
+
+    fn run_project_command(app: &mut App, command: &str, path: &str) {
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ProjectCommandEvent {
+                command: command.into(),
+                path: Some(path.into()),
+            },
+        });
+        app.update();
+    }
+
+    fn space_state(app: &App) -> (Vec<String>, Option<String>) {
+        let space = app
+            .world()
+            .resource::<AppSettings>()
+            .space("work")
+            .expect("space");
+        (
+            space.projects.iter().map(|p| p.path.clone()).collect(),
+            space.active_project.clone(),
+        )
+    }
+
+    #[test]
+    fn activating_a_project_moves_only_the_space_default() {
+        let mut app = project_command_app(
+            "/repo/alpha",
+            vec![
+                vmux_setting::SpaceProject::at("/repo/alpha"),
+                vmux_setting::SpaceProject::at("/repo/beta"),
+            ],
+        );
+        let tabs: Vec<Entity> = ["/repo/alpha", "/repo/beta"]
+            .iter()
+            .map(|dir| {
+                app.world_mut()
+                    .spawn(vmux_layout::tab::Tab {
+                        startup_dir: Some((*dir).to_string()),
+                        ..Default::default()
+                    })
+                    .id()
+            })
+            .collect();
+        let before: Vec<Option<String>> = tabs
+            .iter()
+            .map(|tab| {
+                app.world()
+                    .get::<vmux_layout::tab::Tab>(*tab)
+                    .and_then(|t| t.startup_dir.clone())
+            })
+            .collect();
+
+        run_project_command(&mut app, "activate", "/repo/beta");
+
+        assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
+        let after: Vec<Option<String>> = tabs
+            .iter()
+            .map(|tab| {
+                app.world()
+                    .get::<vmux_layout::tab::Tab>(*tab)
+                    .and_then(|t| t.startup_dir.clone())
+            })
+            .collect();
+        assert_eq!(
+            before, after,
+            "choosing the space's default must leave every open tab where it was"
+        );
+    }
+
+    #[test]
+    fn forgetting_the_active_project_falls_back_to_one_that_remains() {
+        let mut app = project_command_app(
+            "/repo/beta",
+            vec![
+                vmux_setting::SpaceProject::at("/repo/alpha"),
+                vmux_setting::SpaceProject::at("/repo/beta"),
+            ],
+        );
+
+        run_project_command(&mut app, "forget", "/repo/beta");
+
+        assert_eq!(
+            space_state(&app),
+            (vec!["/repo/alpha".to_string()], Some("/repo/alpha".into()))
+        );
+    }
+
+    #[test]
+    fn activating_a_project_the_space_does_not_hold_is_ignored() {
+        let mut app = project_command_app(
+            "/repo/alpha",
+            vec![vmux_setting::SpaceProject::at("/repo/alpha")],
+        );
+
+        run_project_command(&mut app, "activate", "/repo/elsewhere");
+
+        assert_eq!(space_state(&app).1.as_deref(), Some("/repo/alpha"));
     }
 
     #[test]
@@ -915,6 +1080,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
@@ -955,6 +1121,7 @@ mod tests {
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(primary_path.to_string_lossy().into_owned()),
+                ..Default::default()
             },
         );
         let mut app = App::new();
