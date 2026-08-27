@@ -151,12 +151,24 @@ pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldR
 #[derive(Resource)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
+    starting: HashMap<ServerKey, StartingServer>,
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
     outbox: LspOutbox,
     events: crossbeam_channel::Sender<ServerEvent>,
     inflight: Vec<InFlight>,
     offered_actions: HashMap<Entity, Vec<lsp_types::CodeActionOrCommand>>,
+}
+
+struct StartingServer {
+    command: String,
+    task: bevy::tasks::Task<std::io::Result<ServerClient>>,
+}
+
+enum ServerReadiness {
+    Ready(ServerKey),
+    Starting,
+    Unavailable,
 }
 
 fn uri_for(path: &Path) -> Option<String> {
@@ -189,6 +201,7 @@ impl LspManager {
     pub(crate) fn new(outbox: LspOutbox, events: crossbeam_channel::Sender<ServerEvent>) -> Self {
         Self {
             servers: HashMap::new(),
+            starting: HashMap::new(),
             open_docs: HashMap::new(),
             failed: HashSet::new(),
             outbox,
@@ -245,53 +258,80 @@ impl LspManager {
         &mut self,
         root: &Path,
         spec: &crate::lsp::registry::ServerSpec,
-    ) -> Option<ServerKey> {
+    ) -> ServerReadiness {
         let key = server_key(root, spec);
         if self.servers.contains_key(&key) {
-            return Some(key);
+            return ServerReadiness::Ready(key);
         }
         if self.failed.contains(&key) {
-            return None;
+            return ServerReadiness::Unavailable;
         }
-        match ServerClient::spawn(spec, root, self.outbox.clone(), self.events.clone()) {
-            Ok(client) => {
-                self.servers.insert(key.clone(), client);
-                Some(key)
-            }
-            Err(e) => {
-                tracing::warn!(server = %spec.command, "lsp spawn/init failed: {e}");
-                self.failed.insert(key);
-                None
+        if self.starting.contains_key(&key) {
+            return ServerReadiness::Starting;
+        }
+        let spec = spec.clone();
+        let root = root.to_path_buf();
+        let outbox = self.outbox.clone();
+        let events = self.events.clone();
+        let command = spec.command.clone();
+        let task = bevy::tasks::IoTaskPool::get()
+            .spawn(async move { ServerClient::spawn(&spec, &root, outbox, events) });
+        self.starting.insert(key, StartingServer { command, task });
+        ServerReadiness::Starting
+    }
+
+    fn settle_starting_servers(&mut self) {
+        use bevy::tasks::futures_lite::future;
+
+        let mut settled = Vec::new();
+        for (key, starting) in &mut self.starting {
+            let Some(result) = future::block_on(future::poll_once(&mut starting.task)) else {
+                continue;
+            };
+            settled.push((key.clone(), starting.command.clone(), result));
+        }
+        for (key, command, result) in settled {
+            self.starting.remove(&key);
+            match result {
+                Ok(client) => {
+                    self.servers.insert(key, client);
+                }
+                Err(error) => {
+                    tracing::warn!(server = %command, "lsp spawn/init failed: {error}");
+                    self.failed.insert(key);
+                }
             }
         }
     }
 
-    pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) {
+    pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) -> bool {
         if let Some(doc) = self.open_docs.get_mut(path) {
             doc.refs += 1;
-            return;
+            return true;
         }
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-            return;
+            return true;
         };
         let Some(mut spec) = resolve_spec(ext, overrides) else {
-            return;
+            return true;
         };
         match store::resolved_command(&store::default_root(), &spec.command) {
             store::Resolution::Managed(p) => spec.command = p.to_string_lossy().into_owned(),
             store::Resolution::OnPath => {}
             store::Resolution::Missing => {
                 tracing::info!(server = %spec.command, "lsp server not installed/on PATH; skipping {ext}");
-                return;
+                return true;
             }
         }
         let dir = path.parent().unwrap_or(path);
         let root = workspace_root(dir, &spec.root_markers);
-        let Some(key) = self.ensure_server(&root, &spec) else {
-            return;
+        let key = match self.ensure_server(&root, &spec) {
+            ServerReadiness::Ready(key) => key,
+            ServerReadiness::Starting => return false,
+            ServerReadiness::Unavailable => return true,
         };
         let (Some(uri), Some(text)) = (uri_for(path), read_text(path)) else {
-            return;
+            return true;
         };
         if let Some(client) = self.servers.get(&key) {
             client.did_open(&uri, &spec.language_id, 1, &text);
@@ -304,6 +344,7 @@ impl LspManager {
                 },
             );
         }
+        true
     }
 
     pub fn change(&mut self, path: &Path) {
@@ -927,9 +968,12 @@ fn lsp_open_documents(
     mut manager: ResMut<LspManager>,
     mut commands: Commands,
 ) {
+    manager.settle_starting_servers();
     let overrides = server_overrides(&settings);
     for (entity, fv, _edit) in &q {
-        manager.open(&fv.path, &overrides);
+        if !manager.open(&fv.path, &overrides) {
+            continue;
+        }
         manager.folding_range(entity, &fv.path);
         manager.semantic_tokens(entity, &fv.path);
         if !crate::explorer_model::is_markdown(&fv.path) {
