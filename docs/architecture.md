@@ -439,11 +439,8 @@ graph TB
     N2 --> L3[root webview]
 ```
 
-Both neighbours exist, so a pan on the tab bar translates two sibling views. Only the seated tab
-and its neighbours are kept: the cost of this design is a WebKit process per screen.
-
-The capsule names one tab, not all of them. Ten tabs across a phone leaves each one a letter
-wide.
+Only the seated tab and its neighbours keep a column: the cost of this design is a WebKit
+process per screen.
 
 The tab bar hangs off the **window**. A sheet is presented above the root controller, so a bar
 inside it would be buried.
@@ -467,13 +464,8 @@ graph LR
     S1["tab 1<br/>snapshot"] --- S2["tab 2<br/>snapshot"] --- L["tab 3<br/>live"] --- S4["tab 4<br/>snapshot"]
 ```
 
-A card is a snapshot because only three tabs have a column to draw. Each is taken while its tab
-is still on screen — UIKit snapshots a hidden view to an empty one, so a capture after eviction
-would be blank.
-
-Position and tilt are one function of one value, the card's distance from the centre, applied to
-every card whenever the row changes. A card that is in the row but never positioned is a stale
-card in the middle of the deck.
+Cards are snapshots because only three tabs have a column. Each is taken while its tab is still
+on screen: UIKit snapshots a hidden view to an empty one.
 
 ### The navigator's names are Expo Router's
 
