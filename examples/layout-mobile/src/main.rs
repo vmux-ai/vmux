@@ -146,6 +146,18 @@ fn Body(near: String, far: String, kind: String) -> Element {
                 div { class: "mt-2.5 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em]",
                     "{title}"
                 }
+                div { class: "mt-4 flex h-[3px] gap-[3px]",
+                    for step in 0..depth {
+                        div {
+                            key: "{step}",
+                            class: if sheet && step == depth - 1 {
+                                "min-w-px flex-1 rounded-sm bg-[#ffcf6b]"
+                            } else {
+                                "min-w-px flex-1 rounded-sm bg-white/85"
+                            },
+                        }
+                    }
+                }
                 div { class: "mt-2.5 truncate text-[13px] text-white/55", "{trail}" }
 
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
@@ -171,18 +183,6 @@ fn Body(near: String, far: String, kind: String) -> Element {
                     }
                 }
 
-                div { class: "mt-[22px] flex h-[3px] gap-[3px]",
-                    for step in 0..depth {
-                        div {
-                            key: "{step}",
-                            class: if sheet && step == depth - 1 {
-                                "min-w-px flex-1 rounded-sm bg-[#ffcf6b]"
-                            } else {
-                                "min-w-px flex-1 rounded-sm bg-white/85"
-                            },
-                        }
-                    }
-                }
             }
         }
     }
