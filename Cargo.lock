@@ -9660,6 +9660,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "dioxus",
+ "tracing",
  "vmux_mobile",
  "vmux_native",
 ]

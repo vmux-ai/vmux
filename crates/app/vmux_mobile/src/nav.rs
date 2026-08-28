@@ -32,6 +32,21 @@ pub struct Sheet;
 #[derive(Component)]
 pub struct Shows<S: Route>(pub S);
 
+pub struct Seat<S: Route>(pub S);
+
+impl<S: Route> Clone for Seat<S> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<S: Route> Seat<S> {
+    fn taken(screen: &S) -> vmux_native::Instance {
+        let seated = Self(screen.clone());
+        vmux_native::Instance::of(move |scope| scope.provide(seated))
+    }
+}
+
 #[derive(Message)]
 pub struct Report<S: Route> {
     pub tabs: Vec<(String, S)>,
@@ -316,6 +331,7 @@ impl Nav {
                         title: screen.title(),
                         action: draws.action,
                         closable: false,
+                        seat: Seat::taken(&screen),
                     },
                 ));
             }
@@ -480,6 +496,7 @@ impl Nav {
                 title: screen.title(),
                 action: draws.action,
                 closable: false,
+                seat: Seat::taken(&screen),
             });
         }
         levels
@@ -521,6 +538,7 @@ impl Nav {
                 title: screen.title(),
                 action: draws.action,
                 closable: false,
+                seat: Seat::taken(screen),
             });
         }
         for Present(screen) in presents.read() {
@@ -534,6 +552,7 @@ impl Nav {
                 title: screen.title(),
                 action: draws.action,
                 closable: true,
+                seat: Seat::taken(screen),
             });
         }
     }
