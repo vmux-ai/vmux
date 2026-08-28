@@ -18,6 +18,12 @@ pub const SIDEBAR_TREE_CHEVRON_OPEN: &str =
 pub const SIDEBAR_TREE_CHEVRON_CLOSED: &str =
     "h-3 w-3 shrink-0 rotate-0 transition-transform duration-200 ease-out";
 
+pub const SIDEBAR_CARD_CHEVRON_OPEN: &str =
+    "h-3.5 w-3.5 shrink-0 pointer-events-none rotate-90 transition-transform duration-200 ease-out";
+
+pub const SIDEBAR_CARD_CHEVRON_CLOSED: &str =
+    "h-3.5 w-3.5 shrink-0 pointer-events-none rotate-0 transition-transform duration-200 ease-out";
+
 pub const SIDEBAR_TREE_CHILDREN_OPEN: &str = "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out";
 
 pub const SIDEBAR_TREE_CHILDREN_CLOSED: &str =

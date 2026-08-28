@@ -30,8 +30,9 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::tree_row::{
-    SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren, SidebarTreeRow,
-    SidebarTreeRowGroup,
+    SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_CHEVRON_CLOSED,
+    SIDEBAR_TREE_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren,
+    SidebarTreeRow, SidebarTreeRowGroup,
 };
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
@@ -714,8 +715,9 @@ fn ProjectsCard(
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "projects", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1089,8 +1091,9 @@ fn BookmarksSection(
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "bookmarks", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1304,8 +1307,9 @@ fn KnowledgeCard(
                                 "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                             },
                             onclick: move |_| set_side_sheet_section(pane_id, "knowledge", !expanded),
-                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                                path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                            Icon {
+                                class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                                path { d: "m9 18 6-6-6-6" }
                             }
                         }
                     }
@@ -1478,8 +1482,9 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "tools", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1581,8 +1586,9 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "pane", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -3295,8 +3301,9 @@ fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
                 r#type: "button",
                 class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                 onclick: move |_| expanded.set(!expanded()),
-                Icon { class: "h-3 w-3 shrink-0",
-                    path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                Icon {
+                    class: if expanded() { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                    path { d: "m9 18 6-6-6-6" }
                 }
                 span { class: "min-w-0 flex-1 truncate text-ui font-medium", {tools_provider_title(category.provider)} }
                 if updates > 0 {
