@@ -2413,7 +2413,7 @@ fn run_commands(
 ) -> bool {
     let top_before = vp.top_row;
     let mut text_changed = false;
-    let mut sel_or_mode = false;
+    let mut cursor_stale = false;
     let mut dirty_changed = false;
     let mut fold_changed = false;
     for cmd in cmds {
@@ -2424,7 +2424,7 @@ fn run_commands(
             vp.top_row = clamp_top_line(target, visible, vp.rows);
             edit.core.top_row = vp.top_row;
             if ScrolledCursor::follow(edit, vp) {
-                sel_or_mode = true;
+                cursor_stale = true;
             }
             if vp.top_row != was && browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -2545,6 +2545,7 @@ fn run_commands(
                     vmux_core::event::FILE_KEY_EVENT,
                     &vmux_core::event::FileKey::FindClose,
                 ));
+                cursor_stale = true;
             }
             EditCommand::OpenFind { forward } => {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -2609,7 +2610,7 @@ fn run_commands(
                 let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
                 edit.hl.invalidate_from(l.saturating_sub(1));
             }
-            sel_or_mode = true;
+            cursor_stale = true;
             dirty_changed = true;
             continue;
         }
@@ -2629,7 +2630,7 @@ fn run_commands(
             let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
             edit.hl.invalidate_from(l.saturating_sub(1));
         }
-        sel_or_mode |= out.sel_changed || out.mode_changed;
+        cursor_stale |= out.sel_changed || out.mode_changed;
         dirty_changed |= out.dirty_changed;
         if let Some(value) = out.yank
             && let Some(cb) = clipboard.0.as_mut()
@@ -2659,7 +2660,7 @@ fn run_commands(
     if text_changed || fold_changed || DriftedWindow::of(top_before, &vpc).left_the_band() {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
-    if text_changed || sel_or_mode || fold_changed {
+    if text_changed || cursor_stale || fold_changed {
         emit_cursor(entity, edit, keymap, &vpc, browsers, commands);
     }
     if fold_changed {
