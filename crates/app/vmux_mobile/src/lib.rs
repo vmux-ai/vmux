@@ -5,6 +5,7 @@ mod deep_link;
 mod logs;
 pub mod nav;
 pub mod navigator;
+pub use navigator::{Router, Screen, Stack, Tabs, use_route, use_router};
 mod page_host;
 mod pairing;
 mod plugins;
