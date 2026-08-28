@@ -51,7 +51,7 @@ impl Parse for Setting {
         let name: syn::Ident = input.parse()?;
         match name.to_string().as_str() {
             "owning_subtree" => Ok(Self::OwningSubtree),
-            "painted" => {
+            "background" => {
                 input.parse::<Token![=]>()?;
                 Ok(Self::Painted(Box::new(input.parse()?)))
             }
@@ -61,7 +61,7 @@ impl Parse for Setting {
             }
             _ => Err(Error::new_spanned(
                 name,
-                "expected `painted`, `served_from` or `owning_subtree`",
+                "expected `background`, `served_from` or `owning_subtree`",
             )),
         }
     }
@@ -85,7 +85,7 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
         page = quote! { #page.served_from(#url) };
     }
     if let Some(colour) = &args.painted {
-        page = quote! { #page.painted(#colour) };
+        page = quote! { #page.background(#colour) };
     }
     if args.owning_subtree {
         page = quote! { #page.owning_subtree() };
