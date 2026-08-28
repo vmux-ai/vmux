@@ -2688,6 +2688,9 @@ fn run_commands(
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
     }
+    if dirty_changed {
+        commands.entity(entity).insert(OpenEditorsDirty);
+    }
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
