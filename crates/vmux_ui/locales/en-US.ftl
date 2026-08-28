@@ -641,6 +641,7 @@ editor-find-no-results = No results
 editor-find-previous = Previous match
 editor-find-next = Next match
 editor-find-close = Close find
+editor-find-regex = Use regular expression
 editor-rendered-markdown = Rendered Markdown with live editing
 editor-note = Note
 editor-source-editor = Source editor

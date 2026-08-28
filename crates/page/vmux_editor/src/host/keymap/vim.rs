@@ -701,8 +701,9 @@ impl VimKeymap {
                 vec![]
             }
             "/" | "?" => {
-                self.enter_ex(key.chars().next().unwrap());
-                vec![]
+                vec![EditCommand::OpenFind {
+                    forward: key == "/",
+                }]
             }
             "Escape" => {
                 self.reset();
@@ -976,15 +977,7 @@ impl VimKeymap {
                     return vec![];
                 };
                 self.mode = self.mode_before_ex;
-                if prompt == '/' || prompt == '?' {
-                    if body.is_empty() {
-                        return vec![];
-                    }
-                    return vec![EditCommand::SetSearch {
-                        pattern: body,
-                        forward: prompt == '/',
-                    }];
-                }
+                let _ = prompt;
                 self.run_ex(&body)
             }
             "Escape" => {
@@ -2237,28 +2230,30 @@ mod tests {
     }
 
     #[test]
-    fn slash_starts_a_forward_search_and_question_a_backward_one() {
+    fn slash_and_question_hand_the_search_to_the_find_bar() {
         let mut km = VimKeymap::default();
         assert_eq!(
-            run(&mut km, &["/", "f", "o", "o", "Enter"]),
-            vec![EditCommand::SetSearch {
-                pattern: "foo".into(),
-                forward: true
-            }]
+            run(&mut km, &["/"]),
+            vec![EditCommand::OpenFind { forward: true }]
         );
         assert_eq!(
-            run(&mut km, &["?", "b", "a", "r", "Enter"]),
-            vec![EditCommand::SetSearch {
-                pattern: "bar".into(),
-                forward: false
-            }]
+            km.mode(),
+            EditMode::Normal,
+            "the bar owns the text, so the keymap must not swallow the keys that follow"
+        );
+        assert_eq!(km.command_line(), None);
+        assert_eq!(
+            run(&mut km, &["?"]),
+            vec![EditCommand::OpenFind { forward: false }]
         );
     }
 
     #[test]
     fn backspacing_an_empty_prompt_leaves_command_line_mode() {
         let mut km = VimKeymap::default();
-        run(&mut km, &["/", "a", "Backspace"]);
+        run(&mut km, &[":", "a"]);
+        assert_eq!(km.mode(), EditMode::CommandLine);
+        run(&mut km, &["Backspace"]);
         assert_eq!(km.mode(), EditMode::Normal);
     }
 

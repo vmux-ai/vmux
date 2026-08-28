@@ -628,6 +628,7 @@ editor-find-no-results = 无结果
 editor-find-previous = 上一个匹配项
 editor-find-next = 下一个匹配项
 editor-find-close = 关闭查找
+editor-find-regex = 使用正则表达式
 editor-rendered-markdown = 已渲染 Markdown，可实时编辑
 editor-note = 备注
 editor-source-editor = 源码编辑器

@@ -46,7 +46,8 @@ impl FileKeys {
             FileKey::PanelPrevious => self.move_panel(MenuDirection::Previous),
             FileKey::PanelChoose => self.choose(),
             FileKey::PanelDismiss => self.dismiss(),
-            FileKey::Find => self.page.open_find(),
+            FileKey::Find { forward } => self.page.open_find(forward),
+            FileKey::FindClose => self.page.close_find(),
         }
     }
 
@@ -165,6 +166,7 @@ pub struct FilePage {
     pub reference_selection: Signal<usize>,
     pub references: Signal<Vec<RefItem>>,
     pub find_open: Signal<bool>,
+    pub find_forward: Signal<bool>,
 }
 
 impl FilePage {
@@ -193,8 +195,15 @@ impl FilePage {
         self.explorer.reveal_current(self.mode);
     }
 
-    fn open_find(&self) {
+    fn close_find(&self) {
         let mut open = self.find_open;
+        open.set(false);
+    }
+
+    fn open_find(&self, forward: bool) {
+        let mut open = self.find_open;
+        let mut direction = self.find_forward;
+        direction.set(forward);
         open.set(true);
         spawn(async move {
             sleep_ms(0).await;

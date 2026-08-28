@@ -132,6 +132,7 @@ enum BrowserViewCommand {
     Print,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, McpTool)]
 enum BrowserBarCommand {
     #[menu(id = "browser_open_command_bar", label = "Command Bar")]
@@ -144,8 +145,6 @@ enum BrowserBarCommand {
     OpenCommands,
     #[menu(id = "browser_open_history", label = "History")]
     OpenHistory,
-    #[menu(id = "browser_find", label = "Find")]
-    Find,
 }
 
 #[derive(Debug, McpTool)]

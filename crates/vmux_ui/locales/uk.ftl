@@ -628,6 +628,7 @@ editor-find-no-results = Немає збігів
 editor-find-previous = Попередній збіг
 editor-find-next = Наступний збіг
 editor-find-close = Закрити пошук
+editor-find-regex = Використовувати регулярний вираз
 editor-rendered-markdown = Відтворений Markdown із живим редагуванням
 editor-note = Нотатка
 editor-source-editor = Редактор коду

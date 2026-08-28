@@ -217,6 +217,9 @@ pub enum EditCommand {
     SearchWord {
         forward: bool,
     },
+    OpenFind {
+        forward: bool,
+    },
     ClearSearchHighlight,
     Substitute {
         range: crate::edit::ex::ExRange,

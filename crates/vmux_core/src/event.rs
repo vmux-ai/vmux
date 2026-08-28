@@ -1997,7 +1997,8 @@ pub enum FileKey {
     PanelPrevious,
     PanelChoose,
     PanelDismiss,
-    Find,
+    Find { forward: bool },
+    FindClose,
 }
 
 #[derive(
@@ -2099,6 +2100,8 @@ pub struct FileFindRequest {
     pub step: bool,
     pub reverse: bool,
     pub done: bool,
+    pub regex: bool,
+    pub forward: bool,
 }
 
 #[derive(

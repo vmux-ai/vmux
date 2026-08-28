@@ -628,6 +628,7 @@ editor-find-no-results = Nessun risultato
 editor-find-previous = Corrispondenza precedente
 editor-find-next = Corrispondenza successiva
 editor-find-close = Chiudi ricerca
+editor-find-regex = Usa espressione regolare
 editor-rendered-markdown = Markdown renderizzato con modifica live
 editor-note = Nota
 editor-source-editor = Editor sorgente

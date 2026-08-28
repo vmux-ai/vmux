@@ -628,6 +628,7 @@ editor-find-no-results = Geen resultaten
 editor-find-previous = Vorige overeenkomst
 editor-find-next = Volgende overeenkomst
 editor-find-close = Zoeken sluiten
+editor-find-regex = Reguliere expressie gebruiken
 editor-rendered-markdown = Gerenderde Markdown met live bewerking
 editor-note = Notitie
 editor-source-editor = Broncode-editor

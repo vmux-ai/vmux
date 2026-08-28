@@ -628,6 +628,7 @@ editor-find-no-results = 無結果
 editor-find-previous = 上一個相符項
 editor-find-next = 下一個相符項
 editor-find-close = 關閉尋找
+editor-find-regex = 使用正規表示式
 editor-rendered-markdown = 已轉譯的 Markdown，可即時編輯
 editor-note = 備註
 editor-source-editor = 原始碼編輯器

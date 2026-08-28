@@ -103,6 +103,7 @@ pub fn Page() -> Element {
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
+    let find_forward = use_signal(|| true);
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
@@ -165,6 +166,7 @@ pub fn Page() -> Element {
         reference_selection: refs_sel,
         references: refs,
         find_open,
+        find_forward,
     };
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
@@ -907,6 +909,8 @@ pub fn Page() -> Element {
                     FindBar {
                         query: find_query,
                         open: find_open,
+                        forward: find_forward,
+                        vim: keymap() == vmux_core::KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
                     }
@@ -2967,9 +2971,17 @@ fn ExplorerSidebar(
 }
 
 #[component]
-fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) -> Element {
+fn FindBar(
+    query: Signal<String>,
+    open: Signal<bool>,
+    forward: Signal<bool>,
+    vim: bool,
+    total: u32,
+    index: u32,
+) -> Element {
     let mut query = query;
     let mut open = open;
+    let mut regex = use_signal(|| vim);
     let mut close = move || {
         open.set(false);
         query.set(String::new());
@@ -2979,13 +2991,31 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
         });
         focus_file_input();
     };
+    let ask = move |text: String| {
+        let _ = send(&FileFindRequest {
+            query: text,
+            step: false,
+            reverse: false,
+            done: false,
+            regex: regex(),
+            forward: forward(),
+        });
+    };
     let step = move |reverse: bool| {
         let _ = send(&FileFindRequest {
             query: query.peek().clone(),
             step: true,
             reverse,
             done: false,
+            regex: regex(),
+            forward: forward(),
         });
+    };
+    let confirm = move |reverse: bool| {
+        step(reverse);
+        if vim {
+            focus_file_input();
+        }
     };
     let count = match (total, index) {
         (0, _) => translate("editor-find-no-results"),
@@ -3005,19 +3035,14 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
                 oninput: move |event| {
                     let text = event.value();
                     query.set(text.clone());
-                    let _ = send(&FileFindRequest {
-                        query: text,
-                        step: false,
-                        reverse: false,
-                        done: false,
-                    });
+                    ask(text);
                 },
                 onkeydown: move |event: Event<KeyboardData>| {
                     event.stop_propagation();
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
-                            step(event.modifiers().shift());
+                            confirm(event.modifiers().shift());
                         }
                         Key::Escape => {
                             event.prevent_default();
@@ -3026,6 +3051,20 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
                         _ => {}
                     }
                 },
+            }
+            button {
+                r#type: "button",
+                class: if regex() {
+                    "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
+                } else {
+                    "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
+                },
+                title: translate("editor-find-regex"),
+                onclick: move |_| {
+                    regex.toggle();
+                    ask(query.peek().clone());
+                },
+                ".*"
             }
             span {
                 class: if total == 0 && !query().is_empty() {

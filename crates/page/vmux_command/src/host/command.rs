@@ -84,7 +84,7 @@ impl From<FileKeyCommand> for vmux_core::event::FileKey {
             FileKeyCommand::PanelPrevious => Self::PanelPrevious,
             FileKeyCommand::PanelChoose => Self::PanelChoose,
             FileKeyCommand::PanelDismiss => Self::PanelDismiss,
-            FileKeyCommand::Find => Self::Find,
+            FileKeyCommand::Find => Self::Find { forward: true },
         }
     }
 }
@@ -361,8 +361,6 @@ pub enum BrowserBarCommand {
     OpenCommands,
     #[menu(id = "browser_open_history", label = "History", accel = "super+y")]
     OpenHistory,
-    #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
-    Find,
 }
 
 #[allow(dead_code)]

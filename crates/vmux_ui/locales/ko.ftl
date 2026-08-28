@@ -628,6 +628,7 @@ editor-find-no-results = 결과 없음
 editor-find-previous = 이전 일치
 editor-find-next = 다음 일치
 editor-find-close = 찾기 닫기
+editor-find-regex = 정규식 사용
 editor-rendered-markdown = 실시간 편집이 가능한 렌더링된 Markdown
 editor-note = 메모
 editor-source-editor = 소스 편집기

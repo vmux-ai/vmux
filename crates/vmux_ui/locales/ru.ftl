@@ -628,6 +628,7 @@ editor-find-no-results = Нет совпадений
 editor-find-previous = Предыдущее совпадение
 editor-find-next = Следующее совпадение
 editor-find-close = Закрыть поиск
+editor-find-regex = Использовать регулярное выражение
 editor-rendered-markdown = Отображённый Markdown с живым редактированием
 editor-note = Заметка
 editor-source-editor = Редактор исходного кода

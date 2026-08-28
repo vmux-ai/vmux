@@ -613,6 +613,7 @@ editor-find-no-results = 一致なし
 editor-find-previous = 前の一致
 editor-find-next = 次の一致
 editor-find-close = 検索を閉じる
+editor-find-regex = 正規表現を使う
 editor-rendered-markdown = ライブ編集付きMarkdownプレビュー
 editor-note = メモ
 editor-source-editor = ソースエディタ

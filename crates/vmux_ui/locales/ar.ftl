@@ -628,6 +628,7 @@ editor-find-no-results = لا نتائج
 editor-find-previous = التطابق السابق
 editor-find-next = التطابق التالي
 editor-find-close = إغلاق البحث
+editor-find-regex = استخدام تعبير نمطي
 editor-rendered-markdown = Markdown معروض مع تحرير مباشر
 editor-note = ملاحظة
 editor-source-editor = محرر المصدر

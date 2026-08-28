@@ -2539,6 +2539,21 @@ fn run_commands(
                 ));
                 continue;
             }
+            EditCommand::ClearSearchHighlight => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_KEY_EVENT,
+                    &vmux_core::event::FileKey::FindClose,
+                ));
+            }
+            EditCommand::OpenFind { forward } => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_KEY_EVENT,
+                    &vmux_core::event::FileKey::Find { forward: *forward },
+                ));
+                continue;
+            }
             EditCommand::TriggerCompletion => {
                 let (line, utf16, ccol, lt) = caret_lsp(edit);
                 let replace_from = word_start_col(&lt, ccol);
@@ -2712,6 +2727,14 @@ fn on_file_key(
     };
     let mut cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
     if cmds.is_empty() {
+        emit_cursor(
+            entity,
+            &mut edit,
+            keymap.0.as_ref(),
+            &vp,
+            &browsers,
+            &mut commands,
+        );
         return;
     }
     if view_mode.0 == FileViewMode::Note
@@ -3111,9 +3134,13 @@ fn on_file_find_request(
             reverse: request.reverse,
         }));
     } else {
+        let pattern = match request.regex {
+            true => crate::edit::search::translate(&request.query),
+            false => regex::escape(&request.query),
+        };
         edit.core.apply(EditCommand::SetSearch {
-            pattern: regex::escape(&request.query),
-            forward: true,
+            pattern,
+            forward: request.forward,
         });
     }
     emit_cursor(
