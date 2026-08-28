@@ -76,7 +76,13 @@ impl Plugin for CommandBarInputPlugin {
             .add_observer(on_command_bar_rendered)
             .add_observer(on_command_bar_size)
             .init_resource::<crate::command_bar::project_files::ProjectIndex>()
-            .add_systems(Update, answer_settled_project_index)
+            .add_systems(
+                Update,
+                (
+                    warm_project_index.after(WriteCommandBarSnapshots),
+                    answer_settled_project_index.after(warm_project_index),
+                ),
+            )
             .add_systems(
                 Update,
                 prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
@@ -95,7 +101,11 @@ impl Plugin for CommandBarInputPlugin {
             )
             .add_systems(
                 Update,
-                (update_work_dirs_snapshot, update_recent_files_snapshot)
+                (
+                    update_work_dirs_snapshot,
+                    update_recent_files_snapshot,
+                    mirror_project_roots,
+                )
                     .in_set(WriteCommandBarSnapshots),
             )
             .add_systems(
@@ -1098,63 +1108,85 @@ fn retry_pending_command_bar_open(
 
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
-    modal_q: Query<Entity, With<CommandBar>>,
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
 ) {
-    let query = &trigger.event().payload.query;
-    let Ok(modal_e) = modal_q.single() else {
-        return;
-    };
-    if !browsers.can_emit_to(&modal_e) {
+    let asking = trigger.event().webview;
+    if !browsers.can_emit_to(&asking) {
         return;
     }
+    let query = &trigger.event().payload.query;
 
     let mut completions = None;
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
         index.forget();
     } else {
-        completions = index.matches(&roots, query);
+        completions = index.matches(&roots, query, asking);
     }
     let completions = completions.unwrap_or_else(|| complete_path(query));
     let payload = PathCompleteResponse { completions };
     commands.trigger(BinHostEmitEvent::from_rkyv(
-        modal_e,
+        asking,
         PATH_COMPLETE_RESPONSE,
         &payload,
     ));
 }
 
+fn mirror_project_roots(
+    projects: Res<crate::snapshot::CommandBarProjectRoots>,
+    mut work: ResMut<crate::snapshot::CommandBarWorkSnapshot>,
+) {
+    if !projects.is_changed() || work.projects == projects.roots {
+        return;
+    }
+    work.projects = projects.roots.clone();
+}
+
+fn warm_project_index(
+    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
+    projects: Res<crate::snapshot::CommandBarProjectRoots>,
+    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
+) {
+    if !workspace.is_changed() && !projects.is_changed() {
+        return;
+    }
+    let roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    if roots.is_empty() {
+        return;
+    }
+    index.warm(&roots);
+}
+
 fn answer_settled_project_index(
-    modal_q: Query<Entity, With<CommandBar>>,
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
 ) {
-    let Ok(modal_e) = modal_q.single() else {
+    let Some(asked) = index.asked() else {
         return;
     };
-    if !browsers.can_emit_to(&modal_e) {
+    if !browsers.can_emit_to(&asked.webview) {
         return;
     }
-    let Some(query) = index.asked_query() else {
-        return;
-    };
-    let roots = ProjectQuery::roots_for(&query, workspace.project_root.as_deref(), &projects.roots);
+    let roots = ProjectQuery::roots_for(
+        &asked.query,
+        workspace.project_root.as_deref(),
+        &projects.roots,
+    );
     if roots.is_empty() {
         return;
     }
-    let Some((_, completions)) = index.settled(&roots) else {
+    let Some(completions) = index.settled(&roots) else {
         return;
     };
     commands.trigger(BinHostEmitEvent::from_rkyv(
-        modal_e,
+        asked.webview,
         PATH_COMPLETE_RESPONSE,
         &PathCompleteResponse { completions },
     ));
@@ -1173,6 +1205,10 @@ impl ProjectQuery {
         if query.is_empty() || Self::names_a_location(query) {
             return Vec::new();
         }
+        Self::all(project_root, registered)
+    }
+
+    fn all(project_root: Option<&str>, registered: &[String]) -> Vec<std::path::PathBuf> {
         let mut roots = Vec::new();
         for candidate in project_root
             .into_iter()
@@ -1243,6 +1279,7 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
             name: display_name,
             is_dir,
             full_path,
+            project: String::new(),
         });
     }
 
@@ -1682,6 +1719,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -1707,6 +1745,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),

@@ -93,7 +93,10 @@ impl PaletteRows {
             .or_else(|| prompt_targets.first().cloned());
         let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
 
-        let mut items = Self::listed(state, draft, surface, start_prompt_mode);
+        let mut items = FileRows::under_projects(
+            Self::listed(state, draft, surface, start_prompt_mode),
+            &state.projects,
+        );
         if start_prompt_mode {
             prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
         }
@@ -105,6 +108,19 @@ impl PaletteRows {
             ghost: Self::ghost_of(query, &draft.completions),
             start_prompt_mode,
         }
+    }
+
+    fn with_completions(
+        query: &str,
+        draft: &PaletteDraft,
+        matched: Vec<CommandBarResultItem>,
+    ) -> Vec<CommandBarResultItem> {
+        let completions: &[PathEntry] = if CompletionQuery::of(query).is_some() {
+            &draft.completions
+        } else {
+            &[]
+        };
+        FileRows::merge(query, completions, matched)
     }
 
     fn listed(
@@ -122,13 +138,14 @@ impl PaletteRows {
             return open_session_results(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            return start_page_results(
+            let matched = start_page_results(
                 &state.pages,
                 &state.work_dirs,
                 &state.recent_files,
                 &state.search_engines,
                 query,
             );
+            return Self::with_completions(query, draft, matched);
         }
         let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
         let matched = filter_results(
@@ -142,12 +159,7 @@ impl PaletteRows {
             &state.work_dirs,
             &state.recent_files,
         );
-        let completions: &[PathEntry] = if CompletionQuery::of(query).is_some() {
-            &draft.completions
-        } else {
-            &[]
-        };
-        let matched = FileRows::merge(query, completions, matched);
+        let matched = Self::with_completions(query, draft, matched);
         if !is_start {
             return matched;
         }
@@ -772,14 +784,28 @@ impl CompletionQuery {
         if Self::looks_like_path(trimmed) {
             return Some(trimmed.to_string());
         }
-        if trimmed.is_empty()
-            || trimmed.contains(' ')
-            || trimmed.contains("://")
-            || is_data_uri(trimmed)
-        {
+        if trimmed.is_empty() || trimmed.contains("://") || is_data_uri(trimmed) {
             return None;
         }
         Some(trimmed.to_string())
+    }
+
+    pub fn names_a_file(value: &str) -> bool {
+        for term in value.split_whitespace() {
+            if term.contains('/') {
+                return true;
+            }
+            let Some((stem, extension)) = term.rsplit_once('.') else {
+                continue;
+            };
+            if stem.is_empty() || extension.is_empty() || extension.len() > 5 {
+                continue;
+            }
+            if extension.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return true;
+            }
+        }
+        false
     }
 
     fn looks_like_path(value: &str) -> bool {
@@ -808,7 +834,9 @@ impl FileRows {
         if completions.is_empty() {
             return matched;
         }
-        let leads = CompletionQuery::looks_like_path(query.trim());
+        let trimmed = query.trim();
+        let leads =
+            CompletionQuery::looks_like_path(trimmed) || CompletionQuery::names_a_file(trimmed);
         let take = if leads { Self::LEADING } else { Self::TRAILING };
         let mut files = Vec::with_capacity(take);
         let mut listed = Vec::with_capacity(take);
@@ -816,14 +844,14 @@ impl FileRows {
             files.push(CommandBarResultItem::File {
                 path: entry.full_path.clone(),
                 is_dir: entry.is_dir,
+                project: entry.project.clone(),
+                relative: entry.name.clone(),
             });
             listed.push(entry.full_path.as_str());
         }
         let mut rest = Vec::with_capacity(matched.len());
         for item in matched {
-            if let CommandBarResultItem::Editor { path } = &item
-                && listed.contains(&path.as_str())
-            {
+            if Self::already_listed(&item, &listed) {
                 continue;
             }
             rest.push(item);
@@ -834,6 +862,72 @@ impl FileRows {
         }
         rest.extend(files);
         rest
+    }
+
+    fn already_listed(item: &CommandBarResultItem, listed: &[&str]) -> bool {
+        let Some(path) = Self::local_path(item) else {
+            return false;
+        };
+        listed.contains(&path)
+    }
+
+    fn local_path(item: &CommandBarResultItem) -> Option<&str> {
+        match item {
+            CommandBarResultItem::Editor { path } => Some(path.as_str()),
+            CommandBarResultItem::RecentFile { url, .. }
+            | CommandBarResultItem::History { url, .. } => url.strip_prefix("file://"),
+            _ => None,
+        }
+    }
+
+    pub fn under_projects(
+        items: Vec<CommandBarResultItem>,
+        projects: &[String],
+    ) -> Vec<CommandBarResultItem> {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(path) = Self::local_path(&item) else {
+                out.push(item);
+                continue;
+            };
+            let Some((project, relative)) = ProjectPath::of(path, projects) else {
+                out.push(item);
+                continue;
+            };
+            out.push(CommandBarResultItem::File {
+                path: path.to_string(),
+                is_dir: false,
+                project,
+                relative,
+            });
+        }
+        out
+    }
+}
+
+struct ProjectPath;
+
+impl ProjectPath {
+    fn of(path: &str, projects: &[String]) -> Option<(String, String)> {
+        let mut owner = "";
+        for project in projects {
+            let root = project.trim().trim_end_matches('/');
+            if root.is_empty() || root.len() <= owner.len() {
+                continue;
+            }
+            let Some(rest) = path.strip_prefix(root) else {
+                continue;
+            };
+            if !rest.starts_with('/') {
+                continue;
+            }
+            owner = root;
+        }
+        if owner.is_empty() {
+            return None;
+        }
+        let label = owner.rsplit('/').next().unwrap_or(owner);
+        Some((label.to_string(), path[owner.len() + 1..].to_string()))
     }
 }
 
@@ -852,6 +946,7 @@ mod tests {
                     name: (*path).to_string(),
                     is_dir: false,
                     full_path: format!("/root/{path}"),
+                    project: "root".to_string(),
                 });
             }
             entries
@@ -996,9 +1091,31 @@ mod tests {
     #[test]
     fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
         assert_eq!(CompletionQuery::of("handler").as_deref(), Some("handler"));
-        assert_eq!(CompletionQuery::of("how do i").as_deref(), None);
         assert_eq!(CompletionQuery::of("https://example.com").as_deref(), None);
         assert_eq!(CompletionQuery::of("file://~/x").as_deref(), Some("~/x"));
+    }
+
+    #[test]
+    fn several_words_reach_the_host_so_a_path_can_be_narrowed_word_by_word() {
+        assert_eq!(
+            CompletionQuery::of("mobile main").as_deref(),
+            Some("mobile main")
+        );
+        assert_eq!(
+            CompletionQuery::of("desktop src/lib").as_deref(),
+            Some("desktop src/lib")
+        );
+    }
+
+    #[test]
+    fn a_file_under_a_project_is_shown_against_that_project() {
+        let projects = vec!["/code/dashboard".to_string(), "/code".to_string()];
+        assert_eq!(
+            ProjectPath::of("/code/dashboard/src/main.rs", &projects),
+            Some(("dashboard".to_string(), "src/main.rs".to_string())),
+            "the longest matching root wins, or a worktree is shown against its parent repo"
+        );
+        assert_eq!(ProjectPath::of("/elsewhere/main.rs", &projects), None);
     }
 
     #[test]
@@ -1353,6 +1470,8 @@ mod tests {
             &CommandBarResultItem::File {
                 path: "/work/main.rs".into(),
                 is_dir: false,
+                project: String::new(),
+                relative: String::new(),
             },
             &[],
         );

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bevy::prelude::Entity;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 
 use crate::event::PathEntry;
@@ -28,38 +29,67 @@ const UNINTERESTING_DIRS: &[&str] = &[
     "venv",
 ];
 
+#[derive(Clone)]
+pub struct Asked {
+    pub webview: Entity,
+    pub query: String,
+}
+
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
-    asked: Option<String>,
+    asked: Option<Asked>,
     answered_with: usize,
 }
 
 impl ProjectIndex {
-    pub fn matches(&mut self, roots: &[PathBuf], query: &str) -> Option<Vec<PathEntry>> {
+    pub fn matches(
+        &mut self,
+        roots: &[PathBuf],
+        query: &str,
+        webview: Entity,
+    ) -> Option<Vec<PathEntry>> {
         self.sync(roots);
-        self.asked = Some(query.to_string());
+        self.asked = Some(Asked {
+            webview,
+            query: query.to_string(),
+        });
         self.answered_with = self.ready_count();
         self.rank(query)
     }
 
-    pub fn settled(&mut self, roots: &[PathBuf]) -> Option<(String, Vec<PathEntry>)> {
-        let query = self.asked.clone()?;
+    pub fn warm(&mut self, roots: &[PathBuf]) {
+        self.sync(roots);
+    }
+
+    pub fn settled(&mut self, roots: &[PathBuf]) -> Option<Vec<PathEntry>> {
+        let query = self.asked.as_ref()?.query.clone();
         self.sync(roots);
         let ready = self.ready_count();
         if ready == self.answered_with {
+            self.forget_once_complete();
             return None;
         }
         self.answered_with = ready;
-        let ranked = self.rank(&query)?;
-        Some((query, ranked))
+        let ranked = self.rank(&query);
+        self.forget_once_complete();
+        ranked
+    }
+
+    fn forget_once_complete(&mut self) {
+        for index in &self.roots {
+            if matches!(index, RootIndex::Building { .. }) {
+                return;
+            }
+        }
+        self.forget();
     }
 
     pub fn forget(&mut self) {
         self.asked = None;
     }
 
-    pub fn asked_query(&self) -> Option<String> {
+    pub fn asked(&self) -> Option<Asked> {
         self.asked.clone()
     }
 
@@ -198,11 +228,11 @@ struct FuzzyRank;
 
 impl FuzzyRank {
     fn across(roots: &[(&Path, &[String])], query: &str) -> Vec<PathEntry> {
-        let needle = query.to_lowercase();
+        let wanted = FuzzyQuery::of(query);
         let mut scored: Vec<(i32, &Path, &String)> = Vec::new();
         for (root, files) in roots {
             for file in files.iter() {
-                let Some(score) = FuzzyScore::of(file, &needle) else {
+                let Some(score) = wanted.score(file) else {
                     continue;
                 };
                 scored.push((score, root, file));
@@ -214,17 +244,13 @@ impl FuzzyRank {
                 .then(a.2.cmp(b.2))
         });
         scored.truncate(MAX_RESULTS);
-        let qualify = roots.len() > 1;
         let mut entries = Vec::with_capacity(scored.len());
         for (_, root, file) in scored {
-            let name = match qualify {
-                true => format!("{}/{file}", ProjectLabel::of(root)),
-                false => file.clone(),
-            };
             entries.push(PathEntry {
-                name,
+                name: file.clone(),
                 is_dir: false,
                 full_path: root.join(file).to_string_lossy().into_owned(),
+                project: ProjectLabel::of(root),
             });
         }
         entries
@@ -242,16 +268,38 @@ impl ProjectLabel {
     }
 }
 
+struct FuzzyQuery {
+    terms: Vec<String>,
+}
+
+impl FuzzyQuery {
+    fn of(query: &str) -> Self {
+        let mut terms = Vec::new();
+        for term in query.split_whitespace() {
+            terms.push(term.to_lowercase());
+        }
+        Self { terms }
+    }
+
+    fn score(&self, haystack: &str) -> Option<i32> {
+        let lowered = haystack.to_lowercase();
+        let mut total = 0;
+        for term in &self.terms {
+            total += FuzzyScore::of(&lowered, term)?;
+        }
+        Some(total)
+    }
+}
+
 struct FuzzyScore;
 
 impl FuzzyScore {
-    fn of(haystack: &str, needle: &str) -> Option<i32> {
+    fn of(lowered: &str, needle: &str) -> Option<i32> {
         if needle.is_empty() {
             return Some(0);
         }
-        let lowered = haystack.to_lowercase();
-        let base = Self::walk(&lowered, needle)?;
-        let basename = lowered.rsplit('/').next().unwrap_or(&lowered);
+        let base = Self::walk(lowered, needle)?;
+        let basename = lowered.rsplit('/').next().unwrap_or(lowered);
         let mut score = base;
         if basename.contains(needle) {
             score += 60;
@@ -259,7 +307,7 @@ impl FuzzyScore {
         if basename.starts_with(needle) {
             score += 40;
         }
-        score -= (haystack.len() / 16) as i32;
+        score -= (lowered.len() / 16) as i32;
         Some(score)
     }
 
@@ -331,6 +379,18 @@ mod tests {
     }
 
     #[test]
+    fn every_space_separated_term_must_match_the_same_path() {
+        let files = vec![
+            "crates/app/vmux_mobile/src/main.rs".to_string(),
+            "crates/app/vmux_desktop/src/main.rs".to_string(),
+        ];
+        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "mobile main.rs");
+
+        let named: Vec<&str> = ranked.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(named, ["crates/app/vmux_mobile/src/main.rs"]);
+    }
+
+    #[test]
     fn a_hit_in_every_project_is_ranked_together_and_named_by_its_project() {
         let dashboard = vec!["src/main.rs".to_string()];
         let vmux = vec!["src/main.rs".to_string()];
@@ -342,8 +402,14 @@ mod tests {
             "main",
         );
 
-        let named: Vec<&str> = ranked.iter().map(|entry| entry.name.as_str()).collect();
-        assert_eq!(named, ["dashboard/src/main.rs", "vmux/src/main.rs"]);
+        let named: Vec<(&str, &str)> = ranked
+            .iter()
+            .map(|entry| (entry.project.as_str(), entry.name.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [("dashboard", "src/main.rs"), ("vmux", "src/main.rs")]
+        );
         let opened: Vec<&str> = ranked
             .iter()
             .map(|entry| entry.full_path.as_str())
@@ -363,7 +429,8 @@ mod tests {
             "handler",
         );
 
-        assert_eq!(ranked[0].name, "b/handler.rs");
+        assert_eq!(ranked[0].project, "b");
+        assert_eq!(ranked[0].name, "handler.rs");
     }
 
     #[test]

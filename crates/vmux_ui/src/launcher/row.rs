@@ -180,8 +180,9 @@ pub fn ResultRow(
                                 }
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
-                            ResultItem::File { path, is_dir } => {
+                            ResultItem::File { path, is_dir, project, relative } => {
                                 let name = FilePath(path).name();
+                                let location = FileLocation::of(project, relative, path);
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         if *is_dir {
@@ -196,7 +197,12 @@ pub fn ResultRow(
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                             span { class: result_primary_text_class(), "{name}" }
-                                            span { class: result_secondary_text_class(), "{path}" }
+                                            div { class: "flex min-w-0 items-center gap-1.5",
+                                                if !project.is_empty() {
+                                                    span { class: "{result_shortcut_badge_class()} shrink-0", "{project}" }
+                                                }
+                                                span { class: "{result_secondary_text_class()} min-w-0 truncate", "{location}" }
+                                            }
                                         }
                                     }
                                     if *is_dir {
@@ -255,5 +261,20 @@ pub fn ResultRow(
                             },
             }
         }
+    }
+}
+
+struct FileLocation;
+
+impl FileLocation {
+    fn of(project: &str, relative: &str, path: &str) -> String {
+        let shown = match project.is_empty() {
+            true => path,
+            false => relative,
+        };
+        let Some((dir, _)) = shown.trim_end_matches('/').rsplit_once('/') else {
+            return String::new();
+        };
+        dir.to_string()
     }
 }

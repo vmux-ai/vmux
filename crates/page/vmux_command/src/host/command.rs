@@ -325,7 +325,7 @@ pub enum BrowserViewCommand {
         hidden
     )]
     ViewSource,
-    #[menu(id = "browser_print", label = "Print", accel = "super+p", hidden)]
+    #[menu(id = "browser_print", label = "Print", hidden)]
     Print,
 }
 
@@ -340,7 +340,7 @@ pub enum BrowserBarCommand {
         label = "Command Bar",
         accel = "super+k"
     )]
-    #[shortcut(direct = "Super+k")]
+    #[shortcut(direct = "Super+k", direct = "Super+p")]
     OpenCommandBar,
     #[menu(
         id = "browser_open_page_in_command_bar",

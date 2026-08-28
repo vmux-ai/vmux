@@ -50,6 +50,8 @@ pub enum CommandBarResultItem {
     File {
         path: String,
         is_dir: bool,
+        project: String,
+        relative: String,
     },
     History {
         url: String,

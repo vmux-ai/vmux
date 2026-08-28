@@ -97,6 +97,7 @@ pub fn build_command_bar_open_payload(
         work_snapshot.work_dirs.clone(),
         work_snapshot.recent_files.clone(),
         work_snapshot.search_engines.clone(),
+        work_snapshot.projects.clone(),
     )
 }
 
@@ -168,6 +169,7 @@ pub fn command_bar_open_payload(
     work_dirs: Vec<crate::event::CommandBarWorkDir>,
     recent_files: Vec<crate::event::CommandBarRecentFile>,
     search_engines: Vec<SearchEngine>,
+    projects: Vec<String>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -180,6 +182,7 @@ pub fn command_bar_open_payload(
         pages,
         work_dirs,
         recent_files,
+        projects,
         search_engines,
         prompt_context: default(),
         agent_models: Vec::new(),

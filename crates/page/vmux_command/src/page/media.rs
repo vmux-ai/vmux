@@ -63,7 +63,7 @@ impl PromptMedia {
             self.entries.set(Vec::new());
             self.loading.set(true);
             self.selected.set(0);
-            timer.schedule(move || {
+            timer.schedule(crate::page::search::HOST_SEARCH_DEBOUNCE_MS, move || {
                 if *self.request_id.peek() != request_id
                     || self.requested_query.peek().as_deref() != Some(media_query.as_str())
                 {

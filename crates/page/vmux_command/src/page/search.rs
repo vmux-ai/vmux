@@ -11,7 +11,9 @@ use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::launcher::palette::{CompletionQuery, PaletteDraft, PaletteSurface};
 use vmux_ui::platform::sleep_ms;
 
-const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
+pub const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
+
+const COMPLETION_DEBOUNCE_MS: u32 = 60;
 
 const HISTORY_SUGGESTION_LIMIT: u32 = 5;
 
@@ -25,13 +27,13 @@ impl HostSearchTimer {
         }
     }
 
-    pub fn schedule(&self, callback: impl FnOnce() + 'static) {
+    pub fn schedule(&self, delay_ms: u32, callback: impl FnOnce() + 'static) {
         self.cancel();
         let cancelled = Rc::new(Cell::new(false));
         *self.0.borrow_mut() = Some(cancelled.clone());
         let slot = self.clone();
         spawn(async move {
-            sleep_ms(HOST_SEARCH_DEBOUNCE_MS).await;
+            sleep_ms(delay_ms).await;
             if cancelled.get() {
                 return;
             }
@@ -123,7 +125,7 @@ impl PaletteFeeds {
                 completions.set(Vec::new());
                 return;
             };
-            timer.schedule(move || {
+            timer.schedule(COMPLETION_DEBOUNCE_MS, move || {
                 if *request_id.peek() != id {
                     return;
                 }
@@ -168,7 +170,7 @@ impl PaletteFeeds {
                 return;
             }
             let query = trimmed.to_string();
-            timer.schedule(move || {
+            timer.schedule(HOST_SEARCH_DEBOUNCE_MS, move || {
                 if *request_id.peek() != id {
                     return;
                 }

@@ -43,8 +43,8 @@ fn publish_project_roots(
     mut roots: ResMut<vmux_command::snapshot::CommandBarProjectRoots>,
 ) {
     let mut next = Vec::new();
-    for project in projects.active_rows() {
-        if project.missing || !matches!(project.kind, vmux_core::event::ProjectRowKind::Project) {
+    for project in projects.active_projects() {
+        if project.missing {
             continue;
         }
         next.push(project.path);
@@ -80,7 +80,7 @@ impl ExpandedProjectDirs {
         let mut rows = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || UNLISTED_DIRS.contains(&name.as_str()) {
+            if UNLISTED_DIRS.contains(&name.as_str()) {
                 continue;
             }
             let Ok(kind) = entry.file_type() else {
@@ -121,6 +121,7 @@ impl ExpandedProjectDirs {
 }
 
 const UNLISTED_DIRS: &[&str] = &[
+    ".git",
     "DerivedData",
     "Pods",
     "__pycache__",
@@ -176,14 +177,25 @@ impl SpaceProjects<'_, '_> {
         None
     }
 
-    fn rows_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
+    pub fn active_projects(&self) -> Vec<vmux_core::event::ProjectRow> {
+        let Some(active) = self.active_space.as_deref() else {
+            return Vec::new();
+        };
+        self.projects_of(&active.record.id)
+    }
+
+    fn projects_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
         let Some(settings) = self.settings.as_deref() else {
             return Vec::new();
         };
         let Some(overrides) = settings.space(space_id) else {
             return Vec::new();
         };
-        let listed = overrides.project_rows();
+        overrides.project_rows()
+    }
+
+    fn rows_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
+        let listed = self.projects_of(space_id);
         let Some(expanded) = self.expanded_of(space_id) else {
             return listed;
         };

@@ -134,6 +134,8 @@ pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub recent_files: Vec<CommandBarRecentFile>,
     #[serde(default)]
+    pub projects: Vec<String>,
+    #[serde(default)]
     pub search_engines: Vec<SearchEngine>,
     #[serde(default)]
     pub prompt_context: CommandBarPromptContext,
@@ -582,6 +584,7 @@ pub struct PathEntry {
     pub name: String,
     pub is_dir: bool,
     pub full_path: String,
+    pub project: String,
 }
 
 #[derive(
