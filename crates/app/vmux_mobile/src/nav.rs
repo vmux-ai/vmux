@@ -258,6 +258,7 @@ impl Nav {
         mut dropped: MessageWriter<Dropped>,
         mut tapped: MessageWriter<Tapped>,
         mut picked: MessageWriter<Select>,
+        mut closed: MessageWriter<Dismiss>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -268,6 +269,9 @@ impl Nav {
         }
         if let Some(id) = crate::transition::take_picked() {
             picked.write(Select(id));
+        }
+        if crate::transition::take_closed() {
+            closed.write(Dismiss);
         }
     }
 
@@ -311,6 +315,7 @@ impl Nav {
                         page: draws.page,
                         title: screen.title(),
                         action: draws.action,
+                        closable: false,
                     },
                 ));
             }
@@ -474,6 +479,7 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
+                closable: false,
             });
         }
         levels
@@ -514,6 +520,7 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
+                closable: false,
             });
         }
         for Present(screen) in presents.read() {
@@ -526,6 +533,7 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
+                closable: true,
             });
         }
     }

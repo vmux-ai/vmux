@@ -5,6 +5,7 @@ pub struct Level {
     pub page: &'static NativePage,
     pub title: String,
     pub action: Option<&'static str>,
+    pub closable: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -30,15 +31,15 @@ mod platform {
     use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSObjectProtocol, NSString};
     use objc2_ui_kit::{
-        UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle, UIButton,
-        UIButtonType, UIColor, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
-        UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
-        UIGlassContainerEffect, UIGlassEffect, UILayoutConstraintAxis, UIModalPresentationStyle,
-        UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
-        UIPanGestureRecognizer, UIPresentationController, UISheetPresentationController,
-        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIStackView,
-        UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
-        UIViewController, UIVisualEffectView,
+        UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
+        UIBarButtonSystemItem, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState,
+        UIEdgeInsets, UIFont, UIGestureRecognizer, UIGestureRecognizerDelegate,
+        UIGestureRecognizerState, UIGlassContainerEffect, UIGlassEffect, UILayoutConstraintAxis,
+        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
+        UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
+        UISheetPresentationController, UISheetPresentationControllerDelegate,
+        UISheetPresentationControllerDetent, UIStackView, UIStackViewDistribution,
+        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -56,6 +57,7 @@ mod platform {
         static TAPPED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+        static CLOSED: Cell<bool> = const { Cell::new(false) };
     }
 
     struct Held {
@@ -89,6 +91,9 @@ mod platform {
             if let Some(action) = level.action {
                 item.setRightBarButtonItem(Some(&Bar::button(action, delegate, marker)));
             }
+            if level.closable {
+                item.setRightBarButtonItem(Some(&Bar::closer(delegate, marker)));
+            }
             Some(Self {
                 controller,
                 web: Some(web),
@@ -115,6 +120,17 @@ mod platform {
             };
             item.setTag(Self::remember(action));
             item
+        }
+
+        fn closer(delegate: &NavDelegate, marker: MainThreadMarker) -> Retained<UIBarButtonItem> {
+            unsafe {
+                UIBarButtonItem::initWithBarButtonSystemItem_target_action(
+                    UIBarButtonItem::alloc(marker),
+                    UIBarButtonSystemItem::Close,
+                    Some(delegate),
+                    Some(sel!(closeTapped:)),
+                )
+            }
         }
 
         fn remember(action: &'static str) -> isize {
@@ -574,6 +590,11 @@ mod platform {
                 }
             }
 
+            #[unsafe(method(closeTapped:))]
+            fn close_tapped(&self, _sender: &UIBarButtonItem) {
+                CLOSED.set(true);
+            }
+
             #[unsafe(method(centreTapped:))]
             fn centre_tapped(&self, sender: &UIButton) {
                 let Some(action) = Bar::recall(sender.tag()) else {
@@ -995,6 +1016,10 @@ mod platform {
         TAPPED.with_borrow_mut(std::mem::take)
     }
 
+    pub fn take_closed() -> bool {
+        CLOSED.replace(false)
+    }
+
     pub fn take_picked() -> Option<String> {
         PICKED.with_borrow_mut(Option::take)
     }
@@ -1050,6 +1075,10 @@ mod platform {
         None
     }
 
+    pub fn take_closed() -> bool {
+        false
+    }
+
     impl NativeStack {
         pub fn push(_level: Level) {}
 
@@ -1071,4 +1100,6 @@ mod platform {
 
 #[cfg(target_os = "ios")]
 pub use platform::install;
-pub use platform::{NativeStack, take_dismissed, take_picked, take_popped, take_tapped};
+pub use platform::{
+    NativeStack, take_closed, take_dismissed, take_picked, take_popped, take_tapped,
+};

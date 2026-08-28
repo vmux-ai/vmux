@@ -231,7 +231,7 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                     button {
                         class: "key",
                         onclick: move |_| navigation.go(Page::Pushed(format!("Level {}", depth + 1))),
-                        "Push"
+                        "Stack"
                     }
                     button {
                         class: "key",
