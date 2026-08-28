@@ -4,7 +4,7 @@
 //! A page per route, so a webview per route: every tab root, every pushed level and every
 //! sheet is its own document that UIKit animates in.
 //!
-//! The header and the tab bar are UIKit, not HTML, so iOS 26 draws them in Liquid Glass.
+//! The header and the tab bar are UIKit, not HTML, so iOS 26 component them in Liquid Glass.
 //! A bar button arrives back as a `Tapped` message, which is what `act` below reads.
 //!
 //! How a route arrives is an option on its `Screen`, the way Expo Router spells it: a card
@@ -173,22 +173,22 @@ fn Shell() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {
-                Screen::<Page> { name: Name::Tab, draws: &TAB }
-                Screen::<Page> { name: Name::Card, draws: &CARD }
+                Screen::<Page> { name: Name::Tab, component: &TAB }
+                Screen::<Page> { name: Name::Card, component: &CARD }
                 Screen::<Page> {
                     name: Name::Modal,
-                    draws: &MODAL,
+                    component: &MODAL,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
                     name: Name::FormSheet,
-                    draws: &FORM_SHEET,
+                    component: &FORM_SHEET,
                     presentation: Presentation::FormSheet,
                     detents: &[0.4, 1.0],
                 }
                 Screen::<Page> {
                     name: Name::FullScreenModal,
-                    draws: &FULL_SCREEN_MODAL,
+                    component: &FULL_SCREEN_MODAL,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -260,7 +260,7 @@ fn FullScreenModalScreen() -> Element {
 #[component]
 fn Stage(near: String, far: String, kind: String) -> Element {
     let navigation = use_navigation::<Page>();
-    let seen = navigation.view();
+    let seen = navigation.state();
     let title = match use_route::<Page>() {
         Some(route) => route.title(),
         None => "Nothing".to_string(),

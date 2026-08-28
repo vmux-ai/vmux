@@ -27,7 +27,7 @@ pub struct Level {
 
 #[derive(Clone, PartialEq)]
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
-pub struct TabEntry {
+pub struct TabItem {
     pub id: String,
     pub name: String,
     pub here: bool,
@@ -61,7 +61,7 @@ mod platform {
     };
     use vmux_native::WebView;
 
-    use super::{Level, Presentation, TabEntry};
+    use super::{Level, Presentation, TabItem};
     use crate::surface::Surfaces;
 
     const TAB_BAR_HEIGHT: f64 = 56.0;
@@ -364,7 +364,7 @@ mod platform {
 
         fn show(
             &mut self,
-            entries: Vec<TabEntry>,
+            entries: Vec<TabItem>,
             centre: Option<&'static str>,
             delegate: &NavDelegate,
             marker: MainThreadMarker,
@@ -714,7 +714,7 @@ mod platform {
             }
         }
 
-        pub fn tabs(entries: Vec<TabEntry>, centre: Option<&'static str>) {
+        pub fn tabs(entries: Vec<TabItem>, centre: Option<&'static str>) {
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
                     return;
@@ -1182,7 +1182,7 @@ mod platform {
 #[cfg(not(target_os = "ios"))]
 #[allow(dead_code)]
 mod platform {
-    use super::{Level, Presentation, TabEntry};
+    use super::{Level, TabItem};
 
     pub struct NativeStack;
 
@@ -1219,7 +1219,7 @@ mod platform {
 
         pub fn seat(_tab: String, _levels: Vec<Level>) {}
 
-        pub fn tabs(_entries: Vec<TabEntry>, _centre: Option<&'static str>) {}
+        pub fn tabs(_entries: Vec<TabItem>, _centre: Option<&'static str>) {}
 
         pub fn warm(_wanted: Vec<(String, Vec<Level>)>) {}
 

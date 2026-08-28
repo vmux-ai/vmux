@@ -7,9 +7,9 @@ nothing else.
 Navigation is ECS. A tab is an entity, a pushed level is its child, and a sheet is a
 child marked as one — so depth is a walk down the tree, and closing a tab takes its
 stack with it rather than leaving a map to tidy up. You write to it with messages,
-read it with a query, and declare which page draws what in rsx.
+read it with a query, and declare which page component what in rsx.
 
-A level is a webview. The shell draws the selected tab's root, and every pushed level
+A level is a webview. The shell component the selected tab's root, and every pushed level
 and every sheet is a `NativePage` of its own that UIKit animates in — so a modal is a
 real modal with its own document, not the one webview redrawn behind a still.
 
@@ -63,18 +63,18 @@ impl Route for Page {
 }
 ```
 
-Then declare what draws what. Nothing about tabs or depth lives here — that is the ECS,
+Then declare which component draws which route. Nothing about tabs or depth lives here — that is the ECS,
 and this is only the screen table:
 
 ```rust
 rsx! {
     Stack::<Page> {
         Tabs {
-            Screen::<Page> { name: Name("note"), draws: &NOTE }
+            Screen::<Page> { name: Name("note"), component: &NOTE }
         }
         Screen::<Page> {
             name: Name("alert"),
-            draws: &ALERT,
+            component: &ALERT,
             presentation: Presentation::FormSheet,
             detents: &[0.5, 1.0],
         }
@@ -82,8 +82,9 @@ rsx! {
 }
 ```
 
-The names are Expo Router's, because that is where most people meet this shape:
-`Stack`, `Tabs`, `Screen`, `presentation`, `use_navigation()`, `use_route()`. How a
+The names come from Expo Router and React Navigation, because that is where most people
+meet this shape: `Stack`, `Tabs`, `Screen`, `component`, `presentation`, `ScreenOptions`,
+`use_navigation()`, `use_route()`. How a
 route arrives is an option on its screen — `Card` pushes, `Modal` and `FormSheet` slide
 up, `FullScreenModal` covers — so callers only ever say `navigation.go(route)`.
 
