@@ -856,6 +856,16 @@ mod platform {
         }
 
         pub fn settle(tab: String, levels: Vec<Level>) {
+            let sheets = STACK.with_borrow_mut(|stack| match stack.as_mut() {
+                Some(stack) => stack.columns.split_off(1),
+                None => Vec::new(),
+            });
+            for sheet in sheets {
+                sheet
+                    .navigation
+                    .dismissViewControllerAnimated_completion(false, None);
+            }
+
             let mut carried = Vec::new();
             let cached = STACK.with_borrow(|stack| {
                 let stack = stack.as_ref()?;
@@ -869,21 +879,9 @@ mod platform {
                 carried.push(Self::draw(level));
             }
 
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
-                };
-                while stack.columns.len() > 1 {
-                    let Some(sheet) = stack.columns.pop() else {
-                        break;
-                    };
-                    sheet
-                        .navigation
-                        .dismissViewControllerAnimated_completion(false, None);
-                }
-                let Some(column) = stack.columns.first_mut() else {
-                    return;
-                };
+            let seating = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let column = stack.columns.first_mut()?;
                 if !column.levels.is_empty()
                     && let Some(seated) = stack.seated.take()
                 {
@@ -905,17 +903,21 @@ mod platform {
                 }
                 stack.seated = Some(tab);
                 if column.levels.is_empty() {
-                    return;
+                    return None;
                 }
                 let mut controllers = Vec::new();
                 for level in &column.levels {
                     controllers.push(level.controller.clone());
                 }
-                column.navigation.setViewControllers_animated(
-                    &objc2_foundation::NSArray::from_retained_slice(&controllers),
-                    false,
-                );
+                Some((column.navigation.clone(), controllers))
             });
+            let Some((navigation, controllers)) = seating else {
+                return;
+            };
+            navigation.setViewControllers_animated(
+                &objc2_foundation::NSArray::from_retained_slice(&controllers),
+                false,
+            );
         }
 
         pub fn warm(wanted: Vec<(String, Level)>) {
