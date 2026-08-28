@@ -63,6 +63,9 @@ fn grab_key_window_on_pane_hover(
     if !HOVER_OVER_PANE.swap(false, Ordering::Relaxed) {
         return;
     }
+    if !app_is_frontmost() {
+        return;
+    }
     let Some(pointer) = vmux_layout::native_pointer::snapshot() else {
         return;
     };
@@ -80,6 +83,15 @@ fn grab_key_window_on_pane_hover(
         return;
     };
     ensure_native_window_active(window_entity);
+}
+
+fn app_is_frontmost() -> bool {
+    use objc2_app_kit::NSApp;
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    NSApp(mtm).isActive()
 }
 
 fn activate_native_window(window_entity: Entity) {
@@ -149,15 +161,14 @@ const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
 fn activate_app() -> bool {
     use objc2_app_kit::NSApp;
 
+    if app_is_frontmost() {
+        return true;
+    }
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
-    let app = NSApp(mtm);
-    if app.isActive() {
-        return true;
-    }
     #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
+    NSApp(mtm).activateIgnoringOtherApps(true);
     false
 }
 
