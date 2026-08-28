@@ -192,6 +192,7 @@ pub struct NavigationState<S: Route> {
     pub selected: Option<String>,
     pub root: Option<S>,
     pub current: Option<S>,
+    pub trail: Vec<S>,
     pub depth: usize,
     pub sheet: bool,
 }
@@ -203,6 +204,7 @@ impl<S: Route> Default for NavigationState<S> {
             selected: None,
             root: None,
             current: None,
+            trail: Vec::new(),
             depth: 0,
             sheet: false,
         }
@@ -230,6 +232,7 @@ impl Nav {
             if Some(&id) == state.selected.as_ref() {
                 chosen = Some(entity);
                 state.root = Some(screen.clone());
+                state.trail.push(screen.clone());
             }
             state.tabs.push(TabRoute {
                 name: screen.title(),
@@ -250,6 +253,9 @@ impl Nav {
             };
             at = next;
             state.depth += 1;
+            if let Some(shows) = world.get::<Shows<S>>(next) {
+                state.trail.push(shows.0.clone());
+            }
         }
         state.sheet = world.get::<Presented>(at).is_some();
         state.current = world.get::<Shows<S>>(at).map(|shows| shows.0.clone());

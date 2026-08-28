@@ -126,6 +126,11 @@ fn Body(near: String, far: String, kind: String) -> Element {
     };
     let depth = seen.depth;
     let sheet = seen.sheet;
+    let mut trail = Vec::new();
+    for route in &seen.trail {
+        trail.push(route.title());
+    }
+    let trail = trail.join(" › ");
 
     rsx! {
         div {
@@ -141,9 +146,7 @@ fn Body(near: String, far: String, kind: String) -> Element {
                 div { class: "mt-2.5 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em]",
                     "{title}"
                 }
-                div { class: "mt-2.5 text-[13px] tabular-nums text-white/55",
-                    "depth {depth} · {seen.tabs.len()} tabs open"
-                }
+                div { class: "mt-2.5 truncate text-[13px] text-white/55", "{trail}" }
 
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Key {
