@@ -108,6 +108,17 @@ button { font: inherit; color: inherit; border: 0; background: none; }
   border: 2px solid currentColor; opacity: .85; }
 .tab.here { color: #fff; }
 .tab.here .glyph { background: currentColor; }
+
+.add {
+  align-self: center; width: 52px; height: 36px; margin: 0 8px 2px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 300; line-height: 1; color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.09));
+  border: 1px solid rgba(255,255,255,.20);
+  box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  transition: transform .12s ease, background .18s ease;
+}
+.add:active { transform: scale(.92); background: rgba(255,255,255,.3); }
 </style>"#;
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
@@ -245,10 +256,6 @@ fn NavigationBar(title: String, back: bool, depth: usize) -> Element {
                     label: "Push",
                     onpick: move |_| navigation.go(Page::Note(format!("Level {}", depth + 1))),
                 }
-                Action {
-                    label: "Sheet",
-                    onpick: move |_| navigation.go(Page::Alert(format!("Sheet {}", depth + 1))),
-                }
             }
         }
     }
@@ -258,9 +265,27 @@ fn NavigationBar(title: String, back: bool, depth: usize) -> Element {
 fn TabBar() -> Element {
     let navigation = use_navigation::<Page>();
     let seen = navigation.view();
+    let depth = seen.depth;
+    let split = seen.tabs.len() / 2;
     rsx! {
         nav { class: "tabbar",
-            for tab in seen.tabs.iter() {
+            for tab in seen.tabs.iter().take(split) {
+                Tab {
+                    key: "{tab.id}",
+                    label: tab.name.clone(),
+                    here: Some(&tab.id) == seen.selected.as_ref(),
+                    onpick: {
+                        let id = tab.id.clone();
+                        move |_| navigation.navigate(&id)
+                    },
+                }
+            }
+            button {
+                class: "add",
+                onclick: move |_| navigation.go(Page::Alert(format!("Sheet {}", depth + 1))),
+                "+"
+            }
+            for tab in seen.tabs.iter().skip(split) {
                 Tab {
                     key: "{tab.id}",
                     label: tab.name.clone(),
