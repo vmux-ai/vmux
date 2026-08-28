@@ -6,11 +6,11 @@ use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Presentation, Report, Route, Tapped};
-use vmux_mobile::navigator::{Screen, Stack, Tabs, use_navigation, use_route};
+use vmux_mobile::{Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
-const BACKDROP: (u8, u8, u8, u8) = (5, 6, 10, 255);
-const SEEDED: usize = 2;
+const BACKDROP: (u8, u8, u8, u8) = (10, 10, 10, 255);
+const SEEDED: usize = 1;
 const RUNGS: usize = 8;
 const HEAD: usize = 3;
 const CRUMBS: usize = 4;
@@ -99,9 +99,8 @@ fn App() -> Element {
 #[screen]
 #[component]
 fn TabScreen() -> Element {
-    let navigation = use_navigation::<Page>();
-    let seen = navigation.state();
-    let here = use_route::<Page>();
+    let router = use_router::<Page>();
+    let here = router.route();
     let (hue, kind) = match &here {
         Some(Page::Tab(at)) => ((at * 37 + 185) % 360, "tab root"),
         Some(Page::Card(_)) => (285, "card"),
@@ -114,13 +113,11 @@ fn TabScreen() -> Element {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
     };
-    let depth = seen.depth;
-    let mut at = depth;
+    let depth = router.depth();
+    let at = router.position();
     let (mut cards, mut modals, mut sheets, mut full_screens) = (0, 0, 0, 0);
-    for (index, route) in seen.trail.iter().enumerate() {
-        if Some(route) == here.as_ref() {
-            at = index;
-        }
+    let mut trail = Vec::new();
+    for route in router.segments() {
         match route {
             Page::Card(_) => cards += 1,
             Page::Modal(_) => modals += 1,
@@ -128,16 +125,12 @@ fn TabScreen() -> Element {
             Page::FullScreenModal(_) => full_screens += 1,
             Page::Tab(_) => {}
         }
-    }
-    let mut trail = Vec::new();
-    for route in &seen.trail {
         trail.push(route.title());
     }
     if trail.len() > CRUMBS {
         let tail = trail.split_off(trail.len() - (CRUMBS - 1));
-        let hidden = trail.len() - 1;
         trail.truncate(1);
-        trail.push(format!("+{hidden}"));
+        trail.push("\u{2026}".to_string());
         for crumb in tail {
             trail.push(crumb);
         }
@@ -162,65 +155,64 @@ fn TabScreen() -> Element {
     let mut rungs = Vec::new();
     for slot in 0..RUNGS {
         let Some(level) = slots.get(slot) else {
-            rungs.push("mx-0 w-0 flex-none bg-white/20 opacity-0");
+            rungs.push(("mx-0 h-1 w-0 flex-none bg-border opacity-0", String::new()));
             continue;
         };
         let Some(level) = level else {
-            rungs.push("mx-[1.5px] w-[6px] flex-none bg-white/25");
+            let hidden = levels - (RUNGS - 1);
+            rungs.push((
+                "mx-1.5 flex-none text-xs font-medium leading-none text-muted-foreground",
+                format!("+{hidden}"),
+            ));
             continue;
         };
         if depth == 0 {
-            rungs.push("mx-[1.5px] flex-1 bg-white/20");
+            rungs.push(("mx-0.5 h-1 flex-1 bg-border", String::new()));
         } else if *level == at {
-            rungs.push("mx-[1.5px] flex-1 bg-[#ffcf6b]");
+            rungs.push(("mx-0.5 h-1 flex-1 bg-chart-3", String::new()));
         } else {
-            rungs.push("mx-[1.5px] flex-1 bg-white/85");
+            rungs.push(("mx-0.5 h-1 flex-1 bg-foreground", String::new()));
         }
     }
 
     rsx! {
     div {
-        class: "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05060a] text-white",
+        class: "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground",
             style: "--near:hsl({hue} 78% 42%);--far:hsl({(hue + 40) % 360} 74% 38%)",
 
-            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[40px] bg-[radial-gradient(60%_60%_at_30%_20%,var(--near),transparent_70%)]" }
-            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[60px] bg-[radial-gradient(50%_50%_at_80%_0%,var(--far),transparent_70%)]" }
+            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-2xl bg-[radial-gradient(60%_60%_at_30%_20%,var(--near),transparent_70%)]" }
+            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-3xl bg-[radial-gradient(50%_50%_at_80%_0%,var(--far),transparent_70%)]" }
             div { class: "pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(120%_90%_at_50%_0%,transparent_40%,rgba(0,0,0,0.75)_100%)]" }
 
             div { class: "flex min-h-0 flex-1 flex-col overflow-hidden px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1.5rem)]",
-                div { class: "text-[11px] uppercase tracking-[0.18em] text-white/45", "{kind}" }
-                div { class: "mt-2.5 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em]",
-                    "{title}"
-                }
-                div { class: "-mx-[1.5px] mt-4 flex h-[3px]",
-                    for (step , tone) in rungs.iter().enumerate() {
-                        div {
-                            key: "{step}",
-                            class: "rounded-sm transition-all duration-300 ease-out {tone}",
-                        }
+                div { class: "text-xs uppercase tracking-widest text-muted-foreground", "{kind}" }
+                div { class: "mt-2 text-4xl font-semibold leading-tight tracking-tight", "{title}" }
+                div { class: "-mx-0.5 mt-4 flex h-4 items-center",
+                    for (step , rung) in rungs.iter().enumerate() {
+                        Rung { key: "{step}", tone: rung.0, label: rung.1.clone() }
                     }
                 }
-                div { class: "mt-2.5 truncate text-[13px] text-white/55", "{trail}" }
+                div { class: "mt-2 truncate text-sm text-muted-foreground", "{trail}" }
 
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Key {
                         label: "Card",
-                        onpick: move |_| navigation.go(Page::Card(format!("Card {}", cards + 1))),
+                        onpick: move |_| router.push(Page::Card(format!("Card {}", cards + 1))),
                     }
                     Key {
                         label: "Modal",
-                        onpick: move |_| navigation.go(Page::Modal(format!("Modal {}", modals + 1))),
+                        onpick: move |_| router.push(Page::Modal(format!("Modal {}", modals + 1))),
                     }
                     Key {
                         label: "Form Sheet",
                         onpick: move |_| {
-                            navigation.go(Page::FormSheet(format!("Sheet {}", sheets + 1)))
+                            router.push(Page::FormSheet(format!("Sheet {}", sheets + 1)))
                         },
                     }
                     Key {
                         label: "Full Screen Modal",
                         onpick: move |_| {
-                            navigation.go(Page::FullScreenModal(format!(
+                            router.push(Page::FullScreenModal(format!(
                                 "Full {}",
                                 full_screens + 1
                             )))
@@ -233,10 +225,17 @@ fn TabScreen() -> Element {
 }
 
 #[component]
+fn Rung(tone: &'static str, label: String) -> Element {
+    rsx! {
+        div { class: "rounded-sm transition-all duration-300 ease-out {tone}", "{label}" }
+    }
+}
+
+#[component]
 fn Key(label: String, onpick: EventHandler<()>) -> Element {
     rsx! {
         button {
-            class: "rounded-[13px] border border-white/15 bg-white/10 px-[18px] py-[11px] text-[15px] font-medium backdrop-blur-lg transition active:scale-95 active:bg-white/20",
+            class: "rounded-lg border border-border bg-card px-4 py-3 text-base font-medium backdrop-blur-lg transition active:scale-95 active:bg-accent",
             onclick: move |_| onpick.call(()),
             "{label}"
         }
