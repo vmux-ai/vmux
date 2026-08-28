@@ -68,7 +68,20 @@ impl<R: Route> Navigation<R> {
 }
 
 pub fn use_navigation<R: Route>() -> Navigation<R> {
-    use_context()
+    let mut state =
+        use_signal(|| World::with(|world| world.read(Nav::state::<R>)).unwrap_or_default());
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            let Some(seen) = World::with(|world| world.read(Nav::state::<R>)) else {
+                continue;
+            };
+            if *state.peek() != seen {
+                state.set(seen);
+            }
+        }
+    });
+    Navigation { state }
 }
 
 pub fn use_route<R: Route>() -> Option<R> {
@@ -81,22 +94,6 @@ pub fn Stack<R: Route>(
     children: Element,
 ) -> Element {
     let _ = route;
-    let mut state =
-        use_signal(|| World::with(|world| world.read(Nav::state::<R>)).unwrap_or_default());
-    use_context_provider(|| Navigation { state });
-
-    use_future(move || async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            let Some(seen) = World::with(|world| world.read(Nav::state::<R>)) else {
-                continue;
-            };
-            if *state.peek() != seen {
-                state.set(seen);
-            }
-        }
-    });
-
     rsx! {
         {children}
     }
