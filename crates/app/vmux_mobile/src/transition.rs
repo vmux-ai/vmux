@@ -1133,6 +1133,7 @@ mod platform {
             unsafe { objc2::msg_send![Self::alloc(marker), init] }
         }
     }
+
     pub fn take_popped() -> usize {
         POPPED.replace(0)
     }
