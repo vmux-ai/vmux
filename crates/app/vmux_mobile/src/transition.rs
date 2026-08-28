@@ -88,13 +88,12 @@ mod platform {
         fn draw(
             level: Level,
             root_view: &UIView,
+            backdrop: (u8, u8, u8, u8),
             delegate: &NavDelegate,
             marker: MainThreadMarker,
         ) -> Option<Self> {
             let web = Surfaces::build(level.page, level.seat)?;
-            if level.page.prefers_dark().is_none() {
-                web.paint(crate::root::webview_background());
-            }
+            web.paint(level.page.background_or(backdrop));
             web.render();
             let view = web.ui_view();
             view.removeFromSuperview();
@@ -459,6 +458,7 @@ mod platform {
         root_controller: Retained<UIViewController>,
         pager: Retained<UIView>,
         rootless: Retained<UIView>,
+        backdrop: (u8, u8, u8, u8),
         stacks: HashMap<String, Column>,
         sheets: Vec<Column>,
         seated: Option<String>,
@@ -558,21 +558,24 @@ mod platform {
             if known {
                 return;
             }
-            let Some((root_controller, pager, delegate, marker)) = STACK.with_borrow(|stack| {
-                let stack = stack.as_ref()?;
-                Some((
-                    stack.root_controller.clone(),
-                    stack.pager.clone(),
-                    stack.delegate.clone(),
-                    MainThreadMarker::new()?,
-                ))
-            }) else {
+            let Some((root_controller, pager, backdrop, delegate, marker)) =
+                STACK.with_borrow(|stack| {
+                    let stack = stack.as_ref()?;
+                    Some((
+                        stack.root_controller.clone(),
+                        stack.pager.clone(),
+                        stack.backdrop,
+                        stack.delegate.clone(),
+                        MainThreadMarker::new()?,
+                    ))
+                })
+            else {
                 return;
             };
 
             let mut held = Vec::new();
             for level in levels {
-                let Some(drawn) = Held::draw(level, &pager, &delegate, marker) else {
+                let Some(drawn) = Held::draw(level, &pager, backdrop, &delegate, marker) else {
                     continue;
                 };
                 held.push(drawn);
@@ -767,15 +770,16 @@ mod platform {
         }
 
         fn draw(level: Level) -> Option<Held> {
-            let (pager, delegate, marker) = STACK.with_borrow(|stack| {
+            let (pager, backdrop, delegate, marker) = STACK.with_borrow(|stack| {
                 let stack = stack.as_ref()?;
                 Some((
                     stack.pager.clone(),
+                    stack.backdrop,
                     stack.delegate.clone(),
                     MainThreadMarker::new()?,
                 ))
             })?;
-            Held::draw(level, &pager, &delegate, marker)
+            Held::draw(level, &pager, backdrop, &delegate, marker)
         }
 
         fn detents(
@@ -1170,6 +1174,7 @@ mod platform {
             root_controller,
             pager,
             rootless: web_view,
+            backdrop: page.background_or(crate::root::webview_background()),
             stacks: HashMap::new(),
             sheets: Vec::new(),
             seated: None,

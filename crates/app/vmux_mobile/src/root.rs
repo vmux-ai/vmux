@@ -173,10 +173,7 @@ impl Uikit {
     fn paint_background(&self, page: &'static NativePage) {
         use objc2_ui_kit::UIColor;
 
-        let (red, green, blue, _) = match page.paint() {
-            Some(declared) => declared,
-            None => webview_background(),
-        };
+        let (red, green, blue, _) = page.background_or(webview_background());
         let color = UIColor::colorWithRed_green_blue_alpha(
             f64::from(red) / 255.0,
             f64::from(green) / 255.0,

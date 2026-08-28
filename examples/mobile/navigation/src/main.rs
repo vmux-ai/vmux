@@ -61,7 +61,7 @@ fn act(
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen(background = BACKDROP)]
 #[component]
 fn App() -> Element {
     rsx! {
@@ -90,7 +90,7 @@ fn App() -> Element {
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen]
 #[component]
 fn TabScreen() -> Element {
     rsx! {
@@ -188,7 +188,7 @@ fn Body(near: String, far: String, kind: String) -> Element {
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen]
 #[component]
 fn CardScreen() -> Element {
     rsx! {
@@ -198,7 +198,7 @@ fn CardScreen() -> Element {
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen]
 #[component]
 fn ModalScreen() -> Element {
     rsx! {
@@ -208,7 +208,7 @@ fn ModalScreen() -> Element {
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen]
 #[component]
 fn FormSheetScreen() -> Element {
     rsx! {
@@ -218,7 +218,7 @@ fn FormSheetScreen() -> Element {
     }
 }
 
-#[screen(painted = BACKDROP)]
+#[screen]
 #[component]
 fn FullScreenModalScreen() -> Element {
     rsx! {

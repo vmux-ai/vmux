@@ -23,8 +23,11 @@ impl NativePage {
         self.url
     }
 
-    pub fn paint(&self) -> Option<(u8, u8, u8, u8)> {
-        self.background
+    pub fn background_or(&self, fallback: (u8, u8, u8, u8)) -> (u8, u8, u8, u8) {
+        match self.background {
+            Some(colour) => colour,
+            None => fallback,
+        }
     }
 
     pub fn prefers_dark(&self) -> Option<bool> {
@@ -69,7 +72,7 @@ impl NativePage {
         self.document_url = Some(url);
         self
     }
-    pub const fn painted(mut self, colour: (u8, u8, u8, u8)) -> Self {
+    pub const fn background(mut self, colour: (u8, u8, u8, u8)) -> Self {
         self.background = Some(colour);
         self
     }
