@@ -156,12 +156,6 @@ pub(crate) fn embedding(waker: PageWaker) -> vmux_native::Embedding {
     }
 }
 
-pub(crate) static START: NativePage =
-    NativePage::pane("vmux://start/", vmux_start::page::StartPage);
-pub(crate) static TEAM: NativePage = NativePage::pane("vmux://team/", vmux_team::page::Page);
-pub(crate) static AGENT: NativePage =
-    NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree();
-
 thread_local! {
     static WAKER: RefCell<Option<PageWaker>> = const { RefCell::new(None) };
 }

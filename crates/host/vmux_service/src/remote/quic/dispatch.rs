@@ -13,12 +13,6 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
 
         SharedMessage::Agent { sid, action } => agent(state, &sid, action).await,
 
-        SharedMessage::AgentCommand(SharedAgentCommand::ReadLayout) => layout(state).await,
-
-        SharedMessage::AgentCommand(SharedAgentCommand::ReadTerminal { process_id }) => {
-            terminal(state, &process_id).await
-        }
-
         SharedMessage::AgentCommand(command) => {
             let Some(client_op_id) = new_chat_op_id(&command) else {
                 return broker(state, command).await;
@@ -155,53 +149,7 @@ fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
         | SharedAgentCommand::ListTeam
         | SharedAgentCommand::ListModels { .. }
         | SharedAgentCommand::SelectModel { .. }
-        | SharedAgentCommand::SetEffort { .. }
-        | SharedAgentCommand::ReadLayout
-        | SharedAgentCommand::ReadTerminal { .. } => None,
-    }
-}
-
-async fn terminal(state: &RemoteState, process_id: &str) -> SharedResponse {
-    let Ok(id) = process_id.parse() else {
-        return SharedResponse::Failed(SharedFailure::Invalid);
-    };
-    let Some(text) = state.processes.lock().await.visible_text(&id) else {
-        return SharedResponse::Failed(SharedFailure::NotFound);
-    };
-    match serde_json::to_string(&text) {
-        Ok(json) => SharedResponse::BrokerJson(json),
-        Err(error) => {
-            tracing::warn!(%error, "remote quic: the terminal text would not encode");
-            SharedResponse::Failed(SharedFailure::Internal)
-        }
-    }
-}
-
-async fn layout(state: &RemoteState) -> SharedResponse {
-    use crate::protocol::{AgentQuery, AgentQueryResult, AgentRequestId};
-
-    let asked = state
-        .broker
-        .query(
-            AgentRequestId::new(),
-            AgentQuery::ReadLayout { anchor: None },
-        )
-        .await;
-    let snapshot = match asked {
-        Ok(AgentQueryResult::Layout(snapshot)) => snapshot,
-        Ok(AgentQueryResult::Error(message)) => {
-            tracing::warn!(%message, "remote quic: the GUI refused the layout");
-            return SharedResponse::Failed(SharedFailure::Invalid);
-        }
-        Ok(_) => return SharedResponse::Failed(SharedFailure::Internal),
-        Err(_) => return SharedResponse::Failed(SharedFailure::NoDesktop),
-    };
-    match serde_json::to_string(&snapshot) {
-        Ok(json) => SharedResponse::BrokerJson(json),
-        Err(error) => {
-            tracing::warn!(%error, "remote quic: the layout would not encode");
-            SharedResponse::Failed(SharedFailure::Internal)
-        }
+        | SharedAgentCommand::SetEffort { .. } => None,
     }
 }
 
@@ -247,7 +195,6 @@ mod tests {
                 Default::default(),
             ),
             client_ops: Arc::new(Mutex::new(Default::default())),
-            processes: Arc::new(Mutex::new(Default::default())),
         }
     }
 

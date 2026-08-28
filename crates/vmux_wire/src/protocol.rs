@@ -964,8 +964,6 @@ mod tests {
                 "ListModels",
                 "SelectModel",
                 "SetEffort",
-                "ReadLayout",
-                "ReadTerminal",
             ]
         );
     }

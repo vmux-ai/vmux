@@ -457,6 +457,7 @@ mod platform {
     pub struct NativeStack {
         root_controller: Retained<UIViewController>,
         pager: Retained<UIView>,
+        rootless: Retained<UIView>,
         stacks: HashMap<String, Column>,
         sheets: Vec<Column>,
         seated: Option<String>,
@@ -473,6 +474,7 @@ mod platform {
                 let stack = stack.as_mut()?;
                 let arriving = stack.stacks.get(&tab)?.navigation.view()?;
                 stack.pager.bringSubviewToFront(&arriving);
+                stack.rootless.setHidden(true);
                 let vacated = stack.seated.replace(tab.clone());
                 let Some(vacated) = vacated.filter(|seen| *seen != tab) else {
                     arriving.setTransform(Drag::sideways(0.0));
@@ -1107,7 +1109,6 @@ mod platform {
             }
         }
 
-        web_view.setHidden(true);
         let pager = UIView::initWithFrame(UIView::alloc(marker), root_view.bounds());
         size_to_parent(&pager, &root_view);
         pager.setClipsToBounds(true);
@@ -1119,6 +1120,7 @@ mod platform {
         STACK.set(Some(NativeStack {
             root_controller,
             pager,
+            rootless: web_view,
             stacks: HashMap::new(),
             sheets: Vec::new(),
             seated: None,

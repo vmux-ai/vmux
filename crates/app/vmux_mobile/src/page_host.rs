@@ -15,11 +15,9 @@ use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
-use crate::nav::Push;
 use crate::runtime::World;
-use crate::screen::Shown;
 use vmux_ui::hooks::EventListenerError;
-use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost};
+use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
 use vmux_wire::command_bar::CommandBarActionEvent;
 use vmux_wire::prompt_media::{
@@ -52,7 +50,6 @@ pub(crate) struct MobileHost {
 
 thread_local! {
     static EPOCH: Cell<u64> = const { Cell::new(0) };
-
     static INSTALLED: RefCell<Option<Rc<MobileHost>>> = const { RefCell::new(None) };
 }
 
@@ -78,7 +75,8 @@ pub(crate) fn install(
         session,
         composer,
     });
-    INSTALLED.with_borrow_mut(|slot| *slot = Some(host));
+    INSTALLED.with_borrow_mut(|slot| *slot = Some(host.clone()));
+    install_host(host);
 }
 
 fn superseded(epoch: u64) -> bool {
@@ -273,15 +271,12 @@ impl MobileHost {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
-                self.session.attach(session);
-                Ok(())
-            }
-            CommandBarActionEvent::Open { value, .. } => {
-                crate::runtime::World::with(|world| world.send(Push(Shown::addressed(&value))));
+                self.session.open(session);
                 Ok(())
             }
             CommandBarActionEvent::Dismiss => Ok(()),
-            CommandBarActionEvent::Terminal { .. }
+            CommandBarActionEvent::Open { .. }
+            | CommandBarActionEvent::Terminal { .. }
             | CommandBarActionEvent::Command { .. }
             | CommandBarActionEvent::Space { .. } => Err(EventListenerError::Unsupported),
         }

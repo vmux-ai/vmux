@@ -780,14 +780,6 @@ mobile-start-search-placeholder = Search or ask…
 mobile-start-new-chat = Start chat
 mobile-start-starting = Starting…
 
-mobile-nav-untitled-chat = Untitled chat
-mobile-nav-launcher = Start
-mobile-nav-new-tab = New tab
-mobile-nav-unsupported = Not available on this device
-mobile-nav-read-only = Read-only
-mobile-nav-open-on-mac = Open it on your Mac
-mobile-nav-url-placeholder = Ask, or paste a URL…
-
 mobile-chat-back = Back
 mobile-chat-back-to-stacks = Back to stacks
 mobile-chat-no-messages = No messages yet.

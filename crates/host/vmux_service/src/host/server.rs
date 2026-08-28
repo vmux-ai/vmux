@@ -158,7 +158,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
         Arc::clone(&agent_manager),
         Arc::clone(&acp_manager),
         remote_broker,
-        Arc::clone(&manager),
     );
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
@@ -675,11 +674,29 @@ async fn handle_client(
             ClientMessage::AgentQuery { request_id, query } => {
                 let query = match query {
                     crate::protocol::AgentQuery::ReadTerminal { process_id } => {
-                        let result = match manager.lock().await.visible_text(&process_id) {
-                            Some(text) => crate::protocol::AgentQueryResult::Text(text),
-                            None => crate::protocol::AgentQueryResult::Error(format!(
-                                "process not found: {process_id}"
-                            )),
+                        let result = {
+                            let mgr = manager.lock().await;
+                            match mgr.processes.get(&process_id) {
+                                Some(process) => {
+                                    let text = match process.snapshot() {
+                                        ServiceMessage::Snapshot { lines, .. } => lines
+                                            .iter()
+                                            .map(|line| {
+                                                line.spans
+                                                    .iter()
+                                                    .map(|span| span.text.as_str())
+                                                    .collect::<String>()
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n"),
+                                        _ => String::new(),
+                                    };
+                                    crate::protocol::AgentQueryResult::Text(text)
+                                }
+                                None => crate::protocol::AgentQueryResult::Error(format!(
+                                    "process not found: {process_id}"
+                                )),
+                            }
                         };
                         let resp = ServiceMessage::AgentQueryResult { request_id, result };
                         let mut w = writer.lock().await;

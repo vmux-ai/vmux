@@ -774,14 +774,6 @@ mobile-start-search-placeholder = 検索または質問…
 mobile-start-new-chat = チャットを開始
 mobile-start-starting = 開始中…
 
-mobile-nav-untitled-chat = 無題のチャット
-mobile-nav-launcher = スタート
-mobile-nav-new-tab = 新しいタブ
-mobile-nav-unsupported = このデバイスでは利用できません
-mobile-nav-read-only = 読み取り専用
-mobile-nav-open-on-mac = Mac で開いてください
-mobile-nav-url-placeholder = 質問するか URL を貼り付け…
-
 mobile-chat-back = 戻る
 mobile-chat-back-to-stacks = スタックに戻る
 mobile-chat-no-messages = メッセージはまだありません。
