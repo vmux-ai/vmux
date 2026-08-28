@@ -145,6 +145,10 @@ impl ProjectRowKind {
     pub fn opens_a_tree(self) -> bool {
         matches!(self, Self::Project | Self::Directory)
     }
+
+    pub fn carries_a_branch(self) -> bool {
+        matches!(self, Self::Project)
+    }
 }
 
 #[derive(

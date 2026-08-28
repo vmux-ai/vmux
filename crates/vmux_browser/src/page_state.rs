@@ -415,7 +415,7 @@ fn push_tab_boundary_emit(
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         for row in &mut projects {
-            if row.missing || !row.kind.opens_a_tree() {
+            if row.missing || !row.kind.carries_a_branch() {
                 continue;
             }
             if let Some(info) = cache.get(std::path::Path::new(&row.path)) {
