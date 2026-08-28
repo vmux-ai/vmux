@@ -1,12 +1,12 @@
 [package]
-name = "vmux_layout_mobile"
+name = "vmux_navigation_mobile"
 version.workspace = true
 edition.workspace = true
 description = "The phone's navigation, driven by hand instead of by a Mac"
 publish = false
 
 [[bin]]
-name = "vmux_layout_mobile"
+name = "vmux_navigation_mobile"
 path = "src/main.rs"
 
 [dependencies]
@@ -18,8 +18,8 @@ dioxus = { version = "=0.7.9", default-features = false, features = [
     "asset",
     "mounted",
 ] }
-vmux_mobile = { path = "../../crates/app/vmux_mobile", features = ["mobile"] }
-vmux_native = { path = "../../crates/vmux_native" }
+vmux_mobile = { path = "../../../crates/app/vmux_mobile", features = ["mobile"] }
+vmux_native = { path = "../../../crates/vmux_native" }
 
 [lints]
 workspace = true

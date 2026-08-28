@@ -1,4 +1,4 @@
-.PHONY: layout-mobile dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: navigation-mobile dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -55,13 +55,13 @@ build: ensure-mac-deps
 
 ios: mobile-ios-run
 
-layout-mobile: ensure-mobile-ios-deps ensure-booted-simulator
+navigation-mobile: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
-	"$(DX_BIN)" build --ios -p vmux_layout_mobile; \
+	"$(DX_BIN)" build --ios -p vmux_navigation_mobile; \
 	. ./scripts/cargo-target-paths.sh; \
-	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_layout_mobile/debug/ios/VmuxLayoutMobile.app"; \
+	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_navigation_mobile/debug/ios/VmuxNavigationMobile.app"; \
 	xcrun simctl install booted "$$bundle"; \
-	xcrun simctl launch booted ai.vmux.layout.mobile
+	xcrun simctl launch booted ai.vmux.navigation.mobile
 
 android: mobile-android-run
 

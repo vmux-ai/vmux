@@ -409,7 +409,7 @@ jobs:
         run: cargo test --locked -p vmux_mobile --features mobile --lib --bins
 
       - name: Build the phone example
-        run: cargo build --locked -p vmux_layout_mobile
+        run: cargo build --locked -p vmux_navigation_mobile
 
       # vmux_mobile does not depend on every page that claims to be portable, so compiling it
       # proves nothing about them. This went green once while vmux_editor for iOS was broken.
