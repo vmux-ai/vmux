@@ -1,6 +1,7 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 
+pub use crate::transition::Presentation;
 use crate::transition::{Level, NativeStack, TabEntry};
 
 pub trait Route: Clone + PartialEq + Send + Sync + 'static {
@@ -77,23 +78,19 @@ pub struct Dropped(pub usize);
 #[derive(Message)]
 pub struct Tapped(pub &'static str);
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum Arrives {
-    Pushed,
-    Presented,
-}
-
 #[derive(Message)]
 pub struct Declare<S: Route> {
     pub name: S::Name,
     pub draws: &'static vmux_native::NativePage,
-    pub arrives: Arrives,
+    pub presentation: Presentation,
+    pub detents: &'static [f64],
     pub action: Option<&'static str>,
 }
 
 pub struct Draws {
     pub page: &'static vmux_native::NativePage,
-    pub arrives: Arrives,
+    pub presentation: Presentation,
+    pub detents: &'static [f64],
     pub action: Option<&'static str>,
 }
 
@@ -356,7 +353,8 @@ impl Nav {
         for Declare {
             name,
             draws,
-            arrives,
+            presentation,
+            detents,
             action,
         } in asked.read()
         {
@@ -367,7 +365,8 @@ impl Nav {
                 *name,
                 Draws {
                     page: draws,
-                    arrives: *arrives,
+                    presentation: *presentation,
+                    detents,
                     action: *action,
                 },
             ));
@@ -487,7 +486,8 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
-                closable: false,
+                presentation: draws.presentation,
+                detents: draws.detents,
                 seat: Seat::taken(&screen),
             });
         }
@@ -529,7 +529,8 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
-                closable: false,
+                presentation: draws.presentation,
+                detents: draws.detents,
                 seat: Seat::taken(screen),
             });
         }
@@ -543,7 +544,8 @@ impl Nav {
                 page: draws.page,
                 title: screen.title(),
                 action: draws.action,
-                closable: true,
+                presentation: draws.presentation,
+                detents: draws.detents,
                 seat: Seat::taken(screen),
             });
         }
