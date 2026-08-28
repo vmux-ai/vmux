@@ -325,12 +325,27 @@ mod platform {
             if self.ids.len() < 2 {
                 return None;
             }
-            let next = if towards < 0.0 {
+            let next = if towards > 0.0 {
                 self.at + 1
             } else {
                 self.at.checked_sub(1)?
             };
             self.ids.get(next).cloned()
+        }
+
+        fn after(&self, from: &str, to: &str) -> bool {
+            let mut seen = None;
+            for (at, id) in self.ids.iter().enumerate() {
+                if id == from {
+                    seen = Some(at);
+                }
+                if id == to
+                    && let Some(seen) = seen
+                {
+                    return at > seen;
+                }
+            }
+            false
         }
 
         fn pane(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
@@ -453,33 +468,52 @@ mod platform {
         pub fn seat(tab: String, levels: Vec<Level>) {
             Self::shed();
             Self::raise(&tab, levels);
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
+            let plan = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let arriving = stack.stacks.get(&tab)?.navigation.view()?;
+                stack.pager.bringSubviewToFront(&arriving);
+                let vacated = stack.seated.replace(tab.clone());
+                let Some(vacated) = vacated.filter(|seen| *seen != tab) else {
+                    arriving.setTransform(Drag::sideways(0.0));
+                    arriving.setHidden(false);
+                    return None;
                 };
-                if !stack.stacks.contains_key(&tab) {
-                    return;
-                }
-                let leaving = stack.seated.replace(tab.clone());
-                if let Some(leaving) = leaving
-                    && leaving != tab
-                    && let Some(column) = stack.stacks.get(&leaving)
-                    && let Some(view) = column.navigation.view()
-                {
-                    view.setHidden(true);
-                    view.setTransform(Drag::sideways(0.0));
-                }
-                let Some(column) = stack.stacks.get(&tab) else {
-                    return;
+                let across = stack.pager.bounds().size.width;
+                let entering = if stack.tabs.after(&vacated, &tab) {
+                    across
+                } else {
+                    -across
                 };
-                let Some(view) = column.navigation.view() else {
-                    return;
-                };
-                view.setTransform(Drag::sideways(0.0));
-                view.setHidden(false);
-                stack.pager.bringSubviewToFront(&view);
+                let leaving = stack
+                    .stacks
+                    .get(&vacated)
+                    .and_then(|column| column.navigation.view());
+                arriving.setTransform(Drag::sideways(entering));
+                arriving.setHidden(false);
+                Some((leaving, arriving, entering))
             });
             Self::front();
+            let Some((leaving, arriving, entering)) = plan else {
+                return;
+            };
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let sliding = (leaving.clone(), arriving);
+            let slide = block2::RcBlock::new(move || {
+                if let Some(leaving) = sliding.0.as_ref() {
+                    leaving.setTransform(Drag::sideways(-entering));
+                }
+                sliding.1.setTransform(Drag::sideways(0.0));
+            });
+            let done = block2::RcBlock::new(move |_| {
+                let Some(leaving) = leaving.as_ref() else {
+                    return;
+                };
+                leaving.setHidden(true);
+                leaving.setTransform(Drag::sideways(0.0));
+            });
+            UIView::animateWithDuration_animations_completion(0.28, &slide, Some(&done), marker);
         }
 
         pub fn warm(wanted: Vec<(String, Vec<Level>)>) {
@@ -806,12 +840,12 @@ mod platform {
                 let Some(drag) = stack.dragging.as_ref() else {
                     return;
                 };
-                let shifted = shifted.clamp(-drag.across, drag.across);
+                let travelled = -shifted.clamp(-drag.across, drag.across);
                 if let Some(leaving) = Self::leaving(stack) {
-                    leaving.setTransform(Self::sideways(shifted));
+                    leaving.setTransform(Self::sideways(travelled));
                 }
                 if let Some(arriving) = drag.incoming.navigation.view() {
-                    arriving.setTransform(Self::sideways(shifted + drag.entering));
+                    arriving.setTransform(Self::sideways(travelled + drag.entering));
                 }
             });
         }
@@ -825,7 +859,7 @@ mod platform {
                 let stack = stack.as_mut()?;
                 let incoming = stack.stacks.remove(&to)?;
                 let across = stack.pager.bounds().size.width;
-                let entering = if shifted < 0.0 { across } else { -across };
+                let entering = if shifted > 0.0 { across } else { -across };
                 let view = incoming.navigation.view()?;
                 view.setTransform(Self::sideways(entering));
                 view.setHidden(false);
@@ -846,7 +880,7 @@ mod platform {
                 let leaving = Self::leaving(stack)?;
                 let arriving = drag.incoming.navigation.view()?;
                 let far = shifted.abs() > drag.across / 3.0 || speed.abs() > 600.0;
-                let agreed = shifted != 0.0 && shifted.signum() == -drag.entering.signum();
+                let agreed = shifted != 0.0 && shifted.signum() == drag.entering.signum();
                 let commit = far && agreed;
                 let landing = if commit { -drag.entering } else { 0.0 };
                 Some((leaving, arriving, landing, drag.entering, commit))
@@ -878,7 +912,10 @@ mod platform {
                     leaving.setHidden(commit);
                 }
                 let to = drag.to.clone();
-                stack.stacks.insert(drag.to, drag.incoming);
+                stack.stacks.insert(drag.to.clone(), drag.incoming);
+                if commit {
+                    stack.seated = Some(drag.to);
+                }
                 Some(to)
             });
             let Some(to) = arrived else {
