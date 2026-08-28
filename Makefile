@@ -1,4 +1,4 @@
-.PHONY: mobile-navigation dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: example dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -55,13 +55,27 @@ build: ensure-mac-deps
 
 ios: mobile-ios-run
 
-mobile-navigation: ensure-mobile-ios-deps ensure-booted-simulator
+ifneq (,$(filter example,$(MAKECMDGOALS)))
+EXAMPLE := $(firstword $(filter-out example,$(MAKECMDGOALS)))
+EXAMPLE_DIR := examples/$(subst -,/,$(EXAMPLE))
+EXAMPLE_CRATE := vmux_$(subst -,_,$(EXAMPLE))_example
+
+example: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
-	"$(DX_BIN)" build --ios -p vmux_mobile_navigation_example; \
+	if [ -z "$(EXAMPLE)" ]; then \
+		echo "usage: make example <platform>-<name>, e.g. make example mobile-navigation"; \
+		ls -d examples/*/* | sed 's|examples/||; s|/|-|' | sed 's/^/  /'; \
+		exit 1; \
+	fi; \
+	"$(DX_BIN)" build --ios -p $(EXAMPLE_CRATE); \
 	. ./scripts/cargo-target-paths.sh; \
-	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_mobile_navigation_example/debug/ios/VmuxMobileNavigationExample.app"; \
+	bundle="$$(ls -d "$$(vmux_cargo_target_dir .)/dx/$(EXAMPLE_CRATE)/debug/ios/"*.app | head -1)"; \
 	xcrun simctl install booted "$$bundle"; \
-	xcrun simctl launch booted ai.vmux.navigation.mobile
+	xcrun simctl launch booted "$$(awk -F'"' '/^identifier/ { print $$2; exit }' $(EXAMPLE_DIR)/Dioxus.toml)"
+
+$(EXAMPLE):
+	@:
+endif
 
 android: mobile-android-run
 
