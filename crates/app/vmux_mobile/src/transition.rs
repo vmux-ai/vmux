@@ -91,7 +91,7 @@ mod platform {
             marker: MainThreadMarker,
         ) -> Option<Self> {
             let web = Surfaces::build(level.page, level.seat)?;
-            if level.page.background.is_none() {
+            if level.page.prefers_dark().is_none() {
                 web.paint(crate::root::webview_background());
             }
             web.render();

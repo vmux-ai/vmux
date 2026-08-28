@@ -70,55 +70,39 @@ impl NativePagePlugin {
 }
 
 #[cfg(target_os = "macos")]
-pub static LAYOUT_PAGE: NativePage = NativePage {
-    url: vmux_layout::event::LAYOUT_PAGE_URL,
-    document_url: None,
-    title: "vmux",
-    reports_title: true,
-    favicon: true,
-    component: vmux_layout::page::Page,
-    dom_group: None,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+pub static LAYOUT_PAGE: NativePage =
+    NativePage::pane(vmux_layout::event::LAYOUT_PAGE_URL, vmux_layout::page::Page)
+        .titled("vmux")
+        .served_from(vmux_layout::event::LAYOUT_PAGE_URL)
+        .heading(
+            r#"<base href="/"/>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
 body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
-                 text-foreground antialiased",
-    transparent: true,
-    background: None,
-    owns_subtree: false,
-};
+        )
+        .dressed(
+            r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+            "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+             text-foreground antialiased",
+        )
+        .see_through();
 
 #[cfg(target_os = "macos")]
-pub static START_PAGE: NativePage = NativePage {
-    url: vmux_start::START_PAGE_URL,
-    document_url: None,
-    title: "Start",
-    reports_title: true,
-    favicon: true,
-    component: vmux_start::page::StartPage,
-    dom_group: None,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+pub static START_PAGE: NativePage =
+    NativePage::pane(vmux_start::START_PAGE_URL, vmux_start::page::StartPage)
+        .titled("Start")
+        .heading(
+            r#"<base href="/"/>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
 body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
-    transparent: false,
-    background: None,
-    owns_subtree: false,
-};
+        );
 
 #[cfg(target_os = "macos")]
 pub static HISTORY_PAGE: NativePage =
@@ -264,7 +248,7 @@ mod tests {
             assert!(
                 page.document_url().starts_with("vmux://"),
                 "{} loads from {}, which no protocol handler serves",
-                page.url,
+                page.url(),
                 page.document_url()
             );
         }
@@ -283,7 +267,7 @@ mod tests {
 
     #[test]
     fn the_editor_still_answers_for_file_urls() {
-        assert_eq!(FILES_PAGE.url, "file://");
+        assert_eq!(FILES_PAGE.url(), "file://");
         assert!(FILES_PAGE.answers_for("file:///Users/me/a.rs"));
         assert_eq!(FILES_PAGE.document_url(), "vmux://start/");
     }
@@ -291,7 +275,7 @@ mod tests {
     #[test]
     fn editor_routes_preserve_their_shared_dom() {
         for page in [&FILES_PAGE, &PROJECTS_PAGE, &KNOWLEDGE_PAGE] {
-            assert!(FILES_PAGE.preserves_dom_for(page), "{}", page.url);
+            assert!(FILES_PAGE.preserves_dom_for(page), "{}", page.url());
         }
         assert!(!FILES_PAGE.preserves_dom_for(&LSP_PAGE));
     }

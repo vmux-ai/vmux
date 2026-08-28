@@ -202,7 +202,7 @@ fn open_native_pages(world: &mut World) {
                 page,
                 &**window,
                 bounds,
-                embedder.embed(entity, page.url),
+                embedder.embed(entity, page.url()),
                 instance,
             ))
         });
@@ -222,7 +222,7 @@ fn open_native_pages(world: &mut World) {
                     .set_externally_hosted(entity);
                 info!(
                     "native_page: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
-                    page.url
+                    page.url()
                 );
                 world.non_send_mut::<HostedPages>().0.insert(
                     entity,
@@ -237,7 +237,7 @@ fn open_native_pages(world: &mut World) {
             Some(Err(error)) => {
                 error!(
                     "native_page: build_as_child failed for {}: {error}",
-                    page.url
+                    page.url()
                 )
             }
         }

@@ -189,11 +189,11 @@ impl Surfaces {
         match built {
             Some(Ok(surface)) => Some(surface),
             Some(Err(error)) => {
-                tracing::error!(%error, url = page.url, "surface: a page would not mount");
+                tracing::error!(%error, url = page.url(), "surface: a page would not mount");
                 None
             }
             None => {
-                tracing::warn!(url = page.url, "surface: no window to mount into yet");
+                tracing::warn!(url = page.url(), "surface: no window to mount into yet");
                 None
             }
         }
