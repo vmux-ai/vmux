@@ -26,7 +26,7 @@ impl Parse for Args {
         input.parse::<Token![,]>()?;
         for option in Punctuated::<Setting, Token![,]>::parse_terminated(input)? {
             match option {
-                Setting::Painted(expr) => args.painted = Some(expr),
+                Setting::Painted(expr) => args.painted = Some(*expr),
                 Setting::ServedFrom(url) => args.served_from = Some(url),
                 Setting::OwningSubtree => args.owning_subtree = true,
             }
@@ -36,7 +36,7 @@ impl Parse for Args {
 }
 
 enum Setting {
-    Painted(Expr),
+    Painted(Box<Expr>),
     ServedFrom(LitStr),
     OwningSubtree,
 }
@@ -48,7 +48,7 @@ impl Parse for Setting {
             "owning_subtree" => Ok(Self::OwningSubtree),
             "painted" => {
                 input.parse::<Token![=]>()?;
-                Ok(Self::Painted(input.parse()?))
+                Ok(Self::Painted(Box::new(input.parse()?)))
             }
             "served_from" => {
                 input.parse::<Token![=]>()?;
