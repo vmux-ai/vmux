@@ -6,26 +6,31 @@ use crate::nav::{
 };
 use crate::runtime::World;
 
-pub struct Navigation<R: Route> {
+pub struct Router<R: Route> {
     state: Signal<NavigationState<R>>,
+    here: Signal<Option<R>>,
 }
 
-impl<R: Route> Clone for Navigation<R> {
+impl<R: Route> Clone for Router<R> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<R: Route> Copy for Navigation<R> {}
+impl<R: Route> Copy for Router<R> {}
 
-impl<R: Route> PartialEq for Navigation<R> {
+impl<R: Route> PartialEq for Router<R> {
     fn eq(&self, other: &Self) -> bool {
-        self.state == other.state
+        self.state == other.state && self.here == other.here
     }
 }
 
-impl<R: Route> Navigation<R> {
+impl<R: Route> Router<R> {
     pub fn route(&self) -> Option<R> {
+        self.here.read().clone()
+    }
+
+    pub fn top(&self) -> Option<R> {
         self.state.read().current.clone()
     }
 
@@ -33,7 +38,35 @@ impl<R: Route> Navigation<R> {
         self.state.read().clone()
     }
 
-    pub fn go(&self, route: R) {
+    pub fn segments(&self) -> Vec<R> {
+        self.state.read().trail.clone()
+    }
+
+    pub fn depth(&self) -> usize {
+        self.state.read().depth
+    }
+
+    pub fn position(&self) -> usize {
+        let here = self.here.read();
+        let state = self.state.read();
+        let mut at = state.depth;
+        for (index, route) in state.trail.iter().enumerate() {
+            if Some(route) == here.as_ref() {
+                at = index;
+            }
+        }
+        at
+    }
+
+    pub fn pathname(&self) -> String {
+        let mut crumbs = Vec::new();
+        for route in self.state.read().trail.iter() {
+            crumbs.push(route.title());
+        }
+        crumbs.join(" \u{203a} ")
+    }
+
+    pub fn push(&self, route: R) {
         let name = route.name();
         World::with(|world| {
             let pushes = world
@@ -50,7 +83,7 @@ impl<R: Route> Navigation<R> {
         });
     }
 
-    pub fn go_back(&self) {
+    pub fn back(&self) {
         let sheet = self.state.read().sheet;
         World::with(|world| {
             if sheet {
@@ -61,13 +94,21 @@ impl<R: Route> Navigation<R> {
         });
     }
 
+    pub fn dismiss(&self) {
+        World::with(|world| world.send(Dismiss));
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.state.read().depth > 0
+    }
+
     pub fn navigate(&self, tab: &str) {
         let tab = tab.to_string();
         World::with(|world| world.send(Select(tab)));
     }
 }
 
-pub fn use_navigation<R: Route>() -> Navigation<R> {
+pub fn use_router<R: Route>() -> Router<R> {
     let mut state =
         use_signal(|| World::with(|world| world.read(Nav::state::<R>)).unwrap_or_default());
     use_future(move || async move {
@@ -81,7 +122,9 @@ pub fn use_navigation<R: Route>() -> Navigation<R> {
             }
         }
     });
-    Navigation { state }
+    let seen = use_route::<R>();
+    let here = use_signal(move || seen);
+    Router { state, here }
 }
 
 pub fn use_route<R: Route>() -> Option<R> {
