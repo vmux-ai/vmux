@@ -75,7 +75,8 @@ pub fn NavigationContainer<R: Route>(
     children: Element,
 ) -> Element {
     let _ = route;
-    let mut view = use_signal(View::<R>::default);
+    let mut view =
+        use_signal(|| World::with(|world| world.read(Nav::view::<R>)).unwrap_or_default());
     use_context_provider(|| Navigation { view });
 
     use_future(move || async move {
