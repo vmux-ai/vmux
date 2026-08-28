@@ -221,7 +221,10 @@ mod platform {
             row.setDistribution(UIStackViewDistribution::FillEqually);
             row.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
             glass.contentView().addSubview(&row);
-            root_view.addSubview(&glass);
+            match root_view.window() {
+                Some(window) => window.addSubview(&glass),
+                None => root_view.addSubview(&glass),
+            }
             Self {
                 glass,
                 row,
@@ -437,11 +440,15 @@ mod platform {
         );
 
         if let Some(dark) = page.prefers_dark() {
-            root_controller.setOverrideUserInterfaceStyle(if dark {
+            let style = if dark {
                 UIUserInterfaceStyle::Dark
             } else {
                 UIUserInterfaceStyle::Light
-            });
+            };
+            root_controller.setOverrideUserInterfaceStyle(style);
+            if let Some(window) = root_view.window() {
+                window.setOverrideUserInterfaceStyle(style);
+            }
         }
 
         let first =
@@ -545,12 +552,7 @@ mod platform {
                     return;
                 };
                 presenter.presentViewController_animated_completion(&sheet, true, None);
-                STACK.with_borrow(|stack| {
-                    let Some(stack) = stack.as_ref() else {
-                        return;
-                    };
-                    stack.tabs.front();
-                });
+                Self::raise();
             });
         }
 
@@ -568,6 +570,16 @@ mod platform {
             departing
                 .navigation
                 .dismissViewControllerAnimated_completion(true, None);
+            Self::raise();
+        }
+
+        fn raise() {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                stack.tabs.front();
+            });
         }
 
         pub fn settle(levels: Vec<Level>) {
