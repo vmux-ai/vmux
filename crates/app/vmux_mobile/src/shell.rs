@@ -98,7 +98,7 @@ impl Shell {
             return;
         };
         shell.fill_parent();
-        uikit.paint_background();
+        uikit.paint_background(page);
         crate::deep_link::adopt();
         crate::transition::install(&uikit.controller, &uikit.view, &shell.ui_view(), page);
         crate::qr_scanner::install(&uikit.controller);
@@ -174,10 +174,13 @@ impl Uikit {
         })
     }
 
-    fn paint_background(&self) {
+    fn paint_background(&self, page: &'static NativePage) {
         use objc2_ui_kit::UIColor;
 
-        let (red, green, blue, _) = webview_background();
+        let (red, green, blue, _) = match page.background {
+            Some(declared) => declared,
+            None => webview_background(),
+        };
         let color = UIColor::colorWithRed_green_blue_alpha(
             f64::from(red) / 255.0,
             f64::from(green) / 255.0,

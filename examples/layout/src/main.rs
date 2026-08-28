@@ -84,6 +84,7 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 </style>"#;
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
+static INBOX: NativePage = Demo::page("vmux://inbox/", InboxScreen);
 static NOTE: NativePage = Demo::page("vmux://note/", NoteScreen);
 static ALERT: NativePage = Demo::page("vmux://alert/", AlertScreen);
 
@@ -155,19 +156,20 @@ fn Shell() -> Element {
     rsx! {
         NavigationContainer::<Page> {
             TabNavigator {
-                Screen::<Page> { name: Name::Inbox, draws: &SHELL, action: "Push" }
+                Screen::<Page> { name: Name::Inbox, draws: &INBOX, action: "Push" }
                 Screen::<Page> { name: Name::Note, draws: &NOTE, action: "Push" }
                 Sheet::<Page> { name: Name::Alert, draws: &ALERT, action: "Push" }
-                Root {}
             }
         }
     }
 }
 
 #[component]
-fn Root() -> Element {
+fn InboxScreen() -> Element {
     rsx! {
-        Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root", root: true }
+        NavigationContainer::<Page> {
+            Stage { near: "#1d4ed8", far: "#0891b2", kind: "inbox" }
+        }
     }
 }
 
@@ -175,7 +177,7 @@ fn Root() -> Element {
 fn NoteScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", root: false }
+            Stage { near: "#7c3aed", far: "#db2777", kind: "notes" }
         }
     }
 }
@@ -184,16 +186,15 @@ fn NoteScreen() -> Element {
 fn AlertScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#b45309", far: "#be123c", kind: "presented", root: false }
+            Stage { near: "#b45309", far: "#be123c", kind: "presented" }
         }
     }
 }
 
 #[component]
-fn Stage(near: String, far: String, kind: String, root: bool) -> Element {
+fn Stage(near: String, far: String, kind: String) -> Element {
     let seen = use_navigation::<Page>().view();
-    let shown = if root { &seen.root } else { &seen.current };
-    let title = match shown {
+    let title = match &seen.current {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
     };

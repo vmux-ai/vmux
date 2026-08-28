@@ -18,6 +18,7 @@ pub struct TabEntry {
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
     use std::time::Duration;
 
     use dispatch2::{DispatchQueue, DispatchTime};
@@ -413,6 +414,8 @@ mod platform {
     pub struct NativeStack {
         root_view: Retained<UIView>,
         columns: Vec<Column>,
+        roots: HashMap<String, Held>,
+        seated: Option<String>,
         tabs: Tabs,
         delegate: Retained<NavDelegate>,
     }
@@ -571,10 +574,9 @@ mod platform {
             }
         }
 
+        web_view.setHidden(true);
         let first =
             UIViewController::initWithNibName_bundle(UIViewController::alloc(marker), None, None);
-        web_view.removeFromSuperview();
-        first.setView(Some(&*web_view));
         let delegate = NavDelegate::new(marker);
         let column = Column::over(
             Held {
@@ -600,6 +602,8 @@ mod platform {
         STACK.set(Some(NativeStack {
             root_view,
             columns: vec![column],
+            roots: HashMap::new(),
+            seated: None,
             tabs,
             delegate,
         }));
@@ -703,14 +707,20 @@ mod platform {
             });
         }
 
-        pub fn settle(levels: Vec<Level>) {
-            let mut drawn = Vec::new();
-            for level in levels {
-                let Some(held) = Self::draw(level) else {
+        pub fn settle(tab: String, levels: Vec<Level>) {
+            let mut carried = Vec::new();
+            let cached = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                Some(stack.roots.contains_key(&tab))
+            });
+            for (at, level) in levels.into_iter().enumerate() {
+                if at == 0 && cached == Some(true) {
+                    carried.push(None);
                     continue;
-                };
-                drawn.push(held);
+                }
+                carried.push(Self::draw(level));
             }
+
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
                     return;
@@ -726,8 +736,29 @@ mod platform {
                 let Some(column) = stack.columns.first_mut() else {
                     return;
                 };
-                column.levels.truncate(1);
-                column.levels.extend(drawn);
+                if !column.levels.is_empty()
+                    && let Some(seated) = stack.seated.take()
+                {
+                    let root = column.levels.remove(0);
+                    stack.roots.insert(seated, root);
+                }
+                column.levels.clear();
+                for (at, held) in carried.into_iter().enumerate() {
+                    match held {
+                        Some(held) => column.levels.push(held),
+                        None if at == 0 => {
+                            let Some(root) = stack.roots.remove(&tab) else {
+                                continue;
+                            };
+                            column.levels.push(root);
+                        }
+                        None => {}
+                    }
+                }
+                stack.seated = Some(tab);
+                if column.levels.is_empty() {
+                    return;
+                }
                 let mut controllers = Vec::new();
                 for level in &column.levels {
                     controllers.push(level.controller.clone());
@@ -753,34 +784,6 @@ mod platform {
             });
         }
 
-        pub fn root(title: String, action: Option<&'static str>) {
-            STACK.with_borrow(|stack| {
-                let Some(stack) = stack.as_ref() else {
-                    return;
-                };
-                let Some(marker) = MainThreadMarker::new() else {
-                    return;
-                };
-                let Some(root) = stack
-                    .columns
-                    .first()
-                    .and_then(|column| column.levels.first())
-                else {
-                    return;
-                };
-                let item = root.controller.navigationItem();
-                item.setTitle(Some(&NSString::from_str(&title)));
-                match action {
-                    Some(action) => item.setRightBarButtonItem(Some(&Bar::button(
-                        action,
-                        &stack.delegate,
-                        marker,
-                    ))),
-                    None => item.setRightBarButtonItem(None),
-                }
-            });
-        }
-
         pub fn render() {
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
@@ -793,6 +796,12 @@ mod platform {
                         };
                         web.render();
                     }
+                }
+                for root in stack.roots.values() {
+                    let Some(web) = root.web.as_ref() else {
+                        continue;
+                    };
+                    web.render();
                 }
             });
         }
@@ -892,11 +901,9 @@ mod platform {
 
         pub fn dismiss() {}
 
-        pub fn settle(_levels: Vec<Level>) {}
+        pub fn settle(_tab: String, _levels: Vec<Level>) {}
 
         pub fn tabs(_entries: Vec<TabEntry>, _centre: Option<&'static str>) {}
-
-        pub fn root(_title: String, _action: Option<&'static str>) {}
 
         pub fn render() {}
     }

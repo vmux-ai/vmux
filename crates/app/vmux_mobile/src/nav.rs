@@ -105,18 +105,6 @@ impl<S: Route> Declared<S> {
 #[derive(Resource)]
 pub struct Centre(pub &'static str);
 
-#[derive(Default)]
-struct Root {
-    title: String,
-    action: Option<&'static str>,
-}
-
-impl PartialEq for Root {
-    fn eq(&self, other: &Self) -> bool {
-        self.title == other.title && self.action == other.action
-    }
-}
-
 type Listed<'w, 's, S> = Query<
     'w,
     's,
@@ -131,7 +119,7 @@ type Listed<'w, 's, S> = Query<
 #[derive(Resource, Default)]
 struct Painted {
     tabs: Vec<TabEntry>,
-    root: Root,
+    seated: Option<String>,
 }
 
 #[derive(Resource)]
@@ -166,7 +154,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::reconcile,
                     Nav::declare::<S>,
                     Nav::report::<S>,
-                    Nav::select::<S>,
+                    Nav::select,
                     Nav::open_blank::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
@@ -288,18 +276,18 @@ impl Nav {
         declared: Res<Declared<S>>,
         centre: Option<Res<Centre>>,
         mut painted: ResMut<Painted>,
+        mut commands: Commands,
     ) {
         let mut listed = Vec::new();
         let mut selected = None;
-        let mut root = Root::default();
+        let mut ready = false;
         for (tab, shows, local, chosen) in known.iter() {
             listed.push((tab.id.clone(), shows.0.title(), local.is_some()));
             if chosen.is_none() {
                 continue;
             }
             selected = Some(tab.id.clone());
-            root.title = shows.0.title();
-            root.action = declared.of(shows.0.name()).and_then(|draws| draws.action);
+            ready = declared.of(shows.0.name()).is_some();
         }
         listed.sort_by(|left, right| left.2.cmp(&right.2).then(left.0.cmp(&right.0)));
 
@@ -309,9 +297,13 @@ impl Nav {
             entries.push(TabEntry { id, name, here });
         }
 
-        if painted.root != root {
-            NativeStack::root(root.title.clone(), root.action);
-            painted.root = root;
+        if ready && painted.seated != selected {
+            painted.seated = selected.clone();
+            if let Some(id) = selected.clone() {
+                commands.queue(move |world: &mut World| {
+                    NativeStack::settle(id.clone(), Nav::levels::<S>(world, &id));
+                });
+            }
         }
         if painted.tabs == entries {
             return;
@@ -405,15 +397,12 @@ impl Nav {
         world.entity_mut(entity).insert(Selected);
     }
 
-    fn select<S: Route>(mut asked: MessageReader<Select>, mut commands: Commands) {
+    fn select(mut asked: MessageReader<Select>, mut commands: Commands) {
         let Some(Select(id)) = asked.read().last() else {
             return;
         };
         let id = id.clone();
-        commands.queue(move |world: &mut World| {
-            Nav::mark(world, &id);
-            NativeStack::settle(Nav::levels::<S>(world, &id));
-        });
+        commands.queue(move |world: &mut World| Nav::mark(world, &id));
     }
 
     fn levels<S: Route>(world: &mut World, id: &str) -> Vec<Level> {
@@ -425,6 +414,7 @@ impl Nav {
         else {
             return Vec::new();
         };
+        let at_tab = at;
         let mut chain = Vec::new();
         let mut children = world.query::<&Children>();
         while let Ok(kids) = children.get(world, at) {
@@ -436,6 +426,9 @@ impl Nav {
         }
 
         let mut shown = Vec::new();
+        if let Some(shows) = world.get::<Shows<S>>(at_tab) {
+            shown.push(shows.0.clone());
+        }
         for entity in chain {
             let Some(shows) = world.get::<Shows<S>>(entity) else {
                 continue;
