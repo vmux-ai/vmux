@@ -23,14 +23,16 @@ use vmux_native::NativePage;
 enum Page {
     Tab(usize),
     Pushed(String),
-    Presented(String),
+    Modal(String),
+    Sheet(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
     Tab,
     Pushed,
-    Presented,
+    Modal,
+    Sheet,
 }
 
 impl Route for Page {
@@ -40,14 +42,15 @@ impl Route for Page {
         match self {
             Self::Tab(_) => Name::Tab,
             Self::Pushed(_) => Name::Pushed,
-            Self::Presented(_) => Name::Presented,
+            Self::Modal(_) => Name::Modal,
+            Self::Sheet(_) => Name::Sheet,
         }
     }
 
     fn title(&self) -> String {
         match self {
             Self::Tab(at) => format!("Tab {at}"),
-            Self::Pushed(name) | Self::Presented(name) => name.clone(),
+            Self::Pushed(name) | Self::Modal(name) | Self::Sheet(name) => name.clone(),
         }
     }
 }
@@ -98,7 +101,8 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
 static TAB: NativePage = Demo::page("vmux://tab/", TabScreen);
 static PUSHED: NativePage = Demo::page("vmux://pushed/", PushedScreen);
-static PRESENTED: NativePage = Demo::page("vmux://presented/", PresentedScreen);
+static MODAL: NativePage = Demo::page("vmux://modal/", ModalScreen);
+static SHEET: NativePage = Demo::page("vmux://sheet/", SheetScreen);
 
 struct Demo;
 
@@ -164,10 +168,15 @@ fn Shell() -> Element {
                 Screen::<Page> { name: Name::Tab, draws: &TAB }
                 Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
                 Screen::<Page> {
-                    name: Name::Presented,
-                    draws: &PRESENTED,
+                    name: Name::Modal,
+                    draws: &MODAL,
+                    presentation: Presentation::Modal,
+                }
+                Screen::<Page> {
+                    name: Name::Sheet,
+                    draws: &SHEET,
                     presentation: Presentation::FormSheet,
-                    detents: &[0.5, 1.0],
+                    detents: &[0.4, 1.0],
                 }
             }
         }
@@ -209,10 +218,19 @@ fn PushedScreen() -> Element {
 }
 
 #[component]
-fn PresentedScreen() -> Element {
+fn ModalScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#b45309", far: "#be123c", kind: "presented" }
+            Stage { near: "#b45309", far: "#be123c", kind: "modal" }
+        }
+    }
+}
+
+#[component]
+fn SheetScreen() -> Element {
+    rsx! {
+        Stack::<Page> {
+            Stage { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
         }
     }
 }
@@ -244,7 +262,12 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Presented(format!("Sheet {}", depth + 1))),
+                        onclick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
+                        "Modal"
+                    }
+                    button {
+                        class: "key",
+                        onclick: move |_| navigation.go(Page::Sheet(format!("Sheet {}", depth + 1))),
                         "Sheet"
                     }
                 }
