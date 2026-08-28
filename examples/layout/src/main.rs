@@ -139,6 +139,7 @@ impl Demo {
             html_attributes: r#"lang="en" class="h-full""#,
             body_class: "",
             transparent: false,
+            background: Some((5, 6, 10, 255)),
             owns_subtree: false,
         }
     }

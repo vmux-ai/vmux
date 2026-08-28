@@ -65,15 +65,20 @@ impl WebView {
         let routes = PageRoutes::new(current_page.clone(), dom.clone(), embed.assets);
         let title_outbox = outbox.clone();
         let title_page = current_page.clone();
-        let builder = wry::WebViewBuilder::new();
+        let mut builder = wry::WebViewBuilder::new();
         #[cfg(target_os = "macos")]
-        let builder = match macos::SharedWebProcess::configuration() {
-            Some(config) => {
-                use wry::WebViewBuilderExtMacos;
-                builder.with_webview_configuration(config)
-            }
-            None => builder,
-        };
+        {
+            builder = match macos::SharedWebProcess::configuration() {
+                Some(config) => {
+                    use wry::WebViewBuilderExtMacos;
+                    builder.with_webview_configuration(config)
+                }
+                None => builder,
+            };
+        }
+        if let Some(colour) = page.background {
+            builder = builder.with_background_color(colour);
+        }
         let webview = builder
             .with_transparent(page.transparent)
             .with_initialization_script(WRY_HOST_SHIM)
@@ -125,6 +130,12 @@ impl WebView {
             error!("vmux_native: zoom failed: {error}");
         }
     }
+    pub fn paint(&self, colour: (u8, u8, u8, u8)) {
+        if let Err(error) = self.webview.set_background_color(colour) {
+            error!("vmux_native: set_background_color failed: {error}");
+        }
+    }
+
     pub fn set_visible(&self, visible: bool) {
         if let Err(error) = self.webview.set_visible(visible) {
             error!("vmux_native: set_visible failed: {error}");
