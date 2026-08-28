@@ -1249,6 +1249,7 @@ fn emit_window(
     let end_row = (vis_end + overscan).min(visible);
     let visible_top = wrap.line_at(vis_first);
     let layouts = wrap.window(first_row, end_row);
+    let asked_rows = end_row.saturating_sub(first_row);
     let first_row = layouts.first().map_or(first_row, |line| line.row);
     let mut lines = Vec::with_capacity(layouts.len());
     if let (Some(first_line), Some(last_line)) = (
@@ -1275,6 +1276,19 @@ fn emit_window(
             line.indent_levels = guides.levels(layout.line_no as usize);
             lines.push(line);
         }
+    }
+    if asked_rows > 8 && (lines.len() as u32) * 2 < asked_rows {
+        bevy::log::warn!(
+            "editor band short: emitted={} asked={} layouts={} first_row={} top_row={} rows={} visible={} total={}",
+            lines.len(),
+            asked_rows,
+            layouts.len(),
+            first_row,
+            vp.top_row,
+            vp.rows,
+            visible,
+            total
+        );
     }
     let mut sticky = Vec::new();
     if let Some(top) = visible_top {

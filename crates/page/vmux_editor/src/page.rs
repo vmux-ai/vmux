@@ -92,6 +92,7 @@ pub fn Page() -> Element {
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
+    let git_refresh_settled = use_signal(|| true);
     let git_branch = use_signal(String::new);
     let git_ahead = use_signal(|| 0u32);
     let git_behind = use_signal(|| 0u32);
@@ -341,11 +342,21 @@ pub fn Page() -> Element {
 
     let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
-        schedule_git_refresh(git_refresh_generation, git_nonce);
+        GitRefresh {
+            generation: git_refresh_generation,
+            nonce: git_nonce,
+            settled: git_refresh_settled,
+        }
+        .schedule();
     });
 
     let _git_changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
-        schedule_git_refresh(git_refresh_generation, git_nonce);
+        GitRefresh {
+            generation: git_refresh_generation,
+            nonce: git_nonce,
+            settled: git_refresh_settled,
+        }
+        .schedule();
     });
 
     let _view_mode = use_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
@@ -3760,15 +3771,35 @@ fn open_path(path: String) {
     let _ = send(&FileOpenEvent { path });
 }
 
-fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
-    let next = generation().wrapping_add(1);
-    generation.set(next);
-    spawn(async move {
-        sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
-        if generation() == next {
-            nonce.set(nonce().wrapping_add(1));
+#[derive(Clone, Copy)]
+struct GitRefresh {
+    generation: Signal<u32>,
+    nonce: Signal<u32>,
+    settled: Signal<bool>,
+}
+
+impl GitRefresh {
+    fn schedule(mut self) {
+        let next = self.generation.peek().wrapping_add(1);
+        self.generation.set(next);
+        if *self.settled.peek() {
+            self.settled.set(false);
+            self.bump();
         }
-    });
+        spawn(async move {
+            sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
+            if *self.generation.peek() != next {
+                return;
+            }
+            self.settled.set(true);
+            self.bump();
+        });
+    }
+
+    fn bump(&mut self) {
+        let next = self.nonce.peek().wrapping_add(1);
+        self.nonce.set(next);
+    }
 }
 
 fn parent_of(path: &str) -> String {
