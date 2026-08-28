@@ -1,7 +1,5 @@
-use crate::nav::Push;
 use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
 use crate::runtime::World;
-use crate::screen::Shown;
 use crate::take_resumed;
 use dioxus::prelude::*;
 use std::time::Duration;
@@ -31,6 +29,10 @@ pub(crate) fn use_session() -> Session {
 }
 
 impl Session {
+    pub(crate) fn is_open(&self) -> bool {
+        self.current.read().is_some()
+    }
+
     pub(crate) fn sid(&self) -> String {
         match self.current.read().as_ref() {
             Some(session) => session.sid.clone(),
@@ -55,15 +57,6 @@ impl Session {
         });
         handle.connected.set(false);
         handle.generation.set((handle.generation)().wrapping_add(1));
-    }
-
-    pub(crate) fn attach(&self, session: RemoteSession) {
-        let screen = Shown::Chat {
-            sid: Some(session.sid.clone()),
-            title: session.title.clone(),
-        };
-        self.open(session);
-        crate::runtime::World::with(|world| world.send(Push(screen)));
     }
 
     pub(crate) async fn stream(self, api: Api, sid: String, generation: u64) {
@@ -161,7 +154,7 @@ impl Session {
                 }
                 sessions.set(next);
                 if let Some(created) = created {
-                    handle.attach(created);
+                    handle.open(created);
                     return;
                 }
             }

@@ -1866,22 +1866,6 @@ impl ProcessManager {
         }
     }
 
-    pub fn visible_text(&self, id: &ProcessId) -> Option<String> {
-        let ServiceMessage::Snapshot { lines, .. } = self.processes.get(id)?.snapshot() else {
-            return Some(String::new());
-        };
-        let mut text = String::new();
-        for (index, line) in lines.iter().enumerate() {
-            if index > 0 {
-                text.push('\n');
-            }
-            for span in &line.spans {
-                text.push_str(&span.text);
-            }
-        }
-        Some(text)
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn create_process(
         &mut self,
