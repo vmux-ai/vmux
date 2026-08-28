@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::nav::{
-    Arrives, Declare, Declared, Dismiss, GoBack, Nav, Present, Push, Route, Seat, Select, View,
+    Declare, Declared, Dismiss, GoBack, Nav, Present, Presentation, Push, Route, Seat, Select, View,
 };
 use crate::runtime::World;
 
@@ -35,15 +35,16 @@ impl<R: Route> Navigation<R> {
     pub fn go(&self, route: R) {
         let name = route.name();
         World::with(|world| {
-            let arrives = world
+            let pushes = world
                 .read(|world| {
                     let declared = world.get_resource::<Declared<R>>()?;
-                    Some(declared.of(name)?.arrives)
+                    Some(declared.of(name)?.presentation.pushes())
                 })
-                .unwrap_or(Arrives::Pushed);
-            match arrives {
-                Arrives::Presented => world.send(Present(route)),
-                Arrives::Pushed => world.send(Push(route)),
+                .unwrap_or(true);
+            if pushes {
+                world.send(Push(route));
+            } else {
+                world.send(Present(route));
             }
         });
     }
@@ -111,38 +112,20 @@ pub fn TabNavigator(children: Element) -> Element {
 pub fn Screen<R: Route>(
     name: R::Name,
     draws: &'static vmux_native::NativePage,
+    #[props(default = Presentation::Card)] presentation: Presentation,
+    #[props(default = &[])] detents: &'static [f64],
     #[props(default)] action: Option<&'static str>,
 ) -> Element {
-    Arrives::Pushed.announce::<R>(name, draws, action)
-}
-
-#[component]
-pub fn Sheet<R: Route>(
-    name: R::Name,
-    draws: &'static vmux_native::NativePage,
-    #[props(default)] action: Option<&'static str>,
-) -> Element {
-    Arrives::Presented.announce::<R>(name, draws, action)
-}
-
-impl Arrives {
-    fn announce<R: Route>(
-        self,
-        name: R::Name,
-        draws: &'static vmux_native::NativePage,
-        action: Option<&'static str>,
-    ) -> Element {
-        let arrives = self;
-        use_effect(move || {
-            World::with(|world| {
-                world.send(Declare::<R> {
-                    name,
-                    draws,
-                    arrives,
-                    action,
-                })
-            });
+    use_effect(move || {
+        World::with(|world| {
+            world.send(Declare::<R> {
+                name,
+                draws,
+                presentation,
+                detents,
+                action,
+            })
         });
-        rsx! {}
-    }
+    });
+    rsx! {}
 }

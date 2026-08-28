@@ -6,14 +6,18 @@
 //!
 //! The header and the tab bar are UIKit, not HTML, so iOS 26 draws them in Liquid Glass.
 //! A bar button arrives back as a `Tapped` message, which is what `act` below reads.
+//!
+//! How a route arrives is an option on its `Screen`, the way Expo Router spells it: a card
+//! pushes, a form sheet slides up over its detents. Callers only ever say `go(route)`.
 
 use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
+use vmux_mobile::nav::Presentation;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Report, Route, Tapped};
 use vmux_mobile::navigator::{
-    NavigationContainer, Screen, Sheet, TabNavigator, use_navigation, use_route,
+    NavigationContainer, Screen, TabNavigator, use_navigation, use_route,
 };
 use vmux_native::NativePage;
 
@@ -161,7 +165,12 @@ fn Shell() -> Element {
             TabNavigator {
                 Screen::<Page> { name: Name::Tab, draws: &TAB }
                 Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
-                Sheet::<Page> { name: Name::Presented, draws: &PRESENTED }
+                Screen::<Page> {
+                    name: Name::Presented,
+                    draws: &PRESENTED,
+                    presentation: Presentation::FormSheet,
+                    detents: &[0.5, 1.0],
+                }
             }
         }
     }

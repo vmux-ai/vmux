@@ -1,11 +1,26 @@
 use vmux_native::NativePage;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Presentation {
+    Card,
+    Modal,
+    FormSheet,
+    FullScreenModal,
+}
+
+impl Presentation {
+    pub fn pushes(self) -> bool {
+        matches!(self, Self::Card)
+    }
+}
+
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub struct Level {
     pub page: &'static NativePage,
     pub title: String,
     pub action: Option<&'static str>,
-    pub closable: bool,
+    pub presentation: Presentation,
+    pub detents: &'static [f64],
     pub seat: vmux_native::Instance,
 }
 
@@ -39,12 +54,13 @@ mod platform {
         UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
         UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
         UISheetPresentationController, UISheetPresentationControllerDelegate,
-        UISheetPresentationControllerDetent, UIStackView, UIStackViewDistribution,
-        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIVisualEffectView,
+        UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
+        UIStackView, UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
+        UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
-    use super::{Level, TabEntry};
+    use super::{Level, Presentation, TabEntry};
     use crate::surface::Surfaces;
 
     const TAB_BAR_HEIGHT: f64 = 56.0;
@@ -92,7 +108,7 @@ mod platform {
             if let Some(action) = level.action {
                 item.setRightBarButtonItem(Some(&Bar::button(action, delegate, marker)));
             }
-            if level.closable {
+            if !level.presentation.pushes() {
                 item.setRightBarButtonItem(Some(&Bar::closer(delegate, marker)));
             }
             Some(Self {
@@ -598,6 +614,7 @@ mod platform {
         }
 
         pub fn present(level: Level) {
+            let (presentation, detents) = (level.presentation, level.detents);
             let drawn = Self::draw(level);
             after_paint(move || {
                 let Some(drawn) = drawn else {
@@ -609,14 +626,18 @@ mod platform {
                     let presenter = Self::topmost(stack)?.navigation.clone();
                     let column = Column::over(drawn, &stack.delegate, marker);
                     let sheet = column.navigation.clone();
-                    sheet.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
+                    if presentation == Presentation::FullScreenModal {
+                        sheet.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
+                    } else {
+                        sheet.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
+                    }
                     if let Some(controller) = sheet.sheetPresentationController() {
                         unsafe {
                             controller.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
                                 &*stack.delegate,
                             )));
                         }
-                        Self::detents(&controller, marker);
+                        Self::detents(&controller, detents, marker);
                     }
                     stack.sheets.push(column);
                     Some((presenter, sheet))
@@ -719,10 +740,39 @@ mod platform {
             Held::draw(level, &pager, &delegate, marker)
         }
 
-        fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
-            let large = UISheetPresentationControllerDetent::largeDetent(marker);
-            controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&[large]));
+        fn detents(
+            controller: &UISheetPresentationController,
+            wanted: &'static [f64],
+            marker: MainThreadMarker,
+        ) {
             controller.setPrefersGrabberVisible(true);
+            if wanted.is_empty() {
+                let large = UISheetPresentationControllerDetent::largeDetent(marker);
+                controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&[large]));
+                return;
+            }
+            let mut listed = Vec::new();
+            for (at, fraction) in wanted.iter().enumerate() {
+                let fraction = *fraction;
+                let resolve = block2::RcBlock::new(
+                    move |context: std::ptr::NonNull<
+                        objc2::runtime::ProtocolObject<
+                            dyn UISheetPresentationControllerDetentResolutionContext,
+                        >,
+                    >| {
+                        fraction * unsafe { context.as_ref() }.maximumDetentValue()
+                    },
+                );
+                let named = NSString::from_str(&format!("vmux:{at}"));
+                listed.push(
+                    UISheetPresentationControllerDetent::customDetentWithIdentifier_resolver(
+                        Some(&named),
+                        &resolve,
+                        marker,
+                    ),
+                );
+            }
+            controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&listed));
         }
     }
 
@@ -1090,7 +1140,7 @@ mod platform {
 #[cfg(not(target_os = "ios"))]
 #[allow(dead_code)]
 mod platform {
-    use super::{Level, TabEntry};
+    use super::{Level, Presentation, TabEntry};
 
     pub struct NativeStack;
 
