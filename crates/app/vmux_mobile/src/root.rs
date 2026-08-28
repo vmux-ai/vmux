@@ -9,13 +9,9 @@ use vmux_native::{Instance, NativePage, WebView};
 use crate::runtime::World as PageWorld;
 use crate::surface::{PageWaker, Surfaces, embedding};
 
-pub static APP_PAGE: NativePage = NativePage {
-    url: "vmux://app/",
-    document_url: None,
-    component: crate::App,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+pub static APP_PAGE: NativePage = NativePage::pane("vmux://app/", crate::App)
+    .heading(
+        r#"<base href="/"/>
 <title>Vmux</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <meta name="color-scheme" content="light dark"/>
@@ -25,13 +21,13 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
-                 text-foreground antialiased",
-    transparent: true,
-    background: None,
-    owns_subtree: false,
-};
+    )
+    .dressed(
+        r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+        "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+         text-foreground antialiased",
+    )
+    .see_through();
 
 thread_local! {
     static MOUNTED: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -177,7 +173,7 @@ impl Uikit {
     fn paint_background(&self, page: &'static NativePage) {
         use objc2_ui_kit::UIColor;
 
-        let (red, green, blue, _) = match page.background {
+        let (red, green, blue, _) = match page.paint() {
             Some(declared) => declared,
             None => webview_background(),
         };

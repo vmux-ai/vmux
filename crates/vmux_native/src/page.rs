@@ -1,15 +1,15 @@
 pub struct NativePage {
-    pub url: &'static str,
-    pub document_url: Option<&'static str>,
-    pub component: crate::PageComponent,
-    pub root_id: &'static str,
-    pub root_class: &'static str,
-    pub head: &'static str,
-    pub html_attributes: &'static str,
-    pub body_class: &'static str,
-    pub transparent: bool,
-    pub background: Option<(u8, u8, u8, u8)>,
-    pub owns_subtree: bool,
+    pub(crate) url: &'static str,
+    pub(crate) document_url: Option<&'static str>,
+    pub(crate) component: crate::PageComponent,
+    pub(crate) root_id: &'static str,
+    pub(crate) root_class: &'static str,
+    pub(crate) head: &'static str,
+    pub(crate) html_attributes: &'static str,
+    pub(crate) body_class: &'static str,
+    pub(crate) transparent: bool,
+    pub(crate) background: Option<(u8, u8, u8, u8)>,
+    pub(crate) owns_subtree: bool,
 }
 
 impl PartialEq for NativePage {
@@ -19,6 +19,14 @@ impl PartialEq for NativePage {
 }
 
 impl NativePage {
+    pub fn url(&self) -> &'static str {
+        self.url
+    }
+
+    pub fn paint(&self) -> Option<(u8, u8, u8, u8)> {
+        self.background
+    }
+
     pub fn prefers_dark(&self) -> Option<bool> {
         let (red, green, blue, _) = self.background?;
         let luminance = 0.299 * f64::from(red) + 0.587 * f64::from(green) + 0.114 * f64::from(blue);
@@ -35,6 +43,28 @@ impl NativePage {
             None => self.url,
         }
     }
+    pub const fn heading(mut self, head: &'static str) -> Self {
+        self.head = head;
+        self
+    }
+
+    pub const fn rooted(mut self, id: &'static str, class: &'static str) -> Self {
+        self.root_id = id;
+        self.root_class = class;
+        self
+    }
+
+    pub const fn dressed(mut self, html: &'static str, body: &'static str) -> Self {
+        self.html_attributes = html;
+        self.body_class = body;
+        self
+    }
+
+    pub const fn see_through(mut self) -> Self {
+        self.transparent = true;
+        self
+    }
+
     pub const fn served_from(mut self, url: &'static str) -> Self {
         self.document_url = Some(url);
         self
