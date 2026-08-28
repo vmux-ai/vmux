@@ -6,11 +6,11 @@ use crate::file_icon::TypeIcon;
 pub const SIDEBAR_TREE_ROW_GROUP: &str =
     "group/row flex w-full items-center rounded-md hover:bg-glass-hover";
 
-pub const SIDEBAR_TREE_ROW: &str = "flex h-8 w-full cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-left text-muted-foreground group-hover/row:text-foreground";
+pub const SIDEBAR_TREE_ROW: &str = "flex h-[22px] w-full min-w-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-1 text-left text-muted-foreground group-hover/row:text-foreground";
 
-pub const SIDEBAR_TREE_SCROLLER: &str = "overflow-x-auto";
+pub const SIDEBAR_TREE_SCROLLER: &str = "overflow-x-hidden";
 
-pub const SIDEBAR_TREE_COLUMN: &str = "flex w-max min-w-full flex-col";
+pub const SIDEBAR_TREE_COLUMN: &str = "flex min-w-0 flex-col";
 
 pub const SIDEBAR_TREE_CHEVRON_OPEN: &str =
     "h-3 w-3 shrink-0 rotate-90 transition-transform duration-200 ease-out";
@@ -64,14 +64,14 @@ pub fn SidebarTreeRow(
     #[props(default = rsx! {})] trailing: Element,
     on_activate: EventHandler<()>,
 ) -> Element {
-    let indent = 0.375 + f64::from(depth) * 0.75;
+    let indent = 8 + depth * 12;
     let hint = title.unwrap_or_else(|| path.clone());
     rsx! {
         button {
             r#type: "button",
             title: "{hint}",
             class: SIDEBAR_TREE_ROW,
-            style: "padding-left:{indent}rem;",
+            style: "padding-left:{indent}px;",
             onclick: move |_| on_activate.call(()),
             if is_dir {
                 Icon {
@@ -83,7 +83,11 @@ pub fn SidebarTreeRow(
                 TypeIcon { path: path.clone(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" }
             }
             span {
-                class: if emphasis { "flex-1 text-ui font-medium" } else { "flex-1 text-ui" },
+                class: if emphasis {
+                    "min-w-0 flex-1 truncate text-ui font-medium"
+                } else {
+                    "min-w-0 flex-1 truncate text-ui"
+                },
                 "{label}"
             }
             {trailing}
