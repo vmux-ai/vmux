@@ -1,24 +1,29 @@
 //! The navigation on a simulator, with no Mac: the tabs are canned rather than reported
 //! over QUIC, so push, pop, the back-swipe and stacked sheets can be driven by hand.
+//!
+//! Three pages, so three webviews: the shell draws a tab's root, and every pushed level
+//! and sheet is a page of its own that UIKit animates in.
 
 use bevy_app::{App, Startup};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{NavPlugin, Report, Route};
-use vmux_mobile::navigator::{NavigationContainer, Screen, TabNavigator, use_navigation};
+use vmux_mobile::navigator::{NavigationContainer, Screen, Sheet, TabNavigator, use_navigation};
 use vmux_native::NativePage;
 
 #[derive(Clone, PartialEq)]
 enum Page {
     Inbox,
     Note(String),
+    Alert(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
     Inbox,
     Note,
+    Alert,
 }
 
 impl Route for Page {
@@ -28,24 +33,19 @@ impl Route for Page {
         match self {
             Self::Inbox => Name::Inbox,
             Self::Note(_) => Name::Note,
+            Self::Alert(_) => Name::Alert,
         }
     }
 
     fn title(&self) -> String {
         match self {
             Self::Inbox => "Inbox".to_string(),
-            Self::Note(name) => name.clone(),
+            Self::Note(name) | Self::Alert(name) => name.clone(),
         }
     }
 }
 
-static DEMO_PAGE: NativePage = NativePage {
-    url: "vmux://shell/",
-    document_url: None,
-    component: Demo,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+const HEAD: &str = r#"<base href="/"/>
 <title>Layout</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <meta name="color-scheme" content="dark"/>
@@ -57,6 +57,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; color: inherit; border: 0; background: none; }
+#main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 .stage {
   position: relative; flex: 1; display: flex; flex-direction: column;
@@ -94,16 +95,34 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 .tab { flex: 1; padding: 11px 14px; border-radius: 15px; font-size: 14px;
   color: rgba(255,255,255,.55); transition: background .2s ease, color .2s ease; }
 .tab.here { background: rgba(255,255,255,.14); color: #fff; font-weight: 600; }
-</style>"#,
-    html_attributes: r#"lang="en" class="h-full""#,
-    body_class: "",
-    transparent: false,
-    owns_subtree: false,
-};
+</style>"#;
+
+static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
+static NOTE: NativePage = Demo::page("vmux://note/", NoteScreen);
+static ALERT: NativePage = Demo::page("vmux://alert/", AlertScreen);
+
+struct Demo;
+
+impl Demo {
+    const fn page(url: &'static str, component: vmux_native::PageComponent) -> NativePage {
+        NativePage {
+            url,
+            document_url: None,
+            component,
+            root_id: "main",
+            root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
+            head: HEAD,
+            html_attributes: r#"lang="en" class="h-full""#,
+            body_class: "",
+            transparent: false,
+            owns_subtree: false,
+        }
+    }
+}
 
 fn main() {
     App::new()
-        .add_plugins(MobilePlugin::showing(&DEMO_PAGE).serving(|world| {
+        .add_plugins(MobilePlugin::showing(&SHELL).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
                 .add_systems(Startup, seed);
@@ -122,19 +141,45 @@ fn seed(mut reported: MessageWriter<Report<Page>>) {
 }
 
 #[component]
-fn Demo() -> Element {
+fn Shell() -> Element {
     rsx! {
         NavigationContainer::<Page> {
             TabNavigator {
-                Screen::<Page> { name: Name::Inbox, Body { near: "#1d4ed8", far: "#0891b2" } }
-                Screen::<Page> { name: Name::Note, Body { near: "#7c3aed", far: "#db2777" } }
+                Screen::<Page> { name: Name::Note, draws: &NOTE }
+                Sheet::<Page> { name: Name::Alert, draws: &ALERT }
+                Root {}
             }
         }
     }
 }
 
 #[component]
-fn Body(near: String, far: String) -> Element {
+fn Root() -> Element {
+    rsx! {
+        Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root", tabs: true }
+    }
+}
+
+#[component]
+fn NoteScreen() -> Element {
+    rsx! {
+        NavigationContainer::<Page> {
+            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", tabs: false }
+        }
+    }
+}
+
+#[component]
+fn AlertScreen() -> Element {
+    rsx! {
+        NavigationContainer::<Page> {
+            Stage { near: "#b45309", far: "#be123c", kind: "presented", tabs: false }
+        }
+    }
+}
+
+#[component]
+fn Stage(near: String, far: String, kind: String, tabs: bool) -> Element {
     let navigation = use_navigation::<Page>();
     let seen = navigation.view();
     let title = match navigation.route() {
@@ -147,7 +192,7 @@ fn Body(near: String, far: String) -> Element {
     rsx! {
         div { class: "stage", style: "--near:{near};--far:{far}",
             div { class: "vignette" }
-            div { class: "eyebrow", if sheet { "presented" } else { "pushed" } }
+            div { class: "eyebrow", "{kind}" }
             div { class: "title", "{title}" }
             div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
 
@@ -163,25 +208,27 @@ fn Body(near: String, far: String) -> Element {
             div { class: "actions",
                 Tap {
                     label: "Push",
-                    onpick: move |_| navigation.push(Page::Note(format!("Level {}", depth + 1))),
+                    onpick: move |_| navigation.go(Page::Note(format!("Level {}", depth + 1))),
                 }
                 Tap {
                     label: "Sheet",
-                    onpick: move |_| navigation.present(Page::Note(format!("Sheet {}", depth + 1))),
+                    onpick: move |_| navigation.go(Page::Alert(format!("Sheet {}", depth + 1))),
                 }
                 Tap { label: "Back", onpick: move |_| navigation.go_back() }
             }
 
-            div { class: "tabs",
-                for tab in seen.tabs.iter() {
-                    Tab {
-                        key: "{tab.id}",
-                        label: tab.name.clone(),
-                        here: Some(&tab.id) == seen.selected.as_ref(),
-                        onpick: {
-                            let id = tab.id.clone();
-                            move |_| navigation.navigate(&id)
-                        },
+            if tabs {
+                div { class: "tabs",
+                    for tab in seen.tabs.iter() {
+                        Tab {
+                            key: "{tab.id}",
+                            label: tab.name.clone(),
+                            here: Some(&tab.id) == seen.selected.as_ref(),
+                            onpick: {
+                                let id = tab.id.clone();
+                                move |_| navigation.navigate(&id)
+                            },
+                        }
                     }
                 }
             }

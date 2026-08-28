@@ -1,3 +1,11 @@
+use vmux_native::NativePage;
+
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct Level {
+    pub page: &'static NativePage,
+    pub title: String,
+}
+
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::{Cell, RefCell};
@@ -16,6 +24,10 @@ mod platform {
         UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIView,
         UIViewAutoresizing, UIViewController,
     };
+    use vmux_native::WebView;
+
+    use super::Level;
+    use crate::surface::Surfaces;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -23,13 +35,39 @@ mod platform {
         static DISMISSED: Cell<usize> = const { Cell::new(0) };
     }
 
+    struct Held {
+        controller: Retained<UIViewController>,
+        web: Option<WebView>,
+    }
+
+    impl Held {
+        fn draw(level: &Level, root_view: &UIView, marker: MainThreadMarker) -> Option<Self> {
+            let web = Surfaces::build(level.page)?;
+            web.render();
+            let view = web.ui_view();
+            view.removeFromSuperview();
+            size_to_parent(&view, root_view);
+            let controller = UIViewController::initWithNibName_bundle(
+                UIViewController::alloc(marker),
+                None,
+                None,
+            );
+            controller.setView(Some(&view));
+            controller
+                .navigationItem()
+                .setTitle(Some(&NSString::from_str(&level.title)));
+            Some(Self {
+                controller,
+                web: Some(web),
+            })
+        }
+    }
+
     pub struct NativeStack {
         root_view: Retained<UIView>,
-        web_view: Retained<UIView>,
         navigation: Retained<UINavigationController>,
-        levels: Vec<Retained<UIViewController>>,
-        sheets: Vec<Retained<UIViewController>>,
-        covered: Option<Retained<UIView>>,
+        levels: Vec<Held>,
+        sheets: Vec<Held>,
         _delegate: Retained<NavDelegate>,
     }
 
@@ -70,15 +108,8 @@ mod platform {
                     if shown >= stack.levels.len() {
                         return;
                     }
-                    let Some(marker) = MainThreadMarker::new() else {
-                        return;
-                    };
                     let dropped = stack.levels.len() - shown;
-                    for level in stack.levels.drain(shown..) {
-                        level.setView(Some(&UIView::new(marker)));
-                    }
-                    stack.uncover();
-                    stack.occupy_top();
+                    stack.levels.truncate(shown);
                     POPPED.set(POPPED.get() + dropped);
                 });
             }
@@ -91,15 +122,9 @@ mod platform {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
-                    let Some(marker) = MainThreadMarker::new() else {
+                    if stack.sheets.pop().is_none() {
                         return;
-                    };
-                    let Some(departing) = stack.sheets.pop() else {
-                        return;
-                    };
-                    departing.setView(Some(&UIView::new(marker)));
-                    stack.uncover();
-                    stack.occupy_top();
+                    }
                     DISMISSED.set(DISMISSED.get() + 1);
                 });
             }
@@ -123,6 +148,7 @@ mod platform {
 
         let first =
             UIViewController::initWithNibName_bundle(UIViewController::alloc(marker), None, None);
+        web_view.removeFromSuperview();
         first.setView(Some(&*web_view));
         let navigation = UINavigationController::initWithRootViewController(
             UINavigationController::alloc(marker),
@@ -148,11 +174,12 @@ mod platform {
         navigation.didMoveToParentViewController(Some(&root_controller));
 
         STACK.set(Some(NativeStack {
-            covered: None,
             root_view,
-            web_view,
             navigation,
-            levels: vec![first],
+            levels: vec![Held {
+                controller: first,
+                web: None,
+            }],
             sheets: Vec::new(),
             _delegate: delegate,
         }));
@@ -165,133 +192,17 @@ mod platform {
     }
 
     impl NativeStack {
-        pub fn push() -> Pushing {
-            Pushing(STACK.with_borrow_mut(|stack| stack.as_mut().is_some_and(NativeStack::cover)))
-        }
-
-        pub fn pop() -> Popping {
-            Popping(STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return false;
-                };
-                if stack.levels.len() < 2 {
-                    return false;
-                }
-                stack.cover()
-            }))
-        }
-
-        pub fn present() -> Presenting {
-            Presenting(
-                STACK.with_borrow_mut(|stack| stack.as_mut().is_some_and(NativeStack::cover)),
-            )
-        }
-
-        pub fn dismiss() -> Dismissing {
-            Dismissing(STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return false;
-                };
-                if stack.sheets.is_empty() {
-                    return false;
-                }
-                stack.cover()
-            }))
-        }
-
-        pub fn settle(depth: usize) {
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
-                };
-                let Some(marker) = MainThreadMarker::new() else {
-                    return;
-                };
-                for sheet in std::mem::take(&mut stack.sheets) {
-                    sheet.dismissViewControllerAnimated_completion(false, None);
-                }
-                while stack.levels.len() > depth + 1 {
-                    stack.levels.pop();
-                }
-                while stack.levels.len() < depth + 1 {
-                    stack.levels.push(UIViewController::initWithNibName_bundle(
-                        UIViewController::alloc(marker),
-                        None,
-                        None,
-                    ));
-                }
-                stack.uncover();
-                stack.occupy_top();
-                let controllers = objc2_foundation::NSArray::from_retained_slice(&stack.levels);
-                stack
-                    .navigation
-                    .setViewControllers_animated(&controllers, false);
-            });
-        }
-
-        fn cover(&mut self) -> bool {
-            self.uncover();
-            let Some(snapshot) = self.web_view.snapshotViewAfterScreenUpdates(false) else {
-                return false;
-            };
-            size_to_parent(&snapshot, &self.root_view);
-            self.web_view.addSubview(&snapshot);
-            self.covered = Some(snapshot);
-            true
-        }
-
-        fn uncover(&mut self) -> Option<Retained<UIView>> {
-            let snapshot = self.covered.take()?;
-            snapshot.removeFromSuperview();
-            Some(snapshot)
-        }
-
-        fn occupy_top(&mut self) {
-            let Some(top) = self.sheets.last().or_else(|| self.levels.last()) else {
-                return;
-            };
-            size_to_parent(&self.web_view, &self.root_view);
-            top.setView(Some(&*self.web_view));
-        }
-
-        fn presenter(&self) -> Retained<UIViewController> {
-            match self.sheets.last() {
-                Some(sheet) => sheet.clone(),
-                None => Retained::into_super(self.navigation.clone()),
-            }
-        }
-
-        fn covered_by(&self, still: &UIView) -> Option<()> {
-            let holder = self.sheets.last().or_else(|| self.levels.last())?;
-            holder.setView(Some(still));
-            Some(())
-        }
-    }
-
-    pub struct Pushing(bool);
-
-    impl Pushing {
-        pub fn finish(self, title: String) {
-            if !self.0 {
-                return;
-            }
+        pub fn push(level: Level) {
+            let drawn = Self::draw(level);
             after_paint(move || {
+                let Some(drawn) = drawn else {
+                    return;
+                };
                 let pending = STACK.with_borrow_mut(|stack| {
                     let stack = stack.as_mut()?;
-                    let marker = MainThreadMarker::new()?;
-                    let cover = stack.uncover()?;
-                    stack.levels.last()?.setView(Some(&cover));
-
-                    let next = UIViewController::initWithNibName_bundle(
-                        UIViewController::alloc(marker),
-                        None,
-                        None,
-                    );
-                    next.navigationItem()
-                        .setTitle(Some(&NSString::from_str(&title)));
-                    stack.levels.push(next);
-                    stack.occupy_top();
-                    Some((stack.navigation.clone(), stack.levels.last()?.clone()))
+                    let controller = drawn.controller.clone();
+                    stack.levels.push(drawn);
+                    Some((stack.navigation.clone(), controller))
                 });
                 let Some((navigation, top)) = pending else {
                     return;
@@ -299,55 +210,32 @@ mod platform {
                 navigation.pushViewController_animated(&top, true);
             });
         }
-    }
 
-    pub struct Popping(bool);
-
-    impl Popping {
-        pub fn finish(self) {
-            if !self.0 {
+        pub fn pop() {
+            let navigation = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                if stack.levels.len() < 2 {
+                    return None;
+                }
+                Some(stack.navigation.clone())
+            });
+            let Some(navigation) = navigation else {
                 return;
-            }
+            };
+            let _ = navigation.popViewControllerAnimated(true);
+        }
+
+        pub fn present(level: Level) {
+            let drawn = Self::draw(level);
             after_paint(move || {
-                let pending = STACK.with_borrow_mut(|stack| {
-                    let stack = stack.as_mut()?;
-                    let cover = stack.uncover()?;
-                    let departing = stack.levels.pop()?;
-                    departing.setView(Some(&cover));
-                    stack.occupy_top();
-                    Some(stack.navigation.clone())
-                });
-                let Some(navigation) = pending else {
+                let Some(drawn) = drawn else {
                     return;
                 };
-                let _ = navigation.popViewControllerAnimated(true);
-            });
-        }
-    }
-
-    pub struct Presenting(bool);
-
-    impl Presenting {
-        pub fn finish(self, title: String) {
-            if !self.0 {
-                return;
-            }
-            after_paint(move || {
                 let pending = STACK.with_borrow_mut(|stack| {
                     let stack = stack.as_mut()?;
                     let marker = MainThreadMarker::new()?;
-                    let cover = stack.uncover()?;
-                    stack.covered_by(&cover)?;
                     let presenter = stack.presenter();
-
-                    let sheet = UIViewController::initWithNibName_bundle(
-                        UIViewController::alloc(marker),
-                        None,
-                        None,
-                    );
-                    sheet
-                        .navigationItem()
-                        .setTitle(Some(&NSString::from_str(&title)));
+                    let sheet = drawn.controller.clone();
                     sheet.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
                     if let Some(controller) = sheet.sheetPresentationController() {
                         unsafe {
@@ -357,15 +245,79 @@ mod platform {
                         }
                         Self::detents(&controller, marker);
                     }
-                    stack.sheets.push(sheet);
-                    stack.occupy_top();
-                    Some((presenter, stack.sheets.last()?.clone()))
+                    stack.sheets.push(drawn);
+                    Some((presenter, sheet))
                 });
                 let Some((presenter, sheet)) = pending else {
                     return;
                 };
                 presenter.presentViewController_animated_completion(&sheet, true, None);
             });
+        }
+
+        pub fn dismiss() {
+            let departing = STACK.with_borrow_mut(|stack| stack.as_mut()?.sheets.pop());
+            let Some(departing) = departing else {
+                return;
+            };
+            departing
+                .controller
+                .dismissViewControllerAnimated_completion(true, None);
+        }
+
+        pub fn settle(levels: Vec<Level>) {
+            let drawn: Vec<Held> = levels.into_iter().filter_map(Self::draw).collect();
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                for sheet in std::mem::take(&mut stack.sheets) {
+                    sheet
+                        .controller
+                        .dismissViewControllerAnimated_completion(false, None);
+                }
+                stack.levels.truncate(1);
+                stack.levels.extend(drawn);
+                let controllers = objc2_foundation::NSArray::from_retained_slice(
+                    &stack
+                        .levels
+                        .iter()
+                        .map(|level| level.controller.clone())
+                        .collect::<Vec<_>>(),
+                );
+                stack
+                    .navigation
+                    .setViewControllers_animated(&controllers, false);
+            });
+        }
+
+        pub fn render() {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                for level in stack.levels.iter().chain(stack.sheets.iter()) {
+                    let Some(web) = level.web.as_ref() else {
+                        continue;
+                    };
+                    web.render();
+                }
+            });
+        }
+
+        fn draw(level: Level) -> Option<Held> {
+            let (root_view, marker) = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                Some((stack.root_view.clone(), MainThreadMarker::new()?))
+            })?;
+            Held::draw(&level, &root_view, marker)
+        }
+
+        fn presenter(&self) -> Retained<UIViewController> {
+            match self.sheets.last() {
+                Some(sheet) => sheet.controller.clone(),
+                None => Retained::into_super(self.navigation.clone()),
+            }
         }
 
         fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
@@ -375,30 +327,6 @@ mod platform {
                 medium, large,
             ]));
             controller.setPrefersGrabberVisible(true);
-        }
-    }
-
-    pub struct Dismissing(bool);
-
-    impl Dismissing {
-        pub fn finish(self) {
-            if !self.0 {
-                return;
-            }
-            after_paint(move || {
-                let pending = STACK.with_borrow_mut(|stack| {
-                    let stack = stack.as_mut()?;
-                    let cover = stack.uncover()?;
-                    let departing = stack.sheets.pop()?;
-                    departing.setView(Some(&cover));
-                    stack.occupy_top();
-                    Some(departing)
-                });
-                let Some(departing) = pending else {
-                    return;
-                };
-                departing.dismissViewControllerAnimated_completion(true, None);
-            });
         }
     }
 
@@ -417,23 +345,31 @@ mod platform {
         );
     }
 
-    fn after_paint<F: Send + FnOnce() + 'static>(work: F) {
+    fn after_paint<F: FnOnce() + 'static>(work: F) {
         let Ok(when) = DispatchTime::try_from(Duration::from_millis(48)) else {
             return;
         };
-        let _ = DispatchQueue::main().after(when, work);
+        let work = OnMain(work);
+        let _ = DispatchQueue::main().after(when, move || work.run());
+    }
+
+    struct OnMain<F>(F);
+
+    unsafe impl<F> Send for OnMain<F> {}
+
+    impl<F: FnOnce()> OnMain<F> {
+        fn run(self) {
+            (self.0)();
+        }
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 #[allow(dead_code)]
 mod platform {
+    use super::Level;
 
     pub struct NativeStack;
-    pub struct Pushing;
-    pub struct Popping;
-    pub struct Presenting;
-    pub struct Dismissing;
 
     pub fn install(_: &(), _: &(), _: &()) {}
 
@@ -446,39 +382,17 @@ mod platform {
     }
 
     impl NativeStack {
-        pub fn push() -> Pushing {
-            Pushing
-        }
+        pub fn push(_level: Level) {}
 
-        pub fn pop() -> Popping {
-            Popping
-        }
+        pub fn pop() {}
 
-        pub fn present() -> Presenting {
-            Presenting
-        }
+        pub fn present(_level: Level) {}
 
-        pub fn dismiss() -> Dismissing {
-            Dismissing
-        }
+        pub fn dismiss() {}
 
-        pub fn settle(_depth: usize) {}
-    }
+        pub fn settle(_levels: Vec<Level>) {}
 
-    impl Pushing {
-        pub fn finish(self, _title: String) {}
-    }
-
-    impl Popping {
-        pub fn finish(self) {}
-    }
-
-    impl Presenting {
-        pub fn finish(self, _title: String) {}
-    }
-
-    impl Dismissing {
-        pub fn finish(self) {}
+        pub fn render() {}
     }
 }
 

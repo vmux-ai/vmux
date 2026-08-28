@@ -491,22 +491,34 @@ fn Paired(
 
 #[component]
 fn CurrentScreen(api: Signal<Option<Api>>) -> Element {
-    let navigation = use_navigation::<Shown>();
     rsx! {
-        Screen::<Shown> { name: Name::Chat, vmux_chat::page::Page {} }
-        Screen::<Shown> { name: Name::Launcher,
+        Screen::<Shown> { name: Name::Chat, draws: &surface::AGENT }
+        Screen::<Shown> { name: Name::Launcher, draws: &surface::START }
+        Screen::<Shown> { name: Name::Team, draws: &surface::TEAM }
+        RootScreen { api }
+    }
+}
+
+#[component]
+fn RootScreen(api: Signal<Option<Api>>) -> Element {
+    let Some(root) = use_navigation::<Shown>().view().root else {
+        return rsx! {};
+    };
+    match root {
+        Shown::Chat { sid: Some(_), .. } => rsx! {
+            vmux_chat::page::Page {}
+        },
+        Shown::Chat { .. } | Shown::Launcher => rsx! {
             div { class: "flex min-h-0 flex-1 flex-col pt-[calc(3rem+env(safe-area-inset-top))] pb-2",
                 vmux_start::page::Page {}
             }
-        }
-        Screen::<Shown> { name: Name::Team,
+        },
+        Shown::Team => rsx! {
             div { class: "flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]", vmux_team::page::Page {} }
-        }
-        Screen::<Shown> { name: Name::Mirror,
-            if let Some(Shown::Mirror(stack)) = navigation.route() {
-                MirrorScreen { stack, api }
-            }
-        }
+        },
+        Shown::Mirror(stack) => rsx! {
+            MirrorScreen { stack, api }
+        },
     }
 }
 
