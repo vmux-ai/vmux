@@ -130,11 +130,11 @@ impl TypedDigit {
         let Key::Character(typed) = event.key() else {
             return None;
         };
-        let digit = typed
-            .chars()
-            .next()
-            .filter(char::is_ascii_digit)
-            .and_then(|character| character.to_digit(10))?;
+        let character = typed.chars().next()?;
+        if !character.is_ascii_digit() {
+            return None;
+        }
+        let digit = character.to_digit(10)?;
         Some(digit as usize)
     }
 }

@@ -30,7 +30,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_wire::prompt_media::{
     inline_media_query, merge_chat_attachments, replace_inline_media_query,
 };
@@ -140,9 +140,7 @@ impl Chat {
             current.set(state.effort_current.clone());
             agent_key.set(state.agent_key.clone());
             menu_sel.set(0);
-            if !state.models.is_empty() || !state.current_model_name.is_empty() {
-                loaded.set(true);
-            }
+            loaded.set(true);
         });
         let _context = use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
             let mut composer_context = chat.slash.composer_context;
@@ -658,9 +656,15 @@ impl Chat {
             return None;
         }
         if context.branch.is_empty() {
-            return Some(ComposerChip::ready("Git", "Git repository"));
+            return Some(ComposerChip::ready(
+                translate("composer-git"),
+                translate("composer-git-repository"),
+            ));
         }
-        let title = format!("Branch {}", context.branch);
+        let title = translate_with(
+            "composer-branch-name",
+            &[("branch", TranslationValue::String(&context.branch))],
+        );
         Some(ComposerChip::ready(context.branch, title))
     }
 }

@@ -35,12 +35,14 @@ impl ComposerChips {
             };
         }
 
-        let agent = ComposerChip::ready(composer.agent_title.clone(), "Choose agent").opens(
-            EventHandler::new(move |()| {
-                menu.toggle(ComposerMenuKind::Agent);
-                focus_prompt_end(PROMPT_INPUT_ID);
-            }),
-        );
+        let agent = ComposerChip::ready(
+            composer.agent_title.clone(),
+            translate("composer-choose-agent"),
+        )
+        .opens(EventHandler::new(move |()| {
+            menu.toggle(ComposerMenuKind::Agent);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }));
         let model = match composer.model_name.is_empty() {
             true => None,
             false => Some(

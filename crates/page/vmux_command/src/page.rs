@@ -195,7 +195,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let start_status = rsx! {
         span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
             span { class: "h-1.5 w-1.5 rounded-full bg-success" }
-            "Ready"
+            {translate("composer-ready")}
         }
     };
     let start_composer_footer = rsx! {
@@ -472,17 +472,17 @@ fn StartContextBadges(
                 span {
                     class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
                     title: "{worktree_title}",
-                    "Worktree"
+                    {translate("composer-worktree")}
                 }
             }
             if uncommitted > 0 {
-                span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "\u{25cf} {uncommitted}" }
+                span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: translate("composer-uncommitted-changes"), "\u{25cf} {uncommitted}" }
             }
             if ahead > 0 {
-                span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "\u{2191}{ahead}" }
+                span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: translate("composer-commits-ahead"), "\u{2191}{ahead}" }
             }
         } else if !cwd.is_empty() {
-            span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+            span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", {translate("composer-no-git")} }
         }
     }
 }

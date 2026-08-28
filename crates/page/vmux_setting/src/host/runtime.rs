@@ -127,15 +127,9 @@ impl AppSettings {
 
     pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
         let known = self.remember_known_project(&project);
-        let target = normalize_space_key(space_id);
-        let mut key = None;
-        for existing in self.spaces.keys() {
-            if normalize_space_key(existing) == target {
-                key = Some(existing.clone());
-                break;
-            }
-        }
-        let key = key.unwrap_or_else(|| space_id.to_string());
+        let key = self
+            .space_key(space_id)
+            .unwrap_or_else(|| space_id.to_string());
         let overrides = self.spaces.entry(key).or_default();
         let listed = match overrides
             .projects
@@ -197,10 +191,12 @@ impl AppSettings {
 
     fn space_key(&self, space_id: &str) -> Option<String> {
         let target = normalize_space_key(space_id);
-        self.spaces
-            .keys()
-            .find(|existing| normalize_space_key(existing) == target)
-            .cloned()
+        for existing in self.spaces.keys() {
+            if normalize_space_key(existing) == target {
+                return Some(existing.clone());
+            }
+        }
+        None
     }
 
     fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
