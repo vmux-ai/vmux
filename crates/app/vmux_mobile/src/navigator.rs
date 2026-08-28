@@ -75,7 +75,7 @@ pub fn use_route<R: Route>() -> Option<R> {
 }
 
 #[component]
-pub fn NavigationContainer<R: Route>(
+pub fn Stack<R: Route>(
     #[props(default)] route: std::marker::PhantomData<R>,
     children: Element,
 ) -> Element {
@@ -102,7 +102,7 @@ pub fn NavigationContainer<R: Route>(
 }
 
 #[component]
-pub fn TabNavigator(children: Element) -> Element {
+pub fn Tabs(children: Element) -> Element {
     rsx! {
         {children}
     }

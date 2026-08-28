@@ -21,7 +21,7 @@ mod transition;
 
 use crate::logs::Logs;
 use crate::nav::{OpenBlank, Push, Report, Select};
-use crate::navigator::{NavigationContainer, Screen, TabNavigator, use_navigation};
+use crate::navigator::{Screen, Stack, Tabs, use_navigation};
 use crate::pairing::{Credentials, PairCard};
 use crate::plugins::PagePlugins;
 use crate::remote::{Api, ApiError};
@@ -407,8 +407,8 @@ pub fn Shell() -> Element {
     }
 
     rsx! {
-        NavigationContainer::<Shown> {
-            TabNavigator {
+        Stack::<Shown> {
+            Tabs {
                 Paired { api, sessions, agents, session, reachable, auth }
             }
         }
