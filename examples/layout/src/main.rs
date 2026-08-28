@@ -10,7 +10,7 @@
 //! How a route arrives is an option on its `Screen`, the way Expo Router spells it: a card
 //! pushes, a form sheet slides up over its detents. Callers only ever say `go(route)`.
 
-use bevy_app::{App, Startup, Update};
+use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
@@ -104,7 +104,7 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 
 </style>"#;
 
-static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
+static APP: NativePage = Demo::page("vmux://app/", App);
 static TAB: NativePage = Demo::page("vmux://tab/", TabScreen);
 static CARD: NativePage = Demo::page("vmux://card/", CardScreen);
 static MODAL: NativePage = Demo::page("vmux://modal/", ModalScreen);
@@ -133,8 +133,8 @@ impl Demo {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(MobilePlugin::showing(&SHELL).serving(|world| {
+    bevy_app::App::new()
+        .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
                 .insert_resource(Centre("+"))
@@ -169,7 +169,7 @@ fn act(
 }
 
 #[component]
-fn Shell() -> Element {
+fn App() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {

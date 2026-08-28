@@ -14,8 +14,8 @@ mod remote;
 mod runtime;
 pub mod screen;
 
+mod root;
 mod session;
-mod shell;
 mod surface;
 mod transition;
 
@@ -35,7 +35,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use bevy_a11y::AccessibilityPlugin;
-use bevy_app::{App, Plugin, TaskPoolPlugin};
+use bevy_app::{Plugin, TaskPoolPlugin};
 use bevy_input::InputPlugin;
 use bevy_time::TimePlugin;
 use bevy_window::WindowPlugin;
@@ -50,7 +50,7 @@ static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(V
 
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-type Pages = Box<dyn Fn(&mut App) + Send + Sync>;
+type Pages = Box<dyn Fn(&mut bevy_app::App) + Send + Sync>;
 
 pub struct MobilePlugin {
     root: &'static vmux_native::NativePage,
@@ -60,7 +60,7 @@ pub struct MobilePlugin {
 impl Default for MobilePlugin {
     fn default() -> Self {
         Self {
-            root: &shell::SHELL_PAGE,
+            root: &root::APP_PAGE,
             pages: Box::new(|world| {
                 world.add_plugins(PagePlugins);
             }),
@@ -76,14 +76,14 @@ impl MobilePlugin {
         }
     }
 
-    pub fn serving(mut self, pages: impl Fn(&mut App) + Send + Sync + 'static) -> Self {
+    pub fn serving(mut self, pages: impl Fn(&mut bevy_app::App) + Send + Sync + 'static) -> Self {
         self.pages = Box::new(pages);
         self
     }
 }
 
 impl Plugin for MobilePlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut bevy_app::App) {
         Logs::start();
         deep_link::install();
 
@@ -114,7 +114,7 @@ impl Plugin for MobilePlugin {
             },
             unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(shell::ShellPlugin(self.root));
+        .add_plugins(root::RootPlugin(self.root));
     }
 }
 
@@ -135,7 +135,7 @@ pub(crate) fn take_resumed() -> bool {
 }
 
 #[component]
-pub fn Shell() -> Element {
+pub fn App() -> Element {
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);
     let mut error = use_signal(String::new);

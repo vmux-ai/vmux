@@ -9,10 +9,10 @@ use vmux_native::{Instance, NativePage, WebView};
 use crate::runtime::World as PageWorld;
 use crate::surface::{PageWaker, Surfaces, embedding};
 
-pub static SHELL_PAGE: NativePage = NativePage {
-    url: "vmux://shell/",
+pub static APP_PAGE: NativePage = NativePage {
+    url: "vmux://app/",
     document_url: None,
-    component: crate::Shell,
+    component: crate::App,
     root_id: "main",
     root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
     head: r#"<base href="/"/>
@@ -37,25 +37,25 @@ thread_local! {
     static MOUNTED: RefCell<Option<WebView>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct ShellPlugin(pub &'static NativePage);
+pub(crate) struct RootPlugin(pub &'static NativePage);
 
 #[derive(Resource)]
-struct Root(&'static NativePage);
+struct Showing(&'static NativePage);
 
-impl Plugin for ShellPlugin {
+impl Plugin for RootPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Root(self.0))
-            .add_systems(Last, (Shell::mount, Shell::pump).chain());
+        app.insert_resource(Showing(self.0))
+            .add_systems(Last, (Root::mount, Root::pump).chain());
     }
 }
 
-struct Shell;
+struct Root;
 
-impl Shell {
+impl Root {
     fn mount(
         windows: Query<Entity, With<PrimaryWindow>>,
         proxy: Option<Res<EventLoopProxyWrapper>>,
-        root: Res<Root>,
+        showing: Res<Showing>,
     ) {
         if MOUNTED.with_borrow(Option::is_some) {
             return;
@@ -69,7 +69,7 @@ impl Shell {
             let windows = windows.borrow();
             let window = windows.get_window(entity)?;
             Some(WebView::build(
-                root.0,
+                showing.0,
                 &**window,
                 wry::Rect::default(),
                 embedding(waker),
@@ -77,30 +77,30 @@ impl Shell {
             ))
         });
         match built {
-            Some(Ok(shell)) => {
-                shell.order_among_siblings(vmux_native::SiblingOrder::Front);
-                Self::adopt(entity, &shell, root.0);
-                MOUNTED.with_borrow_mut(|slot| *slot = Some(shell));
+            Some(Ok(mounted)) => {
+                mounted.order_among_siblings(vmux_native::SiblingOrder::Front);
+                Self::adopt(entity, &mounted, showing.0);
+                MOUNTED.with_borrow_mut(|slot| *slot = Some(mounted));
             }
-            Some(Err(error)) => tracing::error!(%error, "shell: the chrome would not mount"),
-            None => tracing::debug!("shell: no winit window yet"),
+            Some(Err(error)) => tracing::error!(%error, "root: the app page would not mount"),
+            None => tracing::debug!("root: no winit window yet"),
         }
     }
 
     #[cfg(target_os = "ios")]
-    fn adopt(entity: Entity, shell: &WebView, page: &'static NativePage) {
+    fn adopt(entity: Entity, mounted: &WebView, page: &'static NativePage) {
         let uikit = WINIT_WINDOWS.with(|windows| {
             let windows = windows.borrow();
             Uikit::of(&**windows.get_window(entity)?)
         });
         let Some(uikit) = uikit else {
-            tracing::error!("shell: the window has no root view controller to adopt");
+            tracing::error!("root: the window has no root view controller to adopt");
             return;
         };
-        shell.fill_parent();
+        mounted.fill_parent();
         uikit.paint_background(page);
         crate::deep_link::adopt();
-        crate::transition::install(&uikit.controller, &uikit.view, &shell.ui_view(), page);
+        crate::transition::install(&uikit.controller, &uikit.view, &mounted.ui_view(), page);
         crate::qr_scanner::install(&uikit.controller);
     }
 
@@ -121,10 +121,10 @@ impl Shell {
 
     fn render() {
         MOUNTED.with_borrow(|slot| {
-            let Some(shell) = slot.as_ref() else {
+            let Some(mounted) = slot.as_ref() else {
                 return;
             };
-            shell.render();
+            mounted.render();
         });
     }
 }
