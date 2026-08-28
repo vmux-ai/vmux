@@ -30,20 +30,22 @@ mod platform {
     use objc2_foundation::{NSObjectProtocol, NSString};
     use objc2_ui_kit::{
         UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle, UIButton,
-        UIButtonType, UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIGestureRecognizer,
-        UIGestureRecognizerDelegate, UIGlassEffect, UILayoutConstraintAxis,
-        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
-        UINavigationControllerDelegate, UIPresentationController, UISheetPresentationController,
-        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIStackView,
-        UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
-        UIViewController, UIVisualEffectView,
+        UIButtonType, UIColor, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
+        UIGestureRecognizer, UIGestureRecognizerDelegate, UIGlassContainerEffect, UIGlassEffect,
+        UILayoutConstraintAxis, UIModalPresentationStyle, UINavigationBarAppearance,
+        UINavigationController, UINavigationControllerDelegate, UIPresentationController,
+        UISheetPresentationController, UISheetPresentationControllerDelegate,
+        UISheetPresentationControllerDetent, UIStackView, UIStackViewDistribution,
+        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
     use super::{Level, TabEntry};
     use crate::surface::Surfaces;
 
-    const TAB_BAR_HEIGHT: f64 = 60.0;
+    const TAB_BAR_HEIGHT: f64 = 56.0;
+    const TAB_BAR_EDGE: f64 = 16.0;
+    const TAB_BAR_GAP: f64 = 10.0;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -154,7 +156,7 @@ mod platform {
             navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
                 top: 0.0,
                 left: 0.0,
-                bottom: TAB_BAR_HEIGHT,
+                bottom: TAB_BAR_HEIGHT + TAB_BAR_GAP * 2.0,
                 right: 0.0,
             });
             unsafe {
@@ -179,57 +181,109 @@ mod platform {
     }
 
     struct Tabs {
-        glass: Retained<UIVisualEffectView>,
+        strip: Retained<UIVisualEffectView>,
+        capsule: Retained<UIVisualEffectView>,
         row: Retained<UIStackView>,
+        circle: Retained<UIVisualEffectView>,
         ids: Vec<String>,
     }
 
     impl Tabs {
         fn under(root_view: &UIView, marker: MainThreadMarker) -> Self {
-            let effect = UIGlassEffect::new(marker);
-            let glass = UIVisualEffectView::initWithEffect(
-                UIVisualEffectView::alloc(marker),
-                Some(effect.as_super()),
-            );
             let bounds = root_view.bounds();
-            let inset = root_view.safeAreaInsets().bottom;
-            glass.setFrame(CGRect {
+            let below = root_view.safeAreaInsets().bottom;
+            let (width, height) = (bounds.size.width, bounds.size.height);
+
+            let container = UIGlassContainerEffect::new(marker);
+            container.setSpacing(TAB_BAR_GAP);
+            let strip = UIVisualEffectView::initWithEffect(
+                UIVisualEffectView::alloc(marker),
+                Some(container.as_super()),
+            );
+            strip.setFrame(CGRect {
                 origin: CGPoint {
                     x: 0.0,
-                    y: bounds.size.height - TAB_BAR_HEIGHT - inset,
+                    y: height - TAB_BAR_HEIGHT - below - TAB_BAR_GAP,
                 },
                 size: CGSize {
-                    width: bounds.size.width,
-                    height: TAB_BAR_HEIGHT + inset,
+                    width,
+                    height: TAB_BAR_HEIGHT + below + TAB_BAR_GAP,
                 },
             });
-            glass.setAutoresizingMask(
+            strip.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleTopMargin,
             );
+
+            let circle = Self::pane(TAB_BAR_HEIGHT, marker);
+            circle.setFrame(CGRect {
+                origin: CGPoint {
+                    x: width - TAB_BAR_EDGE - TAB_BAR_HEIGHT,
+                    y: 0.0,
+                },
+                size: CGSize {
+                    width: TAB_BAR_HEIGHT,
+                    height: TAB_BAR_HEIGHT,
+                },
+            });
+            circle.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
+
+            let capsule = Self::pane(TAB_BAR_HEIGHT, marker);
+            let across = width - TAB_BAR_EDGE * 2.0 - TAB_BAR_HEIGHT - TAB_BAR_GAP;
+            capsule.setFrame(CGRect {
+                origin: CGPoint {
+                    x: TAB_BAR_EDGE,
+                    y: 0.0,
+                },
+                size: CGSize {
+                    width: across,
+                    height: TAB_BAR_HEIGHT,
+                },
+            });
+            capsule.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
 
             let row = UIStackView::initWithFrame(
                 UIStackView::alloc(marker),
                 CGRect {
                     origin: CGPoint { x: 0.0, y: 0.0 },
                     size: CGSize {
-                        width: bounds.size.width,
+                        width: across,
                         height: TAB_BAR_HEIGHT,
                     },
                 },
             );
             row.setAxis(UILayoutConstraintAxis::Horizontal);
             row.setDistribution(UIStackViewDistribution::FillEqually);
-            row.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
-            glass.contentView().addSubview(&row);
+            row.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            capsule.contentView().addSubview(&row);
+
+            strip.contentView().addSubview(&capsule);
+            strip.contentView().addSubview(&circle);
             match root_view.window() {
-                Some(window) => window.addSubview(&glass),
-                None => root_view.addSubview(&glass),
+                Some(window) => window.addSubview(&strip),
+                None => root_view.addSubview(&strip),
             }
             Self {
-                glass,
+                strip,
+                capsule,
                 row,
+                circle,
                 ids: Vec::new(),
             }
+        }
+
+        fn pane(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
+            let effect = UIGlassEffect::new(marker);
+            effect.setInteractive(true);
+            let pane = UIVisualEffectView::initWithEffect(
+                UIVisualEffectView::alloc(marker),
+                Some(effect.as_super()),
+            );
+            let layer = pane.layer();
+            layer.setCornerRadius(height / 2.0);
+            layer.setMasksToBounds(true);
+            pane
         }
 
         fn show(
@@ -244,23 +298,21 @@ mod platform {
                 spent.removeFromSuperview();
             }
             self.ids.clear();
-            let halfway = entries.len() / 2;
-            for (at, entry) in entries.into_iter().enumerate() {
-                if at == halfway
-                    && let Some(centre) = centre
-                {
-                    self.row
-                        .addArrangedSubview(&Self::adder(centre, delegate, marker));
-                }
-                let button = UIButton::buttonWithType(objc2_ui_kit::UIButtonType::System, marker);
+            for entry in entries {
+                let button = UIButton::buttonWithType(UIButtonType::System, marker);
                 button.setTitle_forState(
                     Some(&NSString::from_str(&entry.name)),
                     UIControlState::Normal,
                 );
                 if let Some(label) = button.titleLabel() {
-                    unsafe { label.setFont(Some(&UIFont::systemFontOfSize(13.0))) };
+                    unsafe { label.setFont(Some(&UIFont::systemFontOfSize(14.0))) };
                 }
-                button.setAlpha(if entry.here { 1.0 } else { 0.5 });
+                let tone = if entry.here {
+                    UIColor::labelColor()
+                } else {
+                    UIColor::secondaryLabelColor()
+                };
+                button.setTitleColor_forState(Some(&tone), UIControlState::Normal);
                 button.setTag(self.ids.len() as isize);
                 unsafe {
                     button.addTarget_action_forControlEvents(
@@ -272,7 +324,25 @@ mod platform {
                 self.ids.push(entry.id);
                 self.row.addArrangedSubview(&button);
             }
-            self.glass.setHidden(self.ids.is_empty());
+
+            for spent in self.circle.contentView().subviews().iter() {
+                spent.removeFromSuperview();
+            }
+            match centre {
+                Some(centre) => {
+                    let adder = Self::adder(centre, delegate, marker);
+                    adder.setFrame(self.circle.bounds());
+                    adder.setAutoresizingMask(
+                        UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+                    );
+                    self.circle.contentView().addSubview(&adder);
+                    self.circle.setHidden(false);
+                }
+                None => self.circle.setHidden(true),
+            }
+            self.capsule.setHidden(self.ids.is_empty());
+            self.strip
+                .setHidden(self.ids.is_empty() && centre.is_none());
         }
 
         fn adder(
@@ -283,8 +353,9 @@ mod platform {
             let button = UIButton::buttonWithType(UIButtonType::System, marker);
             button.setTitle_forState(Some(&NSString::from_str(centre)), UIControlState::Normal);
             if let Some(label) = button.titleLabel() {
-                unsafe { label.setFont(Some(&UIFont::systemFontOfSize(26.0))) };
+                unsafe { label.setFont(Some(&UIFont::systemFontOfSize(28.0))) };
             }
+            button.setTitleColor_forState(Some(&UIColor::labelColor()), UIControlState::Normal);
             button.setTag(Bar::remember(centre));
             unsafe {
                 button.addTarget_action_forControlEvents(
@@ -297,10 +368,10 @@ mod platform {
         }
 
         fn front(&self) {
-            let Some(parent) = self.glass.superview() else {
+            let Some(parent) = self.strip.superview() else {
                 return;
             };
-            parent.bringSubviewToFront(&self.glass);
+            parent.bringSubviewToFront(&self.strip);
         }
     }
 
