@@ -63,12 +63,43 @@ mod platform {
         }
     }
 
-    pub struct NativeStack {
-        root_view: Retained<UIView>,
+    struct Column {
         navigation: Retained<UINavigationController>,
         levels: Vec<Held>,
-        sheets: Vec<Held>,
-        _delegate: Retained<NavDelegate>,
+    }
+
+    impl Column {
+        fn over(root: Held, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
+            let navigation = UINavigationController::initWithRootViewController(
+                UINavigationController::alloc(marker),
+                &root.controller,
+            );
+            navigation.setNavigationBarHidden(true);
+            unsafe {
+                navigation.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(delegate)));
+            }
+            if let Some(gesture) = navigation.interactivePopGestureRecognizer() {
+                gesture.setEnabled(true);
+                gesture.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(delegate)));
+            }
+            Self {
+                navigation,
+                levels: vec![root],
+            }
+        }
+
+        fn owns(&self, navigation: &UINavigationController) -> bool {
+            std::ptr::eq(
+                &*self.navigation as *const UINavigationController,
+                navigation as *const UINavigationController,
+            )
+        }
+    }
+
+    pub struct NativeStack {
+        root_view: Retained<UIView>,
+        columns: Vec<Column>,
+        delegate: Retained<NavDelegate>,
     }
 
     define_class!(
@@ -84,7 +115,15 @@ mod platform {
         unsafe impl UIGestureRecognizerDelegate for NavDelegate {
             #[unsafe(method(gestureRecognizerShouldBegin:))]
             fn should_begin(&self, _gesture: &UIGestureRecognizer) -> bool {
-                STACK.with_borrow(|stack| stack.as_ref().is_some_and(|stack| stack.levels.len() > 1))
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return false;
+                    };
+                    let Some(column) = stack.columns.last() else {
+                        return false;
+                    };
+                    column.levels.len() > 1
+                })
             }
         }
 
@@ -105,12 +144,18 @@ mod platform {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
-                    if shown >= stack.levels.len() {
+                    for column in stack.columns.iter_mut() {
+                        if !column.owns(navigation) {
+                            continue;
+                        }
+                        if shown >= column.levels.len() {
+                            return;
+                        }
+                        let dropped = column.levels.len() - shown;
+                        column.levels.truncate(shown);
+                        POPPED.set(POPPED.get() + dropped);
                         return;
                     }
-                    let dropped = stack.levels.len() - shown;
-                    stack.levels.truncate(shown);
-                    POPPED.set(POPPED.get() + dropped);
                 });
             }
         }
@@ -122,10 +167,13 @@ mod platform {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
-                    if stack.sheets.pop().is_none() {
+                    if stack.columns.len() < 2 {
                         return;
                     }
-                    DISMISSED.set(DISMISSED.get() + 1);
+                    let Some(departing) = stack.columns.pop() else {
+                        return;
+                    };
+                    DISMISSED.set(DISMISSED.get() + departing.levels.len());
                 });
             }
         }
@@ -150,38 +198,30 @@ mod platform {
             UIViewController::initWithNibName_bundle(UIViewController::alloc(marker), None, None);
         web_view.removeFromSuperview();
         first.setView(Some(&*web_view));
-        let navigation = UINavigationController::initWithRootViewController(
-            UINavigationController::alloc(marker),
-            &first,
-        );
         let delegate = NavDelegate::new(marker);
-        unsafe {
-            navigation.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
-        }
+        let column = Column::over(
+            Held {
+                controller: first,
+                web: None,
+            },
+            &delegate,
+            marker,
+        );
 
-        navigation.setNavigationBarHidden(true);
-        if let Some(gesture) = navigation.interactivePopGestureRecognizer() {
-            gesture.setEnabled(true);
-            gesture.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
-        }
-
-        root_controller.addChildViewController(&navigation);
-        let Some(navigation_view) = navigation.view() else {
+        root_controller.addChildViewController(&column.navigation);
+        let Some(navigation_view) = column.navigation.view() else {
             return;
         };
         size_to_parent(&navigation_view, &root_view);
         root_view.addSubview(&navigation_view);
-        navigation.didMoveToParentViewController(Some(&root_controller));
+        column
+            .navigation
+            .didMoveToParentViewController(Some(&root_controller));
 
         STACK.set(Some(NativeStack {
             root_view,
-            navigation,
-            levels: vec![Held {
-                controller: first,
-                web: None,
-            }],
-            sheets: Vec::new(),
-            _delegate: delegate,
+            columns: vec![column],
+            delegate,
         }));
     }
 
@@ -199,10 +239,10 @@ mod platform {
                     return;
                 };
                 let pending = STACK.with_borrow_mut(|stack| {
-                    let stack = stack.as_mut()?;
+                    let column = stack.as_mut()?.columns.last_mut()?;
                     let controller = drawn.controller.clone();
-                    stack.levels.push(drawn);
-                    Some((stack.navigation.clone(), controller))
+                    column.levels.push(drawn);
+                    Some((column.navigation.clone(), controller))
                 });
                 let Some((navigation, top)) = pending else {
                     return;
@@ -213,11 +253,11 @@ mod platform {
 
         pub fn pop() {
             let navigation = STACK.with_borrow(|stack| {
-                let stack = stack.as_ref()?;
-                if stack.levels.len() < 2 {
+                let column = stack.as_ref()?.columns.last()?;
+                if column.levels.len() < 2 {
                     return None;
                 }
-                Some(stack.navigation.clone())
+                Some(column.navigation.clone())
             });
             let Some(navigation) = navigation else {
                 return;
@@ -234,18 +274,19 @@ mod platform {
                 let pending = STACK.with_borrow_mut(|stack| {
                     let stack = stack.as_mut()?;
                     let marker = MainThreadMarker::new()?;
-                    let presenter = stack.presenter();
-                    let sheet = drawn.controller.clone();
+                    let presenter = stack.columns.last()?.navigation.clone();
+                    let column = Column::over(drawn, &stack.delegate, marker);
+                    let sheet = column.navigation.clone();
                     sheet.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
                     if let Some(controller) = sheet.sheetPresentationController() {
                         unsafe {
                             controller.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
-                                &*stack._delegate,
+                                &*stack.delegate,
                             )));
                         }
                         Self::detents(&controller, marker);
                     }
-                    stack.sheets.push(drawn);
+                    stack.columns.push(column);
                     Some((presenter, sheet))
                 });
                 let Some((presenter, sheet)) = pending else {
@@ -256,38 +297,54 @@ mod platform {
         }
 
         pub fn dismiss() {
-            let departing = STACK.with_borrow_mut(|stack| stack.as_mut()?.sheets.pop());
+            let departing = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                if stack.columns.len() < 2 {
+                    return None;
+                }
+                stack.columns.pop()
+            });
             let Some(departing) = departing else {
                 return;
             };
             departing
-                .controller
+                .navigation
                 .dismissViewControllerAnimated_completion(true, None);
         }
 
         pub fn settle(levels: Vec<Level>) {
-            let drawn: Vec<Held> = levels.into_iter().filter_map(Self::draw).collect();
+            let mut drawn = Vec::new();
+            for level in levels {
+                let Some(held) = Self::draw(level) else {
+                    continue;
+                };
+                drawn.push(held);
+            }
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
                     return;
                 };
-                for sheet in std::mem::take(&mut stack.sheets) {
+                while stack.columns.len() > 1 {
+                    let Some(sheet) = stack.columns.pop() else {
+                        break;
+                    };
                     sheet
-                        .controller
+                        .navigation
                         .dismissViewControllerAnimated_completion(false, None);
                 }
-                stack.levels.truncate(1);
-                stack.levels.extend(drawn);
-                let controllers = objc2_foundation::NSArray::from_retained_slice(
-                    &stack
-                        .levels
-                        .iter()
-                        .map(|level| level.controller.clone())
-                        .collect::<Vec<_>>(),
+                let Some(column) = stack.columns.first_mut() else {
+                    return;
+                };
+                column.levels.truncate(1);
+                column.levels.extend(drawn);
+                let mut controllers = Vec::new();
+                for level in &column.levels {
+                    controllers.push(level.controller.clone());
+                }
+                column.navigation.setViewControllers_animated(
+                    &objc2_foundation::NSArray::from_retained_slice(&controllers),
+                    false,
                 );
-                stack
-                    .navigation
-                    .setViewControllers_animated(&controllers, false);
             });
         }
 
@@ -296,11 +353,13 @@ mod platform {
                 let Some(stack) = stack.as_ref() else {
                     return;
                 };
-                for level in stack.levels.iter().chain(stack.sheets.iter()) {
-                    let Some(web) = level.web.as_ref() else {
-                        continue;
-                    };
-                    web.render();
+                for column in &stack.columns {
+                    for level in &column.levels {
+                        let Some(web) = level.web.as_ref() else {
+                            continue;
+                        };
+                        web.render();
+                    }
                 }
             });
         }
@@ -311,13 +370,6 @@ mod platform {
                 Some((stack.root_view.clone(), MainThreadMarker::new()?))
             })?;
             Held::draw(&level, &root_view, marker)
-        }
-
-        fn presenter(&self) -> Retained<UIViewController> {
-            match self.sheets.last() {
-                Some(sheet) => sheet.controller.clone(),
-                None => Retained::into_super(self.navigation.clone()),
-            }
         }
 
         fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
