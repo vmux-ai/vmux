@@ -8,6 +8,12 @@ pub struct CommandIssued {
     pub command: AppCommand,
 }
 
+#[derive(Message, Clone)]
+pub struct ExLineSubmitted {
+    pub stack: Option<Entity>,
+    pub line: String,
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommandIssuer<'w> {
     pub app: MessageWriter<'w, AppCommand>,

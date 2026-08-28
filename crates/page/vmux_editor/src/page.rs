@@ -99,7 +99,6 @@ pub fn Page() -> Element {
     let git_message = use_signal(String::new);
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
-    let mut ed_command_line = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
@@ -266,9 +265,6 @@ pub fn Page() -> Element {
         }
         if source_sel.peek().as_slice() != c.source_selections.as_slice() {
             source_sel.set(c.source_selections.clone());
-        }
-        if ed_command_line.peek().ne(&c.command_line) {
-            ed_command_line.set(c.command_line.clone());
         }
         if search_spans.peek().as_slice() != c.search.as_slice() {
             search_spans.set(c.search.clone());
@@ -1939,7 +1935,7 @@ pub fn Page() -> Element {
                     {
                         (mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim)
                             .then(|| rsx! {
-                                VimStatus { label: ed_label(), command_line: ed_command_line() }
+                                VimStatus { label: ed_label() }
                             })
                     }
                 },
@@ -2954,17 +2950,7 @@ fn ExplorerSidebar(
 }
 
 #[component]
-fn VimStatus(label: String, command_line: String) -> Element {
-    if !command_line.is_empty() {
-        return rsx! {
-            span {
-                id: "vim-command-line",
-                class: "-ml-4 flex h-7 min-w-0 items-center gap-px overflow-hidden px-3 font-mono text-xs text-foreground",
-                span { class: "truncate", "{command_line}" }
-                span { class: "inline-block h-[1.05em] w-[0.5em] shrink-0 bg-foreground/70" }
-            }
-        };
-    }
+fn VimStatus(label: String) -> Element {
     if label.is_empty() {
         return rsx! {};
     }

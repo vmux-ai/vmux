@@ -131,6 +131,9 @@ impl PaletteRows {
     ) -> Vec<CommandBarResultItem> {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
+        if ExLine::claims(query) {
+            return Vec::new();
+        }
         if state.space_switch {
             return space_switch_results(&state.spaces, &state.pages, query);
         }
@@ -256,6 +259,19 @@ impl PaletteGlyph {
             return Self::Url;
         }
         Self::Search
+    }
+}
+
+pub struct ExLine;
+
+impl ExLine {
+    pub fn claims(query: &str) -> bool {
+        query.starts_with(':')
+    }
+
+    pub fn of(query: &str) -> Option<String> {
+        let body = query.strip_prefix(':')?.trim();
+        (!body.is_empty()).then(|| body.to_string())
     }
 }
 
@@ -581,6 +597,12 @@ impl PaletteState {
     }
 
     pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
+        if ExLine::claims(&self.query) {
+            let Some(line) = ExLine::of(&self.query) else {
+                return Submission::default();
+            };
+            return Submission::closing(CommandBarActionEvent::Ex { line });
+        }
         if self.space_switch {
             let Some(item) = self.row(self.selected) else {
                 return Submission::default();

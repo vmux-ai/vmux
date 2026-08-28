@@ -18,6 +18,7 @@ impl Plugin for CommandPlugin {
         ))
         .add_message::<AppCommand>()
         .add_message::<CommandIssued>()
+        .add_message::<crate::host::ExLineSubmitted>()
         .configure_sets(
             Update,
             (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),

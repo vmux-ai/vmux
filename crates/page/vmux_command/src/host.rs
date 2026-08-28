@@ -15,7 +15,7 @@ pub mod surface;
 
 pub use bundle::CommandBar;
 pub use command::*;
-pub use issued::{CommandIssued, CommandIssuer};
+pub use issued::{CommandIssued, CommandIssuer, ExLineSubmitted};
 pub use open::*;
 pub use page_key::{PageKeyPlugin, ScopedKeys};
 pub use payload::{

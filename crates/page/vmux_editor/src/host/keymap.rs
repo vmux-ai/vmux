@@ -35,8 +35,8 @@ pub trait Keymap: Send + Sync {
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand>;
     fn mode(&self) -> EditMode;
     fn record_text(&mut self, _text: &str) {}
-    fn command_line(&self) -> Option<String> {
-        None
+    fn run_command_line(&mut self, _line: &str) -> Vec<EditCommand> {
+        Vec::new()
     }
 
     fn pointer_selection_mode(&mut self, _extend: bool) -> Option<EditCommand> {

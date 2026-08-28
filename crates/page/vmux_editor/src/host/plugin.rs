@@ -185,6 +185,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
             .add_observer(on_file_hover_request)
+            .add_systems(Update, run_submitted_ex_lines)
             .add_observer(on_file_find_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
@@ -1404,7 +1405,6 @@ fn emit_cursor(
             selections,
             source_primary,
             source_selections: raw_selections,
-            command_line: keymap.command_line().unwrap_or_default(),
             search,
             word_highlights,
         },
@@ -2555,6 +2555,14 @@ fn run_commands(
                 ));
                 continue;
             }
+            EditCommand::OpenCommandLine => {
+                commands.write_message(vmux_command::host::command::AppCommand::Browser(
+                    vmux_command::host::command::BrowserCommand::Bar(
+                        vmux_command::host::command::BrowserBarCommand::OpenExBar,
+                    ),
+                ));
+                continue;
+            }
             EditCommand::TriggerCompletion => {
                 let (line, utf16, ccol, lt) = caret_lsp(edit);
                 let replace_from = word_start_col(&lt, ccol);
@@ -2728,14 +2736,6 @@ fn on_file_key(
     };
     let mut cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
     if cmds.is_empty() {
-        emit_cursor(
-            entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            &vp,
-            &browsers,
-            &mut commands,
-        );
         return;
     }
     if view_mode.0 == FileViewMode::Note
@@ -3115,6 +3115,55 @@ fn edit_closed_file(
         .insert(canon(&document.path), std::time::Instant::now());
     write_atomic(&document.path, updated.as_bytes())
         .map_err(|e| format!("{}: {e}", document.path.display()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_submitted_ex_lines(
+    mut submitted: MessageReader<vmux_command::host::ExLineSubmitted>,
+    children: Query<&Children>,
+    mut q: Query<(
+        &mut EditState,
+        &mut EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for message in submitted.read() {
+        let Some(stack) = message.stack else {
+            continue;
+        };
+        let Ok(kids) = children.get(stack) else {
+            continue;
+        };
+        let Some(entity) = kids.iter().find(|child| q.contains(*child)) else {
+            continue;
+        };
+        let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+            continue;
+        };
+        let cmds = keymap.0.run_command_line(&message.line);
+        if cmds.is_empty() {
+            continue;
+        }
+        run_commands(
+            entity,
+            cmds,
+            &mut edit,
+            &mut diff_source,
+            keymap.0.as_ref(),
+            &mut vp,
+            &mut clipboard,
+            &mut self_writes,
+            &mut manager,
+            &browsers,
+            &mut commands,
+        );
+    }
 }
 
 fn on_file_find_request(

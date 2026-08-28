@@ -318,6 +318,9 @@ pub enum CommandBarActionEvent {
         pane: u64,
         index: usize,
     },
+    Ex {
+        line: String,
+    },
     Dismiss,
 }
 

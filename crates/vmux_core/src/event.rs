@@ -1871,7 +1871,6 @@ pub struct FileCursorEvent {
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
-    pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
     pub word_highlights: Vec<crate::editor::SelSpan>,
     pub search_total: u32,
@@ -2468,7 +2467,6 @@ mod tests {
                 start: 20,
                 end: 25,
             }],
-            command_line: ":wq".into(),
             search: vec![SelSpan {
                 line: 1,
                 row: 1,

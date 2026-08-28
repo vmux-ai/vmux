@@ -361,6 +361,8 @@ pub enum BrowserBarCommand {
     OpenCommands,
     #[menu(id = "browser_open_history", label = "History", accel = "super+y")]
     OpenHistory,
+    #[menu(id = "browser_open_ex_bar", label = "Vim Command Line")]
+    OpenExBar,
 }
 
 #[allow(dead_code)]

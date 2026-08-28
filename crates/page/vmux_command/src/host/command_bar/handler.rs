@@ -426,6 +426,10 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenExBar)) => {
+                request.should_toggle = true;
+                request.url_override = Some(":".to_string());
+            }
             AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
                 request.space_switch = true;
@@ -723,6 +727,7 @@ fn on_command_bar_action(
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
+    mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
     mut issued: MessageWriter<crate::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -947,6 +952,12 @@ fn on_command_bar_action(
             stack_chosen.write(StackInPaneChosen {
                 pane_bits: *pane,
                 index: *index,
+            });
+        }
+        CommandBarActionEvent::Ex { line } => {
+            ex_lines.write(crate::host::ExLineSubmitted {
+                stack: queries.focused_stack(),
+                line: line.clone(),
             });
         }
         CommandBarActionEvent::Dismiss => {}

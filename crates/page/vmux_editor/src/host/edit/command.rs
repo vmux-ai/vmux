@@ -220,6 +220,7 @@ pub enum EditCommand {
     OpenFind {
         forward: bool,
     },
+    OpenCommandLine,
     ClearSearchHighlight,
     Substitute {
         range: crate::edit::ex::ExRange,

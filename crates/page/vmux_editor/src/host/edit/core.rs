@@ -1894,7 +1894,7 @@ impl EditCore {
                 }
             }
             EditCommand::ClearSearchHighlight => self.search_highlight = false,
-            EditCommand::OpenFind { .. } => {}
+            EditCommand::OpenFind { .. } | EditCommand::OpenCommandLine => {}
             EditCommand::Substitute {
                 range,
                 pattern,

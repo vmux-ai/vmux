@@ -145,6 +145,8 @@ enum BrowserBarCommand {
     OpenCommands,
     #[menu(id = "browser_open_history", label = "History")]
     OpenHistory,
+    #[menu(id = "browser_open_ex_bar", label = "Vim Command Line")]
+    OpenExBar,
 }
 
 #[derive(Debug, McpTool)]
