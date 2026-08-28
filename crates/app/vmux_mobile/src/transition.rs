@@ -27,18 +27,18 @@ mod platform {
     use objc2::{
         ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
     };
-    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSObjectProtocol, NSString};
     use objc2_ui_kit::{
         UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle, UIButton,
         UIButtonType, UIColor, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
-        UIGestureRecognizer, UIGestureRecognizerDelegate, UIGlassContainerEffect, UIGlassEffect,
-        UILayoutConstraintAxis, UIModalPresentationStyle, UINavigationBarAppearance,
-        UINavigationController, UINavigationControllerDelegate, UIPresentationController,
-        UISheetPresentationController, UISheetPresentationControllerDelegate,
-        UISheetPresentationControllerDetent, UIStackView, UIStackViewDistribution,
-        UISwipeGestureRecognizer, UISwipeGestureRecognizerDirection, UIUserInterfaceStyle, UIView,
-        UIViewAutoresizing, UIViewController, UIVisualEffectView,
+        UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
+        UIGlassContainerEffect, UIGlassEffect, UILayoutConstraintAxis, UIModalPresentationStyle,
+        UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
+        UIPanGestureRecognizer, UIPresentationController, UISheetPresentationController,
+        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIStackView,
+        UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
+        UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -278,27 +278,21 @@ mod platform {
         }
 
         fn swipeable(&self, delegate: &NavDelegate, marker: MainThreadMarker) {
-            for direction in [
-                UISwipeGestureRecognizerDirection::Left,
-                UISwipeGestureRecognizerDirection::Right,
-            ] {
-                let swipe = unsafe {
-                    UISwipeGestureRecognizer::initWithTarget_action(
-                        UISwipeGestureRecognizer::alloc(marker),
-                        Some(delegate),
-                        Some(sel!(swiped:)),
-                    )
-                };
-                swipe.setDirection(direction);
-                self.capsule.addGestureRecognizer(&swipe);
-            }
+            let pan = unsafe {
+                UIPanGestureRecognizer::initWithTarget_action(
+                    UIPanGestureRecognizer::alloc(marker),
+                    Some(delegate),
+                    Some(sel!(panned:)),
+                )
+            };
+            self.capsule.addGestureRecognizer(&pan);
         }
 
-        fn neighbour(&self, direction: UISwipeGestureRecognizerDirection) -> Option<String> {
+        fn neighbour(&self, towards: f64) -> Option<String> {
             if self.ids.len() < 2 {
                 return None;
             }
-            let next = if direction == UISwipeGestureRecognizerDirection::Left {
+            let next = if towards < 0.0 {
                 self.at + 1
             } else {
                 self.at.checked_sub(1)?
@@ -416,8 +410,138 @@ mod platform {
         columns: Vec<Column>,
         roots: HashMap<String, Held>,
         seated: Option<String>,
+        dragging: Option<Drag>,
         tabs: Tabs,
         delegate: Retained<NavDelegate>,
+    }
+
+    struct Drag {
+        to: String,
+        incoming: Held,
+        entering: f64,
+        across: f64,
+    }
+
+    impl Drag {
+        fn follow(shifted: f64) {
+            let idle = STACK
+                .with_borrow(|stack| stack.as_ref().is_some_and(|stack| stack.dragging.is_none()));
+            if idle {
+                if shifted.abs() < 8.0 {
+                    return;
+                }
+                let started = Self::begin(shifted);
+                STACK.with_borrow_mut(|stack| {
+                    let Some(stack) = stack.as_mut() else {
+                        return;
+                    };
+                    stack.dragging = started;
+                });
+            }
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                let Some(drag) = stack.dragging.as_ref() else {
+                    return;
+                };
+                let shifted = shifted.clamp(-drag.across, drag.across);
+                if let Some(leaving) = Self::leaving(stack) {
+                    leaving.setTransform(Self::sideways(shifted));
+                }
+                if let Some(arriving) = drag.incoming.controller.view() {
+                    arriving.setTransform(Self::sideways(shifted + drag.entering));
+                }
+            });
+        }
+
+        fn begin(shifted: f64) -> Option<Drag> {
+            STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                if stack.columns.len() != 1 || stack.columns[0].levels.len() != 1 {
+                    return None;
+                }
+                let to = stack.tabs.neighbour(shifted)?;
+                let holder = stack.columns[0].navigation.view()?;
+                let incoming = stack.roots.remove(&to)?;
+                let across = holder.bounds().size.width;
+                let entering = if shifted < 0.0 { across } else { -across };
+                let view = incoming.controller.view()?;
+                view.setFrame(holder.bounds());
+                view.setTransform(Self::sideways(entering));
+                holder.addSubview(&view);
+                Some(Drag {
+                    to,
+                    incoming,
+                    entering,
+                    across,
+                })
+            })
+        }
+
+        fn release(shifted: f64, speed: f64) {
+            let plan = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                let drag = stack.dragging.as_ref()?;
+                let leaving = Self::leaving(stack)?;
+                let arriving = drag.incoming.controller.view()?;
+                let far = shifted.abs() > drag.across / 3.0 || speed.abs() > 600.0;
+                let agreed = shifted != 0.0 && shifted.signum() == -drag.entering.signum();
+                let commit = far && agreed;
+                let landing = if commit { -drag.entering } else { 0.0 };
+                Some((leaving, arriving, landing, drag.entering, commit))
+            });
+            let Some((leaving, arriving, landing, entering, commit)) = plan else {
+                return;
+            };
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let slide = block2::RcBlock::new(move || {
+                leaving.setTransform(Drag::sideways(landing));
+                arriving.setTransform(Drag::sideways(landing + entering));
+            });
+            let done = block2::RcBlock::new(move |_| Drag::land(commit));
+            UIView::animateWithDuration_animations_completion(0.3, &slide, Some(&done), marker);
+        }
+
+        fn land(commit: bool) {
+            let arrived = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let drag = stack.dragging.take()?;
+                if let Some(view) = drag.incoming.controller.view() {
+                    view.setTransform(Self::sideways(0.0));
+                    view.removeFromSuperview();
+                }
+                if let Some(leaving) = Self::leaving(stack) {
+                    leaving.setTransform(Self::sideways(0.0));
+                }
+                let to = drag.to.clone();
+                stack.roots.insert(drag.to, drag.incoming);
+                Some(to)
+            });
+            let Some(to) = arrived else {
+                return;
+            };
+            if commit {
+                PICKED.with_borrow_mut(|slot| *slot = Some(to));
+            }
+        }
+
+        fn leaving(stack: &NativeStack) -> Option<Retained<UIView>> {
+            stack.columns.first()?.levels.first()?.controller.view()
+        }
+
+        fn sideways(by: f64) -> CGAffineTransform {
+            CGAffineTransform {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                tx: by,
+                ty: 0.0,
+            }
+        }
     }
 
     define_class!(
@@ -435,18 +559,19 @@ mod platform {
                 TAPPED.with_borrow_mut(|queued| queued.push(action));
             }
 
-            #[unsafe(method(swiped:))]
-            fn swiped(&self, sender: &UISwipeGestureRecognizer) {
-                let direction = sender.direction();
-                STACK.with_borrow(|stack| {
-                    let Some(stack) = stack.as_ref() else {
-                        return;
-                    };
-                    let Some(id) = stack.tabs.neighbour(direction) else {
-                        return;
-                    };
-                    PICKED.with_borrow_mut(|slot| *slot = Some(id));
-                });
+            #[unsafe(method(panned:))]
+            fn panned(&self, sender: &UIPanGestureRecognizer) {
+                let shifted = sender.translationInView(None).x;
+                match sender.state() {
+                    UIGestureRecognizerState::Changed => Drag::follow(shifted),
+                    UIGestureRecognizerState::Ended => {
+                        Drag::release(shifted, sender.velocityInView(None).x)
+                    }
+                    UIGestureRecognizerState::Cancelled | UIGestureRecognizerState::Failed => {
+                        Drag::release(0.0, 0.0)
+                    }
+                    _ => {}
+                }
             }
 
             #[unsafe(method(centreTapped:))]
@@ -604,6 +729,7 @@ mod platform {
             columns: vec![column],
             roots: HashMap::new(),
             seated: None,
+            dragging: None,
             tabs,
             delegate,
         }));
@@ -770,6 +896,38 @@ mod platform {
             });
         }
 
+        pub fn warm(wanted: Vec<(String, Level)>) {
+            let mut fresh = Vec::new();
+            for (id, level) in wanted {
+                let held = STACK.with_borrow(|stack| {
+                    stack
+                        .as_ref()
+                        .is_some_and(|stack| stack.roots.contains_key(&id))
+                });
+                if held {
+                    fresh.push((id, None));
+                    continue;
+                }
+                fresh.push((id, Self::draw(level)));
+            }
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                if stack.dragging.is_some() {
+                    return;
+                }
+                let mut keep = Vec::new();
+                for (id, held) in fresh {
+                    if let Some(held) = held {
+                        stack.roots.insert(id.clone(), held);
+                    }
+                    keep.push(id);
+                }
+                stack.roots.retain(|id, _| keep.contains(id));
+            });
+        }
+
         pub fn tabs(entries: Vec<TabEntry>, centre: Option<&'static str>) {
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
@@ -904,6 +1062,8 @@ mod platform {
         pub fn settle(_tab: String, _levels: Vec<Level>) {}
 
         pub fn tabs(_entries: Vec<TabEntry>, _centre: Option<&'static str>) {}
+
+        pub fn warm(_wanted: Vec<(String, Level)>) {}
 
         pub fn render() {}
     }

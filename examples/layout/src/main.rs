@@ -1,8 +1,8 @@
 //! The navigation on a simulator, with no Mac: the tabs are canned rather than reported
 //! over QUIC, so push, pop, the back-swipe and stacked sheets can be driven by hand.
 //!
-//! Three pages, so three webviews: the shell draws a tab's root, and every pushed level
-//! and sheet is a page of its own that UIKit animates in.
+//! A page per route, so a webview per route: every tab root, every pushed level and every
+//! sheet is its own document that UIKit animates in.
 //!
 //! The header and the tab bar are UIKit, not HTML, so iOS 26 draws them in Liquid Glass.
 //! A bar button arrives back as a `Tapped` message, which is what `act` below reads.
@@ -17,16 +17,18 @@ use vmux_native::NativePage;
 
 #[derive(Clone, PartialEq)]
 enum Page {
-    Inbox,
-    Note(String),
-    Alert(String),
+    One,
+    Two,
+    Pushed(String),
+    Presented(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
-    Inbox,
-    Note,
-    Alert,
+    One,
+    Two,
+    Pushed,
+    Presented,
 }
 
 impl Route for Page {
@@ -34,16 +36,18 @@ impl Route for Page {
 
     fn name(&self) -> Name {
         match self {
-            Self::Inbox => Name::Inbox,
-            Self::Note(_) => Name::Note,
-            Self::Alert(_) => Name::Alert,
+            Self::One => Name::One,
+            Self::Two => Name::Two,
+            Self::Pushed(_) => Name::Pushed,
+            Self::Presented(_) => Name::Presented,
         }
     }
 
     fn title(&self) -> String {
         match self {
-            Self::Inbox => "Inbox".to_string(),
-            Self::Note(name) | Self::Alert(name) => name.clone(),
+            Self::One => "Tab 1".to_string(),
+            Self::Two => "Tab 2".to_string(),
+            Self::Pushed(name) | Self::Presented(name) => name.clone(),
         }
     }
 }
@@ -76,6 +80,16 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 .title { font: 600 40px/1.05 -apple-system, SF Pro Display, sans-serif; letter-spacing: -.02em; margin-top: 10px; }
 .meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
 
+.push {
+  align-self: center; margin: auto 0; padding: 18px 44px; border-radius: 20px;
+  font-size: 18px; font-weight: 600;
+  background: linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.09));
+  border: 1px solid rgba(255,255,255,.20);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  transition: transform .12s ease, background .18s ease;
+}
+.push:active { transform: scale(.94); background: rgba(255,255,255,.3); }
+
 .rungs { display: flex; gap: 5px; margin-top: 22px; }
 .rung { height: 3px; flex: 1; border-radius: 2px; background: rgba(255,255,255,.13); }
 .rung.on { background: rgba(255,255,255,.85); }
@@ -84,9 +98,10 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 </style>"#;
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
-static INBOX: NativePage = Demo::page("vmux://inbox/", InboxScreen);
-static NOTE: NativePage = Demo::page("vmux://note/", NoteScreen);
-static ALERT: NativePage = Demo::page("vmux://alert/", AlertScreen);
+static ONE: NativePage = Demo::page("vmux://one/", OneScreen);
+static TWO: NativePage = Demo::page("vmux://two/", TwoScreen);
+static PUSHED: NativePage = Demo::page("vmux://pushed/", PushedScreen);
+static PRESENTED: NativePage = Demo::page("vmux://presented/", PresentedScreen);
 
 struct Demo;
 
@@ -123,10 +138,10 @@ fn main() {
 fn seed(mut reported: MessageWriter<Report<Page>>) {
     reported.write(Report {
         tabs: vec![
-            ("inbox".to_string(), Page::Inbox),
-            ("notes".to_string(), Page::Note("Notes".to_string())),
+            ("tab:1".to_string(), Page::One),
+            ("tab:2".to_string(), Page::Two),
         ],
-        focused: Some("notes".to_string()),
+        focused: Some("tab:1".to_string()),
     });
 }
 
@@ -141,10 +156,10 @@ fn act(
         let at = *opened;
         match *action {
             "Push" => {
-                pushes.write(Push(Page::Note(format!("Level {at}"))));
+                pushes.write(Push(Page::Pushed(format!("Level {at}"))));
             }
             "+" => {
-                presents.write(Present(Page::Alert(format!("Sheet {at}"))));
+                presents.write(Present(Page::Presented(format!("Sheet {at}"))));
             }
             _ => {}
         }
@@ -156,34 +171,44 @@ fn Shell() -> Element {
     rsx! {
         NavigationContainer::<Page> {
             TabNavigator {
-                Screen::<Page> { name: Name::Inbox, draws: &INBOX, action: "Push" }
-                Screen::<Page> { name: Name::Note, draws: &NOTE, action: "Push" }
-                Sheet::<Page> { name: Name::Alert, draws: &ALERT, action: "Push" }
+                Screen::<Page> { name: Name::One, draws: &ONE }
+                Screen::<Page> { name: Name::Two, draws: &TWO }
+                Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
+                Sheet::<Page> { name: Name::Presented, draws: &PRESENTED }
             }
         }
     }
 }
 
 #[component]
-fn InboxScreen() -> Element {
+fn OneScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#1d4ed8", far: "#0891b2", kind: "inbox" }
+            Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root" }
         }
     }
 }
 
 #[component]
-fn NoteScreen() -> Element {
+fn TwoScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "notes" }
+            Stage { near: "#047857", far: "#0891b2", kind: "tab root" }
         }
     }
 }
 
 #[component]
-fn AlertScreen() -> Element {
+fn PushedScreen() -> Element {
+    rsx! {
+        NavigationContainer::<Page> {
+            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed" }
+        }
+    }
+}
+
+#[component]
+fn PresentedScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
             Stage { near: "#b45309", far: "#be123c", kind: "presented" }
@@ -193,7 +218,8 @@ fn AlertScreen() -> Element {
 
 #[component]
 fn Stage(near: String, far: String, kind: String) -> Element {
-    let seen = use_navigation::<Page>().view();
+    let navigation = use_navigation::<Page>();
+    let seen = navigation.view();
     let title = match &seen.current {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
@@ -209,6 +235,11 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                 div { class: "eyebrow", "{kind}" }
                 div { class: "title", "{title}" }
                 div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
+                button {
+                    class: "push",
+                    onclick: move |_| navigation.go(Page::Pushed(format!("Level {}", depth + 1))),
+                    "Push"
+                }
                 div { class: "rungs",
                     for step in 0..6usize {
                         div {
