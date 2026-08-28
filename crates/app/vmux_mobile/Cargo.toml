@@ -22,16 +22,6 @@ name = "vmux_mobile"
 path = "src/main.rs"
 required-features = ["mobile"]
 
-[[example]]
-name = "minimal"
-path = "examples/minimal.rs"
-required-features = ["mobile"]
-
-[package.metadata.example.minimal]
-name = "Minimal"
-description = "The whole phone runtime as one plugin"
-category = "Mobile"
-
 [dependencies]
 # The phone runs the desktop's runner: `bevy_winit` owns the loop and `app.run()` turns it. These
 # are the plugins `WinitPlugin` needs around it and no more — there is no renderer, because wry

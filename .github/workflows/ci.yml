@@ -412,9 +412,11 @@ jobs:
       - name: Test the phone app
         run: cargo test --locked -p vmux_mobile --features mobile --lib --bins
 
-      # An example that stops compiling is documentation that lies, and nothing else builds these.
-      - name: Build the phone examples
-        run: cargo build --locked -p vmux_mobile --features mobile --examples
+      # An example that stops compiling is documentation that lies. The demo is a crate of its
+      # own so it can carry its own `Dioxus.toml`, which is why it is named rather than swept up
+      # by `--examples`.
+      - name: Build the phone example
+        run: cargo build --locked -p vmux_layout_demo
 
       # vmux_mobile does not depend on every page that claims to be portable, so compiling it
       # proves nothing about them. This went green once while vmux_editor for iOS was broken.

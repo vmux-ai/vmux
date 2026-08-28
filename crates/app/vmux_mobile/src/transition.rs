@@ -92,7 +92,7 @@ mod platform {
         ) -> Option<Self> {
             let web = Surfaces::build(level.page, level.seat)?;
             if level.page.background.is_none() {
-                web.paint(crate::shell::webview_background());
+                web.paint(crate::root::webview_background());
             }
             web.render();
             let view = web.ui_view();
