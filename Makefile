@@ -55,35 +55,18 @@ build: ensure-mac-deps
 
 ios: mobile-ios-run
 
-# The navigation on a simulator: a real push animation, the interactive back-swipe, a sheet
-# you can drag down — the parts no test reaches and CI cannot run. Its tabs are canned rather
-# than reported, so this needs no Mac and no pairing.
-#
-# Built and installed rather than served. `dx serve` ignores whichever simulator is booted and
-# reaches for the last device it can enumerate, which is an iPad; `--device` does not redirect
-# it, because a name or a UDID there puts dx on the physical-device path and it starts asking
-# for provisioning profiles. `simctl install booted` has no opinion, so the iPhone
-# `ensure-booted-simulator` brought up is the one that gets it.
-#
-# No plist surgery here: the demo is its own crate with its own `Dioxus.toml`, so dx already
-# writes the right identifier and the right executable name.
 layout-mobile: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
 	"$(DX_BIN)" build --ios -p vmux_layout_demo; \
 	. ./scripts/cargo-target-paths.sh; \
 	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_layout_demo/debug/ios/VmuxLayoutDemo.app"; \
 	xcrun simctl install booted "$$bundle"; \
-	xcrun simctl launch booted ai.vmux.layout
+	xcrun simctl launch booted ai.vmux.layout.mobile
 
 android: mobile-android-run
 
 # `inject-ios-resources.sh` reads VMUX_IOS_PROFILE to decide which bundle to write into, so the
 # build has to be told the same thing or the script looks for a bundle dx never produced.
-#
-# `--features mobile` is passed here and to `serve` below rather than left to dx. The bin is
-# `required-features = ["mobile"]`, and cargo skips a target whose features are unmet without
-# saying so — which used to be covered by dx turning on `dioxus/mobile` for an iOS build. That
-# feature is gone, so the name is ours now and nothing else will set it.
 mobile-ios: ensure-mobile-ios-deps
 	"$(DX_BIN)" build --ios -p vmux_mobile --features mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh

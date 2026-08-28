@@ -56,6 +56,7 @@ impl NativePage {
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             head: r#"<base href="/"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
 body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }

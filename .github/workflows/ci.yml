@@ -405,16 +405,9 @@ jobs:
       # that makes a bare build vacuous makes a bare `cargo test` skip the bin outright. Three
       # `Credentials` initializers rotted a field behind exactly that gap. These tests are portable
       # logic, so they run on the host rather than needing a simulator.
-      #
-      # `--lib --bins` because the crate is both: the runtime is a library so an example can drive
-      # it, and `main.rs` is the plugin and nothing else. Naming only the bin passes while running
-      # nothing, which is the same gap one rename later.
       - name: Test the phone app
         run: cargo test --locked -p vmux_mobile --features mobile --lib --bins
 
-      # An example that stops compiling is documentation that lies. The demo is a crate of its
-      # own so it can carry its own `Dioxus.toml`, which is why it is named rather than swept up
-      # by `--examples`.
       - name: Build the phone example
         run: cargo build --locked -p vmux_layout_demo
 

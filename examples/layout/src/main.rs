@@ -1,23 +1,15 @@
-//! The navigation on a simulator, with no Mac: the tabs are canned rather than reported
-//! over QUIC, so push, pop, the back-swipe and stacked sheets can be driven by hand.
-//!
-//! A page per route, so a webview per route: every tab root, every pushed level and every
-//! sheet is its own document that UIKit animates in.
-//!
-//! The header and the tab bar are UIKit, not HTML, so iOS 26 component them in Liquid Glass.
-//! A bar button arrives back as a `Tapped` message, which is what `act` below reads.
-//!
-//! How a route arrives is an option on its `Screen`, the way Expo Router spells it: a card
-//! pushes, a form sheet slides up over its detents. Callers only ever say `go(route)`.
+//! The navigation on a simulator, with no Mac: tabs are canned rather than reported, so push,
+//! the back-swipe, a dragged tab switch and every `presentation` can be driven by hand.
 
 use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::Presentation;
-use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Report, Route, Tapped};
+use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Presentation, Report, Route, Tapped};
 use vmux_mobile::navigator::{Screen, Stack, Tabs, use_navigation, use_route};
 use vmux_native::NativePage;
+
+const BACKDROP: (u8, u8, u8, u8) = (5, 6, 10, 255);
 
 #[derive(Clone, PartialEq)]
 enum Page {
@@ -61,76 +53,32 @@ impl Route for Page {
     }
 }
 
-const HEAD: &str = r#"<base href="/"/>
-<title>Layout</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
-<meta name="color-scheme" content="dark"/>
-<style>
-html, body { height: 100%; margin: 0; background: #05060a; color: #f2f3f7; }
-body {
-  display: flex; flex-direction: column; overflow: hidden;
-  font: 400 16px/1.4 -apple-system, SF Pro Text, sans-serif;
-  -webkit-font-smoothing: antialiased;
+macro_rules! screens {
+    ($($page:ident $url:literal $component:ident $near:literal $far:literal $kind:literal;)*) => {
+        $(
+            static $page: NativePage = NativePage::pane($url, $component).painted(BACKDROP);
+
+            #[component]
+            fn $component() -> Element {
+                rsx! {
+                    Stack::<Page> {
+                        Body { near: $near, far: $far, kind: $kind }
+                    }
+                }
+            }
+        )*
+    };
 }
-button { font: inherit; color: inherit; border: 0; background: none; }
-#main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
-.screen { position: relative; flex: 1; display: flex; flex-direction: column;
-  isolation: isolate; overflow: hidden; }
-.screen::before, .screen::after { content: ""; position: absolute; inset: -30% -30% auto -30%; height: 90%; z-index: -1; }
-.screen::before { background: radial-gradient(60% 60% at 30% 20%, var(--near), transparent 70%); filter: blur(40px); }
-.screen::after  { background: radial-gradient(50% 50% at 80% 0%, var(--far), transparent 70%); filter: blur(60px); }
-.vignette { position: absolute; inset: 0; z-index: -1;
-  background: radial-gradient(120% 90% at 50% 0%, transparent 40%, rgba(0,0,0,.75) 100%); }
-
-.stage { flex: 1; display: flex; flex-direction: column; overflow: hidden;
-  padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px); }
-.eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.45); }
-.title { font: 600 40px/1.05 -apple-system, SF Pro Display, sans-serif; letter-spacing: -.02em; margin-top: 10px; }
-.meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
-
-.keys { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: auto 0; }
-.key {
-  padding: 11px 18px; border-radius: 13px; font-size: 15px; font-weight: 500;
-  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
-  backdrop-filter: blur(18px);
-  transition: transform .12s ease, background .18s ease;
+screens! {
+    CARD "vmux://card/" CardScreen "#7c3aed" "#db2777" "card";
+    MODAL "vmux://modal/" ModalScreen "#b45309" "#be123c" "modal";
+    FORM_SHEET "vmux://form-sheet/" FormSheetScreen "#0f766e" "#0369a1" "form sheet";
+    FULL_SCREEN_MODAL "vmux://full-screen-modal/" FullScreenModalScreen "#4338ca" "#7e22ce" "full screen modal";
 }
-.key:active { transform: scale(.94); background: rgba(255,255,255,.22); }
 
-.rungs { display: flex; gap: 3px; margin-top: 22px; height: 3px; }
-.rung { flex: 1; min-width: 1px; border-radius: 2px; background: rgba(255,255,255,.85); }
-.rung.sheet { background: #ffcf6b; }
-
-</style>"#;
-
-static APP: NativePage = Demo::page("vmux://app/", App);
-static TAB: NativePage = Demo::page("vmux://tab/", TabScreen);
-static CARD: NativePage = Demo::page("vmux://card/", CardScreen);
-static MODAL: NativePage = Demo::page("vmux://modal/", ModalScreen);
-static FORM_SHEET: NativePage = Demo::page("vmux://form-sheet/", FormSheetScreen);
-static FULL_SCREEN_MODAL: NativePage =
-    Demo::page("vmux://full-screen-modal/", FullScreenModalScreen);
-
-struct Demo;
-
-impl Demo {
-    const fn page(url: &'static str, component: vmux_native::PageComponent) -> NativePage {
-        NativePage {
-            url,
-            document_url: None,
-            component,
-            root_id: "main",
-            root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-            head: HEAD,
-            html_attributes: r#"lang="en" class="h-full""#,
-            body_class: "",
-            transparent: false,
-            background: Some((5, 6, 10, 255)),
-            owns_subtree: false,
-        }
-    }
-}
+static APP: NativePage = NativePage::pane("vmux://app/", App).painted(BACKDROP);
+static TAB: NativePage = NativePage::pane("vmux://tab/", TabScreen).painted(BACKDROP);
 
 fn main() {
     bevy_app::App::new()
@@ -200,20 +148,20 @@ fn App() -> Element {
 fn TabScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            TabStage {}
+            TabBody {}
         }
     }
 }
 
 #[component]
-fn TabStage() -> Element {
+fn TabBody() -> Element {
     let at = match use_route::<Page>() {
         Some(Page::Tab(at)) => at,
         _ => 1,
     };
     let hue = (at * 37 + 185) % 360;
     rsx! {
-        Stage {
+        Body {
             near: "hsl({hue} 78% 42%)",
             far: "hsl({(hue + 40) % 360} 74% 38%)",
             kind: "tab root",
@@ -222,43 +170,7 @@ fn TabStage() -> Element {
 }
 
 #[component]
-fn CardScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "card" }
-        }
-    }
-}
-
-#[component]
-fn ModalScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Stage { near: "#b45309", far: "#be123c", kind: "modal" }
-        }
-    }
-}
-
-#[component]
-fn FormSheetScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Stage { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
-        }
-    }
-}
-
-#[component]
-fn FullScreenModalScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Stage { near: "#4338ca", far: "#7e22ce", kind: "full screen modal" }
-        }
-    }
-}
-
-#[component]
-fn Stage(near: String, far: String, kind: String) -> Element {
+fn Body(near: String, far: String, kind: String) -> Element {
     let navigation = use_navigation::<Page>();
     let seen = navigation.state();
     let title = match use_route::<Page>() {
@@ -269,44 +181,70 @@ fn Stage(near: String, far: String, kind: String) -> Element {
     let sheet = seen.sheet;
 
     rsx! {
-        div { class: "screen", style: "--near:{near};--far:{far}",
-            div { class: "vignette" }
+        div {
+            class: "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05060a] text-white",
+            style: "--near:{near};--far:{far}",
 
-            div { class: "stage",
-                div { class: "eyebrow", "{kind}" }
-                div { class: "title", "{title}" }
-                div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
-                div { class: "keys",
-                    button {
-                        class: "key",
-                        onclick: move |_| navigation.go(Page::Card(format!("Card {}", depth + 1))),
-                        "Card"
+            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[40px] bg-[radial-gradient(60%_60%_at_30%_20%,var(--near),transparent_70%)]" }
+            div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[60px] bg-[radial-gradient(50%_50%_at_80%_0%,var(--far),transparent_70%)]" }
+            div { class: "pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(120%_90%_at_50%_0%,transparent_40%,rgba(0,0,0,0.75)_100%)]" }
+
+            div { class: "flex min-h-0 flex-1 flex-col overflow-hidden px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1.5rem)]",
+                div { class: "text-[11px] uppercase tracking-[0.18em] text-white/45", "{kind}" }
+                div { class: "mt-2.5 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em]",
+                    "{title}"
+                }
+                div { class: "mt-2.5 text-[13px] tabular-nums text-white/55",
+                    "depth {depth} · {seen.tabs.len()} tabs open"
+                }
+
+                div { class: "my-auto flex flex-wrap justify-center gap-2",
+                    Key {
+                        label: "Card",
+                        onpick: move |_| navigation.go(Page::Card(format!("Card {}", depth + 1))),
                     }
-                    button {
-                        class: "key",
-                        onclick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
-                        "Modal"
+                    Key {
+                        label: "Modal",
+                        onpick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
                     }
-                    button {
-                        class: "key",
-                        onclick: move |_| navigation.go(Page::FormSheet(format!("Sheet {}", depth + 1))),
-                        "Form Sheet"
+                    Key {
+                        label: "Form Sheet",
+                        onpick: move |_| {
+                            navigation.go(Page::FormSheet(format!("Sheet {}", depth + 1)))
+                        },
                     }
-                    button {
-                        class: "key",
-                        onclick: move |_| navigation.go(Page::FullScreenModal(format!("Full {}", depth + 1))),
-                        "Full Screen Modal"
+                    Key {
+                        label: "Full Screen Modal",
+                        onpick: move |_| {
+                            navigation.go(Page::FullScreenModal(format!("Full {}", depth + 1)))
+                        },
                     }
                 }
-                div { class: "rungs",
+
+                div { class: "mt-[22px] flex h-[3px] gap-[3px]",
                     for step in 0..depth {
                         div {
                             key: "{step}",
-                            class: if sheet && step == depth - 1 { "rung sheet" } else { "rung" },
+                            class: if sheet && step == depth - 1 {
+                                "min-w-px flex-1 rounded-sm bg-[#ffcf6b]"
+                            } else {
+                                "min-w-px flex-1 rounded-sm bg-white/85"
+                            },
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn Key(label: String, onpick: EventHandler<()>) -> Element {
+    rsx! {
+        button {
+            class: "rounded-[13px] border border-white/15 bg-white/10 px-[18px] py-[11px] text-[15px] font-medium backdrop-blur-lg transition active:scale-95 active:bg-white/20",
+            onclick: move |_| onpick.call(()),
+            "{label}"
         }
     }
 }

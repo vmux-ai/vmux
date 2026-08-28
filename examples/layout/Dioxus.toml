@@ -1,18 +1,14 @@
 [application]
-name = "Layout"
+name = "Layout Mobile"
 default_platform = "ios"
-
-# No `ios_info_plist`. The app supplies its own so it can set UIDeviceFamily and the
-# orientations; this wants none of that, and letting dx generate one keeps the executable name
-# matching the target it actually built.
+tailwind_input = "../../crates/app/vmux_mobile/assets/tailwind.css"
+tailwind_output = "../../crates/app/vmux_mobile/assets/tailwind.out.css"
 
 [bundle]
-identifier = "ai.vmux.layout"
+identifier = "ai.vmux.layout.mobile"
 publisher = "Vmux"
 short_description = "The phone's navigation, with no phone."
 
-# The whole point of the separate crate: a different identifier, so installing the demo does
-# not uninstall the app it is demonstrating.
 [ios]
 deployment_target = "15.0"
-identifier = "ai.vmux.layout"
+identifier = "ai.vmux.layout.mobile"
