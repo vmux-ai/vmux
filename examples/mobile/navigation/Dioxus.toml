@@ -5,10 +5,10 @@ tailwind_input = "../../../crates/app/vmux_mobile/assets/tailwind.css"
 tailwind_output = "../../../crates/app/vmux_mobile/assets/tailwind.out.css"
 
 [bundle]
-identifier = "ai.vmux.navigation.mobile"
+identifier = "ai.vmux.mobile.navigation"
 publisher = "Vmux"
 short_description = "The phone's navigation, with no phone."
 
 [ios]
 deployment_target = "15.0"
-identifier = "ai.vmux.navigation.mobile"
+identifier = "ai.vmux.mobile.navigation"
