@@ -4045,8 +4045,26 @@ fn explorer_client_id() -> u64 {
     ((now_millis() as u64) << 12) ^ random_index(4096) as u64
 }
 
-fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
-    page_width > 0 && NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
+const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
+
+#[derive(Clone, Copy)]
+struct ExplorerRoom {
+    page_width: u32,
+    explorer_width: u32,
+    open: bool,
+}
+
+impl ExplorerRoom {
+    fn fits(self) -> bool {
+        if self.page_width == 0 {
+            return false;
+        }
+        let mut needed = NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(self.explorer_width);
+        if self.open {
+            needed = needed.saturating_sub(EXPLORER_SQUEEZE_TOLERANCE_PX);
+        }
+        self.page_width >= needed
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4069,7 +4087,12 @@ pub struct ExplorerPane {
 
 impl ExplorerPane {
     fn has_room(self) -> bool {
-        explorer_has_room((self.page_width)(), (self.width)())
+        ExplorerRoom {
+            page_width: (self.page_width)(),
+            explorer_width: (self.width)(),
+            open: (self.visible)(),
+        }
+        .fits()
     }
 
     fn reflow_key(self) -> ExplorerReflowKey {
@@ -4575,6 +4598,57 @@ mod menu_tests {
         assert_eq!(
             opens, 3,
             "modification, clipboard and the palette; navigation is first so it opens nothing"
+        );
+    }
+}
+
+#[cfg(test)]
+mod explorer_room_tests {
+    use super::*;
+
+    #[test]
+    fn the_width_that_will_not_open_the_explorer_does_not_close_it_either() {
+        let explorer_width = 240;
+        let short = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - 1;
+
+        assert!(
+            ExplorerRoom {
+                page_width: short,
+                explorer_width,
+                open: true,
+            }
+            .fits()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: short,
+                explorer_width,
+                open: false,
+            }
+            .fits()
+        );
+    }
+
+    #[test]
+    fn an_explorer_still_opens_at_the_width_it_always_did() {
+        let explorer_width = 240;
+        let snug = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width;
+
+        assert!(
+            ExplorerRoom {
+                page_width: snug,
+                explorer_width,
+                open: false,
+            }
+            .fits()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: snug - 1,
+                explorer_width,
+                open: false,
+            }
+            .fits()
         );
     }
 }
