@@ -91,8 +91,7 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 
 .keys { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: auto 0; }
 .key {
-  padding: 10px 16px; border-radius: 12px; font-weight: 500;
-  font: 500 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 11px 18px; border-radius: 13px; font-size: 15px; font-weight: 500;
   background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
   backdrop-filter: blur(18px);
   transition: transform .12s ease, background .18s ease;
@@ -244,7 +243,7 @@ fn ModalScreen() -> Element {
 fn FormSheetScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#0f766e", far: "#0369a1", kind: "formSheet" }
+            Stage { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
         }
     }
 }
@@ -253,7 +252,7 @@ fn FormSheetScreen() -> Element {
 fn FullScreenModalScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#4338ca", far: "#7e22ce", kind: "fullScreenModal" }
+            Stage { near: "#4338ca", far: "#7e22ce", kind: "full screen modal" }
         }
     }
 }
@@ -280,23 +279,23 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                 div { class: "keys",
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Card(format!("card {}", depth + 1))),
-                        "card"
+                        onclick: move |_| navigation.go(Page::Card(format!("Card {}", depth + 1))),
+                        "Card"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Modal(format!("modal {}", depth + 1))),
-                        "modal"
+                        onclick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
+                        "Modal"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::FormSheet(format!("formSheet {}", depth + 1))),
-                        "formSheet"
+                        onclick: move |_| navigation.go(Page::FormSheet(format!("Sheet {}", depth + 1))),
+                        "Form Sheet"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::FullScreenModal(format!("fullScreenModal {}", depth + 1))),
-                        "fullScreenModal"
+                        onclick: move |_| navigation.go(Page::FullScreenModal(format!("Full {}", depth + 1))),
+                        "Full Screen Modal"
                     }
                 }
                 div { class: "rungs",

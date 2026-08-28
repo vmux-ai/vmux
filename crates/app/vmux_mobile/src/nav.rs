@@ -28,7 +28,7 @@ pub struct Local;
 pub struct Selected;
 
 #[derive(Component)]
-pub struct Sheet;
+pub struct Presented;
 
 #[derive(Component)]
 pub struct Shows<S: Route>(pub S);
@@ -250,7 +250,7 @@ impl Nav {
             at = next;
             view.depth += 1;
         }
-        view.sheet = world.get::<Sheet>(at).is_some();
+        view.sheet = world.get::<Presented>(at).is_some();
         view.current = world.get::<Shows<S>>(at).map(|shows| shows.0.clone());
         view
     }
@@ -536,7 +536,7 @@ impl Nav {
         }
         for Present(screen) in presents.read() {
             let onto = Self::top(tab, &children);
-            commands.spawn((Shows(screen.clone()), Sheet, ChildOf(onto)));
+            commands.spawn((Shows(screen.clone()), Presented, ChildOf(onto)));
             let Some(draws) = declared.of(screen.name()) else {
                 continue;
             };
@@ -557,7 +557,7 @@ impl Nav {
         mut dropped: MessageReader<Dropped>,
         selected: Query<Entity, With<Selected>>,
         children: Query<&Children>,
-        sheets: Query<&Sheet>,
+        presented: Query<&Presented>,
         mut commands: Commands,
     ) {
         let Some(tab) = selected.iter().next() else {
@@ -585,7 +585,7 @@ impl Nav {
         }
 
         for level in chain.iter().rev().take(backs + dismisses) {
-            if sheets.get(*level).is_ok() {
+            if presented.get(*level).is_ok() {
                 NativeStack::dismiss();
             } else {
                 NativeStack::pop();
