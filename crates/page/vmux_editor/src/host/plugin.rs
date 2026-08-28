@@ -1235,10 +1235,8 @@ fn emit_window(
         return;
     }
     let total = edit.core.buffer.len_lines() as u32;
-    let (visible, wrap_columns) = {
-        let wrap = wrapped_view(edit, vp);
-        (wrap.total_rows(), wrap.columns())
-    };
+    let wrap = wrapped_view(edit, vp);
+    let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
     let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
     let overscan = vmux_core::scroll::overscan_for(
         vp.rows,
@@ -1248,7 +1246,8 @@ fn emit_window(
     );
     let first_row = vis_first.saturating_sub(overscan);
     let end_row = (vis_end + overscan).min(visible);
-    let layouts = wrapped_view(edit, vp).window(first_row, end_row);
+    let visible_top = wrap.line_at(vis_first);
+    let layouts = wrap.window(first_row, end_row);
     let first_row = layouts.first().map_or(first_row, |line| line.row);
     let mut lines = Vec::with_capacity(layouts.len());
     if let (Some(first_line), Some(last_line)) = (
@@ -1277,7 +1276,7 @@ fn emit_window(
         }
     }
     let mut sticky = Vec::new();
-    if let Some(top) = layouts.first().map(|layout| layout.line_no) {
+    if let Some(top) = visible_top {
         let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
         for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
             let at = header as usize;
@@ -2194,16 +2193,19 @@ fn drain_file_changes(
             commands.entity(entity).insert(FileReloadRequested);
         }
     }
+    let mut changed_dirs: HashSet<PathBuf> = HashSet::new();
+    for path in &changed {
+        if let Some(parent) = path.parent() {
+            changed_dirs.insert(canon(parent));
+        }
+    }
     for (entity, mut st) in &mut explorers {
         let cached: Vec<PathBuf> = st.children.keys().cloned().collect();
         for d in cached {
-            let dc = canon(&d);
-            if changed
-                .iter()
-                .any(|c| c.parent().map(|p| canon(p) == dc).unwrap_or(false))
-            {
-                let _ = start_explorer_dir_load(entity, d, &mut st, &mut commands, true);
+            if !changed_dirs.contains(&canon(&d)) {
+                continue;
             }
+            let _ = start_explorer_dir_load(entity, d, &mut st, &mut commands, true);
         }
     }
 }

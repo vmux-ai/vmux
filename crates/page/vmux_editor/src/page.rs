@@ -2419,7 +2419,12 @@ fn StickyScopeRow(
             span {
                 class: "sticky left-0 flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums text-muted-foreground/60",
                 style: "min-width:calc(var(--cw, 1ch) * {gutter_chars} + 3rem);height:{cell_height}px;",
-                "{row + 1}"
+                span {
+                    class: "shrink-0 text-right",
+                    style: "width:calc(var(--cw, 1ch) * {gutter_chars});",
+                    "{row + 1}"
+                }
+                span { class: "ml-1 w-[1ch] shrink-0" }
             }
             span { class: "pointer-events-none relative whitespace-pre pr-8",
                 IndentGuides { levels: line.indent_levels }

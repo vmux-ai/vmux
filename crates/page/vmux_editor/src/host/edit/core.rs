@@ -617,6 +617,12 @@ impl EditCore {
     fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
         let search = self.search.as_ref()?;
         let forward = search.forward != reverse;
+        if let Some((rev, pattern, cached)) = self.search_cache.as_ref()
+            && *rev == self.rev
+            && *pattern == search.pattern
+        {
+            return crate::edit::search::step(cached, from, forward);
+        }
         let matches = self.search_matches();
         crate::edit::search::step(&matches, from, forward)
     }
@@ -700,13 +706,15 @@ impl EditCore {
             return Vec::new();
         }
         let last_line = first as usize + rows as usize;
+        let above =
+            matches.partition_point(|m| self.buffer.char_to_coords(m.end).0 < first as usize);
         let mut out = Vec::new();
-        for m in matches.iter().cloned() {
+        for m in matches[above..].iter().cloned() {
             let (l0, _) = self.buffer.char_to_coords(m.start);
-            let (l1, _) = self.buffer.char_to_coords(m.end);
-            if l1 < first as usize || l0 >= last_line {
-                continue;
+            if l0 >= last_line {
+                break;
             }
+            let (l1, _) = self.buffer.char_to_coords(m.end);
             for line in l0..=l1 {
                 if line < first as usize || line >= last_line {
                     continue;
