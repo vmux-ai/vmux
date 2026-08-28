@@ -440,7 +440,7 @@ fn Paired(
         }
     });
 
-    let seen = navigation.view();
+    let seen = navigation.state();
     let at_root = seen.depth == 0;
     let wants_a_bar = at_root && !seen.current.as_ref().is_some_and(Shown::has_own_input);
     rsx! {
@@ -492,16 +492,16 @@ fn Paired(
 #[component]
 fn CurrentScreen(api: Signal<Option<Api>>) -> Element {
     rsx! {
-        Screen::<Shown> { name: Name::Chat, draws: &surface::AGENT }
-        Screen::<Shown> { name: Name::Launcher, draws: &surface::START }
-        Screen::<Shown> { name: Name::Team, draws: &surface::TEAM }
+        Screen::<Shown> { name: Name::Chat, component: &surface::AGENT }
+        Screen::<Shown> { name: Name::Launcher, component: &surface::START }
+        Screen::<Shown> { name: Name::Team, component: &surface::TEAM }
         RootScreen { api }
     }
 }
 
 #[component]
 fn RootScreen(api: Signal<Option<Api>>) -> Element {
-    let Some(root) = use_navigation::<Shown>().view().root else {
+    let Some(root) = use_navigation::<Shown>().state().root else {
         return rsx! {};
     };
     match root {
@@ -569,7 +569,7 @@ fn LinkStatus(reachable: bool, on_disconnect: EventHandler<()>) -> Element {
 
 #[component]
 fn TabBar() -> Element {
-    let seen = use_navigation::<Shown>().view();
+    let seen = use_navigation::<Shown>().state();
     let tabs = seen.tabs.clone();
     let current = seen.selected.clone();
     rsx! {
