@@ -119,11 +119,14 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
     "NSAlert",
+    "NSAnimation",
+    "NSAnimationContext",
     "NSAppearance",
     "NSApplication",
     "NSEvent",
     "NSMenu",
     "NSMenuItem",
+    "NSScreen",
     "NSView",
     "NSWindow",
     "NSResponder",
@@ -134,6 +137,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "NSNotification",
     "NSString",
+    "NSUserDefaults",
 ] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",

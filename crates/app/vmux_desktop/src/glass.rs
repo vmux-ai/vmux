@@ -45,6 +45,38 @@ struct GlassState {
     _parent_window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>,
 }
 
+impl GlassState {
+    fn track_parent_frame(&self) {
+        use objc2::ClassType;
+        use objc2_app_kit::{NSWindowDidMoveNotification, NSWindowDidResizeNotification};
+        use objc2_foundation::{NSNotification, NSNotificationCenter};
+        use std::ptr::NonNull;
+
+        let (Some(backdrop), Some(parent)) = (&self._backdrop_window, &self._parent_window) else {
+            return;
+        };
+        let follower = backdrop.clone();
+        let tracked = parent.clone();
+        let block = block2::RcBlock::new(move |_n: NonNull<NSNotification>| {
+            let follower: &objc2_app_kit::NSWindow = follower.as_super();
+            follower.setFrame_display(tracked.frame(), false);
+        });
+        let center = NSNotificationCenter::defaultCenter();
+        let names = unsafe { [NSWindowDidResizeNotification, NSWindowDidMoveNotification] };
+        for name in names {
+            let token = unsafe {
+                center.addObserverForName_object_queue_usingBlock(
+                    Some(name),
+                    Some(parent),
+                    None,
+                    &block,
+                )
+            };
+            std::mem::forget(token);
+        }
+    }
+}
+
 fn install_window_glass(
     mut state: NonSendMut<GlassState>,
     window: Query<Entity, With<bevy::window::PrimaryWindow>>,
@@ -130,6 +162,7 @@ fn install_window_glass(
     state._backdrop_window = Some(backdrop_window);
     state._parent_window = Some(parent_window);
     state.installed = true;
+    state.track_parent_frame();
     info!("glass: NSGlassEffectView installed in nonactivating child-window backdrop");
 }
 

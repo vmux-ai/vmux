@@ -9,6 +9,7 @@ use crate::event::{
     LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, REMOTE_STATE_EVENT,
     ReloadEvent, RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT,
     StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    WindowDragRegionEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -542,6 +543,7 @@ fn HeaderView(
                             }
                         }
                         NewTabButton {}
+                        WindowDragRegion {}
                     }
                 }
             }
@@ -1967,6 +1969,38 @@ fn NewTabButton() -> Element {
                 path { d: "M12 5v14" }
                 path { d: "M5 12h14" }
             }
+        }
+    }
+}
+
+#[component]
+fn WindowDragRegion() -> Element {
+    let mut region = use_signal(|| None::<Rc<MountedData>>);
+    let publish = move || {
+        spawn(async move {
+            let Some(region) = region() else {
+                return;
+            };
+            let Ok(rect) = region.get_client_rect().await else {
+                return;
+            };
+            let _ = send(&WindowDragRegionEvent {
+                left: rect.origin.x as f32,
+                top: rect.origin.y as f32,
+                width: rect.size.width as f32,
+                height: rect.size.height as f32,
+            });
+        });
+    };
+
+    rsx! {
+        div {
+            class: "h-10 min-w-0 flex-1 self-stretch",
+            onmounted: move |event: Event<MountedData>| {
+                region.set(Some(event.data()));
+                publish();
+            },
+            onresize: move |_: Event<ResizeData>| publish(),
         }
     }
 }

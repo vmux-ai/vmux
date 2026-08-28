@@ -165,6 +165,34 @@ impl SideSheetResizeEvent {
     }
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct WindowDragRegionEvent {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl WindowDragRegionEvent {
+    pub fn is_finite(self) -> bool {
+        self.left.is_finite()
+            && self.top.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+    }
+}
+
 #[cfg(test)]
 mod address_tests {
     use super::*;
