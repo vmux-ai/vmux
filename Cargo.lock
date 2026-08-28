@@ -9720,6 +9720,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vmux_chat",
+ "vmux_macro",
  "vmux_native",
  "vmux_remote",
  "vmux_service",
