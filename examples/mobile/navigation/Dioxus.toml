@@ -1,5 +1,5 @@
 [application]
-name = "Navigation Mobile"
+name = "Vmux Mobile Navigation Example"
 default_platform = "ios"
 tailwind_input = "../../../crates/app/vmux_mobile/assets/tailwind.css"
 tailwind_output = "../../../crates/app/vmux_mobile/assets/tailwind.out.css"

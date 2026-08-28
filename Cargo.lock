@@ -9721,6 +9721,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_mobile_navigation_example"
+version = "0.0.32"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "dioxus",
+ "vmux_mobile",
+ "vmux_native",
+]
+
+[[package]]
 name = "vmux_native"
 version = "0.0.32"
 dependencies = [
@@ -9742,17 +9753,6 @@ dependencies = [
  "vmux_macro",
  "vmux_ui",
  "wry",
-]
-
-[[package]]
-name = "vmux_navigation_mobile"
-version = "0.0.32"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "dioxus",
- "vmux_mobile",
- "vmux_native",
 ]
 
 [[package]]
