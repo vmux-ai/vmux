@@ -39,6 +39,7 @@ mod platform {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use block2::RcBlock;
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::Retained;
     use objc2::runtime::NSObject;
@@ -46,18 +47,19 @@ mod platform {
         ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
     };
     use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
-    use objc2_foundation::{NSObjectProtocol, NSString};
+    use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
     use objc2_ui_kit::{
-        UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
+        UIAction, UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
         UIBarButtonSystemItem, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState,
         UIEdgeInsets, UIFont, UIGestureRecognizer, UIGestureRecognizerDelegate,
         UIGestureRecognizerState, UIGlassContainerEffect, UIGlassEffect, UILayoutConstraintAxis,
-        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
-        UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
-        UISheetPresentationController, UISheetPresentationControllerDelegate,
-        UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
-        UIStackView, UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
-        UIViewController, UIViewKeyframeAnimationOptions, UIVisualEffectView,
+        UIMenu, UIMenuElement, UIMenuElementAttributes, UIModalPresentationStyle,
+        UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
+        UIPanGestureRecognizer, UIPresentationController, UISheetPresentationController,
+        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent,
+        UISheetPresentationControllerDetentResolutionContext, UIStackView, UIStackViewDistribution,
+        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController,
+        UIViewKeyframeAnimationOptions, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -77,6 +79,8 @@ mod platform {
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
+        static CLOSING: RefCell<Option<String>> = const { RefCell::new(None) };
+        static OVERVIEW: Cell<bool> = const { Cell::new(false) };
     }
 
     struct Held {
@@ -374,33 +378,32 @@ mod platform {
                 spent.removeFromSuperview();
             }
             self.ids.clear();
+            let closable = entries.len() > 1;
+            let mut showing = None;
             for entry in entries {
-                let button = UIButton::buttonWithType(UIButtonType::System, marker);
-                button.setTitle_forState(
-                    Some(&NSString::from_str(&entry.name)),
-                    UIControlState::Normal,
-                );
-                if let Some(label) = button.titleLabel() {
-                    unsafe { label.setFont(Some(&UIFont::systemFontOfSize(14.0))) };
+                if entry.here {
+                    self.at = self.ids.len();
+                    showing = Some((entry.name, entry.id.clone()));
                 }
-                let tone = if entry.here {
-                    UIColor::labelColor()
-                } else {
-                    UIColor::secondaryLabelColor()
-                };
-                button.setTitleColor_forState(Some(&tone), UIControlState::Normal);
-                button.setTag(self.ids.len() as isize);
+                self.ids.push(entry.id);
+            }
+            if let Some((name, id)) = showing {
+                let button = UIButton::buttonWithType(UIButtonType::System, marker);
+                button.setTitle_forState(Some(&NSString::from_str(&name)), UIControlState::Normal);
+                if let Some(label) = button.titleLabel() {
+                    unsafe { label.setFont(Some(&UIFont::systemFontOfSize(15.0))) };
+                }
+                button.setTitleColor_forState(Some(&UIColor::labelColor()), UIControlState::Normal);
                 unsafe {
                     button.addTarget_action_forControlEvents(
                         Some(delegate),
-                        sel!(tabTapped:),
+                        sel!(tabsTapped:),
                         UIControlEvents::TouchUpInside,
                     );
                 }
-                if entry.here {
-                    self.at = self.ids.len();
+                if closable {
+                    button.setMenu(Some(&Self::menu(&id, marker)));
                 }
-                self.ids.push(entry.id);
                 self.row.addArrangedSubview(&button);
             }
 
@@ -422,6 +425,25 @@ mod platform {
             self.capsule.setHidden(self.ids.is_empty());
             self.strip
                 .setHidden(self.ids.is_empty() && centre.is_none());
+        }
+
+        fn menu(id: &str, marker: MainThreadMarker) -> Retained<UIMenu> {
+            let id = id.to_string();
+            let shut = RcBlock::new(move |_: std::ptr::NonNull<UIAction>| {
+                CLOSING.with_borrow_mut(|slot| *slot = Some(id.clone()));
+            });
+            let action = unsafe {
+                UIAction::actionWithTitle_image_identifier_handler(
+                    &NSString::from_str(&vmux_ui::i18n::translate("layout-close-tab")),
+                    None,
+                    None,
+                    RcBlock::as_ptr(&shut),
+                    marker,
+                )
+            };
+            action.setAttributes(UIMenuElementAttributes::Destructive);
+            let children = NSArray::from_slice(&[action.as_super() as &UIMenuElement]);
+            UIMenu::menuWithTitle_children(&NSString::from_str(""), &children, marker)
         }
 
         fn adder(
@@ -1031,27 +1053,18 @@ mod platform {
                 TAPPED.with_borrow_mut(|queued| queued.push(action));
             }
 
-            #[unsafe(method(tabTapped:))]
-            fn tab_tapped(&self, sender: &UIButton) {
-                let at = sender.tag() as usize;
-                STACK.with_borrow(|stack| {
-                    let Some(stack) = stack.as_ref() else {
-                        return;
-                    };
-                    let Some(id) = stack.tabs.ids.get(at) else {
-                        return;
-                    };
-                    PICKED.with_borrow_mut(|slot| *slot = Some(id.clone()));
-                });
+            #[unsafe(method(tabsTapped:))]
+            fn tabs_tapped(&self, _sender: &UIButton) {
+                OVERVIEW.set(true);
             }
 
             #[unsafe(method(panned:))]
             fn panned(&self, sender: &UIPanGestureRecognizer) {
-                let shifted = sender.translationInView(None).x;
+                let shifted = -sender.translationInView(None).x;
                 match sender.state() {
                     UIGestureRecognizerState::Changed => Drag::follow(shifted),
                     UIGestureRecognizerState::Ended => {
-                        Drag::release(shifted, sender.velocityInView(None).x)
+                        Drag::release(shifted, -sender.velocityInView(None).x)
                     }
                     UIGestureRecognizerState::Cancelled | UIGestureRecognizerState::Failed => {
                         Drag::release(0.0, 0.0)
@@ -1210,6 +1223,14 @@ mod platform {
         PICKED.with_borrow_mut(Option::take)
     }
 
+    pub fn take_closing() -> Option<String> {
+        CLOSING.with_borrow_mut(Option::take)
+    }
+
+    pub fn take_overview() -> bool {
+        OVERVIEW.replace(false)
+    }
+
     fn size_to_parent(view: &UIView, parent: &UIView) {
         view.setFrame(parent.bounds());
         view.setAutoresizingMask(
@@ -1261,6 +1282,14 @@ mod platform {
         None
     }
 
+    pub fn take_closing() -> Option<String> {
+        None
+    }
+
+    pub fn take_overview() -> bool {
+        false
+    }
+
     pub fn take_closed() -> bool {
         false
     }
@@ -1287,5 +1316,6 @@ mod platform {
 #[cfg(target_os = "ios")]
 pub use platform::install;
 pub use platform::{
-    NativeStack, take_closed, take_dismissed, take_picked, take_popped, take_tapped,
+    NativeStack, take_closed, take_closing, take_dismissed, take_overview, take_picked,
+    take_popped, take_tapped,
 };

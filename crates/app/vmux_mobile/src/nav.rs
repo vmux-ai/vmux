@@ -62,6 +62,12 @@ pub struct Select(pub String);
 pub struct OpenBlank<S: Route>(pub S);
 
 #[derive(Message)]
+pub struct Close(pub String);
+
+#[derive(Message)]
+pub struct Overview;
+
+#[derive(Message)]
 pub struct Push<S: Route>(pub S);
 
 #[derive(Message)]
@@ -156,6 +162,8 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Report<S>>()
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
+            .add_message::<Close>()
+            .add_message::<Overview>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
             .add_message::<GoBack>()
@@ -168,6 +176,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::declare::<S>,
                     Nav::report::<S>,
                     Nav::select,
+                    Nav::close,
                     Nav::open_blank::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
@@ -278,6 +287,8 @@ impl Nav {
         mut tapped: MessageWriter<Tapped>,
         mut picked: MessageWriter<Select>,
         mut closed: MessageWriter<Dismiss>,
+        mut closing: MessageWriter<Close>,
+        mut overview: MessageWriter<Overview>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -291,6 +302,12 @@ impl Nav {
         }
         if crate::transition::take_closed() {
             closed.write(Dismiss);
+        }
+        if let Some(id) = crate::transition::take_closing() {
+            closing.write(Close(id));
+        }
+        if crate::transition::take_overview() {
+            overview.write(Overview);
         }
     }
 
@@ -449,6 +466,49 @@ impl Nav {
         };
         let id = id.clone();
         commands.queue(move |world: &mut World| Nav::mark(world, &id));
+    }
+
+    fn close(mut asked: MessageReader<Close>, mut commands: Commands) {
+        for Close(id) in asked.read() {
+            let id = id.clone();
+            commands.queue(move |world: &mut World| Nav::shut(world, &id));
+        }
+    }
+
+    fn shut(world: &mut World, id: &str) {
+        let mut query = world.query::<(Entity, &Tab, Option<&Local>, Option<&Selected>)>();
+        let mut held = Vec::new();
+        let mut found = None;
+        for (entity, tab, local, selected) in query.iter(world) {
+            held.push((local.is_some(), tab.id.clone()));
+            if tab.id == id {
+                found = Some((entity, selected.is_some()));
+            }
+        }
+        let Some((entity, selected)) = found else {
+            return;
+        };
+        if held.len() < 2 {
+            return;
+        }
+        held.sort();
+        let mut at = 0;
+        for (index, (_, held)) in held.iter().enumerate() {
+            if held == id {
+                at = index;
+                break;
+            }
+        }
+        world.entity_mut(entity).despawn();
+        if !selected {
+            return;
+        }
+        let next = match held.get(at + 1) {
+            Some(next) => next,
+            None => &held[at - 1],
+        };
+        let next = next.1.clone();
+        Nav::mark(world, &next);
     }
 
     fn levels<S: Route>(world: &mut World, id: &str) -> Vec<Level> {
