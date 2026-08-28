@@ -63,6 +63,7 @@ impl Shell {
             return;
         };
         let waker = PageWaker::of(proxy.as_deref());
+        Surfaces::wake_with(waker.clone());
         let built = WINIT_WINDOWS.with(|windows| {
             let windows = windows.borrow();
             let window = windows.get_window(entity)?;
@@ -114,7 +115,7 @@ impl Shell {
         }
         PageWorld::with(PageWorld::tick);
         Self::render();
-        Surfaces::render_all();
+        crate::transition::NativeStack::render();
     }
 
     fn render() {

@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::nav::{Dismiss, Dropped, GoBack, Nav, Present, Push, Route, Select, View};
+use crate::nav::{
+    Arrives, Declare, Declared, Dismiss, GoBack, Nav, Present, Push, Route, Select, View,
+};
 use crate::runtime::World;
-use crate::transition;
 
 pub struct Navigation<R: Route> {
     view: Signal<View<R>>,
@@ -31,12 +32,18 @@ impl<R: Route> Navigation<R> {
         self.view.read().clone()
     }
 
-    pub fn push(&self, route: R) {
-        World::with(|world| world.send(Push(route)));
-    }
-
-    pub fn present(&self, route: R) {
-        World::with(|world| world.send(Present(route)));
+    pub fn go(&self, route: R) {
+        let name = route.name();
+        World::with(|world| {
+            let arrives = world
+                .read(|world| world.get_resource::<Declared<R>>().and_then(|d| d.of(name)))
+                .map(|(_, arrives)| arrives)
+                .unwrap_or(Arrives::Pushed);
+            match arrives {
+                Arrives::Presented => world.send(Present(route)),
+                Arrives::Pushed => world.send(Push(route)),
+            }
+        });
     }
 
     pub fn go_back(&self) {
@@ -72,10 +79,6 @@ pub fn NavigationContainer<R: Route>(
     use_future(move || async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            let dropped = transition::take_popped() + transition::take_dismissed();
-            if dropped > 0 {
-                World::with(|world| world.send(Dropped(dropped)));
-            }
             let Some(seen) = World::with(|world| world.read(Nav::view::<R>)) else {
                 continue;
             };
@@ -98,15 +101,27 @@ pub fn TabNavigator(children: Element) -> Element {
 }
 
 #[component]
-pub fn Screen<R: Route>(name: R::Name, children: Element) -> Element {
-    let navigation = use_navigation::<R>();
-    let Some(route) = navigation.route() else {
-        return rsx! {};
-    };
-    if route.name() != name {
-        return rsx! {};
-    }
-    rsx! {
-        {children}
+pub fn Screen<R: Route>(name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
+    Arrives::Pushed.announce::<R>(name, draws)
+}
+
+#[component]
+pub fn Sheet<R: Route>(name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
+    Arrives::Presented.announce::<R>(name, draws)
+}
+
+impl Arrives {
+    fn announce<R: Route>(self, name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
+        let arrives = self;
+        use_effect(move || {
+            World::with(|world| {
+                world.send(Declare::<R> {
+                    name,
+                    draws,
+                    arrives,
+                })
+            });
+        });
+        rsx! {}
     }
 }

@@ -11,6 +11,12 @@ pub struct NativePage {
     pub owns_subtree: bool,
 }
 
+impl PartialEq for NativePage {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
 impl NativePage {
     pub fn answers_for(&self, url: &str) -> bool {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))

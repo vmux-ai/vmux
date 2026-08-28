@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use bevy_winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
@@ -157,86 +156,46 @@ pub(crate) fn embedding(waker: PageWaker) -> vmux_native::Embedding {
     }
 }
 
-pub(crate) const PAGES: &[NativePage] = &[
-    NativePage::pane("vmux://start/", vmux_start::page::StartPage),
-    NativePage::pane("vmux://team/", vmux_team::page::Page),
-    NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree(),
-];
+pub(crate) static START: NativePage =
+    NativePage::pane("vmux://start/", vmux_start::page::StartPage);
+pub(crate) static TEAM: NativePage = NativePage::pane("vmux://team/", vmux_team::page::Page);
+pub(crate) static AGENT: NativePage =
+    NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree();
 
 thread_local! {
-    static MOUNTED: RefCell<HashMap<String, WebView>> = RefCell::new(HashMap::new());
+    static WAKER: RefCell<Option<PageWaker>> = const { RefCell::new(None) };
 }
 
 pub(crate) struct Surfaces;
 
 impl Surfaces {
-    pub(crate) fn show(
-        entry: &str,
-        screen: &crate::screen::Shown,
-        bounds: Rect,
-        waker: &PageWaker,
-    ) {
-        let Some(page) = screen.page() else {
-            return;
-        };
-        MOUNTED.with_borrow_mut(|mounted| {
-            if let Some(surface) = mounted.get(entry) {
-                surface.set_bounds(bounds);
-                surface.set_visible(true);
-                return;
-            }
-            let built = WINIT_WINDOWS.with(|windows| {
-                let windows = windows.borrow();
-                let window = windows.windows.values().next()?;
-                Some(WebView::build(
-                    page,
-                    &**window,
-                    bounds,
-                    embedding(waker.clone()),
-                    Instance::of(|_| {}),
-                ))
-            });
-            match built {
-                Some(Ok(surface)) => {
-                    mounted.insert(entry.to_string(), surface);
-                }
-                Some(Err(error)) => {
-                    tracing::error!(%error, entry, "surface: a page would not mount");
-                }
-                None => tracing::warn!(entry, "surface: no window to mount into yet"),
-            }
+    pub(crate) fn wake_with(waker: PageWaker) {
+        WAKER.with_borrow_mut(|slot| *slot = Some(waker));
+    }
+
+    pub(crate) fn build(page: &'static NativePage) -> Option<WebView> {
+        let waker = WAKER.with_borrow(Clone::clone)?;
+        let built = WINIT_WINDOWS.with(|windows| {
+            let windows = windows.borrow();
+            let window = windows.windows.values().next()?;
+            Some(WebView::build(
+                page,
+                &**window,
+                Rect::default(),
+                embedding(waker),
+                Instance::of(|_| {}),
+            ))
         });
-    }
-
-    pub(crate) fn retain(keep: &[String]) {
-        MOUNTED.with_borrow_mut(|mounted| mounted.retain(|entry, _| keep.contains(entry)));
-    }
-
-    pub(crate) fn render_all() {
-        MOUNTED.with_borrow(|mounted| {
-            for surface in mounted.values() {
-                surface.render();
+        match built {
+            Some(Ok(surface)) => Some(surface),
+            Some(Err(error)) => {
+                tracing::error!(%error, url = page.url, "surface: a page would not mount");
+                None
             }
-        });
-    }
-
-    pub(crate) fn deliver(id: &str, payload: &[u8]) {
-        MOUNTED.with_borrow(|mounted| {
-            for surface in mounted.values() {
-                surface.deliver(id, payload);
+            None => {
+                tracing::warn!(url = page.url, "surface: no window to mount into yet");
+                None
             }
-        });
-    }
-}
-
-impl crate::screen::Shown {
-    pub(crate) fn page(&self) -> Option<&'static NativePage> {
-        let url = match self {
-            Self::Launcher | Self::Chat { sid: None, .. } => "vmux://start/",
-            Self::Team => "vmux://team/",
-            Self::Chat { sid: Some(_), .. } => "vmux://agent/",
-            Self::Mirror(_) => return None,
-        };
-        PAGES.iter().find(|page| page.answers_for(url))
+        }
     }
 }

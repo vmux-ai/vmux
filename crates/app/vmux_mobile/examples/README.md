@@ -7,7 +7,11 @@ nothing else.
 Navigation is ECS. A tab is an entity, a pushed level is its child, and a sheet is a
 child marked as one — so depth is a walk down the tree, and closing a tab takes its
 stack with it rather than leaving a map to tidy up. You write to it with messages,
-read it with a query, and declare which screen draws what in rsx.
+read it with a query, and declare which page draws what in rsx.
+
+A level is a webview. The shell draws the selected tab's root, and every pushed level
+and every sheet is a `NativePage` of its own that UIKit animates in — so a modal is a
+real modal with its own document, not the one webview redrawn behind a still.
 
 | Example | Shows |
 | --- | --- |
@@ -59,22 +63,23 @@ impl Route for Page {
 }
 ```
 
-Then declare what draws what, the way React Navigation does. Nothing about tabs,
-depth or sheets lives here — that is the ECS, and this is only the screen table:
+Then declare what draws what, the way React Navigation does. Nothing about tabs or
+depth lives here — that is the ECS, and this is only the screen table:
 
 ```rust
 rsx! {
     NavigationContainer::<Page> {
         TabNavigator {
-            Screen::<Page> { name: Name("inbox"), Inbox {} }
-            Screen::<Page> { name: Name("note"), Note {} }
+            Screen::<Page> { name: Name("note"), draws: &NOTE }
+            Sheet::<Page> { name: Name("alert"), draws: &ALERT }
         }
     }
 }
 ```
 
-`use_navigation()` hands out `push`, `present`, `go_back` and `navigate`, the way
-`useNavigation()` does.
+`Screen` pushes and `Sheet` presents, so the declaration is what decides how a route
+arrives — callers only ever say `navigation.go(route)`. Alongside it, `go_back` and
+`navigate` do what `useNavigation()` does.
 
 `Route::is` is the last piece, and it defaults to equality. Override it when two
 routes are the same thing arrived at twice — vmux compares session ids, so a
