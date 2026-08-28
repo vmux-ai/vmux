@@ -43,6 +43,9 @@ mod platform {
     impl Held {
         fn draw(level: &Level, root_view: &UIView, marker: MainThreadMarker) -> Option<Self> {
             let web = Surfaces::build(level.page)?;
+            if level.page.background.is_none() {
+                web.paint(crate::shell::webview_background());
+            }
             web.render();
             let view = web.ui_view();
             view.removeFromSuperview();

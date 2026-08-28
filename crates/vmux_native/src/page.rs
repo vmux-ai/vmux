@@ -8,6 +8,7 @@ pub struct NativePage {
     pub html_attributes: &'static str,
     pub body_class: &'static str,
     pub transparent: bool,
+    pub background: Option<(u8, u8, u8, u8)>,
     pub owns_subtree: bool,
 }
 
@@ -32,6 +33,11 @@ impl NativePage {
         self.document_url = Some(url);
         self
     }
+    pub const fn painted(mut self, colour: (u8, u8, u8, u8)) -> Self {
+        self.background = Some(colour);
+        self
+    }
+
     pub const fn owning_subtree(mut self) -> Self {
         self.owns_subtree = true;
         self
@@ -53,6 +59,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
+            background: None,
             owns_subtree: false,
             document_url: None,
         }

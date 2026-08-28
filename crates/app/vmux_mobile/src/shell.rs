@@ -29,6 +29,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
     body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
                  text-foreground antialiased",
     transparent: true,
+    background: None,
     owns_subtree: false,
 };
 
@@ -134,7 +135,7 @@ const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[cfg(target_os = "ios")]
-fn webview_background() -> (u8, u8, u8, u8) {
+pub(crate) fn webview_background() -> (u8, u8, u8, u8) {
     use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
 
     let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };

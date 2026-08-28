@@ -109,6 +109,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
     body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
     transparent: false,
+    background: None,
     owns_subtree: false,
 };
 
