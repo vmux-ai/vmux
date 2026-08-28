@@ -63,23 +63,36 @@ impl Route for Page {
 }
 ```
 
-Then declare what draws what, the way React Navigation does. Nothing about tabs or
-depth lives here — that is the ECS, and this is only the screen table:
+Then declare what draws what. Nothing about tabs or depth lives here — that is the ECS,
+and this is only the screen table:
 
 ```rust
 rsx! {
-    NavigationContainer::<Page> {
-        TabNavigator {
+    Stack::<Page> {
+        Tabs {
             Screen::<Page> { name: Name("note"), draws: &NOTE }
-            Sheet::<Page> { name: Name("alert"), draws: &ALERT }
+        }
+        Screen::<Page> {
+            name: Name("alert"),
+            draws: &ALERT,
+            presentation: Presentation::FormSheet,
+            detents: &[0.5, 1.0],
         }
     }
 }
 ```
 
-`Screen` pushes and `Sheet` presents, so the declaration is what decides how a route
-arrives — callers only ever say `navigation.go(route)`. Alongside it, `go_back` and
-`navigate` do what `useNavigation()` does.
+The names are Expo Router's, because that is where most people meet this shape:
+`Stack`, `Tabs`, `Screen`, `presentation`, `use_navigation()`, `use_route()`. How a
+route arrives is an option on its screen — `Card` pushes, `Modal` and `FormSheet` slide
+up, `FullScreenModal` covers — so callers only ever say `navigation.go(route)`.
+
+What is deliberately not borrowed is the file-based routing. `_layout.tsx` works because
+a bundler can glob a directory into a route tree; in Rust the nesting is the rsx, which
+the compiler can check.
+
+`use_route()` hands a screen the route it was opened for, which is not the same as the
+route on top — a pushed level keeps its own title while a sheet sits over it.
 
 `Route::is` is the last piece, and it defaults to equality. Override it when two
 routes are the same thing arrived at twice — vmux compares session ids, so a

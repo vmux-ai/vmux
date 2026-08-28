@@ -16,9 +16,7 @@ use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::Presentation;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Report, Route, Tapped};
-use vmux_mobile::navigator::{
-    NavigationContainer, Screen, TabNavigator, use_navigation, use_route,
-};
+use vmux_mobile::navigator::{Screen, Stack, Tabs, use_navigation, use_route};
 use vmux_native::NativePage;
 
 #[derive(Clone, PartialEq)]
@@ -161,8 +159,8 @@ fn act(
 #[component]
 fn Shell() -> Element {
     rsx! {
-        NavigationContainer::<Page> {
-            TabNavigator {
+        Stack::<Page> {
+            Tabs {
                 Screen::<Page> { name: Name::Tab, draws: &TAB }
                 Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
                 Screen::<Page> {
@@ -179,7 +177,7 @@ fn Shell() -> Element {
 #[component]
 fn TabScreen() -> Element {
     rsx! {
-        NavigationContainer::<Page> {
+        Stack::<Page> {
             TabStage {}
         }
     }
@@ -204,7 +202,7 @@ fn TabStage() -> Element {
 #[component]
 fn PushedScreen() -> Element {
     rsx! {
-        NavigationContainer::<Page> {
+        Stack::<Page> {
             Stage { near: "#7c3aed", far: "#db2777", kind: "pushed" }
         }
     }
@@ -213,7 +211,7 @@ fn PushedScreen() -> Element {
 #[component]
 fn PresentedScreen() -> Element {
     rsx! {
-        NavigationContainer::<Page> {
+        Stack::<Page> {
             Stage { near: "#b45309", far: "#be123c", kind: "presented" }
         }
     }
