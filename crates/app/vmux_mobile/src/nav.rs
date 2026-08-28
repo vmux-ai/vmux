@@ -318,22 +318,11 @@ impl Nav {
         }
 
         let mut entries = Vec::new();
-        let mut wanted = Vec::new();
+        let mut beside = Vec::new();
         for (at, (id, screen, _)) in listed.into_iter().enumerate() {
             let here = Some(&id) == selected.as_ref();
-            if at.abs_diff(at_selected) <= 1
-                && let Some(draws) = declared.of(screen.name())
-            {
-                wanted.push((
-                    id.clone(),
-                    Level {
-                        page: draws.page,
-                        title: screen.title(),
-                        action: draws.action,
-                        closable: false,
-                        seat: Seat::taken(&screen),
-                    },
-                ));
+            if !here && at.abs_diff(at_selected) <= 1 {
+                beside.push(id.clone());
             }
             entries.push(TabEntry {
                 id,
@@ -341,15 +330,18 @@ impl Nav {
                 here,
             });
         }
-        if ready {
-            NativeStack::warm(wanted);
-        }
 
         if ready && painted.seated != selected {
             painted.seated = selected.clone();
             if let Some(id) = selected.clone() {
                 commands.queue(move |world: &mut World| {
-                    NativeStack::settle(id.clone(), Nav::levels::<S>(world, &id));
+                    NativeStack::seat(id.clone(), Nav::levels::<S>(world, &id));
+                    let mut wanted = Vec::new();
+                    for near in beside {
+                        let levels = Nav::levels::<S>(world, &near);
+                        wanted.push((near, levels));
+                    }
+                    NativeStack::warm(wanted);
                 });
             }
         }
