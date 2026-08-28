@@ -662,8 +662,9 @@ mod platform {
                     let column = Column::over(drawn, &stack.delegate, marker);
                     let sheet = column.navigation.clone();
                     sheet.setModalPresentationStyle(match presentation {
-                        Presentation::FullScreenModal => UIModalPresentationStyle::FullScreen,
-                        Presentation::TransparentModal => UIModalPresentationStyle::OverFullScreen,
+                        Presentation::FullScreenModal | Presentation::TransparentModal => {
+                            UIModalPresentationStyle::OverFullScreen
+                        }
                         Presentation::FormSheet => UIModalPresentationStyle::FormSheet,
                         Presentation::Modal | Presentation::Card => {
                             UIModalPresentationStyle::PageSheet
