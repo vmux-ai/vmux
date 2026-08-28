@@ -59,17 +59,34 @@ body {
 button { font: inherit; color: inherit; border: 0; background: none; }
 #main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
-.stage {
-  position: relative; flex: 1; display: flex; flex-direction: column;
-  padding: calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 20px);
-  isolation: isolate; overflow: hidden;
-}
-.stage::before, .stage::after { content: ""; position: absolute; inset: -30% -30% auto -30%; height: 90%; z-index: -1; }
-.stage::before { background: radial-gradient(60% 60% at 30% 20%, var(--near), transparent 70%); filter: blur(40px); }
-.stage::after  { background: radial-gradient(50% 50% at 80% 0%, var(--far), transparent 70%); filter: blur(60px); }
+.screen { position: relative; flex: 1; display: flex; flex-direction: column;
+  isolation: isolate; overflow: hidden; }
+.screen::before, .screen::after { content: ""; position: absolute; inset: -30% -30% auto -30%; height: 90%; z-index: -1; }
+.screen::before { background: radial-gradient(60% 60% at 30% 20%, var(--near), transparent 70%); filter: blur(40px); }
+.screen::after  { background: radial-gradient(50% 50% at 80% 0%, var(--far), transparent 70%); filter: blur(60px); }
 .vignette { position: absolute; inset: 0; z-index: -1;
   background: radial-gradient(120% 90% at 50% 0%, transparent 40%, rgba(0,0,0,.75) 100%); }
 
+.bar {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  padding: calc(env(safe-area-inset-top) + 8px) 12px 10px;
+  background: rgba(8,10,16,.5); backdrop-filter: blur(28px) saturate(160%);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.bar .name { position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 16px; font-weight: 600; letter-spacing: -.01em; pointer-events: none; }
+.lead { display: flex; align-items: center; min-width: 0; }
+.trail { display: flex; gap: 6px; }
+.back { display: flex; align-items: center; gap: 3px; padding: 4px 8px 4px 2px;
+  border-radius: 10px; color: #6ea8ff; font-size: 16px; }
+.back::before { content: "‹"; font-size: 30px; line-height: 22px; font-weight: 300; }
+.back:active { background: rgba(255,255,255,.10); }
+.act { padding: 6px 12px; border-radius: 11px; font-size: 14px; font-weight: 500;
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.14);
+  transition: transform .12s ease, background .18s ease; }
+.act:active { transform: scale(.94); background: rgba(255,255,255,.2); }
+
+.stage { flex: 1; display: flex; flex-direction: column; padding: 28px 24px; overflow: hidden; }
 .eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.45); }
 .title { font: 600 40px/1.05 -apple-system, SF Pro Display, sans-serif; letter-spacing: -.02em; margin-top: 10px; }
 .meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
@@ -79,22 +96,18 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 .rung.on { background: rgba(255,255,255,.85); }
 .rung.sheet { background: #ffcf6b; }
 
-.actions { display: flex; gap: 10px; margin-top: 30px; flex-wrap: wrap; }
-.key {
-  padding: 13px 20px; border-radius: 14px; font-weight: 500;
-  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.14);
-  backdrop-filter: blur(18px); transition: transform .12s ease, background .18s ease;
+.tabbar {
+  margin-top: auto; display: flex; padding: 8px 10px calc(env(safe-area-inset-bottom) + 6px);
+  background: rgba(8,10,16,.5); backdrop-filter: blur(28px) saturate(160%);
+  border-top: 1px solid rgba(255,255,255,.07);
 }
-.key:active { transform: scale(.95); background: rgba(255,255,255,.2); }
-
-.tabs {
-  margin-top: auto; display: flex; gap: 6px; padding: 6px; border-radius: 20px;
-  background: rgba(12,14,22,.6); border: 1px solid rgba(255,255,255,.10);
-  backdrop-filter: blur(28px) saturate(160%);
-}
-.tab { flex: 1; padding: 11px 14px; border-radius: 15px; font-size: 14px;
-  color: rgba(255,255,255,.55); transition: background .2s ease, color .2s ease; }
-.tab.here { background: rgba(255,255,255,.14); color: #fff; font-weight: 600; }
+.tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 6px 4px; border-radius: 12px; font-size: 11px; font-weight: 500;
+  color: rgba(255,255,255,.45); transition: color .2s ease; }
+.tab .glyph { width: 20px; height: 20px; border-radius: 7px;
+  border: 2px solid currentColor; opacity: .85; }
+.tab.here { color: #fff; }
+.tab.here .glyph { background: currentColor; }
 </style>"#;
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
@@ -164,7 +177,7 @@ fn Root() -> Element {
 fn NoteScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", tabs: false }
+            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", tabs: true }
         }
     }
 }
@@ -190,46 +203,72 @@ fn Stage(near: String, far: String, kind: String, tabs: bool) -> Element {
     let sheet = seen.sheet;
 
     rsx! {
-        div { class: "stage", style: "--near:{near};--far:{far}",
+        div { class: "screen", style: "--near:{near};--far:{far}",
             div { class: "vignette" }
-            div { class: "eyebrow", "{kind}" }
-            div { class: "title", "{title}" }
-            div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
 
-            div { class: "rungs",
-                for step in 0..6usize {
-                    div {
-                        key: "{step}",
-                        class: if step >= depth { "rung" } else if sheet && step == depth - 1 { "rung on sheet" } else { "rung on" },
+            NavigationBar { title: title.clone(), back: depth > 0, depth }
+
+            div { class: "stage",
+                div { class: "eyebrow", "{kind}" }
+                div { class: "title", "{title}" }
+                div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
+                div { class: "rungs",
+                    for step in 0..6usize {
+                        div {
+                            key: "{step}",
+                            class: if step >= depth { "rung" } else if sheet && step == depth - 1 { "rung on sheet" } else { "rung on" },
+                        }
                     }
                 }
-            }
-
-            div { class: "actions",
-                Tap {
-                    label: "Push",
-                    onpick: move |_| navigation.go(Page::Note(format!("Level {}", depth + 1))),
-                }
-                Tap {
-                    label: "Sheet",
-                    onpick: move |_| navigation.go(Page::Alert(format!("Sheet {}", depth + 1))),
-                }
-                Tap { label: "Back", onpick: move |_| navigation.go_back() }
             }
 
             if tabs {
-                div { class: "tabs",
-                    for tab in seen.tabs.iter() {
-                        Tab {
-                            key: "{tab.id}",
-                            label: tab.name.clone(),
-                            here: Some(&tab.id) == seen.selected.as_ref(),
-                            onpick: {
-                                let id = tab.id.clone();
-                                move |_| navigation.navigate(&id)
-                            },
-                        }
-                    }
+                TabBar {}
+            }
+        }
+    }
+}
+
+#[component]
+fn NavigationBar(title: String, back: bool, depth: usize) -> Element {
+    let navigation = use_navigation::<Page>();
+    rsx! {
+        header { class: "bar",
+            div { class: "lead",
+                if back {
+                    button { class: "back", onclick: move |_| navigation.go_back(), "Back" }
+                }
+            }
+            div { class: "name", "{title}" }
+            div { class: "trail",
+                Action {
+                    label: "Push",
+                    onpick: move |_| navigation.go(Page::Note(format!("Level {}", depth + 1))),
+                }
+                Action {
+                    label: "Sheet",
+                    onpick: move |_| navigation.go(Page::Alert(format!("Sheet {}", depth + 1))),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TabBar() -> Element {
+    let navigation = use_navigation::<Page>();
+    let seen = navigation.view();
+    rsx! {
+        nav { class: "tabbar",
+            for tab in seen.tabs.iter() {
+                Tab {
+                    key: "{tab.id}",
+                    label: tab.name.clone(),
+                    here: Some(&tab.id) == seen.selected.as_ref(),
+                    onpick: {
+                        let id = tab.id.clone();
+                        move |_| navigation.navigate(&id)
+                    },
                 }
             }
         }
@@ -242,14 +281,15 @@ fn Tab(label: String, here: bool, onpick: EventHandler<()>) -> Element {
         button {
             class: if here { "tab here" } else { "tab" },
             onclick: move |_| onpick.call(()),
+            div { class: "glyph" }
             "{label}"
         }
     }
 }
 
 #[component]
-fn Tap(label: String, onpick: EventHandler<()>) -> Element {
+fn Action(label: String, onpick: EventHandler<()>) -> Element {
     rsx! {
-        button { class: "key", onclick: move |_| onpick.call(()), "{label}" }
+        button { class: "act", onclick: move |_| onpick.call(()), "{label}" }
     }
 }
