@@ -512,14 +512,6 @@ React-style, in one atomic transaction.
 | iOS | remote client | linked in CI, packaged and shipped via `dx` |
 | Android | remote client | configured, no platform code yet |
 
-A remote client is strictly a client — the server half of `vmux_service` is compiled out.
-
-Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
-iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the
-desktop app and the daemon. Write `#[cfg(host)]` rather than a negation of target
-predicates. Cargo's own `[target.'cfg(...)'.dependencies]` still has to spell the targets
-out, because dependency resolution happens before any build script runs.
-
 ---
 
 ## Where a crate lives
@@ -561,12 +553,3 @@ crates/
 ├── vmux_ui
 └── vmux_wire
 ```
-
-Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
-which sits above `page/` and below `app/` — a `page/` crate must never depend on it, and
-nothing but `app/vmux_desktop` may.
-
-Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
-`host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
-And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
-staying flat.
