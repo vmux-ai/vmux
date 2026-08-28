@@ -57,9 +57,9 @@ ios: mobile-ios-run
 
 layout-mobile: ensure-mobile-ios-deps ensure-booted-simulator
 	@set -e; \
-	"$(DX_BIN)" build --ios -p vmux_layout_demo; \
+	"$(DX_BIN)" build --ios -p vmux_layout_mobile; \
 	. ./scripts/cargo-target-paths.sh; \
-	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_layout_demo/debug/ios/VmuxLayoutDemo.app"; \
+	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_layout_mobile/debug/ios/VmuxLayoutMobile.app"; \
 	xcrun simctl install booted "$$bundle"; \
 	xcrun simctl launch booted ai.vmux.layout.mobile
 
