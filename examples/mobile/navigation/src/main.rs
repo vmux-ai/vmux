@@ -10,6 +10,11 @@ use vmux_mobile::navigator::{Screen, Stack, Tabs, use_navigation, use_route};
 use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (5, 6, 10, 255);
+const SEEDED: usize = 2;
+const RUNGS: usize = 8;
+const HEAD: usize = 3;
+const CRUMBS: usize = 4;
+const PLUS: &str = "+";
 
 #[derive(Clone, PartialEq, Route)]
 enum Page {
@@ -30,34 +35,35 @@ fn main() {
         .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
-                .insert_resource(Centre("+"))
+                .insert_resource(Centre(PLUS))
                 .add_systems(Startup, setup)
-                .add_systems(Update, act);
+                .add_systems(Update, open_new_tab);
         }))
         .run();
 }
 
 fn setup(mut reported: MessageWriter<Report<Page>>) {
+    let mut tabs = Vec::new();
+    for at in 1..=SEEDED {
+        tabs.push((format!("tab:{at}"), Page::Tab(at)));
+    }
     reported.write(Report {
-        tabs: vec![
-            ("tab:1".to_string(), Page::Tab(1)),
-            ("tab:2".to_string(), Page::Tab(2)),
-        ],
+        tabs,
         focused: Some("tab:1".to_string()),
     });
 }
 
-fn act(
+fn open_new_tab(
     mut tapped: MessageReader<Tapped>,
     mut opened: Local<usize>,
-    mut blanks: MessageWriter<OpenBlank<Page>>,
+    mut opening: MessageWriter<OpenBlank<Page>>,
 ) {
     for Tapped(action) in tapped.read() {
-        if *action != "+" {
+        if *action != PLUS {
             continue;
         }
         *opened += 1;
-        blanks.write(OpenBlank(Page::Tab(*opened + 2)));
+        opening.write(OpenBlank(Page::Tab(SEEDED + *opened)));
     }
 }
 
@@ -68,21 +74,21 @@ fn App() -> Element {
         Stack::<Page> {
             Tabs {
                 Screen::<Page> { name: PageName::Tab, component: &TAB_SCREEN }
-                Screen::<Page> { name: PageName::Card, component: &CARD_SCREEN }
+                Screen::<Page> { name: PageName::Card, component: &TAB_SCREEN }
                 Screen::<Page> {
                     name: PageName::Modal,
-                    component: &MODAL_SCREEN,
+                    component: &TAB_SCREEN,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
                     name: PageName::FormSheet,
-                    component: &FORM_SHEET_SCREEN,
+                    component: &TAB_SCREEN,
                     presentation: Presentation::FormSheet,
-                    detents: &[0.4, 1.0],
+                    detents: &[0.75, 1.0],
                 }
                 Screen::<Page> {
                     name: PageName::FullScreenModal,
-                    component: &FULL_SCREEN_MODAL_SCREEN,
+                    component: &TAB_SCREEN,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -93,49 +99,89 @@ fn App() -> Element {
 #[screen]
 #[component]
 fn TabScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            TabBody {}
-        }
-    }
-}
-
-#[component]
-fn TabBody() -> Element {
-    let at = match use_route::<Page>() {
-        Some(Page::Tab(at)) => at,
-        _ => 1,
-    };
-    let hue = (at * 37 + 185) % 360;
-    rsx! {
-        Body {
-            near: "hsl({hue} 78% 42%)",
-            far: "hsl({(hue + 40) % 360} 74% 38%)",
-            kind: "tab root",
-        }
-    }
-}
-
-#[component]
-fn Body(near: String, far: String, kind: String) -> Element {
     let navigation = use_navigation::<Page>();
     let seen = navigation.state();
-    let title = match use_route::<Page>() {
+    let here = use_route::<Page>();
+    let (hue, kind) = match &here {
+        Some(Page::Tab(at)) => ((at * 37 + 185) % 360, "tab root"),
+        Some(Page::Card(_)) => (285, "card"),
+        Some(Page::Modal(_)) => (30, "modal"),
+        Some(Page::FormSheet(_)) => (175, "form sheet"),
+        Some(Page::FullScreenModal(_)) => (255, "full screen modal"),
+        None => (185, "nowhere"),
+    };
+    let title = match &here {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
     };
     let depth = seen.depth;
-    let sheet = seen.sheet;
+    let mut at = depth;
+    let (mut cards, mut modals, mut sheets, mut full_screens) = (0, 0, 0, 0);
+    for (index, route) in seen.trail.iter().enumerate() {
+        if Some(route) == here.as_ref() {
+            at = index;
+        }
+        match route {
+            Page::Card(_) => cards += 1,
+            Page::Modal(_) => modals += 1,
+            Page::FormSheet(_) => sheets += 1,
+            Page::FullScreenModal(_) => full_screens += 1,
+            Page::Tab(_) => {}
+        }
+    }
     let mut trail = Vec::new();
     for route in &seen.trail {
         trail.push(route.title());
     }
-    let trail = trail.join(" › ");
+    if trail.len() > CRUMBS {
+        let tail = trail.split_off(trail.len() - (CRUMBS - 1));
+        let hidden = trail.len() - 1;
+        trail.truncate(1);
+        trail.push(format!("+{hidden}"));
+        for crumb in tail {
+            trail.push(crumb);
+        }
+    }
+    let trail = trail.join(" \u{203a} ");
+
+    let levels = depth + 1;
+    let mut slots = Vec::new();
+    if levels <= RUNGS {
+        for level in 0..levels {
+            slots.push(Some(level));
+        }
+    } else {
+        for level in 0..HEAD {
+            slots.push(Some(level));
+        }
+        slots.push(None);
+        for level in (levels - (RUNGS - HEAD - 1))..levels {
+            slots.push(Some(level));
+        }
+    }
+    let mut rungs = Vec::new();
+    for slot in 0..RUNGS {
+        let Some(level) = slots.get(slot) else {
+            rungs.push("mx-0 w-0 flex-none bg-white/20 opacity-0");
+            continue;
+        };
+        let Some(level) = level else {
+            rungs.push("mx-[1.5px] w-[6px] flex-none bg-white/25");
+            continue;
+        };
+        if depth == 0 {
+            rungs.push("mx-[1.5px] flex-1 bg-white/20");
+        } else if *level == at {
+            rungs.push("mx-[1.5px] flex-1 bg-[#ffcf6b]");
+        } else {
+            rungs.push("mx-[1.5px] flex-1 bg-white/85");
+        }
+    }
 
     rsx! {
-        div {
-            class: "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05060a] text-white",
-            style: "--near:{near};--far:{far}",
+    div {
+        class: "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05060a] text-white",
+            style: "--near:hsl({hue} 78% 42%);--far:hsl({(hue + 40) % 360} 74% 38%)",
 
             div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[40px] bg-[radial-gradient(60%_60%_at_30%_20%,var(--near),transparent_70%)]" }
             div { class: "pointer-events-none absolute inset-x-[-30%] top-[-30%] -z-10 h-[90%] blur-[60px] bg-[radial-gradient(50%_50%_at_80%_0%,var(--far),transparent_70%)]" }
@@ -146,15 +192,11 @@ fn Body(near: String, far: String, kind: String) -> Element {
                 div { class: "mt-2.5 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em]",
                     "{title}"
                 }
-                div { class: "mt-4 flex h-[3px] gap-[3px]",
-                    for step in 0..depth {
+                div { class: "-mx-[1.5px] mt-4 flex h-[3px]",
+                    for (step , tone) in rungs.iter().enumerate() {
                         div {
                             key: "{step}",
-                            class: if sheet && step == depth - 1 {
-                                "min-w-px flex-1 rounded-sm bg-[#ffcf6b]"
-                            } else {
-                                "min-w-px flex-1 rounded-sm bg-white/85"
-                            },
+                            class: "rounded-sm transition-all duration-300 ease-out {tone}",
                         }
                     }
                 }
@@ -163,67 +205,29 @@ fn Body(near: String, far: String, kind: String) -> Element {
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Key {
                         label: "Card",
-                        onpick: move |_| navigation.go(Page::Card(format!("Card {}", depth + 1))),
+                        onpick: move |_| navigation.go(Page::Card(format!("Card {}", cards + 1))),
                     }
                     Key {
                         label: "Modal",
-                        onpick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
+                        onpick: move |_| navigation.go(Page::Modal(format!("Modal {}", modals + 1))),
                     }
                     Key {
                         label: "Form Sheet",
                         onpick: move |_| {
-                            navigation.go(Page::FormSheet(format!("Sheet {}", depth + 1)))
+                            navigation.go(Page::FormSheet(format!("Sheet {}", sheets + 1)))
                         },
                     }
                     Key {
                         label: "Full Screen Modal",
                         onpick: move |_| {
-                            navigation.go(Page::FullScreenModal(format!("Full {}", depth + 1)))
+                            navigation.go(Page::FullScreenModal(format!(
+                                "Full {}",
+                                full_screens + 1
+                            )))
                         },
                     }
                 }
-
             }
-        }
-    }
-}
-
-#[screen]
-#[component]
-fn CardScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Body { near: "#7c3aed", far: "#db2777", kind: "card" }
-        }
-    }
-}
-
-#[screen]
-#[component]
-fn ModalScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Body { near: "#b45309", far: "#be123c", kind: "modal" }
-        }
-    }
-}
-
-#[screen]
-#[component]
-fn FormSheetScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Body { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
-        }
-    }
-}
-
-#[screen]
-#[component]
-fn FullScreenModalScreen() -> Element {
-    rsx! {
-        Stack::<Page> {
-            Body { near: "#4338ca", far: "#7e22ce", kind: "full screen modal" }
         }
     }
 }
