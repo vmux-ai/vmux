@@ -20,7 +20,7 @@ use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 use vmux_core::media::MediaKind;
 use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
-use vmux_git::ui::{DiffView, GitBar, GitFooter};
+use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::icon::Icon;
@@ -97,6 +97,17 @@ pub fn Page() -> Element {
     let git_behind = use_signal(|| 0u32);
     let git_staged = use_signal(|| 0u32);
     let git_message = use_signal(String::new);
+    GitStatusFeed {
+        path: git_path.into(),
+        nonce: git_nonce,
+        has_diff: git_has_diff,
+        branch: git_branch,
+        ahead: git_ahead,
+        behind: git_behind,
+        staged_count: git_staged,
+        message: git_message,
+    }
+    .subscribe();
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -1008,16 +1019,6 @@ pub fn Page() -> Element {
                             {translate("editor-keymap-vim")}
                         }
                     }
-                }
-                GitBar {
-                    path: git_path,
-                    has_diff: git_has_diff,
-                    nonce: git_nonce,
-                    branch: git_branch,
-                    ahead: git_ahead,
-                    behind: git_behind,
-                    staged_count: git_staged,
-                    message: git_message,
                 }
                 {
                     tidy_prompt().map(|count| {

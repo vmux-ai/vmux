@@ -23,27 +23,6 @@ fn status_has_diff(s: FileStatus) -> bool {
     )
 }
 
-fn status_label(s: FileStatus) -> String {
-    match s {
-        FileStatus::Clean => translate("git-status-clean"),
-        FileStatus::Modified => translate("git-status-modified"),
-        FileStatus::Staged => translate("git-status-staged"),
-        FileStatus::StagedModified => translate("git-status-staged-modified"),
-        FileStatus::Untracked => translate("git-status-untracked"),
-        FileStatus::Deleted => translate("git-status-deleted"),
-        FileStatus::Conflicted => translate("git-status-conflict"),
-    }
-}
-
-fn status_dot_class(s: FileStatus) -> &'static str {
-    match s {
-        FileStatus::Clean => "text-muted-foreground",
-        FileStatus::Staged | FileStatus::StagedModified => "text-ansi-2",
-        FileStatus::Conflicted => "text-ansi-1",
-        _ => "text-ansi-3",
-    }
-}
-
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");
@@ -87,110 +66,54 @@ fn sign_style(kind: DiffKind) -> &'static str {
     }
 }
 
-#[component]
-pub fn GitBar(
-    path: ReadSignal<String>,
-    has_diff: Signal<bool>,
-    nonce: Signal<u32>,
-    branch: Signal<String>,
-    ahead: Signal<u32>,
-    behind: Signal<u32>,
-    staged_count: Signal<u32>,
-    message: Signal<String>,
-) -> Element {
-    let mut file_status = use_signal(|| FileStatus::Clean);
-    let mut confirming = use_signal(|| false);
+#[derive(Clone, Copy)]
+pub struct GitStatusFeed {
+    pub path: ReadSignal<String>,
+    pub nonce: Signal<u32>,
+    pub has_diff: Signal<bool>,
+    pub branch: Signal<String>,
+    pub ahead: Signal<u32>,
+    pub behind: Signal<u32>,
+    pub staged_count: Signal<u32>,
+    pub message: Signal<String>,
+}
 
-    let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
-        message.set(String::new());
-        branch.set(s.branch);
-        ahead.set(s.ahead);
-        behind.set(s.behind);
-        staged_count.set(s.staged_count);
-        has_diff.set(status_has_diff(s.file_status));
-        file_status.set(s.file_status);
-    });
-    let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
-        message.set(if r.ok { String::new() } else { r.message });
-        nonce.set(nonce() + 1);
-    });
-    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
-        message.set(e.message);
-    });
+impl GitStatusFeed {
+    pub fn subscribe(self) {
+        let Self {
+            path,
+            mut nonce,
+            mut has_diff,
+            mut branch,
+            mut ahead,
+            mut behind,
+            mut staged_count,
+            mut message,
+        } = self;
 
-    use_effect(move || {
-        let p = path();
-        let _ = nonce();
-        if !p.is_empty() {
-            let _ = send(&GitStatusRequest { path: p });
-        }
-    });
+        let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+            message.set(String::new());
+            branch.set(s.branch);
+            ahead.set(s.ahead);
+            behind.set(s.behind);
+            staged_count.set(s.staged_count);
+            has_diff.set(status_has_diff(s.file_status));
+        });
+        let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
+            message.set(if r.ok { String::new() } else { r.message });
+            nonce.set(nonce() + 1);
+        });
+        let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
+            message.set(e.message);
+        });
 
-    let fs = file_status();
-    if !status_has_diff(fs) {
-        return rsx! {};
-    }
-    let can_stage = matches!(
-        fs,
-        FileStatus::Modified
-            | FileStatus::Untracked
-            | FileStatus::StagedModified
-            | FileStatus::Deleted
-    );
-    let can_unstage = matches!(fs, FileStatus::Staged | FileStatus::StagedModified);
-    let can_discard = matches!(
-        fs,
-        FileStatus::Modified | FileStatus::StagedModified | FileStatus::Deleted
-    );
-
-    rsx! {
-        div {
-            class: "flex shrink-0 items-center gap-1.5 font-sans text-[11px] text-muted-foreground",
-
-            span { class: "shrink-0 {status_dot_class(fs)}", "\u{25cf} {status_label(fs)}" }
-
-            if can_stage {
-                button {
-                    class: "shrink-0 rounded px-2 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
-                    onclick: move |_| {
-                        let _ = send(&GitStageRequest { path: path() });
-                    },
-                    {translate("git-stage-file")}
-                }
+        use_effect(move || {
+            let p = path();
+            let _ = nonce();
+            if !p.is_empty() {
+                let _ = send(&GitStatusRequest { path: p });
             }
-            if can_unstage {
-                button {
-                    class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
-                    onclick: move |_| {
-                        let _ = send(&GitUnstageRequest { path: path() });
-                    },
-                    {translate("git-unstage")}
-                }
-            }
-            if can_discard {
-                if confirming() {
-                    button {
-                        class: "shrink-0 rounded bg-ansi-1/20 px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/30",
-                        onclick: move |_| {
-                            let _ = send(&GitDiscardRequest { path: path() });
-                            confirming.set(false);
-                        },
-                        {translate("git-confirm-discard")}
-                    }
-                    button {
-                        class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
-                        onclick: move |_| confirming.set(false),
-                        {translate("common-cancel")}
-                    }
-                } else {
-                    button {
-                        class: "shrink-0 rounded px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
-                        onclick: move |_| confirming.set(true),
-                        {translate("git-discard-file")}
-                    }
-                }
-            }
-        }
+        });
     }
 }
 
