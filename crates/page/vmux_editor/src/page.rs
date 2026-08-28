@@ -1429,6 +1429,10 @@ pub fn Page() -> Element {
                                             return;
                                         }
                                         let vis_first = (event.scroll_top() / ch).floor().max(0.0) as u32;
+                                        if last_scroll_req() == vis_first {
+                                            return;
+                                        }
+                                        last_scroll_req.set(vis_first);
                                         let vis_rows = (event.client_height() as f64 / ch).ceil() as u32 + 1;
                                         let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
@@ -1436,12 +1440,17 @@ pub fn Page() -> Element {
                                             .read()
                                             .last()
                                             .map_or(0, |line| line.row + line.rows as u32 - rfirst);
-                                        if vmux_core::scroll::needs_refetch(vis_first, vis_rows, rfirst, loaded_len, trigger)
-                                            && last_scroll_req() != vis_first
-                                        {
-                                            last_scroll_req.set(vis_first);
-                                            let _ = send(&FileScrollEvent { top_row: vis_first });
-                                        }
+                                        let needs_rows = vmux_core::scroll::needs_refetch(
+                                            vis_first,
+                                            vis_rows,
+                                            rfirst,
+                                            loaded_len,
+                                            trigger,
+                                        );
+                                        let _ = send(&FileScrollEvent {
+                                            top_row: vis_first,
+                                            needs_rows,
+                                        });
                                     },
                                     StickyScope {
                                         lines: sticky_lines(),
@@ -2067,11 +2076,15 @@ impl LineChunk {
     fn split(lines: &[FileLine], layouts: &[FileLineLayout], first_row: u32) -> Vec<Self> {
         let mut chunks: Vec<Self> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            let layout = layouts.get(i).copied().unwrap_or(FileLineLayout {
-                line_no: line.line_no,
-                row: first_row + i as u32,
-                rows: 1,
-            });
+            let found = layouts.binary_search_by_key(&line.line_no, |layout| layout.line_no);
+            let layout = match found {
+                Ok(at) => layouts[at],
+                Err(_) => FileLineLayout {
+                    line_no: line.line_no,
+                    row: first_row + i as u32,
+                    rows: 1,
+                },
+            };
             let start = line.line_no - (line.line_no % Self::LINES);
             if chunks.last().is_none_or(|chunk| chunk.start != start) {
                 chunks.push(Self {

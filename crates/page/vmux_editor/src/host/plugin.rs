@@ -240,6 +240,32 @@ pub struct FileViewport {
     pub word_wrap_column: u16,
 }
 
+impl FileViewport {
+    fn scroll_to(
+        &mut self,
+        top: u32,
+        entity: Entity,
+        browsers: &Browsers,
+        commands: &mut Commands,
+    ) {
+        let was = self.top_row;
+        if top == was {
+            return;
+        }
+        self.top_row = top;
+        if !browsers.can_emit_to(&entity) {
+            return;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_SCROLL_BY_EVENT,
+            &FileScrollByEvent {
+                lines: top as i32 - was as i32,
+            },
+        ));
+    }
+}
+
 #[derive(Component, Clone, Debug)]
 pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
@@ -1249,46 +1275,28 @@ fn emit_window(
     let end_row = (vis_end + overscan).min(visible);
     let visible_top = wrap.line_at(vis_first);
     let layouts = wrap.window(first_row, end_row);
-    let asked_rows = end_row.saturating_sub(first_row);
     let first_row = layouts.first().map_or(first_row, |line| line.row);
     let mut lines = Vec::with_capacity(layouts.len());
     if let (Some(first_line), Some(last_line)) = (
         layouts.first().map(|layout| layout.line_no),
         layouts.last().map(|layout| layout.line_no),
     ) {
-        let mut window: Vec<Option<vmux_core::event::FileLine>> = edit
-            .hl
-            .line_window(
-                &edit.core.buffer.rope,
-                first_line as usize,
-                last_line as usize + 1,
-            )
-            .into_iter()
-            .map(Some)
-            .collect();
+        let mut window = edit.hl.line_window(
+            &edit.core.buffer.rope,
+            first_line as usize,
+            last_line as usize + 1,
+        );
         let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
         for layout in &layouts {
             let index = (layout.line_no - first_line) as usize;
-            let Some(mut line) = window.get_mut(index).and_then(Option::take) else {
+            let Some(line) = window.get_mut(index) else {
                 continue;
             };
+            let mut line = std::mem::take(line);
             line.fold = edit.folds.gutter(layout.line_no);
             line.indent_levels = guides.levels(layout.line_no as usize);
             lines.push(line);
         }
-    }
-    if asked_rows > 8 && (lines.len() as u32) * 2 < asked_rows {
-        bevy::log::warn!(
-            "editor band short: emitted={} asked={} layouts={} first_row={} top_row={} rows={} visible={} total={}",
-            lines.len(),
-            asked_rows,
-            layouts.len(),
-            first_row,
-            vp.top_row,
-            vp.rows,
-            visible,
-            total
-        );
     }
     let mut sticky = Vec::new();
     if let Some(top) = visible_top {
@@ -1698,6 +1706,10 @@ fn on_file_scroll(
     };
     let visible = wrapped_view(&mut edit, &vp).total_rows();
     vp.top_row = clamp_top_line(evt.top_row, visible, vp.rows);
+    edit.core.top_row = vp.top_row;
+    if !evt.needs_rows {
+        return;
+    }
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
     emit_cursor(
@@ -2433,21 +2445,12 @@ fn run_commands(
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
             let visible = wrapped_view(edit, vp).total_rows();
-            let was = vp.top_row;
-            let target = (was as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
-            vp.top_row = clamp_top_line(target, visible, vp.rows);
+            let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
+            let target = clamp_top_line(target, visible, vp.rows);
+            vp.scroll_to(target, entity, browsers, commands);
             edit.core.top_row = vp.top_row;
             if ScrolledCursor::follow(edit, vp) {
                 cursor_stale = true;
-            }
-            if vp.top_row != was && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
-                    FILE_SCROLL_BY_EVENT,
-                    &FileScrollByEvent {
-                        lines: vp.top_row as i32 - was as i32,
-                    },
-                ));
             }
             continue;
         }
@@ -2457,22 +2460,13 @@ fn run_commands(
                 .view(edit.core.buffer.len_lines() as u32)
                 .buffer_to_row(edit.core.cursor_pos().line);
             let rows = vp.rows.max(1) as u32;
-            let was = vp.top_row;
-            vp.top_row = match placement {
+            let target = match placement {
                 crate::edit::command::ScrollPlacement::Top => row,
                 crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
                 crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
             };
+            vp.scroll_to(target, entity, browsers, commands);
             edit.core.top_row = vp.top_row;
-            if vp.top_row != was && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
-                    FILE_SCROLL_BY_EVENT,
-                    &FileScrollByEvent {
-                        lines: vp.top_row as i32 - was as i32,
-                    },
-                ));
-            }
             continue;
         }
         if matches!(
@@ -2676,7 +2670,8 @@ fn run_commands(
         }
     }
     if let Some(top) = wrapped_autoscroll(edit, vp) {
-        vp.top_row = top;
+        vp.scroll_to(top, entity, browsers, commands);
+        edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;
     if text_changed || fold_changed || DriftedWindow::of(top_before, &vpc).left_the_band() {
@@ -5614,6 +5609,86 @@ mod scrolled_cursor_tests {
         let (mut edit, vp) = ScrolledCursor::at(2, 10, 20);
         ScrolledCursor::follow(&mut edit, &vp);
         assert_eq!(edit.core.cursor_pos().col, 3);
+    }
+}
+
+#[cfg(test)]
+mod file_scroll_tests {
+    use super::*;
+
+    impl FileViewport {
+        fn scrolling(top_row: u32, rows: u16) -> (App, Entity) {
+            let text = (0..400).map(|i| format!("line {i}\n")).collect::<String>();
+            let path = PathBuf::from("/tmp/scroll-report.rs");
+            let core = EditCore::new(
+                path.clone(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let edit = EditState::new(
+                core,
+                HighlightCache::new(&path),
+                crate::fold::FoldState::default(),
+            );
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins).add_observer(on_file_scroll);
+            app.world_mut().insert_non_send(Browsers::default());
+            let entity = app
+                .world_mut()
+                .spawn((
+                    edit,
+                    FileViewport {
+                        top_row,
+                        rows,
+                        wrap_columns: 0,
+                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap_column: 80,
+                    },
+                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                ))
+                .id();
+            (app, entity)
+        }
+    }
+
+    #[test]
+    fn a_report_that_asks_for_no_rows_still_moves_the_host_viewport() {
+        let (mut app, entity) = FileViewport::scrolling(0, 40);
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileScrollEvent {
+                top_row: 120,
+                needs_rows: false,
+            },
+        });
+
+        assert_eq!(
+            app.world().get::<FileViewport>(entity).unwrap().top_row,
+            120
+        );
+        assert_eq!(
+            app.world().get::<EditState>(entity).unwrap().core.top_row,
+            120,
+            "screen-relative motions read core.top_row"
+        );
+    }
+
+    #[test]
+    fn a_report_past_the_end_is_clamped_to_the_last_screenful() {
+        let (mut app, entity) = FileViewport::scrolling(0, 40);
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileScrollEvent {
+                top_row: 9_000,
+                needs_rows: true,
+            },
+        });
+
+        assert_eq!(
+            app.world().get::<FileViewport>(entity).unwrap().top_row,
+            361
+        );
     }
 }
 

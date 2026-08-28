@@ -130,6 +130,7 @@ pub enum FoldGutter {
 #[derive(
     Debug,
     Clone,
+    Default,
     PartialEq,
     Serialize,
     Deserialize,
@@ -502,6 +503,7 @@ pub struct FileVideoRect {
 )]
 pub struct FileScrollEvent {
     pub top_row: u32,
+    pub needs_rows: bool,
 }
 
 #[derive(
@@ -1469,13 +1471,14 @@ mod file_event_tests {
 
     #[test]
     fn file_scroll_and_resize_roundtrip() {
-        let s = FileScrollEvent { top_row: 42 };
+        let s = FileScrollEvent {
+            top_row: 42,
+            needs_rows: true,
+        };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&s).unwrap();
         assert_eq!(
-            rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b)
-                .unwrap()
-                .top_row,
-            42
+            rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b).unwrap(),
+            s
         );
         let r = FileResizeEvent {
             char_height: 16.0,
