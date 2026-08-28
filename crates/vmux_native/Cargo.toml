@@ -6,6 +6,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+vmux_macro = { path = "../vmux_macro" }
 base64 = "0.22"
 dioxus-core = "=0.7.9"
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }

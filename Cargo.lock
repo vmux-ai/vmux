@@ -10686,6 +10686,7 @@ dependencies = [
  "tokio",
  "tracing",
  "vmux_clipboard",
+ "vmux_macro",
  "vmux_ui",
  "wry",
 ]

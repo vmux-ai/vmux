@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Presentation, Report, Route, Tapped};
 use vmux_mobile::navigator::{Screen, Stack, Tabs, use_navigation, use_route};
-use vmux_native::NativePage;
+use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (5, 6, 10, 255);
 
@@ -53,33 +53,6 @@ impl Route for Page {
     }
 }
 
-macro_rules! screens {
-    ($($page:ident $url:literal $component:ident $near:literal $far:literal $kind:literal;)*) => {
-        $(
-            static $page: NativePage = NativePage::pane($url, $component).painted(BACKDROP);
-
-            #[component]
-            fn $component() -> Element {
-                rsx! {
-                    Stack::<Page> {
-                        Body { near: $near, far: $far, kind: $kind }
-                    }
-                }
-            }
-        )*
-    };
-}
-
-screens! {
-    CARD "vmux://card/" CardScreen "#7c3aed" "#db2777" "card";
-    MODAL "vmux://modal/" ModalScreen "#b45309" "#be123c" "modal";
-    FORM_SHEET "vmux://form-sheet/" FormSheetScreen "#0f766e" "#0369a1" "form sheet";
-    FULL_SCREEN_MODAL "vmux://full-screen-modal/" FullScreenModalScreen "#4338ca" "#7e22ce" "full screen modal";
-}
-
-static APP: NativePage = NativePage::pane("vmux://app/", App).painted(BACKDROP);
-static TAB: NativePage = NativePage::pane("vmux://tab/", TabScreen).painted(BACKDROP);
-
 fn main() {
     bevy_app::App::new()
         .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
@@ -116,27 +89,28 @@ fn act(
     }
 }
 
+#[screen("vmux://app/", painted = BACKDROP)]
 #[component]
 fn App() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {
-                Screen::<Page> { name: Name::Tab, component: &TAB }
-                Screen::<Page> { name: Name::Card, component: &CARD }
+                Screen::<Page> { name: Name::Tab, component: &TAB_SCREEN }
+                Screen::<Page> { name: Name::Card, component: &CARD_SCREEN }
                 Screen::<Page> {
                     name: Name::Modal,
-                    component: &MODAL,
+                    component: &MODAL_SCREEN,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
                     name: Name::FormSheet,
-                    component: &FORM_SHEET,
+                    component: &FORM_SHEET_SCREEN,
                     presentation: Presentation::FormSheet,
                     detents: &[0.4, 1.0],
                 }
                 Screen::<Page> {
                     name: Name::FullScreenModal,
-                    component: &FULL_SCREEN_MODAL,
+                    component: &FULL_SCREEN_MODAL_SCREEN,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -144,6 +118,7 @@ fn App() -> Element {
     }
 }
 
+#[screen("vmux://tab/", painted = BACKDROP)]
 #[component]
 fn TabScreen() -> Element {
     rsx! {
@@ -234,6 +209,46 @@ fn Body(near: String, far: String, kind: String) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[screen("vmux://card/", painted = BACKDROP)]
+#[component]
+fn CardScreen() -> Element {
+    rsx! {
+        Stack::<Page> {
+            Body { near: "#7c3aed", far: "#db2777", kind: "card" }
+        }
+    }
+}
+
+#[screen("vmux://modal/", painted = BACKDROP)]
+#[component]
+fn ModalScreen() -> Element {
+    rsx! {
+        Stack::<Page> {
+            Body { near: "#b45309", far: "#be123c", kind: "modal" }
+        }
+    }
+}
+
+#[screen("vmux://form-sheet/", painted = BACKDROP)]
+#[component]
+fn FormSheetScreen() -> Element {
+    rsx! {
+        Stack::<Page> {
+            Body { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
+        }
+    }
+}
+
+#[screen("vmux://full-screen-modal/", painted = BACKDROP)]
+#[component]
+fn FullScreenModalScreen() -> Element {
+    rsx! {
+        Stack::<Page> {
+            Body { near: "#4338ca", far: "#7e22ce", kind: "full screen modal" }
         }
     }
 }
