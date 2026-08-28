@@ -11,22 +11,20 @@ use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{Centre, NavPlugin, Present, Push, Report, Route, Tapped};
+use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Report, Route, Tapped};
 use vmux_mobile::navigator::{NavigationContainer, Screen, Sheet, TabNavigator, use_navigation};
 use vmux_native::NativePage;
 
 #[derive(Clone, PartialEq)]
 enum Page {
-    One,
-    Two,
+    Tab(usize),
     Pushed(String),
     Presented(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
-    One,
-    Two,
+    Tab,
     Pushed,
     Presented,
 }
@@ -36,8 +34,7 @@ impl Route for Page {
 
     fn name(&self) -> Name {
         match self {
-            Self::One => Name::One,
-            Self::Two => Name::Two,
+            Self::Tab(_) => Name::Tab,
             Self::Pushed(_) => Name::Pushed,
             Self::Presented(_) => Name::Presented,
         }
@@ -45,8 +42,7 @@ impl Route for Page {
 
     fn title(&self) -> String {
         match self {
-            Self::One => "Tab 1".to_string(),
-            Self::Two => "Tab 2".to_string(),
+            Self::Tab(at) => format!("Tab {at}"),
             Self::Pushed(name) | Self::Presented(name) => name.clone(),
         }
     }
@@ -80,26 +76,23 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 .title { font: 600 40px/1.05 -apple-system, SF Pro Display, sans-serif; letter-spacing: -.02em; margin-top: 10px; }
 .meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
 
-.push {
-  align-self: center; margin: auto 0; padding: 18px 44px; border-radius: 20px;
-  font-size: 18px; font-weight: 600;
-  background: linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.09));
-  border: 1px solid rgba(255,255,255,.20);
-  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+.keys { display: flex; gap: 10px; justify-content: center; margin: auto 0; }
+.key {
+  padding: 11px 22px; border-radius: 13px; font-size: 15px; font-weight: 500;
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
+  backdrop-filter: blur(18px);
   transition: transform .12s ease, background .18s ease;
 }
-.push:active { transform: scale(.94); background: rgba(255,255,255,.3); }
+.key:active { transform: scale(.94); background: rgba(255,255,255,.22); }
 
-.rungs { display: flex; gap: 5px; margin-top: 22px; }
-.rung { height: 3px; flex: 1; border-radius: 2px; background: rgba(255,255,255,.13); }
-.rung.on { background: rgba(255,255,255,.85); }
+.rungs { display: flex; gap: 3px; margin-top: 22px; height: 3px; }
+.rung { flex: 1; min-width: 1px; border-radius: 2px; background: rgba(255,255,255,.85); }
 .rung.sheet { background: #ffcf6b; }
 
 </style>"#;
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
-static ONE: NativePage = Demo::page("vmux://one/", OneScreen);
-static TWO: NativePage = Demo::page("vmux://two/", TwoScreen);
+static TAB: NativePage = Demo::page("vmux://tab/", TabScreen);
 static PUSHED: NativePage = Demo::page("vmux://pushed/", PushedScreen);
 static PRESENTED: NativePage = Demo::page("vmux://presented/", PresentedScreen);
 
@@ -138,8 +131,8 @@ fn main() {
 fn seed(mut reported: MessageWriter<Report<Page>>) {
     reported.write(Report {
         tabs: vec![
-            ("tab:1".to_string(), Page::One),
-            ("tab:2".to_string(), Page::Two),
+            ("tab:1".to_string(), Page::Tab(1)),
+            ("tab:2".to_string(), Page::Tab(2)),
         ],
         focused: Some("tab:1".to_string()),
     });
@@ -148,21 +141,14 @@ fn seed(mut reported: MessageWriter<Report<Page>>) {
 fn act(
     mut tapped: MessageReader<Tapped>,
     mut opened: Local<usize>,
-    mut pushes: MessageWriter<Push<Page>>,
-    mut presents: MessageWriter<Present<Page>>,
+    mut blanks: MessageWriter<OpenBlank<Page>>,
 ) {
     for Tapped(action) in tapped.read() {
-        *opened += 1;
-        let at = *opened;
-        match *action {
-            "Push" => {
-                pushes.write(Push(Page::Pushed(format!("Level {at}"))));
-            }
-            "+" => {
-                presents.write(Present(Page::Presented(format!("Sheet {at}"))));
-            }
-            _ => {}
+        if *action != "+" {
+            continue;
         }
+        *opened += 1;
+        blanks.write(OpenBlank(Page::Tab(*opened + 2)));
     }
 }
 
@@ -171,8 +157,7 @@ fn Shell() -> Element {
     rsx! {
         NavigationContainer::<Page> {
             TabNavigator {
-                Screen::<Page> { name: Name::One, draws: &ONE }
-                Screen::<Page> { name: Name::Two, draws: &TWO }
+                Screen::<Page> { name: Name::Tab, draws: &TAB }
                 Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
                 Sheet::<Page> { name: Name::Presented, draws: &PRESENTED }
             }
@@ -181,19 +166,26 @@ fn Shell() -> Element {
 }
 
 #[component]
-fn OneScreen() -> Element {
+fn TabScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root" }
+            TabStage {}
         }
     }
 }
 
 #[component]
-fn TwoScreen() -> Element {
+fn TabStage() -> Element {
+    let at = match use_navigation::<Page>().view().current {
+        Some(Page::Tab(at)) => at,
+        _ => 1,
+    };
+    let hue = (at * 37 + 185) % 360;
     rsx! {
-        NavigationContainer::<Page> {
-            Stage { near: "#047857", far: "#0891b2", kind: "tab root" }
+        Stage {
+            near: "hsl({hue} 78% 42%)",
+            far: "hsl({(hue + 40) % 360} 74% 38%)",
+            kind: "tab root",
         }
     }
 }
@@ -235,16 +227,23 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                 div { class: "eyebrow", "{kind}" }
                 div { class: "title", "{title}" }
                 div { class: "meta", "depth {depth} · {seen.tabs.len()} tabs open" }
-                button {
-                    class: "push",
-                    onclick: move |_| navigation.go(Page::Pushed(format!("Level {}", depth + 1))),
-                    "Push"
+                div { class: "keys",
+                    button {
+                        class: "key",
+                        onclick: move |_| navigation.go(Page::Pushed(format!("Level {}", depth + 1))),
+                        "Push"
+                    }
+                    button {
+                        class: "key",
+                        onclick: move |_| navigation.go(Page::Presented(format!("Sheet {}", depth + 1))),
+                        "Sheet"
+                    }
                 }
                 div { class: "rungs",
-                    for step in 0..6usize {
+                    for step in 0..depth {
                         div {
                             key: "{step}",
-                            class: if step >= depth { "rung" } else if sheet && step == depth - 1 { "rung on sheet" } else { "rung on" },
+                            class: if sheet && step == depth - 1 { "rung sheet" } else { "rung" },
                         }
                     }
                 }
