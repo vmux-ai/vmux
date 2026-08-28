@@ -4,6 +4,15 @@ use vmux_native::NativePage;
 pub struct Level {
     pub page: &'static NativePage,
     pub title: String,
+    pub action: Option<&'static str>,
+}
+
+#[derive(Clone, PartialEq)]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct TabEntry {
+    pub id: String,
+    pub name: String,
+    pub here: bool,
 }
 
 #[cfg(target_os = "ios")]
@@ -12,27 +21,37 @@ mod platform {
     use std::time::Duration;
 
     use dispatch2::{DispatchQueue, DispatchTime};
-    use objc2::Message;
     use objc2::rc::Retained;
     use objc2::runtime::NSObject;
-    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+    use objc2::{
+        ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
+    };
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSObjectProtocol, NSString};
     use objc2_ui_kit::{
-        UIAdaptivePresentationControllerDelegate, UIGestureRecognizer, UIGestureRecognizerDelegate,
-        UIModalPresentationStyle, UINavigationController, UINavigationControllerDelegate,
-        UIPresentationController, UISheetPresentationController,
-        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIView,
-        UIViewAutoresizing, UIViewController,
+        UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle, UIButton,
+        UIButtonType, UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIGestureRecognizer,
+        UIGestureRecognizerDelegate, UIGlassEffect, UILayoutConstraintAxis,
+        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
+        UINavigationControllerDelegate, UIPresentationController, UISheetPresentationController,
+        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent, UIStackView,
+        UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
+        UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
-    use super::Level;
+    use super::{Level, TabEntry};
     use crate::surface::Surfaces;
+
+    const TAB_BAR_HEIGHT: f64 = 60.0;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
         static POPPED: Cell<usize> = const { Cell::new(0) };
         static DISMISSED: Cell<usize> = const { Cell::new(0) };
+        static TAPPED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+        static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+        static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     }
 
     struct Held {
@@ -41,7 +60,12 @@ mod platform {
     }
 
     impl Held {
-        fn draw(level: &Level, root_view: &UIView, marker: MainThreadMarker) -> Option<Self> {
+        fn draw(
+            level: &Level,
+            root_view: &UIView,
+            delegate: &NavDelegate,
+            marker: MainThreadMarker,
+        ) -> Option<Self> {
             let web = Surfaces::build(level.page)?;
             if level.page.background.is_none() {
                 web.paint(crate::shell::webview_background());
@@ -56,13 +80,62 @@ mod platform {
                 None,
             );
             controller.setView(Some(&view));
-            controller
-                .navigationItem()
-                .setTitle(Some(&NSString::from_str(&level.title)));
+            let item = controller.navigationItem();
+            item.setTitle(Some(&NSString::from_str(&level.title)));
+            if let Some(action) = level.action {
+                item.setRightBarButtonItem(Some(&Bar::button(action, delegate, marker)));
+            }
             Some(Self {
                 controller,
                 web: Some(web),
             })
+        }
+    }
+
+    struct Bar;
+
+    impl Bar {
+        fn button(
+            action: &'static str,
+            delegate: &NavDelegate,
+            marker: MainThreadMarker,
+        ) -> Retained<UIBarButtonItem> {
+            let item = unsafe {
+                UIBarButtonItem::initWithTitle_style_target_action(
+                    UIBarButtonItem::alloc(marker),
+                    Some(&NSString::from_str(action)),
+                    UIBarButtonItemStyle::Plain,
+                    Some(delegate),
+                    Some(sel!(barTapped:)),
+                )
+            };
+            item.setTag(Self::remember(action));
+            item
+        }
+
+        fn remember(action: &'static str) -> isize {
+            ACTIONS.with_borrow_mut(|known| {
+                for (at, seen) in known.iter().enumerate() {
+                    if *seen == action {
+                        return at as isize;
+                    }
+                }
+                known.push(action);
+                (known.len() - 1) as isize
+            })
+        }
+
+        fn recall(tag: isize) -> Option<&'static str> {
+            ACTIONS.with_borrow(|known| known.get(tag as usize).copied())
+        }
+
+        fn glassy(navigation: &UINavigationController, marker: MainThreadMarker) {
+            navigation.setNavigationBarHidden(false);
+            let appearance = UINavigationBarAppearance::new(marker);
+            appearance.configureWithDefaultBackground();
+            let bar = navigation.navigationBar();
+            bar.setStandardAppearance(&appearance);
+            bar.setScrollEdgeAppearance(Some(&appearance));
         }
     }
 
@@ -77,7 +150,13 @@ mod platform {
                 UINavigationController::alloc(marker),
                 &root.controller,
             );
-            navigation.setNavigationBarHidden(true);
+            Bar::glassy(&navigation, marker);
+            navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
+                top: 0.0,
+                left: 0.0,
+                bottom: TAB_BAR_HEIGHT,
+                right: 0.0,
+            });
             unsafe {
                 navigation.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(delegate)));
             }
@@ -99,9 +178,133 @@ mod platform {
         }
     }
 
+    struct Tabs {
+        glass: Retained<UIVisualEffectView>,
+        row: Retained<UIStackView>,
+        ids: Vec<String>,
+    }
+
+    impl Tabs {
+        fn under(root_view: &UIView, marker: MainThreadMarker) -> Self {
+            let effect = UIGlassEffect::new(marker);
+            let glass = UIVisualEffectView::initWithEffect(
+                UIVisualEffectView::alloc(marker),
+                Some(effect.as_super()),
+            );
+            let bounds = root_view.bounds();
+            let inset = root_view.safeAreaInsets().bottom;
+            glass.setFrame(CGRect {
+                origin: CGPoint {
+                    x: 0.0,
+                    y: bounds.size.height - TAB_BAR_HEIGHT - inset,
+                },
+                size: CGSize {
+                    width: bounds.size.width,
+                    height: TAB_BAR_HEIGHT + inset,
+                },
+            });
+            glass.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleTopMargin,
+            );
+
+            let row = UIStackView::initWithFrame(
+                UIStackView::alloc(marker),
+                CGRect {
+                    origin: CGPoint { x: 0.0, y: 0.0 },
+                    size: CGSize {
+                        width: bounds.size.width,
+                        height: TAB_BAR_HEIGHT,
+                    },
+                },
+            );
+            row.setAxis(UILayoutConstraintAxis::Horizontal);
+            row.setDistribution(UIStackViewDistribution::FillEqually);
+            row.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
+            glass.contentView().addSubview(&row);
+            root_view.addSubview(&glass);
+            Self {
+                glass,
+                row,
+                ids: Vec::new(),
+            }
+        }
+
+        fn show(
+            &mut self,
+            entries: Vec<TabEntry>,
+            centre: Option<&'static str>,
+            delegate: &NavDelegate,
+            marker: MainThreadMarker,
+        ) {
+            for spent in self.row.arrangedSubviews().iter() {
+                self.row.removeArrangedSubview(&spent);
+                spent.removeFromSuperview();
+            }
+            self.ids.clear();
+            let halfway = entries.len() / 2;
+            for (at, entry) in entries.into_iter().enumerate() {
+                if at == halfway
+                    && let Some(centre) = centre
+                {
+                    self.row
+                        .addArrangedSubview(&Self::adder(centre, delegate, marker));
+                }
+                let button = UIButton::buttonWithType(objc2_ui_kit::UIButtonType::System, marker);
+                button.setTitle_forState(
+                    Some(&NSString::from_str(&entry.name)),
+                    UIControlState::Normal,
+                );
+                if let Some(label) = button.titleLabel() {
+                    unsafe { label.setFont(Some(&UIFont::systemFontOfSize(13.0))) };
+                }
+                button.setAlpha(if entry.here { 1.0 } else { 0.5 });
+                button.setTag(self.ids.len() as isize);
+                unsafe {
+                    button.addTarget_action_forControlEvents(
+                        Some(delegate),
+                        sel!(tabTapped:),
+                        UIControlEvents::TouchUpInside,
+                    );
+                }
+                self.ids.push(entry.id);
+                self.row.addArrangedSubview(&button);
+            }
+            self.glass.setHidden(self.ids.is_empty());
+        }
+
+        fn adder(
+            centre: &'static str,
+            delegate: &NavDelegate,
+            marker: MainThreadMarker,
+        ) -> Retained<UIButton> {
+            let button = UIButton::buttonWithType(UIButtonType::System, marker);
+            button.setTitle_forState(Some(&NSString::from_str(centre)), UIControlState::Normal);
+            if let Some(label) = button.titleLabel() {
+                unsafe { label.setFont(Some(&UIFont::systemFontOfSize(26.0))) };
+            }
+            button.setTag(Bar::remember(centre));
+            unsafe {
+                button.addTarget_action_forControlEvents(
+                    Some(delegate),
+                    sel!(centreTapped:),
+                    UIControlEvents::TouchUpInside,
+                );
+            }
+            button
+        }
+
+        fn front(&self) {
+            let Some(parent) = self.glass.superview() else {
+                return;
+            };
+            parent.bringSubviewToFront(&self.glass);
+        }
+    }
+
     pub struct NativeStack {
         root_view: Retained<UIView>,
         columns: Vec<Column>,
+        tabs: Tabs,
         delegate: Retained<NavDelegate>,
     }
 
@@ -111,7 +314,37 @@ mod platform {
         #[name = "VmuxNavigationDelegate"]
         struct NavDelegate;
 
-        impl NavDelegate {}
+        impl NavDelegate {
+            #[unsafe(method(barTapped:))]
+            fn bar_tapped(&self, sender: &UIBarButtonItem) {
+                let Some(action) = Bar::recall(sender.tag()) else {
+                    return;
+                };
+                TAPPED.with_borrow_mut(|queued| queued.push(action));
+            }
+
+            #[unsafe(method(centreTapped:))]
+            fn centre_tapped(&self, sender: &UIButton) {
+                let Some(action) = Bar::recall(sender.tag()) else {
+                    return;
+                };
+                TAPPED.with_borrow_mut(|queued| queued.push(action));
+            }
+
+            #[unsafe(method(tabTapped:))]
+            fn tab_tapped(&self, sender: &UIButton) {
+                let at = sender.tag() as usize;
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return;
+                    };
+                    let Some(id) = stack.tabs.ids.get(at) else {
+                        return;
+                    };
+                    PICKED.with_borrow_mut(|slot| *slot = Some(id.clone()));
+                });
+            }
+        }
 
         unsafe impl NSObjectProtocol for NavDelegate {}
 
@@ -147,6 +380,7 @@ mod platform {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
+                    stack.tabs.front();
                     for column in stack.columns.iter_mut() {
                         if !column.owns(navigation) {
                             continue;
@@ -184,7 +418,12 @@ mod platform {
         unsafe impl UISheetPresentationControllerDelegate for NavDelegate {}
     );
 
-    pub fn install(root_controller: &UIViewController, root_view: &UIView, web_view: &UIView) {
+    pub fn install(
+        root_controller: &UIViewController,
+        root_view: &UIView,
+        web_view: &UIView,
+        page: &'static vmux_native::NativePage,
+    ) {
         if STACK.with_borrow(Option::is_some) {
             return;
         }
@@ -196,6 +435,14 @@ mod platform {
             root_view.retain(),
             web_view.retain(),
         );
+
+        if let Some(dark) = page.prefers_dark() {
+            root_controller.setOverrideUserInterfaceStyle(if dark {
+                UIUserInterfaceStyle::Dark
+            } else {
+                UIUserInterfaceStyle::Light
+            });
+        }
 
         let first =
             UIViewController::initWithNibName_bundle(UIViewController::alloc(marker), None, None);
@@ -221,9 +468,11 @@ mod platform {
             .navigation
             .didMoveToParentViewController(Some(&root_controller));
 
+        let tabs = Tabs::under(&root_view, marker);
         STACK.set(Some(NativeStack {
             root_view,
             columns: vec![column],
+            tabs,
             delegate,
         }));
     }
@@ -296,6 +545,12 @@ mod platform {
                     return;
                 };
                 presenter.presentViewController_animated_completion(&sheet, true, None);
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return;
+                    };
+                    stack.tabs.front();
+                });
             });
         }
 
@@ -351,6 +606,48 @@ mod platform {
             });
         }
 
+        pub fn tabs(entries: Vec<TabEntry>, centre: Option<&'static str>) {
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let delegate = stack.delegate.clone();
+                stack.tabs.show(entries, centre, &delegate, marker);
+                stack.tabs.front();
+            });
+        }
+
+        pub fn root(title: String, action: Option<&'static str>) {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let Some(root) = stack
+                    .columns
+                    .first()
+                    .and_then(|column| column.levels.first())
+                else {
+                    return;
+                };
+                let item = root.controller.navigationItem();
+                item.setTitle(Some(&NSString::from_str(&title)));
+                match action {
+                    Some(action) => item.setRightBarButtonItem(Some(&Bar::button(
+                        action,
+                        &stack.delegate,
+                        marker,
+                    ))),
+                    None => item.setRightBarButtonItem(None),
+                }
+            });
+        }
+
         pub fn render() {
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
@@ -368,11 +665,15 @@ mod platform {
         }
 
         fn draw(level: Level) -> Option<Held> {
-            let (root_view, marker) = STACK.with_borrow(|stack| {
+            let (root_view, delegate, marker) = STACK.with_borrow(|stack| {
                 let stack = stack.as_ref()?;
-                Some((stack.root_view.clone(), MainThreadMarker::new()?))
+                Some((
+                    stack.root_view.clone(),
+                    stack.delegate.clone(),
+                    MainThreadMarker::new()?,
+                ))
             })?;
-            Held::draw(&level, &root_view, marker)
+            Held::draw(&level, &root_view, &delegate, marker)
         }
 
         fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
@@ -388,6 +689,14 @@ mod platform {
 
     pub fn take_dismissed() -> usize {
         DISMISSED.replace(0)
+    }
+
+    pub fn take_tapped() -> Vec<&'static str> {
+        TAPPED.with_borrow_mut(std::mem::take)
+    }
+
+    pub fn take_picked() -> Option<String> {
+        PICKED.with_borrow_mut(Option::take)
     }
 
     fn size_to_parent(view: &UIView, parent: &UIView) {
@@ -419,11 +728,11 @@ mod platform {
 #[cfg(not(target_os = "ios"))]
 #[allow(dead_code)]
 mod platform {
-    use super::Level;
+    use super::{Level, TabEntry};
 
     pub struct NativeStack;
 
-    pub fn install(_: &(), _: &(), _: &()) {}
+    pub fn install(_: &(), _: &(), _: &(), _: &'static vmux_native::NativePage) {}
 
     pub fn take_popped() -> usize {
         0
@@ -431,6 +740,14 @@ mod platform {
 
     pub fn take_dismissed() -> usize {
         0
+    }
+
+    pub fn take_tapped() -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    pub fn take_picked() -> Option<String> {
+        None
     }
 
     impl NativeStack {
@@ -444,10 +761,14 @@ mod platform {
 
         pub fn settle(_levels: Vec<Level>) {}
 
+        pub fn tabs(_entries: Vec<TabEntry>, _centre: Option<&'static str>) {}
+
+        pub fn root(_title: String, _action: Option<&'static str>) {}
+
         pub fn render() {}
     }
 }
 
 #[cfg(target_os = "ios")]
 pub use platform::install;
-pub use platform::{NativeStack, take_dismissed, take_popped};
+pub use platform::{NativeStack, take_dismissed, take_picked, take_popped, take_tapped};

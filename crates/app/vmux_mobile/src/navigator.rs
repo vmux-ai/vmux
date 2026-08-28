@@ -36,8 +36,10 @@ impl<R: Route> Navigation<R> {
         let name = route.name();
         World::with(|world| {
             let arrives = world
-                .read(|world| world.get_resource::<Declared<R>>().and_then(|d| d.of(name)))
-                .map(|(_, arrives)| arrives)
+                .read(|world| {
+                    let declared = world.get_resource::<Declared<R>>()?;
+                    Some(declared.of(name)?.arrives)
+                })
                 .unwrap_or(Arrives::Pushed);
             match arrives {
                 Arrives::Presented => world.send(Present(route)),
@@ -101,17 +103,30 @@ pub fn TabNavigator(children: Element) -> Element {
 }
 
 #[component]
-pub fn Screen<R: Route>(name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
-    Arrives::Pushed.announce::<R>(name, draws)
+pub fn Screen<R: Route>(
+    name: R::Name,
+    draws: &'static vmux_native::NativePage,
+    #[props(default)] action: Option<&'static str>,
+) -> Element {
+    Arrives::Pushed.announce::<R>(name, draws, action)
 }
 
 #[component]
-pub fn Sheet<R: Route>(name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
-    Arrives::Presented.announce::<R>(name, draws)
+pub fn Sheet<R: Route>(
+    name: R::Name,
+    draws: &'static vmux_native::NativePage,
+    #[props(default)] action: Option<&'static str>,
+) -> Element {
+    Arrives::Presented.announce::<R>(name, draws, action)
 }
 
 impl Arrives {
-    fn announce<R: Route>(self, name: R::Name, draws: &'static vmux_native::NativePage) -> Element {
+    fn announce<R: Route>(
+        self,
+        name: R::Name,
+        draws: &'static vmux_native::NativePage,
+        action: Option<&'static str>,
+    ) -> Element {
         let arrives = self;
         use_effect(move || {
             World::with(|world| {
@@ -119,6 +134,7 @@ impl Arrives {
                     name,
                     draws,
                     arrives,
+                    action,
                 })
             });
         });

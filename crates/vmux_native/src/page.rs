@@ -19,6 +19,12 @@ impl PartialEq for NativePage {
 }
 
 impl NativePage {
+    pub fn prefers_dark(&self) -> Option<bool> {
+        let (red, green, blue, _) = self.background?;
+        let luminance = 0.299 * f64::from(red) + 0.587 * f64::from(green) + 0.114 * f64::from(blue);
+        Some(luminance < 128.0)
+    }
+
     pub fn answers_for(&self, url: &str) -> bool {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))
     }
