@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::nav::{
-    Arrives, Declare, Declared, Dismiss, GoBack, Nav, Present, Push, Route, Select, View,
+    Arrives, Declare, Declared, Dismiss, GoBack, Nav, Present, Push, Route, Seat, Select, View,
 };
 use crate::runtime::World;
 
@@ -67,6 +67,10 @@ impl<R: Route> Navigation<R> {
 
 pub fn use_navigation<R: Route>() -> Navigation<R> {
     use_context()
+}
+
+pub fn use_route<R: Route>() -> Option<R> {
+    use_hook(try_consume_context::<Seat<R>>).map(|seat| seat.0)
 }
 
 #[component]

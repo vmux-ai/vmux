@@ -12,7 +12,9 @@ use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Report, Route, Tapped};
-use vmux_mobile::navigator::{NavigationContainer, Screen, Sheet, TabNavigator, use_navigation};
+use vmux_mobile::navigator::{
+    NavigationContainer, Screen, Sheet, TabNavigator, use_navigation, use_route,
+};
 use vmux_native::NativePage;
 
 #[derive(Clone, PartialEq)]
@@ -117,6 +119,9 @@ impl Demo {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!("VMUXPANIC {info}");
+    }));
     App::new()
         .add_plugins(MobilePlugin::showing(&SHELL).serving(|world| {
             world
@@ -176,7 +181,7 @@ fn TabScreen() -> Element {
 
 #[component]
 fn TabStage() -> Element {
-    let at = match use_navigation::<Page>().view().current {
+    let at = match use_route::<Page>() {
         Some(Page::Tab(at)) => at,
         _ => 1,
     };
@@ -212,7 +217,7 @@ fn PresentedScreen() -> Element {
 fn Stage(near: String, far: String, kind: String) -> Element {
     let navigation = use_navigation::<Page>();
     let seen = navigation.view();
-    let title = match &seen.current {
+    let title = match use_route::<Page>() {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
     };

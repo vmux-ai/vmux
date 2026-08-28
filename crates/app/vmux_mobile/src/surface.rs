@@ -173,7 +173,7 @@ impl Surfaces {
         WAKER.with_borrow_mut(|slot| *slot = Some(waker));
     }
 
-    pub(crate) fn build(page: &'static NativePage) -> Option<WebView> {
+    pub(crate) fn build(page: &'static NativePage, seat: Instance) -> Option<WebView> {
         let waker = WAKER.with_borrow(Clone::clone)?;
         let built = WINIT_WINDOWS.with(|windows| {
             let windows = windows.borrow();
@@ -183,7 +183,7 @@ impl Surfaces {
                 &**window,
                 Rect::default(),
                 embedding(waker),
-                Instance::of(|_| {}),
+                seat,
             ))
         });
         match built {

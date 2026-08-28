@@ -6,6 +6,7 @@ pub struct Level {
     pub title: String,
     pub action: Option<&'static str>,
     pub closable: bool,
+    pub seat: vmux_native::Instance,
 }
 
 #[derive(Clone, PartialEq)]
@@ -67,12 +68,12 @@ mod platform {
 
     impl Held {
         fn draw(
-            level: &Level,
+            level: Level,
             root_view: &UIView,
             delegate: &NavDelegate,
             marker: MainThreadMarker,
         ) -> Option<Self> {
-            let web = Surfaces::build(level.page)?;
+            let web = Surfaces::build(level.page, level.seat)?;
             if level.page.background.is_none() {
                 web.paint(crate::shell::webview_background());
             }
@@ -994,7 +995,7 @@ mod platform {
                     MainThreadMarker::new()?,
                 ))
             })?;
-            Held::draw(&level, &root_view, &delegate, marker)
+            Held::draw(level, &root_view, &delegate, marker)
         }
 
         fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
