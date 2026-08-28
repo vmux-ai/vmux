@@ -22,19 +22,19 @@ use vmux_native::NativePage;
 #[derive(Clone, PartialEq)]
 enum Page {
     Tab(usize),
-    Pushed(String),
+    Card(String),
     Modal(String),
-    Sheet(String),
-    Full(String),
+    FormSheet(String),
+    FullScreenModal(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
     Tab,
-    Pushed,
+    Card,
     Modal,
-    Sheet,
-    Full,
+    FormSheet,
+    FullScreenModal,
 }
 
 impl Route for Page {
@@ -43,19 +43,20 @@ impl Route for Page {
     fn name(&self) -> Name {
         match self {
             Self::Tab(_) => Name::Tab,
-            Self::Pushed(_) => Name::Pushed,
+            Self::Card(_) => Name::Card,
             Self::Modal(_) => Name::Modal,
-            Self::Sheet(_) => Name::Sheet,
-            Self::Full(_) => Name::Full,
+            Self::FormSheet(_) => Name::FormSheet,
+            Self::FullScreenModal(_) => Name::FullScreenModal,
         }
     }
 
     fn title(&self) -> String {
         match self {
             Self::Tab(at) => format!("Tab {at}"),
-            Self::Pushed(name) | Self::Modal(name) | Self::Sheet(name) | Self::Full(name) => {
-                name.clone()
-            }
+            Self::Card(name)
+            | Self::Modal(name)
+            | Self::FormSheet(name)
+            | Self::FullScreenModal(name) => name.clone(),
         }
     }
 }
@@ -88,10 +89,10 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 .title { font: 600 40px/1.05 -apple-system, SF Pro Display, sans-serif; letter-spacing: -.02em; margin-top: 10px; }
 .meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
 
-.keys { display: flex; gap: 10px; justify-content: center; margin: auto 0; }
-.keys { flex-wrap: wrap; }
+.keys { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: auto 0; }
 .key {
-  padding: 11px 18px; border-radius: 13px; font-size: 15px; font-weight: 500;
+  padding: 10px 16px; border-radius: 12px; font-weight: 500;
+  font: 500 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
   backdrop-filter: blur(18px);
   transition: transform .12s ease, background .18s ease;
@@ -106,10 +107,11 @@ button { font: inherit; color: inherit; border: 0; background: none; }
 
 static SHELL: NativePage = Demo::page("vmux://shell/", Shell);
 static TAB: NativePage = Demo::page("vmux://tab/", TabScreen);
-static PUSHED: NativePage = Demo::page("vmux://pushed/", PushedScreen);
+static CARD: NativePage = Demo::page("vmux://card/", CardScreen);
 static MODAL: NativePage = Demo::page("vmux://modal/", ModalScreen);
-static SHEET: NativePage = Demo::page("vmux://sheet/", SheetScreen);
-static FULL: NativePage = Demo::page("vmux://full/", FullScreen);
+static FORM_SHEET: NativePage = Demo::page("vmux://form-sheet/", FormSheetScreen);
+static FULL_SCREEN_MODAL: NativePage =
+    Demo::page("vmux://full-screen-modal/", FullScreenModalScreen);
 
 struct Demo;
 
@@ -173,21 +175,21 @@ fn Shell() -> Element {
         Stack::<Page> {
             Tabs {
                 Screen::<Page> { name: Name::Tab, draws: &TAB }
-                Screen::<Page> { name: Name::Pushed, draws: &PUSHED }
+                Screen::<Page> { name: Name::Card, draws: &CARD }
                 Screen::<Page> {
                     name: Name::Modal,
                     draws: &MODAL,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
-                    name: Name::Sheet,
-                    draws: &SHEET,
+                    name: Name::FormSheet,
+                    draws: &FORM_SHEET,
                     presentation: Presentation::FormSheet,
                     detents: &[0.4, 1.0],
                 }
                 Screen::<Page> {
-                    name: Name::Full,
-                    draws: &FULL,
+                    name: Name::FullScreenModal,
+                    draws: &FULL_SCREEN_MODAL,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -221,10 +223,10 @@ fn TabStage() -> Element {
 }
 
 #[component]
-fn PushedScreen() -> Element {
+fn CardScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed" }
+            Stage { near: "#7c3aed", far: "#db2777", kind: "card" }
         }
     }
 }
@@ -239,19 +241,19 @@ fn ModalScreen() -> Element {
 }
 
 #[component]
-fn SheetScreen() -> Element {
+fn FormSheetScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#0f766e", far: "#0369a1", kind: "form sheet" }
+            Stage { near: "#0f766e", far: "#0369a1", kind: "formSheet" }
         }
     }
 }
 
 #[component]
-fn FullScreen() -> Element {
+fn FullScreenModalScreen() -> Element {
     rsx! {
         Stack::<Page> {
-            Stage { near: "#4338ca", far: "#7e22ce", kind: "full screen modal" }
+            Stage { near: "#4338ca", far: "#7e22ce", kind: "fullScreenModal" }
         }
     }
 }
@@ -278,23 +280,23 @@ fn Stage(near: String, far: String, kind: String) -> Element {
                 div { class: "keys",
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Pushed(format!("Level {}", depth + 1))),
-                        "Stack"
+                        onclick: move |_| navigation.go(Page::Card(format!("card {}", depth + 1))),
+                        "card"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Modal(format!("Modal {}", depth + 1))),
-                        "Modal"
+                        onclick: move |_| navigation.go(Page::Modal(format!("modal {}", depth + 1))),
+                        "modal"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Sheet(format!("Sheet {}", depth + 1))),
-                        "Sheet"
+                        onclick: move |_| navigation.go(Page::FormSheet(format!("formSheet {}", depth + 1))),
+                        "formSheet"
                     }
                     button {
                         class: "key",
-                        onclick: move |_| navigation.go(Page::Full(format!("Full {}", depth + 1))),
-                        "Full"
+                        onclick: move |_| navigation.go(Page::FullScreenModal(format!("fullScreenModal {}", depth + 1))),
+                        "fullScreenModal"
                     }
                 }
                 div { class: "rungs",
