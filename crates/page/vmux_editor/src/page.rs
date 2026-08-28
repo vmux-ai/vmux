@@ -1864,17 +1864,6 @@ pub fn Page() -> Element {
             }
 
             {
-                (!ed_command_line().is_empty()).then(|| rsx! {
-                    div {
-                        id: "vim-command-line",
-                        class: "pointer-events-none absolute bottom-0 left-0 z-50 flex h-6 max-w-full items-center gap-px overflow-hidden bg-background/95 pl-2 pr-3 font-mono text-xs text-foreground",
-                        span { class: "truncate", "{ed_command_line()}" }
-                        span { class: "inline-block h-[1.05em] w-[0.5em] shrink-0 bg-foreground/70" }
-                    }
-                })
-            }
-
-            {
                 refs_open().then(|| {
                     let items = refs();
                     rsx! {
@@ -1948,15 +1937,9 @@ pub fn Page() -> Element {
                     && keymap() == vmux_core::KeymapKind::Vim,
                 leading: rsx! {
                     {
-                        let lbl = ed_label();
-                        (!lbl.is_empty()
-                            && mode() == Mode::Text
-                            && keymap() == vmux_core::KeymapKind::Vim)
+                        (mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim)
                             .then(|| rsx! {
-                                span {
-                                    class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
-                                    "{lbl}"
-                                }
+                                VimStatus { label: ed_label(), command_line: ed_command_line() }
                             })
                     }
                 },
@@ -2966,6 +2949,29 @@ fn ExplorerSidebar(
                 e.prevent_default();
                 resizing.set(true);
             },
+        }
+    }
+}
+
+#[component]
+fn VimStatus(label: String, command_line: String) -> Element {
+    if !command_line.is_empty() {
+        return rsx! {
+            span {
+                id: "vim-command-line",
+                class: "-ml-4 flex h-7 min-w-0 items-center gap-px overflow-hidden px-3 font-mono text-xs text-foreground",
+                span { class: "truncate", "{command_line}" }
+                span { class: "inline-block h-[1.05em] w-[0.5em] shrink-0 bg-foreground/70" }
+            }
+        };
+    }
+    if label.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
+            "{label}"
         }
     }
 }
