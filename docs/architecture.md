@@ -415,47 +415,24 @@ there to ask.
 
 ### The phone navigates by what is open on the Mac
 
-The phone's tabs **are** the Mac's tabs. The wire already modelled this — `Tab` → `Pane` →
-`Stack`, a stack carrying its url, title, kind and icon — so nothing was invented for the
-phone. A phone has room for one stack at a time, so the pane tree flattens and the splits go
-away; reading order survives. A stack's kind is only ever `terminal`, `files` or `browser`, so
-the **url** decides which page draws it, and a stack the phone cannot draw is mirrored rather
-than dropped — otherwise the two tab bars would quietly disagree.
+The phone's tabs **are** the Mac's tabs — `Tab` → `Pane` → `Stack` off the wire, flattened
+because a phone shows one stack at a time. A stack the phone cannot draw is mirrored rather than
+dropped, so the two tab bars never disagree.
 
-`ReadLayout` and `ReadTerminal` are the read-only half of the shared surface, enumerated rather
-than a blanket `AgentQuery` pass-through: that enum also carries `RecordStart`, `BrowserScroll`
-and their siblings, which act rather than report, so forwarding it wholesale would hand a paired
-phone the desktop's whole control surface. `ReadTerminal` is answered by the daemon itself,
-which owns the terminals; `ReadLayout` is brokered into the GUI's ECS.
+`ReadLayout` and `ReadTerminal` are enumerated rather than forwarding `AgentQuery` wholesale:
+that enum also carries `RecordStart` and its siblings, which act rather than report.
 
 ### Who owns the phone's event loop
 
-`bevy_winit` owns it, exactly as on the desktop, and the shell is a `NativePage` in a webview of
-its own. Dioxus is demoted to what diffs a tree: a `vmux_native` page is a real `VirtualDom`
-with a real reactor, so signals and futures still work. Adopting the desktop's runner deleted a
-hand-written `UIApplication` observer, an unmeasured `CFRunLoop` nudge, and tao from the iOS tree
-— `dioxus/mobile` has to *go* rather than merely stop being called, because tao and winit both
-assert on `UIApplicationMain`.
+`bevy_winit`, exactly as on the desktop. Dioxus is demoted to what diffs a tree. Two things this
+needs that the desktop does not: an `UIApplicationDelegate`, because winit deliberately installs
+none and a cold-start url arrives before any delegate exists; and an embedder layered in front of
+the host a surface would install, or a page mounts and stays empty.
 
-Two things this needs that the desktop does not. Winit installs no `UIApplicationDelegate`,
-passing nil deliberately so the app can supply one — and the app needs two mechanisms, because a
-cold-start url rides the launch notification, which fires before any delegate exists, while a
-warm-start tap reaches only the delegate. And a surface installs its own host per entry into its
-`VirtualDom`, filing subscriptions locally so only `send` reaches the embedder; the phone leans
-the other way, kicking the first refresh when a page subscribes. On a surface that host is never
-reached, so a page would mount and stay empty — no crash, just something that reads as a slow
-link. An embedder therefore layers itself in front of the host the surface would have installed.
+### A screen is a webview
 
-### How a push actually works
-
-Two stacks are kept in step. `nav.rs` holds the phone's own — tabs as entities, a pushed level
-as a child of the tab that opened it — and knows nothing about UIKit. `transition.rs` holds the
-view controllers and knows nothing about a `Route`. The join is a `Level`: the page that draws
-it, its title, and how it arrives.
-
-**A screen is a webview.** One page, one document, one `UIViewController`. A tab owns its own
-`UINavigationController` with its own pushed levels, and those controllers sit side by side in a
-plain `UIView` this code owns.
+One page, one document, one `UIViewController`. A tab owns its own `UINavigationController`, and
+those sit side by side in a plain `UIView` this code owns.
 
 ```mermaid
 graph TB
@@ -468,46 +445,36 @@ graph TB
     N2 --> L3[root webview]
 ```
 
-The pager is why a tab switch can be dragged: both tabs already exist, so a pan on the tab bar
-translates two sibling views. Only the seated tab and its two neighbours are kept; the rest are
-torn down, because the cost of this design is a live WebKit process per screen.
+Both neighbours exist, so a pan on the tab bar translates two sibling views. Only the seated tab
+and its neighbours are kept: the cost of this design is a WebKit process per screen.
 
-The tab bar hangs off the **window**, not off the root view controller's view. A presented sheet
-is added above the root controller, so a bar living inside it would be buried — and
-`bringSubviewToFront` only reorders within one parent.
+The tab bar hangs off the **window**. A sheet is presented above the root controller, so a bar
+inside it would be buried.
 
-Two UIKit rules this code has to obey, both learned by crashing.
+Three UIKit rules, each learned by crashing:
 
-`setViewControllers:` and `dismissViewController:` call the navigation delegate back
-**synchronously**, and that delegate takes the same `RefCell` the caller is holding. Everything
-decides what to do inside the borrow and calls UIKit after it ends.
-
-`UIModalPresentationFullScreen` **detaches the presenting controller's view** once the
-transition finishes — and that view is winit's. The event loop then stops, so the app freezes
-behind its own modal. `fullScreenModal` therefore presents over full screen instead, which looks
-the same for an opaque page and leaves the window intact.
-
-A back-swipe runs the other way: UIKit drives it and only tells the delegate afterwards, so it
-cannot be bracketed. `didShowViewController:` finds the column that owns the navigation
-controller, compares its controller count against the levels it knows about, and bumps a counter
-a system drains back into the ECS. The gesture is refused at a tab's root, where there is
-nothing to go back to.
+- `setViewControllers:` and `dismissViewController:` call the navigation delegate back
+  **synchronously**, into the same `RefCell` the caller holds. Decide inside the borrow, call
+  UIKit after it.
+- A webview left in the window hierarchy while also serving as a controller's view makes
+  `nextResponder` cycle. `removeFromSuperview` first.
+- `UIModalPresentationFullScreen` detaches the presenting view — which is winit's — and the event
+  loop stops. `fullScreenModal` presents *over* full screen instead.
 
 ### The navigator's names are Expo Router's
 
 `Stack`, `Tabs`, `Screen`, `presentation`, `use_navigation`, `use_route`. Most people meet this
-shape in Expo first, and a navigator that renames it is one they have to learn twice. How a
-route arrives is an option on its screen — `Card` pushes, `Modal` and `FormSheet` present,
-`FullScreenModal` covers — so a caller only ever says `go(route)` and the declaration decides.
+shape in Expo first. How a route arrives is an option on its screen, so a caller only ever says
+`go(route)`.
 
-What is deliberately not borrowed is file-based routing. `_layout.tsx` works because a bundler
-can glob a directory into a route tree; here the nesting is the rsx, which the compiler checks.
+File-based routing is deliberately not borrowed: `_layout.tsx` works because a bundler globs a
+directory, and here the nesting is the rsx, which the compiler checks.
 
-`use_route` matters more than it looks. A screen reads the route **it** was opened for, not
-whatever is on top, so a pushed level keeps its own title while a sheet sits over it and a tab
-sliding in from the edge draws itself rather than the tab being left.
+`use_route` gives a screen the route **it** was opened for, not whatever is on top — so a pushed
+level keeps its title under a sheet, and a tab sliding in draws itself.
 
 ---
+
 
 ## Agents
 
