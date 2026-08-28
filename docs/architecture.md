@@ -429,6 +429,9 @@ those sit side by side in a plain `UIView` this code owns.
 graph TB
     W[UIWindow] --> P[pager]
     W --> B["tab bar — UIGlassEffect"]
+    B --> C["capsule — current tab"]
+    B --> T["tabs"]
+    B --> A["+"]
     P --> N1["tab 1 — UINavigationController"]
     P --> N2["tab 2 — UINavigationController"]
     N1 --> L1[root webview]
@@ -438,6 +441,9 @@ graph TB
 
 Both neighbours exist, so a pan on the tab bar translates two sibling views. Only the seated tab
 and its neighbours are kept: the cost of this design is a WebKit process per screen.
+
+The capsule names one tab, not all of them. Ten tabs across a phone leaves each one a letter
+wide.
 
 The tab bar hangs off the **window**. A sheet is presented above the root controller, so a bar
 inside it would be buried.
@@ -452,17 +458,36 @@ Three UIKit rules, each learned by crashing:
 - `UIModalPresentationFullScreen` detaches the presenting view — which is winit's — and the event
   loop stops. `fullScreenModal` presents *over* full screen instead.
 
+### The overview is snapshots
+
+`tabs` zooms the pager out into one card per tab, flicked through and tapped to enter.
+
+```mermaid
+graph LR
+    S1["tab 1<br/>snapshot"] --- S2["tab 2<br/>snapshot"] --- L["tab 3<br/>live"] --- S4["tab 4<br/>snapshot"]
+```
+
+A card is a snapshot because only three tabs have a column to draw. Each is taken while its tab
+is still on screen — UIKit snapshots a hidden view to an empty one, so a capture after eviction
+would be blank.
+
+Position and tilt are one function of one value, the card's distance from the centre, applied to
+every card whenever the row changes. A card that is in the row but never positioned is a stale
+card in the middle of the deck.
+
 ### The navigator's names are Expo Router's
 
-`Stack`, `Tabs`, `Screen`, `presentation`, `use_navigation`, `use_route`. Most people meet this
+`Stack`, `Tabs`, `Screen`, `presentation`, `use_router`, `use_route`. Most people meet this
 shape in Expo first. How a route arrives is an option on its screen, so a caller only ever says
-`go(route)`.
+`push(route)`.
 
 File-based routing is deliberately not borrowed: `_layout.tsx` works because a bundler globs a
 directory, and here the nesting is the rsx, which the compiler checks.
 
 `use_route` gives a screen the route **it** was opened for, not whatever is on top — so a pushed
-level keeps its title under a sheet, and a tab sliding in draws itself.
+level keeps its title under a sheet, and a tab sliding in draws itself. `use_router` reads that
+seat too, which is why `position` can say where a screen sits in the trail: one ECS world serves
+every webview, so the world alone cannot know.
 
 ---
 
