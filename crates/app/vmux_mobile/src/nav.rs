@@ -3,6 +3,7 @@ use bevy_ecs::prelude::*;
 
 pub use crate::transition::Presentation;
 use crate::transition::{Level, NativeStack, TabItem};
+pub use vmux_macro::Route;
 
 pub trait Route: Clone + PartialEq + Send + Sync + 'static {
     type Name: Copy + PartialEq + Send + Sync + 'static;

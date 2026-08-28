@@ -11,46 +11,18 @@ use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (5, 6, 10, 255);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Route)]
 enum Page {
+    #[route("Tab {0}")]
     Tab(usize),
+    #[route("{0}")]
     Card(String),
+    #[route("{0}")]
     Modal(String),
+    #[route("{0}")]
     FormSheet(String),
+    #[route("{0}")]
     FullScreenModal(String),
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Name {
-    Tab,
-    Card,
-    Modal,
-    FormSheet,
-    FullScreenModal,
-}
-
-impl Route for Page {
-    type Name = Name;
-
-    fn name(&self) -> Name {
-        match self {
-            Self::Tab(_) => Name::Tab,
-            Self::Card(_) => Name::Card,
-            Self::Modal(_) => Name::Modal,
-            Self::FormSheet(_) => Name::FormSheet,
-            Self::FullScreenModal(_) => Name::FullScreenModal,
-        }
-    }
-
-    fn title(&self) -> String {
-        match self {
-            Self::Tab(at) => format!("Tab {at}"),
-            Self::Card(name)
-            | Self::Modal(name)
-            | Self::FormSheet(name)
-            | Self::FullScreenModal(name) => name.clone(),
-        }
-    }
 }
 
 fn main() {
@@ -95,21 +67,21 @@ fn App() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {
-                Screen::<Page> { name: Name::Tab, component: &TAB_SCREEN }
-                Screen::<Page> { name: Name::Card, component: &CARD_SCREEN }
+                Screen::<Page> { name: PageName::Tab, component: &TAB_SCREEN }
+                Screen::<Page> { name: PageName::Card, component: &CARD_SCREEN }
                 Screen::<Page> {
-                    name: Name::Modal,
+                    name: PageName::Modal,
                     component: &MODAL_SCREEN,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
-                    name: Name::FormSheet,
+                    name: PageName::FormSheet,
                     component: &FORM_SHEET_SCREEN,
                     presentation: Presentation::FormSheet,
                     detents: &[0.4, 1.0],
                 }
                 Screen::<Page> {
-                    name: Name::FullScreenModal,
+                    name: PageName::FullScreenModal,
                     component: &FULL_SCREEN_MODAL_SCREEN,
                     presentation: Presentation::FullScreenModal,
                 }

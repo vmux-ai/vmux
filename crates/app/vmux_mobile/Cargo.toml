@@ -23,6 +23,7 @@ path = "src/main.rs"
 required-features = ["mobile"]
 
 [dependencies]
+vmux_macro = { path = "../../vmux_macro" }
 # The phone runs the desktop's runner: `bevy_winit` owns the loop and `app.run()` turns it. These
 # are the plugins `WinitPlugin` needs around it and no more — there is no renderer, because wry
 # paints every pixel this app shows.
