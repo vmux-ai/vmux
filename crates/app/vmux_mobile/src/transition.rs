@@ -6,6 +6,7 @@ pub enum Presentation {
     Modal,
     FormSheet,
     FullScreenModal,
+    TransparentModal,
 }
 
 impl Presentation {
@@ -660,18 +661,23 @@ mod platform {
                     let presenter = Self::topmost(stack)?.navigation.clone();
                     let column = Column::over(drawn, &stack.delegate, marker);
                     let sheet = column.navigation.clone();
-                    if presentation == Presentation::FullScreenModal {
-                        sheet.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
-                    } else {
-                        sheet.setModalPresentationStyle(UIModalPresentationStyle::PageSheet);
-                    }
+                    sheet.setModalPresentationStyle(match presentation {
+                        Presentation::FullScreenModal => UIModalPresentationStyle::FullScreen,
+                        Presentation::TransparentModal => UIModalPresentationStyle::OverFullScreen,
+                        Presentation::FormSheet => UIModalPresentationStyle::FormSheet,
+                        Presentation::Modal | Presentation::Card => {
+                            UIModalPresentationStyle::PageSheet
+                        }
+                    });
                     if let Some(controller) = sheet.sheetPresentationController() {
                         unsafe {
                             controller.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
                                 &*stack.delegate,
                             )));
                         }
-                        Self::detents(&controller, detents, marker);
+                        if presentation == Presentation::FormSheet {
+                            Self::detents(&controller, detents, marker);
+                        }
                     }
                     stack.sheets.push(column);
                     Some((presenter, sheet))
@@ -781,8 +787,6 @@ mod platform {
         ) {
             controller.setPrefersGrabberVisible(true);
             if wanted.is_empty() {
-                let large = UISheetPresentationControllerDetent::largeDetent(marker);
-                controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&[large]));
                 return;
             }
             let mut listed = Vec::new();
