@@ -627,33 +627,14 @@ impl EditCore {
         crate::edit::search::step(&matches, from, forward)
     }
 
-    fn is_word_char(&self, at: usize) -> bool {
-        at < self.buffer.len_chars() && {
-            let c = self.buffer.rope.char(at);
-            c.is_alphanumeric() || c == '_'
-        }
-    }
-
-    fn word_at(&self, caret: usize) -> Option<std::ops::Range<usize>> {
-        let caret = caret.min(self.buffer.len_chars());
-        let mut start = caret;
-        while start > 0 && self.is_word_char(start - 1) {
-            start -= 1;
-        }
-        let mut end = caret;
-        while self.is_word_char(end) {
-            end += 1;
-        }
-        (start != end).then_some(start..end)
-    }
-
     pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        if rows == 0 || !self.primary().is_empty() {
+        if rows == 0 {
             return Vec::new();
         }
-        let Some(word) = self.word_at(self.primary().head) else {
+        let word = self.primary().range();
+        if word.is_empty() {
             return Vec::new();
-        };
+        }
         let first_line = first as usize;
         let last_line = (first_line + rows as usize).min(self.buffer.len_lines());
         if first_line >= last_line {
@@ -678,9 +659,7 @@ impl EditCore {
         while at + needle.len() <= band.len() {
             let found = band[at..at + needle.len()] == needle[..];
             let absolute = band_start + at;
-            let bounded = (absolute == 0 || !self.is_word_char(absolute - 1))
-                && !self.is_word_char(absolute + needle.len());
-            if found && bounded {
+            if found {
                 let (line, column) = self.buffer.char_to_coords(absolute);
                 let line_start = self.buffer.line_to_char(line);
                 out.push(SelSpan {
@@ -2221,11 +2200,16 @@ mod tests {
     }
 
     #[test]
-    fn word_highlight_scans_the_band_and_skips_longer_words() {
+    fn only_a_selection_highlights_its_other_occurrences() {
         let mut c = core("id\nid_x\nother\nid\nid\n");
         c.mode = EditMode::Normal;
         c.set_caret(0);
+        assert!(
+            c.word_highlight_spans(0, 5).is_empty(),
+            "a bare caret sitting on a word must not light up the whole file"
+        );
 
+        c.set_active(Selection { anchor: 0, head: 2 });
         let in_band = |first, rows| {
             c.word_highlight_spans(first, rows)
                 .iter()
@@ -2233,8 +2217,11 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        assert_eq!(in_band(0, 3), vec![(0, 0, 2)]);
-        assert_eq!(in_band(0, 5), vec![(0, 0, 2), (3, 0, 2), (4, 0, 2)]);
+        assert_eq!(in_band(0, 3), vec![(0, 0, 2), (1, 0, 2)]);
+        assert_eq!(
+            in_band(0, 5),
+            vec![(0, 0, 2), (1, 0, 2), (3, 0, 2), (4, 0, 2)]
+        );
         assert_eq!(in_band(3, 2), vec![(3, 0, 2), (4, 0, 2)]);
     }
 
