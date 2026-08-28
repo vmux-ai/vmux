@@ -36,7 +36,8 @@ mod platform {
         UINavigationController, UINavigationControllerDelegate, UIPresentationController,
         UISheetPresentationController, UISheetPresentationControllerDelegate,
         UISheetPresentationControllerDetent, UIStackView, UIStackViewDistribution,
-        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIVisualEffectView,
+        UISwipeGestureRecognizer, UISwipeGestureRecognizerDirection, UIUserInterfaceStyle, UIView,
+        UIViewAutoresizing, UIViewController, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -186,6 +187,7 @@ mod platform {
         row: Retained<UIStackView>,
         circle: Retained<UIVisualEffectView>,
         ids: Vec<String>,
+        at: usize,
     }
 
     impl Tabs {
@@ -270,7 +272,37 @@ mod platform {
                 row,
                 circle,
                 ids: Vec::new(),
+                at: 0,
             }
+        }
+
+        fn swipeable(&self, delegate: &NavDelegate, marker: MainThreadMarker) {
+            for direction in [
+                UISwipeGestureRecognizerDirection::Left,
+                UISwipeGestureRecognizerDirection::Right,
+            ] {
+                let swipe = unsafe {
+                    UISwipeGestureRecognizer::initWithTarget_action(
+                        UISwipeGestureRecognizer::alloc(marker),
+                        Some(delegate),
+                        Some(sel!(swiped:)),
+                    )
+                };
+                swipe.setDirection(direction);
+                self.capsule.addGestureRecognizer(&swipe);
+            }
+        }
+
+        fn neighbour(&self, direction: UISwipeGestureRecognizerDirection) -> Option<String> {
+            if self.ids.len() < 2 {
+                return None;
+            }
+            let next = if direction == UISwipeGestureRecognizerDirection::Left {
+                self.at + 1
+            } else {
+                self.at.checked_sub(1)?
+            };
+            self.ids.get(next).cloned()
         }
 
         fn pane(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
@@ -320,6 +352,9 @@ mod platform {
                         sel!(tabTapped:),
                         UIControlEvents::TouchUpInside,
                     );
+                }
+                if entry.here {
+                    self.at = self.ids.len();
                 }
                 self.ids.push(entry.id);
                 self.row.addArrangedSubview(&button);
@@ -395,6 +430,20 @@ mod platform {
                     return;
                 };
                 TAPPED.with_borrow_mut(|queued| queued.push(action));
+            }
+
+            #[unsafe(method(swiped:))]
+            fn swiped(&self, sender: &UISwipeGestureRecognizer) {
+                let direction = sender.direction();
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return;
+                    };
+                    let Some(id) = stack.tabs.neighbour(direction) else {
+                        return;
+                    };
+                    PICKED.with_borrow_mut(|slot| *slot = Some(id));
+                });
             }
 
             #[unsafe(method(centreTapped:))]
@@ -547,6 +596,7 @@ mod platform {
             .didMoveToParentViewController(Some(&root_controller));
 
         let tabs = Tabs::under(&root_view, marker);
+        tabs.swipeable(&delegate, marker);
         STACK.set(Some(NativeStack {
             root_view,
             columns: vec![column],
