@@ -31,13 +31,13 @@ fn main() {
             world
                 .add_plugins(NavPlugin::<Page>::default())
                 .insert_resource(Centre("+"))
-                .add_systems(Startup, seed)
+                .add_systems(Startup, setup)
                 .add_systems(Update, act);
         }))
         .run();
 }
 
-fn seed(mut reported: MessageWriter<Report<Page>>) {
+fn setup(mut reported: MessageWriter<Report<Page>>) {
     reported.write(Report {
         tabs: vec![
             ("tab:1".to_string(), Page::Tab(1)),
@@ -61,7 +61,7 @@ fn act(
     }
 }
 
-#[screen("vmux://app/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn App() -> Element {
     rsx! {
@@ -90,7 +90,7 @@ fn App() -> Element {
     }
 }
 
-#[screen("vmux://tab/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn TabScreen() -> Element {
     rsx! {
@@ -188,7 +188,7 @@ fn Body(near: String, far: String, kind: String) -> Element {
     }
 }
 
-#[screen("vmux://card/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn CardScreen() -> Element {
     rsx! {
@@ -198,7 +198,7 @@ fn CardScreen() -> Element {
     }
 }
 
-#[screen("vmux://modal/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn ModalScreen() -> Element {
     rsx! {
@@ -208,7 +208,7 @@ fn ModalScreen() -> Element {
     }
 }
 
-#[screen("vmux://form-sheet/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn FormSheetScreen() -> Element {
     rsx! {
@@ -218,7 +218,7 @@ fn FormSheetScreen() -> Element {
     }
 }
 
-#[screen("vmux://full-screen-modal/", painted = BACKDROP)]
+#[screen(painted = BACKDROP)]
 #[component]
 fn FullScreenModalScreen() -> Element {
     rsx! {

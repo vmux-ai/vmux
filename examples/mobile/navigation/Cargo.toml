@@ -1,12 +1,12 @@
 [package]
-name = "vmux_navigation_mobile"
+name = "vmux_mobile_navigation_example"
 version.workspace = true
 edition.workspace = true
 description = "The phone's navigation, driven by hand instead of by a Mac"
 publish = false
 
 [[bin]]
-name = "vmux_navigation_mobile"
+name = "vmux_mobile_navigation_example"
 path = "src/main.rs"
 
 [dependencies]

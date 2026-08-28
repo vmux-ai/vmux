@@ -5,7 +5,7 @@ use syn::punctuated::Punctuated;
 use syn::{Error, Expr, ItemFn, LitStr, Token};
 
 pub struct Args {
-    url: LitStr,
+    url: Option<LitStr>,
     painted: Option<Expr>,
     served_from: Option<LitStr>,
     owning_subtree: bool,
@@ -13,17 +13,22 @@ pub struct Args {
 
 impl Parse for Args {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let url: LitStr = input.parse()?;
         let mut args = Self {
-            url,
+            url: None,
             painted: None,
             served_from: None,
             owning_subtree: false,
         };
+        if input.peek(LitStr) {
+            args.url = Some(input.parse()?);
+            if input.is_empty() {
+                return Ok(args);
+            }
+            input.parse::<Token![,]>()?;
+        }
         if input.is_empty() {
             return Ok(args);
         }
-        input.parse::<Token![,]>()?;
         for option in Punctuated::<Setting, Token![,]>::parse_terminated(input)? {
             match option {
                 Setting::Painted(expr) => args.painted = Some(*expr),
@@ -65,8 +70,15 @@ impl Parse for Setting {
 pub fn expand(args: Args, component: ItemFn) -> TokenStream {
     let name = &component.sig.ident;
     let visibility = &component.vis;
-    let url = &args.url;
-    let named = format_ident!("{}", screaming(&name.to_string()));
+    let spelled = name.to_string();
+    let named = format_ident!("{}", screaming(&spelled));
+    let url = match &args.url {
+        Some(url) => quote! { #url },
+        None => {
+            let addressed = format!("vmux://{}/", kebab(&spelled));
+            quote! { #addressed }
+        }
+    };
 
     let mut page = quote! { ::vmux_native::NativePage::pane(#url, #name) };
     if let Some(url) = &args.served_from {
@@ -84,6 +96,17 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
 
         #component
     }
+}
+
+fn kebab(name: &str) -> String {
+    let mut out = String::new();
+    for (at, letter) in name.char_indices() {
+        if letter.is_uppercase() && at > 0 {
+            out.push('-');
+        }
+        out.extend(letter.to_lowercase());
+    }
+    out
 }
 
 fn screaming(name: &str) -> String {
