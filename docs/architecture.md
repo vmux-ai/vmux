@@ -448,47 +448,64 @@ link. An embedder therefore layers itself in front of the host the surface would
 
 ### How a push actually works
 
-Two stacks are kept in step. `nav.rs` holds the phone's own — tabs, a selection, and a
-`Vec<Screen>` of pushed levels per tab — and knows nothing about UIKit. `transition.rs` holds a
-`UINavigationController` and knows nothing about `Screen`. The join is three lines in
-`Nav::open`.
+Two stacks are kept in step. `nav.rs` holds the phone's own — tabs as entities, a pushed level
+as a child of the tab that opened it — and knows nothing about UIKit. `transition.rs` holds the
+view controllers and knows nothing about a `Route`. The join is a `Level`: the page that draws
+it, its title, and how it arrives.
 
-**The view controllers in that navigation stack are empty.** There is one webview, the shell's,
-and a controller's view is either that live webview — only ever the top one — or a still taken
-when it was covered. `occupy_top` is the whole idea: hand the live webview to whichever level is
-now on top.
+**A screen is a webview.** One page, one document, one `UIViewController`. A tab owns its own
+`UINavigationController` with its own pushed levels, and those controllers sit side by side in a
+plain `UIView` this code owns.
 
 ```mermaid
-sequenceDiagram
-    participant N as Nav (Rust)
-    participant U as UIKit
-    N->>U: push() — snapshot the webview,<br/>add the still OVER it
-    N->>N: pushed[tab].push(screen)
-    Note over N: the webview repaints to the new<br/>screen behind the still
-    N->>U: finish(title) — after 48ms
-    U->>U: still → the outgoing level
-    U->>U: live webview → a new top level
-    U->>U: pushViewController(animated)
+graph TB
+    W[UIWindow] --> P[pager]
+    W --> B["tab bar — UIGlassEffect"]
+    P --> N1["tab 1 — UINavigationController"]
+    P --> N2["tab 2 — UINavigationController"]
+    N1 --> L1[root webview]
+    N1 --> L2[pushed webview]
+    N2 --> L3[root webview]
 ```
 
-By the time UIKit animates, the outgoing level shows the picture it always showed and the
-incoming one is already painted. A pop is the mirror: the still goes to the level being left,
-`occupy_top` returns the webview to the one beneath.
+The pager is why a tab switch can be dragged: both tabs already exist, so a pan on the tab bar
+translates two sibling views. Only the seated tab and its two neighbours are kept; the rest are
+torn down, because the cost of this design is a live WebKit process per screen.
 
-The still goes **over** the webview rather than in place of it. Replacing it would leave the
-webview windowless for the whole paint wait, and WebKit does not promise to keep drawing a view
-with no window — the incoming screen could arrive blank. The 48ms is a guess, erring long,
-because nothing reports when an out-of-process paint has landed.
+The tab bar hangs off the **window**, not off the root view controller's view. A presented sheet
+is added above the root controller, so a bar living inside it would be buried — and
+`bringSubviewToFront` only reorders within one parent.
+
+Two UIKit rules this code has to obey, both learned by crashing.
+
+`setViewControllers:` and `dismissViewController:` call the navigation delegate back
+**synchronously**, and that delegate takes the same `RefCell` the caller is holding. Everything
+decides what to do inside the borrow and calls UIKit after it ends.
+
+`UIModalPresentationFullScreen` **detaches the presenting controller's view** once the
+transition finishes — and that view is winit's. The event loop then stops, so the app freezes
+behind its own modal. `fullScreenModal` therefore presents over full screen instead, which looks
+the same for an opaque page and leaves the window intact.
 
 A back-swipe runs the other way: UIKit drives it and only tells the delegate afterwards, so it
-cannot be bracketed. `didShowViewController:` compares the controller count against the levels
-it knows about, drops the difference, and bumps a counter the shell drains into `Nav::pop`.
-The gesture is refused at the root, where there is nothing to go back to.
+cannot be bracketed. `didShowViewController:` finds the column that owns the navigation
+controller, compares its controller count against the levels it knows about, and bumps a counter
+a system drains back into the ECS. The gesture is refused at a tab's root, where there is
+nothing to go back to.
 
-One webview is also why the phone cannot yet swipe between two conversations. Giving each screen
-its own view is the open question, and the cost is memory: the answer is a measurement, not an
-opinion. Three mounted — current and both neighbours — is the floor a swipe needs; anything wider
-is a switch-latency optimisation.
+### The navigator's names are Expo Router's
+
+`Stack`, `Tabs`, `Screen`, `presentation`, `use_navigation`, `use_route`. Most people meet this
+shape in Expo first, and a navigator that renames it is one they have to learn twice. How a
+route arrives is an option on its screen — `Card` pushes, `Modal` and `FormSheet` present,
+`FullScreenModal` covers — so a caller only ever says `go(route)` and the declaration decides.
+
+What is deliberately not borrowed is file-based routing. `_layout.tsx` works because a bundler
+can glob a directory into a route tree; here the nesting is the rsx, which the compiler checks.
+
+`use_route` matters more than it looks. A screen reads the route **it** was opened for, not
+whatever is on top, so a pushed level keeps its own title while a sheet sits over it and a tab
+sliding in from the edge draws itself rather than the tab being left.
 
 ---
 
