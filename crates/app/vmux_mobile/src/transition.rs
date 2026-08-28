@@ -48,17 +48,19 @@ mod platform {
     };
     use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
+    use objc2_quartz_core::CATransform3D;
     use objc2_ui_kit::{
         UIAction, UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
         UIBarButtonSystemItem, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState,
         UIEdgeInsets, UIFont, UIGestureRecognizer, UIGestureRecognizerDelegate,
-        UIGestureRecognizerState, UIGlassContainerEffect, UIGlassEffect, UILayoutConstraintAxis,
-        UIMenu, UIMenuElement, UIMenuElementAttributes, UIModalPresentationStyle,
-        UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
-        UIPanGestureRecognizer, UIPresentationController, UISheetPresentationController,
-        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent,
-        UISheetPresentationControllerDetentResolutionContext, UIStackView, UIStackViewDistribution,
-        UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController,
+        UIGestureRecognizerState, UIGlassContainerEffect, UIGlassEffect, UIImage,
+        UILayoutConstraintAxis, UIMenu, UIMenuElement, UIMenuElementAttributes,
+        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
+        UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
+        UISheetPresentationController, UISheetPresentationControllerDelegate,
+        UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
+        UIStackView, UIStackViewDistribution, UITapGestureRecognizer, UIUserInterfaceStyle, UIView,
+        UIViewAnimationOptions, UIViewAutoresizing, UIViewController,
         UIViewKeyframeAnimationOptions, UIVisualEffectView,
     };
     use vmux_native::WebView;
@@ -70,6 +72,15 @@ mod platform {
     const TAB_BAR_EDGE: f64 = 16.0;
     const TAB_BAR_GAP: f64 = 10.0;
     const DIP: f64 = 0.06;
+    const OVERVIEW_SCALE: f64 = 0.54;
+    const OVERVIEW_TILT: f64 = 0.95;
+    const OVERVIEW_SPREAD: f64 = 0.82;
+    const OVERVIEW_TIGHT: f64 = 0.22;
+    const OVERVIEW_DEPTH: f64 = 190.0;
+    const OVERVIEW_EYE: f64 = -1.0 / 900.0;
+    const OVERVIEW_GAP: f64 = 14.0;
+    const OVERVIEW_GLIDE: f64 = 0.35;
+    const OVERVIEW_RESIST: f64 = 0.3;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -225,6 +236,7 @@ mod platform {
         capsule: Retained<UIVisualEffectView>,
         row: Retained<UIStackView>,
         circle: Retained<UIVisualEffectView>,
+        browse: Retained<UIVisualEffectView>,
         ids: Vec<String>,
         at: usize,
     }
@@ -268,8 +280,21 @@ mod platform {
             });
             circle.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
 
+            let browse = Self::pane(TAB_BAR_HEIGHT, marker);
+            browse.setFrame(CGRect {
+                origin: CGPoint {
+                    x: width - TAB_BAR_EDGE - TAB_BAR_HEIGHT * 2.0 - TAB_BAR_GAP,
+                    y: 0.0,
+                },
+                size: CGSize {
+                    width: TAB_BAR_HEIGHT,
+                    height: TAB_BAR_HEIGHT,
+                },
+            });
+            browse.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
+
             let capsule = Self::pane(TAB_BAR_HEIGHT, marker);
-            let across = width - TAB_BAR_EDGE * 2.0 - TAB_BAR_HEIGHT - TAB_BAR_GAP;
+            let across = width - TAB_BAR_EDGE * 2.0 - TAB_BAR_HEIGHT * 2.0 - TAB_BAR_GAP * 2.0;
             capsule.setFrame(CGRect {
                 origin: CGPoint {
                     x: TAB_BAR_EDGE,
@@ -300,6 +325,7 @@ mod platform {
             capsule.contentView().addSubview(&row);
 
             strip.contentView().addSubview(&capsule);
+            strip.contentView().addSubview(&browse);
             strip.contentView().addSubview(&circle);
             match root_view.window() {
                 Some(window) => window.addSubview(&strip),
@@ -310,6 +336,7 @@ mod platform {
                 capsule,
                 row,
                 circle,
+                browse,
                 ids: Vec::new(),
                 at: 0,
             }
@@ -422,9 +449,69 @@ mod platform {
                 }
                 None => self.circle.setHidden(true),
             }
+            for spent in self.browse.contentView().subviews().iter() {
+                spent.removeFromSuperview();
+            }
+            let counter = UIButton::buttonWithType(UIButtonType::System, marker);
+            match UIImage::systemImageNamed(&NSString::from_str("square.on.square")) {
+                Some(glyph) => counter.setImage_forState(Some(&glyph), UIControlState::Normal),
+                None => counter.setTitle_forState(
+                    Some(&NSString::from_str(&self.ids.len().to_string())),
+                    UIControlState::Normal,
+                ),
+            }
+            unsafe { counter.setTintColor(Some(&UIColor::labelColor())) };
+            counter.setTitleColor_forState(Some(&UIColor::labelColor()), UIControlState::Normal);
+            unsafe {
+                counter.addTarget_action_forControlEvents(
+                    Some(delegate),
+                    sel!(browseTapped:),
+                    UIControlEvents::TouchUpInside,
+                );
+            }
+            counter.setFrame(self.browse.bounds());
+            counter.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            self.browse.contentView().addSubview(&counter);
+            self.browse.setHidden(self.ids.len() < 2);
+
             self.capsule.setHidden(self.ids.is_empty());
             self.strip
                 .setHidden(self.ids.is_empty() && centre.is_none());
+            self.lay_out();
+        }
+
+        fn lay_out(&self) {
+            let width = self.strip.bounds().size.width;
+            let square = CGSize {
+                width: TAB_BAR_HEIGHT,
+                height: TAB_BAR_HEIGHT,
+            };
+            let mut edge = TAB_BAR_EDGE;
+            for pane in [&self.circle, &self.browse] {
+                if pane.isHidden() {
+                    continue;
+                }
+                pane.setFrame(CGRect {
+                    origin: CGPoint {
+                        x: width - edge - TAB_BAR_HEIGHT,
+                        y: 0.0,
+                    },
+                    size: square,
+                });
+                edge += TAB_BAR_HEIGHT + TAB_BAR_GAP;
+            }
+            self.capsule.setFrame(CGRect {
+                origin: CGPoint {
+                    x: TAB_BAR_EDGE,
+                    y: 0.0,
+                },
+                size: CGSize {
+                    width: width - TAB_BAR_EDGE - edge,
+                    height: TAB_BAR_HEIGHT,
+                },
+            });
         }
 
         fn menu(id: &str, marker: MainThreadMarker) -> Retained<UIMenu> {
@@ -487,6 +574,285 @@ mod platform {
         dragging: Option<Drag>,
         tabs: Tabs,
         delegate: Retained<NavDelegate>,
+        overviewing: bool,
+        leave: Retained<UITapGestureRecognizer>,
+        sweep: Retained<UIPanGestureRecognizer>,
+        snaps: HashMap<String, Retained<UIView>>,
+        row: Vec<Card>,
+    }
+
+    struct Card {
+        at: usize,
+        view: Retained<UIView>,
+        snapshot: bool,
+    }
+
+    struct Overview;
+
+    impl Overview {
+        fn toggle() {
+            let plan = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                if !stack.sheets.is_empty() || stack.tabs.ids.len() < 2 {
+                    return None;
+                }
+                stack.overviewing = !stack.overviewing;
+                let on = stack.overviewing;
+                stack.leave.setEnabled(on);
+                stack.sweep.setEnabled(on);
+                stack.pager.setClipsToBounds(!on);
+                let places = if on {
+                    Self::capture(stack);
+                    Self::deal(stack);
+                    Self::plan(stack, 0.0)
+                } else {
+                    for card in &stack.row {
+                        if card.at != stack.tabs.at {
+                            card.view.setHidden(true);
+                        }
+                    }
+                    Vec::new()
+                };
+                Some((stack.pager.clone(), places, on))
+            });
+            let Some((pager, places, on)) = plan else {
+                return;
+            };
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let scale = if on { OVERVIEW_SCALE } else { 1.0 };
+            let settled = block2::RcBlock::new(move |_| {
+                if !on {
+                    Self::clear();
+                }
+            });
+            let settling = block2::RcBlock::new(move || {
+                pager.setTransform(Drag::moved(0.0, scale));
+                for (view, shape) in &places {
+                    view.layer().setTransform(*shape);
+                }
+            });
+            UIView::animateWithDuration_animations_completion(
+                0.3,
+                &settling,
+                Some(&settled),
+                marker,
+            );
+        }
+
+        fn capture(stack: &mut NativeStack) {
+            let Some(showing) = stack.tabs.ids.get(stack.tabs.at).cloned() else {
+                return;
+            };
+            if let Some(view) = stack
+                .stacks
+                .get(&showing)
+                .and_then(|column| column.navigation.view())
+                && !view.isHidden()
+                && let Some(shot) = view.snapshotViewAfterScreenUpdates(false)
+            {
+                stack.snaps.insert(showing, shot);
+            }
+        }
+
+        fn deal(stack: &mut NativeStack) {
+            let mut fresh = Vec::new();
+            for (at, id) in stack.tabs.ids.iter().enumerate() {
+                let live = stack
+                    .stacks
+                    .get(id)
+                    .and_then(|column| column.navigation.view());
+                let (view, snapshot) = match stack.snaps.get(id) {
+                    Some(shot) => {
+                        if let Some(live) = live.as_ref() {
+                            live.setHidden(true);
+                        }
+                        (shot.clone(), true)
+                    }
+                    None => match live {
+                        Some(view) => (view, false),
+                        None => continue,
+                    },
+                };
+                if snapshot && view.superview().is_none() {
+                    size_to_parent(&view, &stack.pager);
+                    stack.pager.addSubview(&view);
+                }
+                view.setHidden(false);
+                view.setUserInteractionEnabled(false);
+                fresh.push(Card { at, view, snapshot });
+            }
+            for card in stack.row.drain(..) {
+                if !card.snapshot {
+                    continue;
+                }
+                let kept = fresh
+                    .iter()
+                    .any(|other| std::ptr::eq(&*other.view, &*card.view));
+                if !kept {
+                    card.view.removeFromSuperview();
+                }
+            }
+            stack.row = fresh;
+        }
+
+        fn clear() {
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                for card in stack.row.drain(..) {
+                    card.view.setUserInteractionEnabled(true);
+                    card.view.layer().setTransform(Self::flat());
+                    if card.snapshot {
+                        card.view.removeFromSuperview();
+                    }
+                }
+                let showing = stack.tabs.ids.get(stack.tabs.at).cloned();
+                for (id, column) in stack.stacks.iter() {
+                    let Some(view) = column.navigation.view() else {
+                        continue;
+                    };
+                    view.layer().setTransform(Self::flat());
+                    view.setTransform(Drag::sideways(0.0));
+                    view.setUserInteractionEnabled(true);
+                    view.setHidden(Some(id) != showing.as_ref());
+                }
+            });
+        }
+
+        fn plan(stack: &NativeStack, shifted: f64) -> Vec<(Retained<UIView>, CATransform3D)> {
+            Self::plan_from(stack, stack.tabs.at, shifted)
+        }
+
+        fn plan_from(
+            stack: &NativeStack,
+            at: usize,
+            shifted: f64,
+        ) -> Vec<(Retained<UIView>, CATransform3D)> {
+            let width = stack.pager.bounds().size.width;
+            let step = width + OVERVIEW_GAP / OVERVIEW_SCALE;
+            let mut places = Vec::new();
+            for card in &stack.row {
+                let delta = card.at as f64 - at as f64 + shifted / step;
+                card.view.layer().setZPosition(-delta.abs());
+                places.push((card.view.clone(), Self::tilt(delta, width)));
+            }
+            places
+        }
+
+        fn tilt(delta: f64, width: f64) -> CATransform3D {
+            let near = delta.clamp(-1.0, 1.0);
+            let (sin, cos) = (-near * OVERVIEW_TILT).sin_cos();
+            let scale = 1.0 - 0.18 * near.abs();
+            let x = near * width * OVERVIEW_SPREAD + (delta - near) * width * OVERVIEW_TIGHT;
+            let z = -OVERVIEW_DEPTH * near.abs();
+            CATransform3D {
+                m11: cos * scale,
+                m12: 0.0,
+                m13: sin * scale,
+                m14: sin * scale * OVERVIEW_EYE,
+                m21: 0.0,
+                m22: scale,
+                m23: 0.0,
+                m24: 0.0,
+                m31: -sin * scale,
+                m32: 0.0,
+                m33: cos * scale,
+                m34: cos * scale * OVERVIEW_EYE,
+                m41: x,
+                m42: 0.0,
+                m43: z,
+                m44: z * OVERVIEW_EYE + 1.0,
+            }
+        }
+
+        fn flat() -> CATransform3D {
+            CATransform3D {
+                m11: 1.0,
+                m12: 0.0,
+                m13: 0.0,
+                m14: 0.0,
+                m21: 0.0,
+                m22: 1.0,
+                m23: 0.0,
+                m24: 0.0,
+                m31: 0.0,
+                m32: 0.0,
+                m33: 1.0,
+                m34: 0.0,
+                m41: 0.0,
+                m42: 0.0,
+                m43: 0.0,
+                m44: 1.0,
+            }
+        }
+
+        fn follow(shifted: f64) {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                let step = stack.pager.bounds().size.width + OVERVIEW_GAP / OVERVIEW_SCALE;
+                let travelled = -shifted / OVERVIEW_SCALE;
+                let last = stack.tabs.ids.len().saturating_sub(1) as f64;
+                let reached = stack.tabs.at as f64 - travelled / step;
+                let held = if reached < 0.0 {
+                    reached * OVERVIEW_RESIST
+                } else if reached > last {
+                    last + (reached - last) * OVERVIEW_RESIST
+                } else {
+                    reached
+                };
+                let eased = (stack.tabs.at as f64 - held) * step;
+                for (view, shape) in Self::plan(stack, eased) {
+                    view.layer().setTransform(shape);
+                }
+            });
+        }
+
+        fn release(shifted: f64, speed: f64) {
+            let plan = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let step = stack.pager.bounds().size.width + OVERVIEW_GAP / OVERVIEW_SCALE;
+                let travelled = -shifted / OVERVIEW_SCALE;
+                let coasted = travelled - speed * OVERVIEW_GLIDE / OVERVIEW_SCALE;
+                let mut hops = -(coasted / step).round() as isize;
+                let flicked = speed.abs() > 80.0 && travelled.abs() > 3.0;
+                if hops == 0 && (travelled.abs() > step / 16.0 || flicked) {
+                    hops = if coasted < 0.0 { 1 } else { -1 };
+                }
+                let last = stack.tabs.ids.len() as isize - 1;
+                let landing = (stack.tabs.at as isize + hops).clamp(0, last);
+                if landing as usize != stack.tabs.at {
+                    let id = stack.tabs.ids[landing as usize].clone();
+                    PICKED.with_borrow_mut(|slot| *slot = Some(id));
+                    return None;
+                }
+                Some((Self::plan(stack, 0.0), 0usize))
+            });
+            let Some((places, moved)) = plan else {
+                return;
+            };
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let settling = block2::RcBlock::new(move || {
+                for (view, shape) in &places {
+                    view.layer().setTransform(*shape);
+                }
+            });
+            let gliding = (0.42 + 0.11 * moved as f64).min(1.4);
+            UIView::animateWithDuration_delay_options_animations_completion(
+                gliding,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &settling,
+                None,
+                marker,
+            );
+        }
     }
 
     impl NativeStack {
@@ -498,6 +864,11 @@ mod platform {
                 let arriving = stack.stacks.get(&tab)?.navigation.view()?;
                 stack.pager.bringSubviewToFront(&arriving);
                 stack.rootless.setHidden(true);
+                if stack.overviewing {
+                    stack.seated = Some(tab.clone());
+                    arriving.setHidden(false);
+                    return None;
+                }
                 let vacated = stack.seated.replace(tab.clone());
                 let Some(vacated) = vacated.filter(|seen| *seen != tab) else {
                     arriving.setTransform(Drag::sideways(0.0));
@@ -514,6 +885,12 @@ mod platform {
                     .stacks
                     .get(&vacated)
                     .and_then(|column| column.navigation.view());
+                if let Some(view) = leaving.as_ref()
+                    && !view.isHidden()
+                    && let Some(shot) = view.snapshotViewAfterScreenUpdates(false)
+                {
+                    stack.snaps.insert(vacated.clone(), shot);
+                }
                 arriving.setTransform(Drag::sideways(entering));
                 arriving.setHidden(false);
                 Some((leaving, arriving, entering))
@@ -561,6 +938,12 @@ mod platform {
                     let Some(column) = stack.stacks.remove(&id) else {
                         continue;
                     };
+                    if let Some(view) = column.navigation.view()
+                        && !view.isHidden()
+                        && let Some(shot) = view.snapshotViewAfterScreenUpdates(false)
+                    {
+                        stack.snaps.insert(id.clone(), shot);
+                    }
                     spent.push(column);
                 }
                 spent
@@ -572,6 +955,43 @@ mod platform {
                 column.navigation.willMoveToParentViewController(None);
                 column.navigation.removeFromParentViewController();
             }
+
+            let settling = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                if !stack.overviewing {
+                    return None;
+                }
+                let marker = MainThreadMarker::new()?;
+                let before = stack.row.len();
+                let entered = stack.tabs.at.saturating_sub(1);
+                Overview::deal(stack);
+                if stack.row.len() == before {
+                    for (view, shape) in Overview::plan(stack, 0.0) {
+                        view.layer().setTransform(shape);
+                    }
+                    return None;
+                }
+                for (view, shape) in Overview::plan_from(stack, entered, 0.0) {
+                    view.layer().setTransform(shape);
+                }
+                Some((Overview::plan(stack, 0.0), marker))
+            });
+            let Some((places, marker)) = settling else {
+                return;
+            };
+            let sliding = block2::RcBlock::new(move || {
+                for (view, shape) in &places {
+                    view.layer().setTransform(*shape);
+                }
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.45,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &sliding,
+                None,
+                marker,
+            );
         }
 
         fn raise(tab: &str, levels: Vec<Level>) {
@@ -737,17 +1157,34 @@ mod platform {
         }
 
         pub fn tabs(entries: Vec<TabItem>, centre: Option<&'static str>) {
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
-                };
-                let Some(marker) = MainThreadMarker::new() else {
-                    return;
-                };
+            let settling = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let marker = MainThreadMarker::new()?;
                 let delegate = stack.delegate.clone();
                 stack.tabs.show(entries, centre, &delegate, marker);
                 stack.tabs.front();
+                if !stack.overviewing {
+                    return None;
+                }
+                Overview::deal(stack);
+                Some((Overview::plan(stack, 0.0), marker))
             });
+            let Some((places, marker)) = settling else {
+                return;
+            };
+            let sliding = block2::RcBlock::new(move || {
+                for (view, shape) in &places {
+                    view.layer().setTransform(*shape);
+                }
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.45,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &sliding,
+                None,
+                marker,
+            );
         }
 
         pub fn render() {
@@ -1058,14 +1495,34 @@ mod platform {
                 OVERVIEW.set(true);
             }
 
+            #[unsafe(method(browseTapped:))]
+            fn browse_tapped(&self, _sender: &UIButton) {
+                Overview::toggle();
+            }
+
+            #[unsafe(method(pagerTapped:))]
+            fn pager_tapped(&self, _sender: &UITapGestureRecognizer) {
+                Overview::toggle();
+            }
+
             #[unsafe(method(panned:))]
             fn panned(&self, sender: &UIPanGestureRecognizer) {
                 let shifted = -sender.translationInView(None).x;
+                let speed = -sender.velocityInView(None).x;
+                let overviewing =
+                    STACK.with_borrow(|stack| stack.as_ref().is_some_and(|stack| stack.overviewing));
                 match sender.state() {
-                    UIGestureRecognizerState::Changed => Drag::follow(shifted),
-                    UIGestureRecognizerState::Ended => {
-                        Drag::release(shifted, -sender.velocityInView(None).x)
+                    UIGestureRecognizerState::Changed if overviewing => Overview::follow(shifted),
+                    UIGestureRecognizerState::Ended if overviewing => {
+                        Overview::release(shifted, speed)
                     }
+                    UIGestureRecognizerState::Cancelled | UIGestureRecognizerState::Failed
+                        if overviewing =>
+                    {
+                        Overview::release(0.0, 0.0)
+                    }
+                    UIGestureRecognizerState::Changed => Drag::follow(shifted),
+                    UIGestureRecognizerState::Ended => Drag::release(shifted, speed),
                     UIGestureRecognizerState::Cancelled | UIGestureRecognizerState::Failed => {
                         Drag::release(0.0, 0.0)
                     }
@@ -1183,6 +1640,24 @@ mod platform {
         let delegate = NavDelegate::new(marker);
         let tabs = Tabs::under(&root_view, marker);
         tabs.swipeable(&delegate, marker);
+        let leave = unsafe {
+            UITapGestureRecognizer::initWithTarget_action(
+                UITapGestureRecognizer::alloc(marker),
+                Some(&*delegate),
+                Some(sel!(pagerTapped:)),
+            )
+        };
+        leave.setEnabled(false);
+        root_view.addGestureRecognizer(&leave);
+        let sweep = unsafe {
+            UIPanGestureRecognizer::initWithTarget_action(
+                UIPanGestureRecognizer::alloc(marker),
+                Some(&*delegate),
+                Some(sel!(panned:)),
+            )
+        };
+        sweep.setEnabled(false);
+        root_view.addGestureRecognizer(&sweep);
         STACK.set(Some(NativeStack {
             root_controller,
             pager,
@@ -1194,6 +1669,11 @@ mod platform {
             dragging: None,
             tabs,
             delegate,
+            overviewing: false,
+            leave,
+            sweep,
+            snaps: HashMap::new(),
+            row: Vec::new(),
         }));
     }
 

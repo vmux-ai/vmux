@@ -102,6 +102,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",
     "CALayer",
+    "CATransform3D",
     "objc2-core-foundation",
 ] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
@@ -137,6 +138,7 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "UISheetPresentationController",
     "UIPanGestureRecognizer",
     "UIStackView",
+    "UITapGestureRecognizer",
     "UIView",
     "UIViewController",
     "UIVisualEffect",
