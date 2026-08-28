@@ -14,12 +14,15 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::SideSheetCommandEvent;
+use vmux_layout::event::{SideSheetCommandEvent, SideSheetResizeEvent};
 use vmux_layout::{
     Header, LayoutCef,
     event::{HeaderCommandEvent, RELOAD_EVENT, ReloadEvent},
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetSectionsExpanded},
+    side_sheet::{
+        SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
+        SideSheetWidth,
+    },
     stack::{ActiveTabParam, Stack, focused_stack},
 };
 
@@ -32,6 +35,7 @@ impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
+            .add_observer(on_side_sheet_resize)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_systems(Update, handle_browser_commands.in_set(ReadAppCommands));
@@ -235,6 +239,27 @@ fn on_hard_reload_notify_header(
             RELOAD_EVENT,
             &ReloadEvent,
         ));
+    }
+}
+
+fn on_side_sheet_resize(
+    trigger: On<BinReceive<SideSheetResizeEvent>>,
+    mut width: ResMut<SideSheetWidth>,
+    mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    saves: Option<ResMut<Messages<vmux_setting::SettingsSaveRequest>>>,
+) {
+    let next = trigger.event().payload.clamped();
+    if width.0 == next {
+        return;
+    }
+    width.apply(next, &mut sheets);
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.layout.side_sheet.width = next;
+    if let Some(mut saves) = saves {
+        saves.write(vmux_setting::SettingsSaveRequest);
     }
 }
 

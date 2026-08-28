@@ -42,7 +42,9 @@ use vmux_core::{
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
-use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
+use vmux_layout::event::{
+    RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent, SideSheetResizeEvent,
+};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
@@ -176,6 +178,7 @@ impl Plugin for BrowserPlugin {
                 BinEventEmitterPlugin::<(
                     HeaderCommandEvent,
                     SideSheetCommandEvent,
+                    SideSheetResizeEvent,
                     RemoteCommandEvent,
                     RemoteCopyEvent,
                 )>::for_hosts(&["layout"]),

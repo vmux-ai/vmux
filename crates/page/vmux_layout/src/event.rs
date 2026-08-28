@@ -138,6 +138,32 @@ pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 pub const PANE_GAP_PX: f32 = 4.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
+pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
+pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SideSheetResizeEvent {
+    pub width: f32,
+}
+
+impl SideSheetResizeEvent {
+    pub fn clamped(self) -> f32 {
+        if !self.width.is_finite() {
+            return SIDE_SHEET_WIDTH_PX;
+        }
+        self.width
+            .clamp(SIDE_SHEET_MIN_WIDTH_PX, SIDE_SHEET_MAX_WIDTH_PX)
+    }
+}
 
 #[cfg(test)]
 mod address_tests {

@@ -212,9 +212,18 @@ pub fn Page() -> Element {
             last_scrolled_stack.set(Some((pane_id, stack_index)));
         }
     });
+    let host_sheet_width = state.side_sheet_width;
+    let sheet_left = state.window_pad_left;
+    let mut sheet_width = use_signal(|| host_sheet_width);
+    let mut sheet_resizing = use_signal(|| false);
+    use_effect(use_reactive!(|host_sheet_width| {
+        if !*sheet_resizing.peek() {
+            sheet_width.set(host_sheet_width);
+        }
+    }));
     let side_sheet_vars = format!(
         "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
-        state.side_sheet_width,
+        sheet_width(),
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
@@ -236,6 +245,7 @@ pub fn Page() -> Element {
                     id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
+                    SideSheetGrab { resizing: sheet_resizing }
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
                             panes,
@@ -274,6 +284,37 @@ pub fn Page() -> Element {
                 }
             }
             CommandBarPanel {}
+            if sheet_resizing() {
+                div {
+                    class: "pointer-events-auto fixed inset-0 z-[900] cursor-col-resize",
+                    onmousemove: move |event: Event<MouseData>| {
+                        let x = event.client_coordinates().x as f32 - sheet_left;
+                        sheet_width.set(crate::event::SideSheetResizeEvent { width: x }.clamped());
+                    },
+                    onmouseup: move |_| {
+                        sheet_resizing.set(false);
+                        let _ = send(
+                            &crate::event::SideSheetResizeEvent {
+                                width: sheet_width(),
+                            },
+                        );
+                    },
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize",
+            onmousedown: move |event: Event<MouseData>| {
+                event.prevent_default();
+                resizing.set(true);
+            },
+            div { class: "mx-auto h-full w-px bg-transparent transition-colors duration-150 hover:bg-cyan-400/40" }
         }
     }
 }
