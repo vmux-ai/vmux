@@ -180,7 +180,7 @@ fn Shell() -> Element {
 #[component]
 fn Root() -> Element {
     rsx! {
-        Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root", tabs: true }
+        Stage { near: "#1d4ed8", far: "#0891b2", kind: "tab root", tabs: true, root: true }
     }
 }
 
@@ -188,7 +188,7 @@ fn Root() -> Element {
 fn NoteScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", tabs: true }
+            Stage { near: "#7c3aed", far: "#db2777", kind: "pushed", tabs: true, root: false }
         }
     }
 }
@@ -197,16 +197,16 @@ fn NoteScreen() -> Element {
 fn AlertScreen() -> Element {
     rsx! {
         NavigationContainer::<Page> {
-            Stage { near: "#b45309", far: "#be123c", kind: "presented", tabs: false }
+            Stage { near: "#b45309", far: "#be123c", kind: "presented", tabs: true, root: false }
         }
     }
 }
 
 #[component]
-fn Stage(near: String, far: String, kind: String, tabs: bool) -> Element {
-    let navigation = use_navigation::<Page>();
-    let seen = navigation.view();
-    let title = match navigation.route() {
+fn Stage(near: String, far: String, kind: String, tabs: bool, root: bool) -> Element {
+    let seen = use_navigation::<Page>().view();
+    let shown = if root { &seen.root } else { &seen.current };
+    let title = match shown {
         Some(route) => route.title(),
         None => "Nothing".to_string(),
     };
@@ -217,7 +217,7 @@ fn Stage(near: String, far: String, kind: String, tabs: bool) -> Element {
         div { class: "screen", style: "--near:{near};--far:{far}",
             div { class: "vignette" }
 
-            NavigationBar { title: title.clone(), back: depth > 0, depth }
+            NavigationBar { title: title.clone(), back: !root, depth }
 
             div { class: "stage",
                 div { class: "eyebrow", "{kind}" }
