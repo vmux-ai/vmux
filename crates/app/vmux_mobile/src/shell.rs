@@ -79,7 +79,7 @@ impl Shell {
         match built {
             Some(Ok(shell)) => {
                 shell.order_among_siblings(vmux_native::SiblingOrder::Front);
-                Self::adopt(entity, &shell);
+                Self::adopt(entity, &shell, root.0);
                 MOUNTED.with_borrow_mut(|slot| *slot = Some(shell));
             }
             Some(Err(error)) => tracing::error!(%error, "shell: the chrome would not mount"),
@@ -88,7 +88,7 @@ impl Shell {
     }
 
     #[cfg(target_os = "ios")]
-    fn adopt(entity: Entity, shell: &WebView) {
+    fn adopt(entity: Entity, shell: &WebView, page: &'static NativePage) {
         let uikit = WINIT_WINDOWS.with(|windows| {
             let windows = windows.borrow();
             Uikit::of(&**windows.get_window(entity)?)
@@ -100,12 +100,12 @@ impl Shell {
         shell.fill_parent();
         uikit.paint_background();
         crate::deep_link::adopt();
-        crate::transition::install(&uikit.controller, &uikit.view, &shell.ui_view());
+        crate::transition::install(&uikit.controller, &uikit.view, &shell.ui_view(), page);
         crate::qr_scanner::install(&uikit.controller);
     }
 
     #[cfg(not(target_os = "ios"))]
-    fn adopt(_: Entity, _: &WebView) {}
+    fn adopt(_: Entity, _: &WebView, _: &'static NativePage) {}
 
     fn pump(mut lifecycle: MessageReader<AppLifecycle>) {
         for reported in lifecycle.read() {

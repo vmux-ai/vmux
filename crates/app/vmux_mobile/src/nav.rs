@@ -1,7 +1,7 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 
-use crate::transition::{Level, NativeStack};
+use crate::transition::{Level, NativeStack, TabEntry};
 
 pub trait Route: Clone + PartialEq + Send + Sync + 'static {
     type Name: Copy + PartialEq + Send + Sync + 'static;
@@ -59,6 +59,9 @@ pub struct Dismiss;
 #[derive(Message)]
 pub struct Dropped(pub usize);
 
+#[derive(Message)]
+pub struct Tapped(pub &'static str);
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum Arrives {
     Pushed,
@@ -70,10 +73,17 @@ pub struct Declare<S: Route> {
     pub name: S::Name,
     pub draws: &'static vmux_native::NativePage,
     pub arrives: Arrives,
+    pub action: Option<&'static str>,
+}
+
+pub struct Draws {
+    pub page: &'static vmux_native::NativePage,
+    pub arrives: Arrives,
+    pub action: Option<&'static str>,
 }
 
 #[derive(Resource)]
-pub struct Declared<S: Route>(Vec<(S::Name, &'static vmux_native::NativePage, Arrives)>);
+pub struct Declared<S: Route>(Vec<(S::Name, Draws)>);
 
 impl<S: Route> Default for Declared<S> {
     fn default() -> Self {
@@ -82,14 +92,46 @@ impl<S: Route> Default for Declared<S> {
 }
 
 impl<S: Route> Declared<S> {
-    pub fn of(&self, name: S::Name) -> Option<(&'static vmux_native::NativePage, Arrives)> {
-        for (known, draws, arrives) in &self.0 {
+    pub fn of(&self, name: S::Name) -> Option<&Draws> {
+        for (known, draws) in &self.0 {
             if *known == name {
-                return Some((*draws, *arrives));
+                return Some(draws);
             }
         }
         None
     }
+}
+
+#[derive(Resource)]
+pub struct Centre(pub &'static str);
+
+#[derive(Default)]
+struct Root {
+    title: String,
+    action: Option<&'static str>,
+}
+
+impl PartialEq for Root {
+    fn eq(&self, other: &Self) -> bool {
+        self.title == other.title && self.action == other.action
+    }
+}
+
+type Listed<'w, 's, S> = Query<
+    'w,
+    's,
+    (
+        &'static Tab,
+        &'static Shows<S>,
+        Option<&'static Local>,
+        Option<&'static Selected>,
+    ),
+>;
+
+#[derive(Resource, Default)]
+struct Painted {
+    tabs: Vec<TabEntry>,
+    root: Root,
 }
 
 #[derive(Resource)]
@@ -107,6 +149,8 @@ impl<S: Route> Plugin for NavPlugin<S> {
     fn build(&self, app: &mut App) {
         app.insert_resource(Opened(0))
             .init_resource::<Declared<S>>()
+            .init_resource::<Painted>()
+            .add_message::<Tapped>()
             .add_message::<Declare<S>>()
             .add_message::<Report<S>>()
             .add_message::<Select>()
@@ -126,6 +170,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::open_blank::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
+                    Nav::paint::<S>,
                 )
                     .chain(),
             );
@@ -221,12 +266,58 @@ impl Nav {
         at
     }
 
-    fn reconcile(mut dropped: MessageWriter<Dropped>) {
+    fn reconcile(
+        mut dropped: MessageWriter<Dropped>,
+        mut tapped: MessageWriter<Tapped>,
+        mut picked: MessageWriter<Select>,
+    ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
-        if count == 0 {
+        if count > 0 {
+            dropped.write(Dropped(count));
+        }
+        for action in crate::transition::take_tapped() {
+            tapped.write(Tapped(action));
+        }
+        if let Some(id) = crate::transition::take_picked() {
+            picked.write(Select(id));
+        }
+    }
+
+    fn paint<S: Route>(
+        known: Listed<S>,
+        declared: Res<Declared<S>>,
+        centre: Option<Res<Centre>>,
+        mut painted: ResMut<Painted>,
+    ) {
+        let mut listed = Vec::new();
+        let mut selected = None;
+        let mut root = Root::default();
+        for (tab, shows, local, chosen) in known.iter() {
+            listed.push((tab.id.clone(), shows.0.title(), local.is_some()));
+            if chosen.is_none() {
+                continue;
+            }
+            selected = Some(tab.id.clone());
+            root.title = shows.0.title();
+            root.action = declared.of(shows.0.name()).and_then(|draws| draws.action);
+        }
+        listed.sort_by(|left, right| left.2.cmp(&right.2).then(left.0.cmp(&right.0)));
+
+        let mut entries = Vec::new();
+        for (id, name, _) in listed {
+            let here = Some(&id) == selected.as_ref();
+            entries.push(TabEntry { id, name, here });
+        }
+
+        if painted.root != root {
+            NativeStack::root(root.title.clone(), root.action);
+            painted.root = root;
+        }
+        if painted.tabs == entries {
             return;
         }
-        dropped.write(Dropped(count));
+        painted.tabs = entries.clone();
+        NativeStack::tabs(entries, centre.map(|centre| centre.0));
     }
 
     fn declare<S: Route>(mut asked: MessageReader<Declare<S>>, mut declared: ResMut<Declared<S>>) {
@@ -234,12 +325,20 @@ impl Nav {
             name,
             draws,
             arrives,
+            action,
         } in asked.read()
         {
             if declared.of(*name).is_some() {
                 continue;
             }
-            declared.0.push((*name, draws, *arrives));
+            declared.0.push((
+                *name,
+                Draws {
+                    page: draws,
+                    arrives: *arrives,
+                    action: *action,
+                },
+            ));
         }
     }
 
@@ -348,12 +447,13 @@ impl Nav {
         };
         let mut levels = Vec::new();
         for screen in shown {
-            let Some((page, _)) = declared.of(screen.name()) else {
+            let Some(draws) = declared.of(screen.name()) else {
                 continue;
             };
             levels.push(Level {
-                page,
+                page: draws.page,
                 title: screen.title(),
+                action: draws.action,
             });
         }
         levels
@@ -387,23 +487,25 @@ impl Nav {
         for Push(screen) in pushes.read() {
             let onto = Self::top(tab, &children);
             commands.spawn((Shows(screen.clone()), ChildOf(onto)));
-            let Some((page, _)) = declared.of(screen.name()) else {
+            let Some(draws) = declared.of(screen.name()) else {
                 continue;
             };
             NativeStack::push(Level {
-                page,
+                page: draws.page,
                 title: screen.title(),
+                action: draws.action,
             });
         }
         for Present(screen) in presents.read() {
             let onto = Self::top(tab, &children);
             commands.spawn((Shows(screen.clone()), Sheet, ChildOf(onto)));
-            let Some((page, _)) = declared.of(screen.name()) else {
+            let Some(draws) = declared.of(screen.name()) else {
                 continue;
             };
             NativeStack::present(Level {
-                page,
+                page: draws.page,
                 title: screen.title(),
+                action: draws.action,
             });
         }
     }
