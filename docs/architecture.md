@@ -413,15 +413,6 @@ and subscriptions are still polled. `ListAgents` and `ListTeam` are brokered int
 client's ECS rather than read from the server, so they answer `NoDesktop` until a window is
 there to ask.
 
-### The phone navigates by what is open on the Mac
-
-The phone's tabs **are** the Mac's tabs — `Tab` → `Pane` → `Stack` off the wire, flattened
-because a phone shows one stack at a time. A stack the phone cannot draw is mirrored rather than
-dropped, so the two tab bars never disagree.
-
-`ReadLayout` and `ReadTerminal` are enumerated rather than forwarding `AgentQuery` wholesale:
-that enum also carries `RecordStart` and its siblings, which act rather than report.
-
 ### Who owns the phone's event loop
 
 `bevy_winit`, exactly as on the desktop. Dioxus is demoted to what diffs a tree. Two things this
