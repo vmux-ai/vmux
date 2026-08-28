@@ -321,11 +321,8 @@ mod platform {
         }
 
         fn detents(controller: &UISheetPresentationController, marker: MainThreadMarker) {
-            let medium = UISheetPresentationControllerDetent::mediumDetent(marker);
             let large = UISheetPresentationControllerDetent::largeDetent(marker);
-            controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&[
-                medium, large,
-            ]));
+            controller.setDetents(&objc2_foundation::NSArray::from_retained_slice(&[large]));
             controller.setPrefersGrabberVisible(true);
         }
     }
