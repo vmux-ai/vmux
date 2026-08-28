@@ -119,9 +119,6 @@ impl Demo {
 }
 
 fn main() {
-    std::panic::set_hook(Box::new(|info| {
-        tracing::error!("VMUXPANIC {info}");
-    }));
     App::new()
         .add_plugins(MobilePlugin::showing(&SHELL).serving(|world| {
             world

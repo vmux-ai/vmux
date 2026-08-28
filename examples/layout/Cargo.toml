@@ -15,7 +15,6 @@ path = "src/main.rs"
 
 [dependencies]
 bevy_app = { workspace = true }
-tracing = "0.1"
 bevy_ecs = { workspace = true }
 dioxus = { version = "=0.7.9", default-features = false, features = [
     "minimal",
