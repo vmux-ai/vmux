@@ -282,7 +282,7 @@ impl Nav {
         let mut selected = None;
         let mut ready = false;
         for (tab, shows, local, chosen) in known.iter() {
-            listed.push((tab.id.clone(), shows.0.title(), local.is_some()));
+            listed.push((tab.id.clone(), shows.0.clone(), local.is_some()));
             if chosen.is_none() {
                 continue;
             }
@@ -291,10 +291,37 @@ impl Nav {
         }
         listed.sort_by(|left, right| left.2.cmp(&right.2).then(left.0.cmp(&right.0)));
 
+        let mut at_selected = 0;
+        for (at, (id, _, _)) in listed.iter().enumerate() {
+            if Some(id) == selected.as_ref() {
+                at_selected = at;
+            }
+        }
+
         let mut entries = Vec::new();
-        for (id, name, _) in listed {
+        let mut wanted = Vec::new();
+        for (at, (id, screen, _)) in listed.into_iter().enumerate() {
             let here = Some(&id) == selected.as_ref();
-            entries.push(TabEntry { id, name, here });
+            if at.abs_diff(at_selected) <= 1
+                && let Some(draws) = declared.of(screen.name())
+            {
+                wanted.push((
+                    id.clone(),
+                    Level {
+                        page: draws.page,
+                        title: screen.title(),
+                        action: draws.action,
+                    },
+                ));
+            }
+            entries.push(TabEntry {
+                id,
+                name: screen.title(),
+                here,
+            });
+        }
+        if ready {
+            NativeStack::warm(wanted);
         }
 
         if ready && painted.seated != selected {
