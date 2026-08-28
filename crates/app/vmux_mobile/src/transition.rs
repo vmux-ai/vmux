@@ -57,7 +57,7 @@ mod platform {
         UISheetPresentationController, UISheetPresentationControllerDelegate,
         UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
         UIStackView, UIStackViewDistribution, UIUserInterfaceStyle, UIView, UIViewAutoresizing,
-        UIViewController, UIVisualEffectView,
+        UIViewController, UIViewKeyframeAnimationOptions, UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -67,6 +67,7 @@ mod platform {
     const TAB_BAR_HEIGHT: f64 = 56.0;
     const TAB_BAR_EDGE: f64 = 16.0;
     const TAB_BAR_GAP: f64 = 10.0;
+    const DIP: f64 = 0.06;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -502,21 +503,15 @@ mod platform {
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let sliding = (leaving.clone(), arriving);
-            let slide = block2::RcBlock::new(move || {
-                if let Some(leaving) = sliding.0.as_ref() {
-                    leaving.setTransform(Drag::sideways(-entering));
-                }
-                sliding.1.setTransform(Drag::sideways(0.0));
-            });
+            let departing = leaving.clone();
             let done = block2::RcBlock::new(move |_| {
-                let Some(leaving) = leaving.as_ref() else {
+                let Some(departing) = departing.as_ref() else {
                     return;
                 };
-                leaving.setHidden(true);
-                leaving.setTransform(Drag::sideways(0.0));
+                departing.setHidden(true);
+                departing.setTransform(Drag::sideways(0.0));
             });
-            UIView::animateWithDuration_animations_completion(0.28, &slide, Some(&done), marker);
+            Drag::glide(leaving, arriving, 0.0, entering, -entering, done, marker);
         }
 
         pub fn warm(wanted: Vec<(String, Vec<Level>)>) {
@@ -848,11 +843,13 @@ mod platform {
                     return;
                 };
                 let travelled = -shifted.clamp(-drag.across, drag.across);
+                let scale =
+                    1.0 - DIP * (std::f64::consts::PI * travelled / drag.across).sin().abs();
                 if let Some(leaving) = Self::leaving(stack) {
-                    leaving.setTransform(Self::sideways(travelled));
+                    leaving.setTransform(Self::moved(travelled, scale));
                 }
                 if let Some(arriving) = drag.incoming.navigation.view() {
-                    arriving.setTransform(Self::sideways(travelled + drag.entering));
+                    arriving.setTransform(Self::moved(travelled + drag.entering, scale));
                 }
             });
         }
@@ -890,20 +887,25 @@ mod platform {
                 let agreed = shifted != 0.0 && shifted.signum() == drag.entering.signum();
                 let commit = far && agreed;
                 let landing = if commit { -drag.entering } else { 0.0 };
-                Some((leaving, arriving, landing, drag.entering, commit))
+                let from = -shifted.clamp(-drag.across, drag.across);
+                Some((leaving, arriving, landing, drag.entering, commit, from))
             });
-            let Some((leaving, arriving, landing, entering, commit)) = plan else {
+            let Some((leaving, arriving, landing, entering, commit, from)) = plan else {
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let slide = block2::RcBlock::new(move || {
-                leaving.setTransform(Drag::sideways(landing));
-                arriving.setTransform(Drag::sideways(landing + entering));
-            });
             let done = block2::RcBlock::new(move |_| Drag::land(commit));
-            UIView::animateWithDuration_animations_completion(0.3, &slide, Some(&done), marker);
+            Self::glide(
+                Some(leaving),
+                arriving,
+                from,
+                entering,
+                landing,
+                done,
+                marker,
+            );
         }
 
         fn land(commit: bool) {
@@ -939,14 +941,61 @@ mod platform {
         }
 
         fn sideways(by: f64) -> CGAffineTransform {
+            Self::moved(by, 1.0)
+        }
+
+        fn moved(by: f64, scale: f64) -> CGAffineTransform {
             CGAffineTransform {
-                a: 1.0,
+                a: scale,
                 b: 0.0,
                 c: 0.0,
-                d: 1.0,
+                d: scale,
                 tx: by,
                 ty: 0.0,
             }
+        }
+
+        fn glide(
+            leaving: Option<Retained<UIView>>,
+            arriving: Retained<UIView>,
+            from: f64,
+            entering: f64,
+            landing: f64,
+            settled: block2::RcBlock<dyn Fn(objc2::runtime::Bool)>,
+            marker: MainThreadMarker,
+        ) {
+            let midway = (from + landing) / 2.0;
+            let (dipping, dipped) = (leaving.clone(), arriving.clone());
+            let slide = block2::RcBlock::new(move || {
+                let (leaving, arriving) = (dipping.clone(), dipped.clone());
+                let dip = block2::RcBlock::new(move || {
+                    if let Some(leaving) = leaving.as_ref() {
+                        leaving.setTransform(Drag::moved(midway, 1.0 - DIP));
+                    }
+                    arriving.setTransform(Drag::moved(midway + entering, 1.0 - DIP));
+                });
+                UIView::addKeyframeWithRelativeStartTime_relativeDuration_animations(
+                    0.0, 0.5, &dip, marker,
+                );
+                let (leaving, arriving) = (dipping.clone(), dipped.clone());
+                let rise = block2::RcBlock::new(move || {
+                    if let Some(leaving) = leaving.as_ref() {
+                        leaving.setTransform(Drag::sideways(landing));
+                    }
+                    arriving.setTransform(Drag::sideways(landing + entering));
+                });
+                UIView::addKeyframeWithRelativeStartTime_relativeDuration_animations(
+                    0.5, 0.5, &rise, marker,
+                );
+            });
+            UIView::animateKeyframesWithDuration_delay_options_animations_completion(
+                0.34,
+                0.0,
+                UIViewKeyframeAnimationOptions::CalculationModeCubic,
+                &slide,
+                Some(&settled),
+                marker,
+            );
         }
     }
 
