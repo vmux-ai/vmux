@@ -6,7 +6,7 @@ use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Presentation, Report, Route, Tapped};
-use vmux_mobile::{Screen, Stack, Tabs, use_router};
+use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (10, 10, 10, 255);
@@ -96,84 +96,124 @@ fn App() -> Element {
     }
 }
 
+struct Demo {
+    router: Router<Page>,
+    hue: usize,
+    kind: &'static str,
+    title: String,
+    trail: String,
+    rungs: Vec<(&'static str, String)>,
+    card: String,
+    modal: String,
+    sheet: String,
+    full: String,
+}
+
+fn use_demo() -> Demo {
+    Demo::of(use_router::<Page>())
+}
+
+impl Demo {
+    fn of(router: Router<Page>) -> Self {
+        let here = router.route();
+        let (hue, kind) = match &here {
+            Some(Page::Tab(at)) => ((at * 37 + 185) % 360, "tab root"),
+            Some(Page::Card(_)) => (285, "card"),
+            Some(Page::Modal(_)) => (30, "modal"),
+            Some(Page::FormSheet(_)) => (175, "form sheet"),
+            Some(Page::FullScreenModal(_)) => (255, "full screen modal"),
+            None => (185, "nowhere"),
+        };
+        let title = match &here {
+            Some(route) => route.title(),
+            None => "Nothing".to_string(),
+        };
+        let (mut cards, mut modals, mut sheets, mut full_screens) = (0, 0, 0, 0);
+        let mut crumbs = Vec::new();
+        for route in router.segments() {
+            match route {
+                Page::Card(_) => cards += 1,
+                Page::Modal(_) => modals += 1,
+                Page::FormSheet(_) => sheets += 1,
+                Page::FullScreenModal(_) => full_screens += 1,
+                Page::Tab(_) => {}
+            }
+            crumbs.push(route.title());
+        }
+        Self {
+            router,
+            hue,
+            kind,
+            title,
+            trail: Self::elide(crumbs),
+            rungs: Self::rungs(router.depth(), router.position()),
+            card: format!("Card {}", cards + 1),
+            modal: format!("Modal {}", modals + 1),
+            sheet: format!("Sheet {}", sheets + 1),
+            full: format!("Full {}", full_screens + 1),
+        }
+    }
+
+    fn elide(mut crumbs: Vec<String>) -> String {
+        if crumbs.len() > CRUMBS {
+            let tail = crumbs.split_off(crumbs.len() - (CRUMBS - 1));
+            crumbs.truncate(1);
+            crumbs.push("\u{2026}".to_string());
+            for crumb in tail {
+                crumbs.push(crumb);
+            }
+        }
+        crumbs.join(" \u{203a} ")
+    }
+
+    fn rungs(depth: usize, at: usize) -> Vec<(&'static str, String)> {
+        let levels = depth + 1;
+        let mut slots = Vec::new();
+        if levels <= RUNGS {
+            for level in 0..levels {
+                slots.push(Some(level));
+            }
+        } else {
+            for level in 0..HEAD {
+                slots.push(Some(level));
+            }
+            slots.push(None);
+            for level in (levels - (RUNGS - HEAD - 1))..levels {
+                slots.push(Some(level));
+            }
+        }
+        let mut rungs = Vec::new();
+        for slot in 0..RUNGS {
+            let Some(level) = slots.get(slot) else {
+                rungs.push(("mx-0 h-1 w-0 flex-none bg-border opacity-0", String::new()));
+                continue;
+            };
+            let Some(level) = level else {
+                rungs.push((
+                    "mx-1.5 flex-none text-xs font-medium leading-none text-muted-foreground",
+                    format!("+{}", levels - (RUNGS - 1)),
+                ));
+                continue;
+            };
+            if depth == 0 {
+                rungs.push(("mx-0.5 h-1 flex-1 bg-border", String::new()));
+            } else if *level == at {
+                rungs.push(("mx-0.5 h-1 flex-1 bg-chart-3", String::new()));
+            } else {
+                rungs.push(("mx-0.5 h-1 flex-1 bg-foreground", String::new()));
+            }
+        }
+        rungs
+    }
+}
+
 #[screen]
 #[component]
 fn TabScreen() -> Element {
-    let router = use_router::<Page>();
-    let here = router.route();
-    let (hue, kind) = match &here {
-        Some(Page::Tab(at)) => ((at * 37 + 185) % 360, "tab root"),
-        Some(Page::Card(_)) => (285, "card"),
-        Some(Page::Modal(_)) => (30, "modal"),
-        Some(Page::FormSheet(_)) => (175, "form sheet"),
-        Some(Page::FullScreenModal(_)) => (255, "full screen modal"),
-        None => (185, "nowhere"),
-    };
-    let title = match &here {
-        Some(route) => route.title(),
-        None => "Nothing".to_string(),
-    };
-    let depth = router.depth();
-    let at = router.position();
-    let (mut cards, mut modals, mut sheets, mut full_screens) = (0, 0, 0, 0);
-    let mut trail = Vec::new();
-    for route in router.segments() {
-        match route {
-            Page::Card(_) => cards += 1,
-            Page::Modal(_) => modals += 1,
-            Page::FormSheet(_) => sheets += 1,
-            Page::FullScreenModal(_) => full_screens += 1,
-            Page::Tab(_) => {}
-        }
-        trail.push(route.title());
-    }
-    if trail.len() > CRUMBS {
-        let tail = trail.split_off(trail.len() - (CRUMBS - 1));
-        trail.truncate(1);
-        trail.push("\u{2026}".to_string());
-        for crumb in tail {
-            trail.push(crumb);
-        }
-    }
-    let trail = trail.join(" \u{203a} ");
-
-    let levels = depth + 1;
-    let mut slots = Vec::new();
-    if levels <= RUNGS {
-        for level in 0..levels {
-            slots.push(Some(level));
-        }
-    } else {
-        for level in 0..HEAD {
-            slots.push(Some(level));
-        }
-        slots.push(None);
-        for level in (levels - (RUNGS - HEAD - 1))..levels {
-            slots.push(Some(level));
-        }
-    }
-    let mut rungs = Vec::new();
-    for slot in 0..RUNGS {
-        let Some(level) = slots.get(slot) else {
-            rungs.push(("mx-0 h-1 w-0 flex-none bg-border opacity-0", String::new()));
-            continue;
-        };
-        let Some(level) = level else {
-            let hidden = levels - (RUNGS - 1);
-            rungs.push((
-                "mx-1.5 flex-none text-xs font-medium leading-none text-muted-foreground",
-                format!("+{hidden}"),
-            ));
-            continue;
-        };
-        if depth == 0 {
-            rungs.push(("mx-0.5 h-1 flex-1 bg-border", String::new()));
-        } else if *level == at {
-            rungs.push(("mx-0.5 h-1 flex-1 bg-chart-3", String::new()));
-        } else {
-            rungs.push(("mx-0.5 h-1 flex-1 bg-foreground", String::new()));
-        }
-    }
+    let demo = use_demo();
+    let (hue, kind, title, trail) = (demo.hue, demo.kind, demo.title.clone(), demo.trail.clone());
+    let rungs = demo.rungs.clone();
+    let router = demo.router;
 
     rsx! {
     div {
@@ -197,25 +237,22 @@ fn TabScreen() -> Element {
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Key {
                         label: "Card",
-                        onpick: move |_| router.push(Page::Card(format!("Card {}", cards + 1))),
+                        onpick: move |_| router.push(Page::Card(demo.card.clone())),
                     }
                     Key {
                         label: "Modal",
-                        onpick: move |_| router.push(Page::Modal(format!("Modal {}", modals + 1))),
+                        onpick: move |_| router.push(Page::Modal(demo.modal.clone())),
                     }
                     Key {
                         label: "Form Sheet",
                         onpick: move |_| {
-                            router.push(Page::FormSheet(format!("Sheet {}", sheets + 1)))
+                            router.push(Page::FormSheet(demo.sheet.clone()))
                         },
                     }
                     Key {
                         label: "Full Screen Modal",
                         onpick: move |_| {
-                            router.push(Page::FullScreenModal(format!(
-                                "Full {}",
-                                full_screens + 1
-                            )))
+                            router.push(Page::FullScreenModal(demo.full.clone()))
                         },
                     }
                 }
