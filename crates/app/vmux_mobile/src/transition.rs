@@ -63,8 +63,8 @@ mod platform {
         UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
         UISheetPresentationController, UISheetPresentationControllerDelegate,
         UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
-        UIStackView, UIStackViewDistribution, UITapGestureRecognizer, UIUserInterfaceStyle, UIView,
-        UIViewAnimationOptions, UIViewAutoresizing, UIViewController,
+        UIStackView, UIStackViewDistribution, UITapGestureRecognizer, UITouch,
+        UIUserInterfaceStyle, UIView, UIViewAnimationOptions, UIViewAutoresizing, UIViewController,
         UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
         UIViewKeyframeAnimationOptions, UIVisualEffectView,
     };
@@ -102,6 +102,7 @@ mod platform {
     const OVERVIEW_GAP: f64 = 14.0;
     const OVERVIEW_GLIDE: f64 = 0.35;
     const OVERVIEW_RESIST: f64 = 0.3;
+    const OVERVIEW_SHUT: f64 = 60.0;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -1023,6 +1024,7 @@ mod platform {
     struct Card {
         at: usize,
         view: Retained<UIView>,
+        shut: Retained<UIView>,
         snapshot: bool,
     }
 
@@ -1149,9 +1151,18 @@ mod platform {
                 view.setHidden(false);
                 view.setUserInteractionEnabled(false);
                 Self::round(&view, true);
-                fresh.push(Card { at, view, snapshot });
+                let Some(shut) = Self::shutter(stack, at) else {
+                    continue;
+                };
+                fresh.push(Card {
+                    at,
+                    view,
+                    shut,
+                    snapshot,
+                });
             }
             for card in stack.row.drain(..) {
+                card.shut.removeFromSuperview();
                 if !card.snapshot {
                     continue;
                 }
@@ -1163,6 +1174,30 @@ mod platform {
                 }
             }
             stack.row = fresh;
+        }
+
+        fn shutter(stack: &NativeStack, at: usize) -> Option<Retained<UIView>> {
+            let marker = MainThreadMarker::new()?;
+            let bounds = stack.pager.bounds();
+            let over = UIView::initWithFrame(UIView::alloc(marker), bounds);
+            over.setBackgroundColor(None);
+            let cross = Pane::glass(OVERVIEW_SHUT, marker);
+            cross.setFrame(CGRect {
+                origin: CGPoint {
+                    x: bounds.size.width - OVERVIEW_SHUT - TAB_BAR_EDGE,
+                    y: TAB_BAR_EDGE,
+                },
+                size: CGSize {
+                    width: OVERVIEW_SHUT,
+                    height: OVERVIEW_SHUT,
+                },
+            });
+            let button = Pane::glyph("xmark", &stack.delegate, sel!(shutTapped:), marker);
+            button.setTag(at as isize);
+            Pane::fill(&button, &cross);
+            over.addSubview(&cross);
+            stack.pager.addSubview(&over);
+            Some(over)
         }
 
         fn round(view: &UIView, on: bool) {
@@ -1181,6 +1216,7 @@ mod platform {
                     return;
                 };
                 for card in stack.row.drain(..) {
+                    card.shut.removeFromSuperview();
                     card.view.setUserInteractionEnabled(true);
                     card.view.layer().setTransform(Self::flat());
                     Self::round(&card.view, false);
@@ -1216,7 +1252,10 @@ mod platform {
             for card in &stack.row {
                 let delta = card.at as f64 - at as f64 + shifted / step;
                 card.view.layer().setZPosition(-delta.abs());
-                places.push((card.view.clone(), Self::tilt(delta, width)));
+                card.shut.layer().setZPosition(-delta.abs());
+                let shape = Self::tilt(delta, width);
+                places.push((card.view.clone(), shape));
+                places.push((card.shut.clone(), shape));
             }
             places
         }
@@ -2831,6 +2870,19 @@ mod platform {
                 Overview::toggle();
             }
 
+            #[unsafe(method(shutTapped:))]
+            fn shut_tapped(&self, sender: &UIButton) {
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return;
+                    };
+                    let Some(id) = stack.tabs.ids.get(sender.tag() as usize) else {
+                        return;
+                    };
+                    CLOSING.with_borrow_mut(|slot| *slot = Some(id.clone()));
+                });
+            }
+
             #[unsafe(method(pagerTapped:))]
             fn pager_tapped(&self, _sender: &UITapGestureRecognizer) {
                 Overview::toggle();
@@ -2865,8 +2917,19 @@ mod platform {
         unsafe impl NSObjectProtocol for NavDelegate {}
 
         unsafe impl UIGestureRecognizerDelegate for NavDelegate {
+            #[unsafe(method(gestureRecognizer:shouldReceiveTouch:))]
+            fn should_receive(&self, _gesture: &UIGestureRecognizer, touch: &UITouch) -> bool {
+                match touch.view() {
+                    Some(view) => view.downcast::<UIButton>().is_err(),
+                    None => true,
+                }
+            }
+
             #[unsafe(method(gestureRecognizerShouldBegin:))]
-            fn should_begin(&self, _gesture: &UIGestureRecognizer) -> bool {
+            fn should_begin(&self, gesture: &UIGestureRecognizer) -> bool {
+                if gesture.downcast_ref::<UITapGestureRecognizer>().is_some() {
+                    return true.into();
+                }
                 STACK.with_borrow(|stack| {
                     let Some(stack) = stack.as_ref() else {
                         return false;
@@ -2984,6 +3047,7 @@ mod platform {
             )
         };
         leave.setEnabled(false);
+        leave.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
         root_view.addGestureRecognizer(&leave);
         let sweep = unsafe {
             UIPanGestureRecognizer::initWithTarget_action(
