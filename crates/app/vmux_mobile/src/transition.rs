@@ -53,7 +53,7 @@ mod platform {
     };
     use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
-    use objc2_quartz_core::CATransform3D;
+    use objc2_quartz_core::{CATransform3D, kCACornerCurveContinuous};
     use objc2_ui_kit::{
         UIAction, UIAdaptivePresentationControllerDelegate, UIButton, UIButtonType, UIColor,
         UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIGestureRecognizer,
@@ -86,6 +86,7 @@ mod platform {
     const DIP: f64 = 0.06;
     const SHEET_FADE: f64 = 0.55;
     const SHEET_RECEDE: f64 = 0.92;
+    const SHEET_CORNER: f64 = 30.0;
     const OVERVIEW_SCALE: f64 = 0.54;
     const OVERVIEW_TILT: f64 = 0.95;
     const OVERVIEW_SPREAD: f64 = 0.82;
@@ -2261,13 +2262,22 @@ mod platform {
             Self::glide_to(&view, if back { 1.0 } else { SHEET_RECEDE });
         }
 
+        fn dress(view: &UIView, scale: f64) {
+            view.setTransform(Drag::moved(0.0, scale));
+            let sunk = ((1.0 - scale) / (1.0 - SHEET_RECEDE)).clamp(0.0, 1.0);
+            let layer = view.layer();
+            layer.setMasksToBounds(true);
+            layer.setCornerCurve(unsafe { kCACornerCurveContinuous });
+            layer.setCornerRadius(SHEET_CORNER * sunk);
+        }
+
         fn glide_to(view: &UIView, scale: f64) {
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
             let view = view.retain();
             let motion = block2::RcBlock::new(move || {
-                view.setTransform(Drag::moved(0.0, scale));
+                Parallax::dress(&view, scale);
             });
             UIView::animateWithDuration_delay_options_animations_completion(
                 0.34,
@@ -2456,7 +2466,7 @@ mod platform {
                 let Some(slide) = held.as_ref() else {
                     return;
                 };
-                slide.under.setTransform(Drag::moved(0.0, slide.scale()));
+                Parallax::dress(&slide.under, slide.scale());
             });
         }
 
@@ -2476,7 +2486,7 @@ mod platform {
                             dyn UIViewControllerTransitionCoordinatorContext,
                         >,
                     >| {
-                        leaving.setTransform(Drag::moved(0.0, 1.0));
+                        Parallax::dress(&leaving, 1.0);
                     },
                 );
                 let staying = slide.under.clone();
