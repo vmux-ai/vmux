@@ -18,10 +18,6 @@ mod session;
 mod surface;
 mod transition;
 
-pub fn resource<R: bevy_ecs::prelude::Resource + Clone>() -> Option<R> {
-    World::with(|world| world.read(|world| world.get_resource::<R>().cloned()))?
-}
-
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
 use crate::plugins::PagePlugins;
