@@ -1,6 +1,9 @@
 use bevy::{ecs::relationship::Relationship, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
-use vmux_core::{PageIdentity, PageMetadata, page::PageReady};
+use vmux_core::{
+    PageIdentity, PageMetadata,
+    page::{HostHistory, PageReady},
+};
 use vmux_history::LastActivatedAt;
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -156,6 +159,7 @@ fn push_stacks_host_emit(
             &PageMetadata,
             &ChildOf,
             Option<&NavigationState>,
+            Option<&HostHistory>,
             Option<&PageIdentity>,
         ),
         With<Browser>,
@@ -192,16 +196,21 @@ fn push_stacks_host_emit(
             .unwrap_or_default(),
     };
     if let Some(active_stack_entity) = active_stack_opt {
-        for (meta, child_of, nav_state, osc) in &browser_q {
+        for (meta, child_of, nav_state, host_history, osc) in &browser_q {
             let stack_entity = child_of.get();
             let stack_pane = child_of_q.get(stack_entity).ok().map(|co| co.get());
             if stack_pane != active_pane {
                 continue;
             }
             let is_active = stack_entity == active_stack_entity;
-            if is_active && let Some(ns) = nav_state {
-                can_go_back = ns.can_go_back;
-                can_go_forward = ns.can_go_forward;
+            if is_active {
+                if let Some(history) = host_history {
+                    can_go_back = history.can_go_back();
+                    can_go_forward = history.can_go_forward();
+                } else if let Some(ns) = nav_state {
+                    can_go_back = ns.can_go_back;
+                    can_go_forward = ns.can_go_forward;
+                }
             }
             let title = meta.title_with(osc).to_string();
             rows.push(StackRow {

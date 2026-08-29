@@ -15,7 +15,6 @@ const MAX_MATCHES_PER_FILE: usize = 40;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_FILES_SCANNED: usize = 40_000;
 const MAX_PREVIEW_CHARS: usize = 240;
-const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
 pub(crate) struct ProjectSearchPlugin;
 
@@ -172,15 +171,7 @@ struct FileText;
 impl FileText {
     fn read(path: &Path) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
-        if Self::is_binary(&bytes) {
-            return None;
-        }
-        String::from_utf8(bytes).ok()
-    }
-
-    fn is_binary(bytes: &[u8]) -> bool {
-        let head = &bytes[..bytes.len().min(BINARY_SNIFF_BYTES)];
-        head.contains(&0)
+        Some(crate::encoding::DecodedText::of(&bytes)?.text)
     }
 }
 

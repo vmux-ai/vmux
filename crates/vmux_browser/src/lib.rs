@@ -1845,6 +1845,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
+                vmux_core::CorePlugin,
                 vmux_command::CommandPlugin,
                 vmux_terminal::TerminalContractPlugin,
                 crate::command::CommandPlugin,

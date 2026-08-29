@@ -1,9 +1,9 @@
 use ropey::Rope;
-use unicode_width::UnicodeWidthStr;
 use vmux_core::editor::{SelSpan, WordWrap};
 use vmux_core::event::FileLineLayout;
 
 use crate::fold::FoldView;
+use crate::page_model::DisplayCells;
 
 pub struct WrapView {
     columns: u16,
@@ -31,7 +31,7 @@ impl WrapView {
                 .chars()
                 .filter(|character| *character != '\n' && *character != '\r')
                 .collect::<String>();
-            let width = UnicodeWidthStr::width(text.as_str()) as u32;
+            let width = DisplayCells::of_str(&text);
             let rows = if columns == 0 {
                 1
             } else {

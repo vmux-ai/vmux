@@ -59,7 +59,7 @@ pub fn is_markdown(path: &std::path::Path) -> bool {
 }
 
 pub fn markdown_outline(text: &str) -> Vec<OutlineRow> {
-    let mut out = Vec::new();
+    let mut out: Vec<OutlineRow> = Vec::new();
     let mut in_fence = false;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
@@ -71,14 +71,26 @@ pub fn markdown_outline(text: &str) -> Vec<OutlineRow> {
             continue;
         }
         let hashes = t.chars().take_while(|c| *c == '#').count();
-        if (1..=6).contains(&hashes) && t[hashes..].starts_with(' ') {
-            out.push(OutlineRow {
-                name: t[hashes..].trim().to_string(),
-                kind: 15,
-                line: i as u32,
-                depth: (hashes - 1) as u16,
-            });
+        if !(1..=6).contains(&hashes) || !t[hashes..].starts_with(' ') {
+            continue;
         }
+        let at = i as u32;
+        let depth = (hashes - 1) as u16;
+        for open in out.iter_mut().rev() {
+            if open.depth < depth {
+                break;
+            }
+            if open.end_line == OutlineRow::OPEN_END {
+                open.end_line = at.saturating_sub(1);
+            }
+        }
+        out.push(OutlineRow {
+            name: t[hashes..].trim().to_string(),
+            kind: 15,
+            line: at,
+            end_line: OutlineRow::OPEN_END,
+            depth,
+        });
     }
     out
 }
@@ -103,10 +115,12 @@ fn push_symbol(item: &serde_json::Value, depth: u16, out: &mut Vec<OutlineRow>) 
         return;
     }
     let kind = item.get("kind").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    let span = SymbolSpan::of(item);
     out.push(OutlineRow {
         name,
         kind,
-        line: symbol_line(item),
+        line: span.line,
+        end_line: span.end_line,
         depth,
     });
     if let Some(children) = item.get("children").and_then(|v| v.as_array()) {
@@ -116,18 +130,46 @@ fn push_symbol(item: &serde_json::Value, depth: u16, out: &mut Vec<OutlineRow>) 
     }
 }
 
-fn symbol_line(item: &serde_json::Value) -> u32 {
-    if let Some(line) = item
-        .get("selectionRange")
-        .or_else(|| item.get("range"))
-        .and_then(|r| r.pointer("/start/line"))
-        .and_then(|v| v.as_u64())
-    {
-        return line as u32;
+struct SymbolSpan {
+    line: u32,
+    end_line: u32,
+}
+
+impl SymbolSpan {
+    fn of(item: &serde_json::Value) -> Self {
+        let line = Self::pick(
+            item,
+            &[
+                "/selectionRange/start/line",
+                "/range/start/line",
+                "/location/range/start/line",
+            ],
+        )
+        .unwrap_or(0);
+        let end = Self::pick(item, &["/range/end/line", "/location/range/end/line"]);
+        let Some(end_line) = end else {
+            return Self {
+                line,
+                end_line: OutlineRow::OPEN_END,
+            };
+        };
+        if end_line < line {
+            return Self {
+                line,
+                end_line: OutlineRow::OPEN_END,
+            };
+        }
+        Self { line, end_line }
     }
-    item.pointer("/location/range/start/line")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32
+
+    fn pick(item: &serde_json::Value, paths: &[&str]) -> Option<u32> {
+        for path in paths {
+            if let Some(found) = item.pointer(path).and_then(|v| v.as_u64()) {
+                return Some(found as u32);
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +280,24 @@ mod tests {
     }
 
     #[test]
+    fn markdown_heading_runs_to_the_next_heading_of_the_same_or_shallower_level() {
+        let md = "# One\na\n## Sub\nb\n## Sub2\nc\n# Two\nd\n";
+        let got: Vec<_> = markdown_outline(md)
+            .into_iter()
+            .map(|r| (r.name, r.line, r.end_line))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("One".to_string(), 0, 5),
+                ("Sub".to_string(), 2, 3),
+                ("Sub2".to_string(), 4, 5),
+                ("Two".to_string(), 6, OutlineRow::OPEN_END),
+            ]
+        );
+    }
+
+    #[test]
     fn markdown_outline_ignores_headings_in_fences() {
         let md = "# Real\n```\n# Fake\n```\n## After\n";
         let names: Vec<_> = markdown_outline(md).into_iter().map(|r| r.name).collect();
@@ -260,21 +320,40 @@ mod tests {
         let rows = flatten_symbols(&v);
         let got: Vec<_> = rows
             .iter()
-            .map(|r| (r.name.as_str(), r.kind, r.line, r.depth))
+            .map(|r| (r.name.as_str(), r.kind, r.line, r.end_line, r.depth))
             .collect();
-        assert_eq!(got, vec![("Foo", 5, 2, 0), ("bar", 6, 4, 1)]);
+        assert_eq!(
+            got,
+            vec![("Foo", 5, 2, 9, 0), ("bar", 6, 4, OutlineRow::OPEN_END, 1)]
+        );
     }
 
     #[test]
     fn flatten_symbols_flat() {
         let v = serde_json::json!([
-            { "name": "main", "kind": 12, "location": { "uri": "file:///x", "range": { "start": { "line": 7, "character": 0 } } } }
+            { "name": "main", "kind": 12, "location": { "uri": "file:///x", "range": { "start": { "line": 7, "character": 0 }, "end": { "line": 19, "character": 1 } } } }
         ]);
         let rows = flatten_symbols(&v);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "main");
         assert_eq!(rows[0].kind, 12);
         assert_eq!(rows[0].line, 7);
+        assert_eq!(rows[0].end_line, 19);
         assert_eq!(rows[0].depth, 0);
+    }
+
+    #[test]
+    fn a_symbol_range_ending_before_it_starts_is_left_open() {
+        let v = serde_json::json!([
+            {
+                "name": "broken",
+                "kind": 12,
+                "range": { "start": { "line": 3, "character": 0 }, "end": { "line": 1, "character": 0 } },
+                "selectionRange": { "start": { "line": 3, "character": 4 } }
+            }
+        ]);
+        let rows = flatten_symbols(&v);
+        assert_eq!(rows[0].line, 3);
+        assert_eq!(rows[0].end_line, OutlineRow::OPEN_END);
     }
 }

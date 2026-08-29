@@ -3,7 +3,7 @@ use std::path::Path;
 use vmux_core::event::{FileLine, PreviewKind};
 
 use crate::dir::list_dir;
-use crate::highlight::Highlighter;
+use crate::highlight::{Highlighter, LoadError};
 
 pub const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;
 pub const THUMB_MAX_EDGE: u32 = 64;
@@ -71,27 +71,13 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
             native: cfg!(target_os = "macos") && vmux_core::media::is_proprietary_video(&path_str),
         };
     }
-    if is_probably_binary(path) {
-        return info_kind(&meta, "binary");
-    }
     match Highlighter::new().load_file(path) {
         Ok(out) => {
             let lines: Vec<FileLine> = out.lines.into_iter().take(TEXT_PREVIEW_LINES).collect();
             PreviewKind::Text(lines)
         }
-        Err(_) => info_kind(&meta, "file"),
-    }
-}
-
-fn is_probably_binary(path: &Path) -> bool {
-    use std::io::Read;
-    let Ok(mut f) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut buf = [0u8; 8192];
-    match f.read(&mut buf) {
-        Ok(n) => buf[..n].contains(&0),
-        Err(_) => false,
+        Err(LoadError::Binary) => info_kind(&meta, "binary"),
+        Err(LoadError::Unreadable(_)) => info_kind(&meta, "file"),
     }
 }
 

@@ -433,29 +433,22 @@ struct SymbolTrail {
 
 impl SymbolTrail {
     fn at(rows: &[OutlineRow], line: u32) -> Self {
-        let mut deepest = None;
+        let mut chain: Vec<usize> = Vec::new();
         for (index, row) in rows.iter().enumerate() {
-            if row.line > line {
-                break;
-            }
-            deepest = Some(index);
-        }
-        let Some(deepest) = deepest else {
-            return Self::default();
-        };
-        let mut chain = vec![deepest];
-        let mut lowest = rows[deepest].depth;
-        for index in (0..deepest).rev() {
-            if lowest == 0 {
-                break;
-            }
-            if rows[index].depth >= lowest {
+            if !row.contains(line) {
                 continue;
             }
-            lowest = rows[index].depth;
+            while let Some(&open) = chain.last() {
+                if rows[open].depth < row.depth {
+                    break;
+                }
+                chain.pop();
+            }
             chain.push(index);
         }
-        chain.reverse();
+        if chain.is_empty() {
+            return Self::default();
+        }
         let mut crumbs = Vec::with_capacity(chain.len());
         for (level, index) in chain.iter().enumerate() {
             let parent = match level {
@@ -515,10 +508,15 @@ mod tests {
     }
 
     fn row(name: &str, line: u32, depth: u16) -> OutlineRow {
+        span(name, line, OutlineRow::OPEN_END, depth)
+    }
+
+    fn span(name: &str, line: u32, end_line: u32, depth: u16) -> OutlineRow {
         OutlineRow {
             name: name.to_string(),
             kind: 12,
             line,
+            end_line,
             depth,
         }
     }
@@ -616,5 +614,30 @@ mod tests {
     fn symbol_chain_survives_a_skipped_depth_level() {
         let rows = [row("Title", 0, 0), row("Step", 3, 2)];
         assert_eq!(SymbolTrail::at(&rows, 4).names(), vec!["Title", "Step"]);
+    }
+
+    #[test]
+    fn symbols_end_with_the_body_instead_of_running_on_to_the_next_one() {
+        let rows = [
+            span("first", 0, 8, 0),
+            span("nested", 2, 6, 1),
+            span("second", 20, 30, 0),
+        ];
+        assert_eq!(SymbolTrail::at(&rows, 4).names(), vec!["first", "nested"]);
+        assert_eq!(SymbolTrail::at(&rows, 7).names(), vec!["first"]);
+        assert!(SymbolTrail::at(&rows, 12).crumbs.is_empty());
+        assert_eq!(SymbolTrail::at(&rows, 25).names(), vec!["second"]);
+    }
+
+    #[test]
+    fn a_symbol_with_no_extent_holds_the_caret_until_the_next_one_starts() {
+        let rows = [
+            row("open", 0, 0),
+            span("bounded", 4, 6, 1),
+            row("later", 40, 0),
+        ];
+        assert_eq!(SymbolTrail::at(&rows, 900).names(), vec!["later"]);
+        assert_eq!(SymbolTrail::at(&rows, 20).names(), vec!["open"]);
+        assert_eq!(SymbolTrail::at(&rows, 5).names(), vec!["open", "bounded"]);
     }
 }

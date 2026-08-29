@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::breadcrumb::EditorBreadcrumbs;
+use crate::columns::{DirColumns, DirWindow};
 use crate::explorer::ExplorerPanel;
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    GotoLine, NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top,
-    clamp_selection, dir_select_index, editor_drag_started, gutter_width, heading_class,
-    image_mime, line_severity, note_cursor_activation, note_inline_nodes,
+    CellMetrics, ColumnRuler, GotoLine, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
+    centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started, gutter_width,
+    heading_class, image_mime, line_severity, note_cursor_activation, note_inline_nodes,
     note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
     should_apply_explorer_chrome, span_style, squiggle_style,
 };
@@ -45,6 +46,7 @@ pub fn Page() -> Element {
     let mut language = use_signal(String::new);
     let mut indent = use_signal(vmux_core::event::FileIndent::default);
     let mut line_ending = use_signal(vmux_core::event::FileLineEnding::default);
+    let mut encoding = use_signal(vmux_core::event::FileEncoding::default);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut sticky_lines = use_signal(Vec::<FileLine>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
@@ -63,6 +65,7 @@ pub fn Page() -> Element {
     let mut rename_failed = use_signal(String::new);
     let mut rename_failed_generation = use_signal(|| 0u32);
     let mut error = use_signal(String::new);
+    let mut error_undecodable = use_signal(|| false);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut parent_path = use_signal(String::new);
@@ -75,7 +78,7 @@ pub fn Page() -> Element {
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
-    let mut cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let mut cell_dims = use_signal(CellMetrics::default);
     let viewport = FileViewport::new();
     let mut page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
@@ -128,7 +131,8 @@ pub fn Page() -> Element {
     let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut dirty = use_signal(|| false);
-    let mut composing = use_signal(|| false);
+    let ime = use_ime_guard();
+    let rename_ime = use_ime_guard();
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
@@ -206,26 +210,33 @@ pub fn Page() -> Element {
     });
 
     let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
-        error.set(String::new());
-        clear_preview(preview, thumbs);
-        media.set(None);
-        viewport.reset();
-        last_scroll_req.set(0);
+        let arrival = FileMeta::arriving(&m.abs_path, &git_path.peek());
         doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
-        diagnostics.set(Vec::new());
-        hover_diag.set(None);
-        lsp_status.set(None);
-        if git_path() != m.abs_path {
-            git_has_diff.set(false);
-            git_line_markers.set(HashMap::new());
-        }
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         language.set(m.language);
         indent.set(m.indent);
         line_ending.set(m.line_ending);
+        encoding.set(m.encoding);
         mode.set(Mode::Text);
+        if !arrival.resets_view() {
+            return;
+        }
+        error.set(String::new());
+        clear_preview(preview, thumbs);
+        media.set(None);
+        viewport.reset();
+        last_scroll_req.set(0);
+        let _ = send(&FileScrollEvent {
+            top_row: 0,
+            needs_rows: true,
+        });
+        diagnostics.set(Vec::new());
+        hover_diag.set(None);
+        lsp_status.set(None);
+        git_has_diff.set(false);
+        git_line_markers.set(HashMap::new());
         lsp_install_notice.set(None);
         lsp_install_request.set(None);
         lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
@@ -245,6 +256,10 @@ pub fn Page() -> Element {
     let _shape = use_listener::<FileShapeEvent, _>(FILE_SHAPE_EVENT, move |s| {
         indent.set(s.indent);
         line_ending.set(s.line_ending);
+    });
+
+    let _encoding = use_listener::<FileEncodingEvent, _>(FILE_ENCODING_EVENT, move |e| {
+        encoding.set(e.encoding);
     });
 
     let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
@@ -342,14 +357,11 @@ pub fn Page() -> Element {
     });
 
     let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
-        let line_height = if file_view_mode() == FileViewMode::Note {
-            28.0
-        } else {
-            cell_dims().1
-        };
-        if line_height <= 0.0 {
+        let Some(line_height) =
+            ScrolledLineHeight::of(file_view_mode(), &git_path(), cell_dims().height)
+        else {
             return;
-        }
+        };
         viewport.scroll_by(event.lines, line_height);
     });
 
@@ -391,7 +403,7 @@ pub fn Page() -> Element {
                 }
             }
             FileViewMode::Editor => {
-                viewport.center_row(cursor().row, cell_dims().1);
+                viewport.center_row(cursor().row, cell_dims().height);
             }
             _ => {}
         }
@@ -556,6 +568,7 @@ pub fn Page() -> Element {
         });
 
     let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+        error_undecodable.set(e.undecodable);
         error.set(e.message);
     });
 
@@ -727,7 +740,18 @@ pub fn Page() -> Element {
             true => source_cursor().line,
             false => cursor().line,
         };
+    let status_scope = FileStatusScope {
+        mode: mode(),
+        view: file_view_mode(),
+        markdown: is_markdown_file(&git_path()),
+        has_diff: git_has_diff(),
+    };
+    let status_caret = match status_scope.reading_note() {
+        true => source_cursor(),
+        false => cursor(),
+    };
     let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
+    let measure_wide_text = MEASURE_WIDE_GLYPH.repeat(MEASURE_COLS);
     let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
 
@@ -769,7 +793,7 @@ pub fn Page() -> Element {
             id: CONTAINER_ID,
             tabindex: "0",
             class: "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
-            style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
+            style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
                 match mode() {
@@ -928,16 +952,34 @@ pub fn Page() -> Element {
                     let Ok(size) = event.get_border_box_size() else {
                         return;
                     };
-                    let cell = (
-                        size.width / MEASURE_COLS as f64,
-                        size.height / MEASURE_ROWS as f64,
-                    );
-                    let (cw, ch) = *cell_dims.peek();
-                    if (cw - cell.0).abs() > 0.01 || (ch - cell.1).abs() > 0.01 {
-                        cell_dims.set(cell);
+                    let measured = CellMetrics {
+                        narrow: size.width / MEASURE_COLS as f64,
+                        wide: cell_dims.peek().wide,
+                        height: size.height / MEASURE_ROWS as f64,
+                    };
+                    if measured != *cell_dims.peek() {
+                        cell_dims.set(measured);
                     }
                 },
                 {measure_text}
+            }
+
+            span {
+                id: MEASURE_WIDE_ID,
+                style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
+                onresize: move |event: Event<ResizeData>| {
+                    let Ok(size) = event.get_border_box_size() else {
+                        return;
+                    };
+                    let measured = CellMetrics {
+                        wide: size.width / MEASURE_COLS as f64,
+                        ..*cell_dims.peek()
+                    };
+                    if measured != *cell_dims.peek() {
+                        cell_dims.set(measured);
+                    }
+                },
+                {measure_wide_text}
             }
 
             div {
@@ -994,7 +1036,7 @@ pub fn Page() -> Element {
                                 onclick: move |_| {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
-                                    viewport.center_row(cursor().row, cell_dims().1);
+                                    viewport.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
@@ -1115,8 +1157,11 @@ pub fn Page() -> Element {
                         class: "absolute inset-0 z-50 flex items-center justify-center",
                         style: "background:rgba(0,0,0,0.6);",
                         div {
-                            class: "rounded-md border border-ansi-1 bg-background px-4 py-2 text-sm text-ansi-1",
-                            "{msg}"
+                            class: "flex max-w-xl flex-col items-center gap-3 rounded-md border border-ansi-1 bg-background px-4 py-3 text-sm text-ansi-1",
+                            span { class: "break-all text-center", "{msg}" }
+                            if error_undecodable() {
+                                EncodingRecovery { encoding: encoding() }
+                            }
                         }
                     }
                 })
@@ -1171,55 +1216,19 @@ pub fn Page() -> Element {
                     }
                 },
                 Mode::Dir => rsx! {
-                    div {
-                        class: "grid min-h-0 flex-1 gap-3 p-3",
-                        style: "grid-template-columns: minmax(8rem,14rem) minmax(10rem,1fr) minmax(12rem,1.3fr);",
-
-                        div { class: PANE_CLASS,
-                            for e in visible_entries(&parent_entries(), show_hidden()) {
-                                div {
-                                    key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-foreground/[0.04]" },
-                                    EntryVisual { entry: e.clone(), thumb: None }
-                                    span { class: "truncate text-xs", "{e.name}" }
-                                }
-                            }
-                        }
-
-                        div { class: PANE_CLASS,
-                            for (i, e) in visible_entries(&dir_entries(), show_hidden()).into_iter().enumerate() {
-                                {
-                                    let p_sel = e.path.clone();
-                                    let p_open = e.path.clone();
-                                    let is_dir = e.is_dir;
-                                    let thumb = thumbs().get(&e.path).cloned();
-                                    rsx! {
-                                        div {
-                                            key: "{e.path}",
-                                            id: "dir-row-{i}",
-                                            class: row_class(i == selected()),
-                                            title: "{e.path}",
-                                            onclick: move |_| {
-                                                selected.set(i);
-                                                request_preview(p_sel.clone());
-                                            },
-                                            ondoubleclick: move |_| {
-                                                if !is_dir {
-                                                    back_dir.set(Some(parent_of(&p_open)));
-                                                }
-                                                open_path(p_open.clone());
-                                            },
-                                            EntryVisual { entry: e.clone(), thumb: thumb.clone() }
-                                            span { class: "truncate text-xs", "{e.name}" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
-                            PreviewPane { preview: preview() }
-                        }
+                    DirColumns {
+                        window: DirWindow {
+                            dir_entries,
+                            parent_entries,
+                            path,
+                            parent_path,
+                            selected,
+                            preview,
+                            thumbs,
+                            came_from,
+                            back_dir,
+                            show_hidden,
+                        },
                     }
                 },
                 Mode::Text => rsx! {
@@ -1312,20 +1321,20 @@ pub fn Page() -> Element {
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
-                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
-                                                composing.set(false);
+                                                ime.commit();
                                                 send_committed_text(event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
-                                                if composing() {
+                                                if ime.active() {
                                                     return;
                                                 }
                                                 send_committed_text(event.value());
                                             },
                                             onkeydown: move |event: Event<KeyboardData>| {
                                                 event.stop_propagation();
-                                                if composing() {
+                                                if ime.swallows(&event) {
                                                     return;
                                                 }
                                                 if keys.offer(&event) {
@@ -1394,9 +1403,18 @@ pub fn Page() -> Element {
                         }
                     } else if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
                         {
-                            let (cw, ch) = cell_dims();
+                            let cell = cell_dims();
+                            let (cw, ch) = (cell.narrow, cell.height);
+                            let overlay_lines = lines();
+                            let overlay_layouts = line_layouts();
+                            let ruler = RowRuler {
+                                lines: &overlay_lines,
+                                layouts: &overlay_layouts,
+                                metrics: cell,
+                                wrap_columns: wrap_columns(),
+                            };
                             let gutter = gw as f64 * cw + 48.0;
-                            let cx = gutter + cursor().col as f64 * cw;
+                            let cx = gutter + ruler.x_of(cursor().row, cursor().col);
                             let cy = cursor().row as f64 * ch;
                             let cursor_style = if ed_mode().accepts_text() {
                                 format!(
@@ -1405,13 +1423,13 @@ pub fn Page() -> Element {
                             } else {
                                 format!(
                                     "left:{cx}px;top:{cy}px;height:{ch}px;width:{}px;background:color-mix(in srgb,currentColor 28%,transparent);outline:1px solid currentColor;",
-                                    cw.max(2.0)
+                                    ruler.advance_at(cursor().row, cursor().col).max(2.0)
                                 )
                             };
                             let cursor_key =
                                 format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
                             let spacer = total_rows() as f64 * ch;
-                            let txtcol = if composing() { "inherit" } else { "transparent" };
+                            let txtcol = if ime.active() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
                                     id: SCROLL_ID,
@@ -1459,7 +1477,7 @@ pub fn Page() -> Element {
                                             event.scroll_left(),
                                             event.scroll_top(),
                                         ));
-                                        let (_, ch) = cell_dims();
+                                        let ch = cell_dims().height;
                                         if ch <= 0.0 {
                                             return;
                                         }
@@ -1544,8 +1562,8 @@ pub fn Page() -> Element {
                                         for s in word_spans().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
-                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
+                                                let w = ruler.width_between(s.row, s.start, s.end);
                                                 let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
                                                 rsx! {
                                                     div {
@@ -1560,8 +1578,8 @@ pub fn Page() -> Element {
                                         for s in search_spans().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
-                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
+                                                let w = ruler.width_between(s.row, s.start, s.end);
                                                 let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
                                                 rsx! {
                                                     div {
@@ -1576,11 +1594,11 @@ pub fn Page() -> Element {
                                         for s in sel().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
                                                 let style = if s.end == u32::MAX {
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
                                                 } else {
-                                                    let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                    let w = ruler.width_between(s.row, s.start, s.end);
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;")
                                                 };
                                                 rsx! {
@@ -1601,7 +1619,7 @@ pub fn Page() -> Element {
 
                                         for extra in carets().iter().filter(|c| **c != cursor()) {
                                             {
-                                                let ex = gutter + extra.col as f64 * cw;
+                                                let ex = gutter + ruler.x_of(extra.row, extra.col);
                                                 let ey = extra.row as f64 * ch;
                                                 let style = format!(
                                                     "left:{ex}px;top:{ey}px;height:{ch}px;width:2px;background-color:currentColor;"
@@ -1626,20 +1644,20 @@ pub fn Page() -> Element {
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
-                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
-                                                composing.set(false);
+                                                ime.commit();
                                                 send_committed_text(event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
-                                                if composing() {
+                                                if ime.active() {
                                                     return;
                                                 }
                                                 send_committed_text(event.value());
                                             },
                                             onkeydown: move |e: Event<KeyboardData>| {
                                                 e.stop_propagation();
-                                                if composing() {
+                                                if ime.swallows(&e) {
                                                     return;
                                                 }
                                                 if keys.offer(&e) {
@@ -1651,13 +1669,17 @@ pub fn Page() -> Element {
 
                                         {
                                             lsp_hover().map(|h| {
-                                                let (cw, ch) = cell_dims();
                                                 let Some(i) = lines().iter().position(|l| l.line_no == h.line) else {
                                                     return rsx! {};
                                                 };
+                                                let mut hovered = String::new();
+                                                for span in &lines()[i].spans {
+                                                    hovered.push_str(&span.text);
+                                                }
                                                 let hrow = first_row() + i as u32;
                                                 let top = hrow as f64 * ch + ch;
-                                                let left = gw as f64 * cw + 48.0 + h.col as f64 * cw;
+                                                let left = gutter
+                                                    + ColumnRuler::new(&hovered, cell).x_of_char(h.col);
                                                 rsx! {
                                                     div {
                                                         class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
@@ -1693,7 +1715,7 @@ pub fn Page() -> Element {
                                                 let titles = code_actions();
                                                 let chosen = code_action_sel().min(titles.len() - 1);
                                                 let top = cursor().row as f64 * ch + ch;
-                                                let left = gutter + cursor().col as f64 * cw;
+                                                let left = gutter + ruler.x_of(cursor().row, cursor().col);
                                                 rsx! {
                                                     div {
                                                         id: CODE_ACTION_ID,
@@ -1749,7 +1771,7 @@ pub fn Page() -> Element {
                                         {
                                             rename_box().map(|box_| {
                                                 let top = box_.line as f64 * ch + ch;
-                                                let left = gutter + box_.col as f64 * cw;
+                                                let left = gutter + ruler.x_of_char(box_.line, box_.col);
                                                 rsx! {
                                                     input {
                                                         id: RENAME_ID,
@@ -1764,8 +1786,13 @@ pub fn Page() -> Element {
                                                                 open.draft = e.value();
                                                             }
                                                         },
-                                                        onkeydown: move |e| {
+                                                        oncompositionstart: move |_| rename_ime.start(),
+                                                        oncompositionend: move |_| rename_ime.commit(),
+                                                        onkeydown: move |e: Event<KeyboardData>| {
                                                             e.stop_propagation();
+                                                            if rename_ime.swallows(&e) {
+                                                                return;
+                                                            }
                                                             match e.key() {
                                                                 Key::Enter => {
                                                                     e.prevent_default();
@@ -1795,7 +1822,7 @@ pub fn Page() -> Element {
                                             (comp_open() && !comp_filtered.is_empty()).then(|| {
                                                 let (cline, cfrom) = comp_anchor();
                                                 let top = cline as f64 * ch + ch;
-                                                let left = gutter + cfrom as f64 * cw;
+                                                let left = gutter + ruler.x_of_char(cline, cfrom);
                                                 rsx! {
                                                     div {
                                                         class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
@@ -2028,12 +2055,16 @@ pub fn Page() -> Element {
                         }
                     })
                 }
-                FileStatusInfo {
-                    line: cursor().line + 1,
-                    col: cursor().col + 1,
-                    indent: indent(),
-                    line_ending: line_ending(),
-                    language: language(),
+                if status_scope.shows_anything() {
+                    FileStatusInfo {
+                        scope: status_scope,
+                        line: status_caret.line + 1,
+                        col: status_caret.char_col + 1,
+                        indent: indent(),
+                        line_ending: line_ending(),
+                        encoding: encoding(),
+                        language: language(),
+                    }
                 }
             }
         }
@@ -2057,7 +2088,7 @@ fn EditorLines(
     cell_height: f64,
     gutter_chars: usize,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2144,7 +2175,7 @@ fn EditorLineChunk(
     cell_height: f64,
     gutter_chars: usize,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2207,7 +2238,7 @@ fn EditorLineRow(
     gutter_chars: usize,
     wrap_cols: u16,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2227,6 +2258,13 @@ fn EditorLineRow(
     let fold = line.fold;
     let ch = cell_height;
     let gw = gutter_chars;
+    let mut line_text = String::new();
+    for span in &line.spans {
+        line_text.push_str(&span.text);
+    }
+    let pointer_text = line_text.clone();
+    let menu_text = line_text.clone();
+    let hover_text = line_text.clone();
     let lt = layout.row as f64 * ch;
     let line_height = layout.rows as f64 * ch;
     let text_class = if wrap_cols > 0 {
@@ -2249,8 +2287,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (_, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &pointer_text,
                     wrap_cols,
                     true,
                 );
@@ -2275,8 +2314,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (_, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &menu_text,
                     wrap_cols,
                     true,
                 );
@@ -2287,8 +2327,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (x, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &hover_text,
                     wrap_cols,
                     editor_dragging(),
                 );
@@ -2363,10 +2404,15 @@ fn EditorLineRow(
                             DiagSeverity::Hint => "rgb(34,211,238)",
                         };
                         let dc = d.clone();
+                        let marks = ColumnRuler::new(&line_text, cell_dims());
                         rsx! {
                             span {
                                 key: "d{di}",
-                                style: squiggle_style(d.start_col, d.end_col, color),
+                                style: squiggle_style(
+                                    marks.x_of(d.start_col),
+                                    marks.width_between(d.start_col, d.end_col),
+                                    color,
+                                ),
                                 onmouseenter: move |_| hover_diag.set(Some(dc.clone())),
                                 onmouseleave: move |_| hover_diag.set(None),
                             }
@@ -2383,10 +2429,12 @@ fn EditorLineRow(
 
 #[component]
 fn FileStatusInfo(
+    scope: FileStatusScope,
     line: u32,
     col: u32,
     indent: vmux_core::event::FileIndent,
     line_ending: vmux_core::event::FileLineEnding,
+    encoding: vmux_core::event::FileEncoding,
     language: String,
 ) -> Element {
     let menus = StatusMenus {
@@ -2405,21 +2453,31 @@ fn FileStatusInfo(
         vmux_core::event::FileLineEnding::Lf => "LF",
     };
     rsx! {
-        StatusItemButton {
-            label: position,
-            title: translate("editor-status-goto-title"),
-            extra: "tabular-nums",
-            kind: StatusMenuKind::Goto,
-            menus,
+        if scope.shows_caret() {
+            StatusItemButton {
+                label: position,
+                title: translate("editor-status-goto-title"),
+                extra: "tabular-nums",
+                kind: StatusMenuKind::Goto,
+                menus,
+            }
+        }
+        if scope.shows_indent() {
+            StatusItemButton {
+                label: IndentChoice::of(indent).label(),
+                title: translate("editor-status-indent-title"),
+                extra: "",
+                kind: StatusMenuKind::Indent,
+                menus,
+            }
         }
         StatusItemButton {
-            label: IndentChoice::of(indent).label(),
-            title: translate("editor-status-indent-title"),
+            label: encoding.label().to_string(),
+            title: translate("editor-status-encoding-title"),
             extra: "",
-            kind: StatusMenuKind::Indent,
+            kind: StatusMenuKind::Encoding,
             menus,
         }
-        span { class: "shrink-0", "UTF-8" }
         StatusItemButton {
             label: eol.to_string(),
             title: translate("editor-status-eol-title"),
@@ -2444,6 +2502,8 @@ fn FileStatusInfo(
                 menu: current,
                 indent,
                 line_ending,
+                encoding,
+                menus,
                 goto: menus.goto,
                 on_close: EventHandler::new(move |()| menus.hide()),
             }
@@ -2481,6 +2541,8 @@ fn StatusMenuList(
     menu: StatusMenu,
     indent: vmux_core::event::FileIndent,
     line_ending: vmux_core::event::FileLineEnding,
+    encoding: vmux_core::event::FileEncoding,
+    menus: StatusMenus,
     goto: Signal<String>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -2516,6 +2578,12 @@ fn StatusMenuList(
                         }
                     }
                 },
+                StatusMenuKind::Encoding => rsx! {
+                    EncodingActionList { x, y, menus }
+                },
+                StatusMenuKind::EncodingChoice(action) => rsx! {
+                    EncodingChoiceList { action, encoding, on_close }
+                },
                 StatusMenuKind::LineEnding => rsx! {
                     for choice in [vmux_core::event::FileLineEnding::Lf, vmux_core::event::FileLineEnding::Crlf] {
                         {
@@ -2547,8 +2615,91 @@ fn StatusMenuList(
 }
 
 #[component]
+fn EncodingActionList(x: f64, y: f64, menus: StatusMenus) -> Element {
+    rsx! {
+        for action in [FileEncodingAction::Reopen, FileEncodingAction::Save] {
+            {
+                let id = match action {
+                    FileEncodingAction::Reopen => "editor-status-encoding-reopen",
+                    FileEncodingAction::Save => "editor-status-encoding-save",
+                };
+                rsx! {
+                    button {
+                        key: "{id}",
+                        class: STATUS_MENU_ITEM_CLASS,
+                        onclick: move |_| {
+                            menus
+                                .show(StatusMenu {
+                                    x,
+                                    y,
+                                    kind: StatusMenuKind::EncodingChoice(action),
+                                });
+                        },
+                        span { class: "truncate", {translate(id)} }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn EncodingRecovery(encoding: vmux_core::event::FileEncoding) -> Element {
+    let mut choosing = use_signal(|| false);
+    if !choosing() {
+        return rsx! {
+            button {
+                class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
+                onclick: move |_| choosing.set(true),
+                {translate("editor-status-encoding-reopen")}
+            }
+        };
+    }
+    rsx! {
+        div {
+            class: "max-h-[50dvh] w-56 overflow-y-auto rounded-lg bg-background p-1 font-sans text-xs text-foreground shadow-[inset_0_0_0_1px_var(--border)]",
+            EncodingChoiceList {
+                action: FileEncodingAction::Reopen,
+                encoding,
+                on_close: EventHandler::new(move |()| choosing.set(false)),
+            }
+        }
+    }
+}
+
+#[component]
+fn EncodingChoiceList(
+    action: FileEncodingAction,
+    encoding: vmux_core::event::FileEncoding,
+    on_close: EventHandler<()>,
+) -> Element {
+    rsx! {
+        for choice in vmux_core::event::FileEncoding::ALL {
+            {
+                let active = choice == encoding;
+                rsx! {
+                    button {
+                        key: "{choice.label()}",
+                        class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
+                        onclick: move |_| {
+                            let _ = send(&FileEncodingSet {
+                                encoding: choice,
+                                action,
+                            });
+                            on_close.call(());
+                        },
+                        span { class: "truncate", "{choice.label()}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn GotoLineField(goto: Signal<String>, on_close: EventHandler<()>) -> Element {
     let mut draft = goto;
+    let ime = use_ime_guard();
     rsx! {
         input {
             r#type: "text",
@@ -2562,8 +2713,13 @@ fn GotoLineField(goto: Signal<String>, on_close: EventHandler<()>) -> Element {
                 });
             },
             oninput: move |event: Event<FormData>| draft.set(event.value()),
+            oncompositionstart: move |_| ime.start(),
+            oncompositionend: move |_| ime.commit(),
             onkeydown: move |event: Event<KeyboardData>| {
                 event.stop_propagation();
+                if ime.swallows(&event) {
+                    return;
+                }
                 match event.key() {
                     Key::Escape => {
                         draft.set(String::new());
@@ -2588,6 +2744,36 @@ fn GotoLineField(goto: Signal<String>, on_close: EventHandler<()>) -> Element {
 
 const STATUS_MENU_ITEM_CLASS: &str = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
 const STATUS_MENU_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md bg-cyan-400/12 px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStatusScope {
+    mode: Mode,
+    view: FileViewMode,
+    markdown: bool,
+    has_diff: bool,
+}
+
+impl FileStatusScope {
+    fn reading_note(self) -> bool {
+        self.mode == Mode::Text && self.view == FileViewMode::Note && self.markdown
+    }
+
+    fn reading_diff(self) -> bool {
+        self.mode == Mode::Text && self.view == FileViewMode::Diff && self.has_diff
+    }
+
+    fn shows_anything(self) -> bool {
+        self.mode == Mode::Text
+    }
+
+    fn shows_caret(self) -> bool {
+        self.shows_anything() && !self.reading_diff()
+    }
+
+    fn shows_indent(self) -> bool {
+        self.shows_caret() && !self.reading_note()
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 struct StatusMenus {
@@ -2630,6 +2816,8 @@ struct StatusMenu {
 enum StatusMenuKind {
     Goto,
     Indent,
+    Encoding,
+    EncodingChoice(FileEncodingAction),
     LineEnding,
 }
 
@@ -2798,8 +2986,10 @@ fn FoldMarker(line: u32, collapsed: bool, revealed: bool) -> Element {
 const CONTAINER_ID: &str = "file-container";
 const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
+const MEASURE_WIDE_ID: &str = "file-measure-wide";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
+const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
@@ -2973,6 +3163,20 @@ impl RenameBox {
     }
 }
 
+struct ScrolledLineHeight;
+
+impl ScrolledLineHeight {
+    const NOTE: f64 = 28.0;
+
+    fn of(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
+        let height = match mode == FileViewMode::Note && is_markdown_file(path) {
+            true => Self::NOTE,
+            false => cell_height,
+        };
+        (height > 0.0).then_some(height)
+    }
+}
+
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
         .map(|(_, extension)| {
@@ -2994,28 +3198,24 @@ fn file_mode_class(active: bool) -> &'static str {
 fn column_in_line(
     at: ElementPoint,
     gutter: f64,
-    cell: (f64, f64),
+    cell: CellMetrics,
+    text: &str,
     wrap_columns: u16,
-    round: bool,
+    snap: bool,
 ) -> (f64, u32) {
-    let (cw, ch) = cell;
     let x = at.x - gutter;
-    if cw <= 0.0 {
+    if !cell.measured() {
         return (x, 0);
     }
-    let local = if round {
-        (x.max(0.0) / cw).round()
-    } else {
-        (x.max(0.0) / cw).floor()
-    } as u32;
-    if wrap_columns == 0 || ch <= 0.0 {
-        return (x, local);
+    if wrap_columns == 0 {
+        return (x, ColumnRuler::new(text, cell).col_at(x, snap));
     }
-    let wrapped_row = (at.y.max(0.0) / ch).floor() as u32;
+    let segment = (at.y.max(0.0) / cell.height).floor() as u32;
+    let local = ColumnRuler::wrapped_row(text, cell, wrap_columns, segment).col_at(x, snap);
 
     (
         x,
-        wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
+        segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
     )
 }
 
@@ -3345,6 +3545,7 @@ fn FindBar(
     let mut scope = scope;
     let mut regex = use_signal(|| vim);
     let mut case_sensitive = use_signal(|| false);
+    let ime = use_ime_guard();
     let project = scope().is_project();
     let mut close = move || {
         open.set(false);
@@ -3429,8 +3630,13 @@ fn FindBar(
                 placeholder: scope().placeholder(),
                 value: "{query}",
                 oninput: move |event| retype(event.value()),
+                oncompositionstart: move |_| ime.start(),
+                oncompositionend: move |_| ime.commit(),
                 onkeydown: move |event: Event<KeyboardData>| {
                     event.stop_propagation();
+                    if ime.swallows(&event) {
+                        return;
+                    }
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
@@ -4137,7 +4343,7 @@ pub enum Mode {
 }
 
 #[derive(Clone, PartialEq)]
-enum Preview {
+pub(crate) enum Preview {
     None,
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
@@ -4171,7 +4377,7 @@ fn clear_preview(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String
     thumbs.set(HashMap::new());
 }
 
-fn request_preview(path: String) {
+pub(crate) fn request_preview(path: String) {
     let _ = send(&FilePreviewRequest { path, thumb: false });
 }
 
@@ -4179,7 +4385,7 @@ fn request_thumb(path: String) {
     let _ = send(&FilePreviewRequest { path, thumb: true });
 }
 
-fn open_path(path: String) {
+pub(crate) fn open_path(path: String) {
     let _ = send(&FileOpenEvent { path });
 }
 
@@ -4214,7 +4420,7 @@ impl GitRefresh {
     }
 }
 
-fn parent_of(path: &str) -> String {
+pub(crate) fn parent_of(path: &str) -> String {
     match path.trim_end_matches('/').rsplit_once('/') {
         Some(("", _)) => "/".to_string(),
         Some((prefix, _)) => prefix.to_string(),
@@ -4238,9 +4444,9 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+pub(crate) const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 
-fn row_class(selected: bool) -> String {
+pub(crate) fn row_class(selected: bool) -> String {
     let base =
         "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
     if selected {
@@ -4302,7 +4508,7 @@ fn note_block_diff_marker(
         .max_by_key(|marker| priority(*marker))
 }
 
-fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
+pub(crate) fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
     if show_hidden {
         all.to_vec()
     } else {
@@ -4314,7 +4520,7 @@ fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry>
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_dir(
+pub(crate) fn apply_dir(
     mut dir_entries: Signal<Vec<FileDirEntry>>,
     mut parent_entries: Signal<Vec<FileDirEntry>>,
     mut path: Signal<String>,
@@ -4349,7 +4555,7 @@ fn apply_dir(
 }
 
 #[component]
-fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
+pub(crate) fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
     let entry = &entry;
     let thumb = thumb.as_ref();
     if let Some(url) = thumb {
@@ -4361,10 +4567,10 @@ fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
 }
 
 #[component]
-fn PreviewPane(preview: Preview) -> Element {
+pub(crate) fn PreviewPane(preview: Preview) -> Element {
     let preview = &preview;
     match preview {
-        Preview::None => rsx! {
+        Preview::None | Preview::Dir(_) => rsx! {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
         },
         Preview::Image(url) => rsx! {
@@ -4399,16 +4605,6 @@ fn PreviewPane(preview: Preview) -> Element {
                         for (i, s) in line.spans.iter().enumerate() {
                             span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
                         }
-                    }
-                }
-            }
-        },
-        Preview::Dir(entries) => rsx! {
-            div { class: "h-full w-full overflow-auto",
-                for e in entries.iter() {
-                    div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
-                        EntryVisual { entry: e.clone(), thumb: None }
-                        span { class: "truncate text-xs", "{e.name}" }
                     }
                 }
             }
@@ -4595,6 +4791,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
     let mut key = use_signal(|| property.key.clone());
     let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
     let mut item = use_signal(String::new);
+    let ime = use_ime_guard();
     let values = property.values.clone();
     let key_for_kind = original_key.clone();
     let key_for_delete = original_key.clone();
@@ -4666,10 +4863,15 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                             placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
                             class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
                             oninput: move |event| item.set(event.value()),
+                            oncompositionstart: move |_| ime.start(),
+                            oncompositionend: move |_| ime.commit(),
                             onkeydown: {
                                 let add_key = original_key.clone();
                                 let add_values = values.clone();
                                 move |event: Event<KeyboardData>| {
+                                    if ime.swallows(&event) {
+                                        return;
+                                    }
                                     if event.key() != Key::Enter {
                                         return;
                                     }
@@ -4765,9 +4967,9 @@ struct ScrollBox {
 }
 
 impl ScrollBox {
-    fn announce(self, cell: (f64, f64), total_lines: u32, mut last: Signal<FileResizeEvent>) {
-        let (cw, ch) = cell;
-        if cw <= 0.0 || ch <= 0.0 || self.size.0 <= 0.0 {
+    fn announce(self, cell: CellMetrics, total_lines: u32, mut last: Signal<FileResizeEvent>) {
+        let (cw, ch) = (cell.narrow, cell.height);
+        if !cell.measured() || self.size.0 <= 0.0 {
             return;
         }
         let next = FileResizeEvent {
@@ -4791,6 +4993,92 @@ impl ScrollBox {
 
 fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
     gutter_width(total_lines) as f64 * char_width + 48.0
+}
+
+struct RowRuler<'a> {
+    lines: &'a [FileLine],
+    layouts: &'a [FileLineLayout],
+    metrics: CellMetrics,
+    wrap_columns: u16,
+}
+
+impl RowRuler<'_> {
+    fn segment_of(&self, row: u32) -> Option<(String, u32)> {
+        let mut owner = None;
+        for layout in self.layouts {
+            if row >= layout.row && row < layout.row + u32::from(layout.rows) {
+                owner = Some(layout);
+                break;
+            }
+        }
+        let layout = owner?;
+        for line in self.lines {
+            if line.line_no != layout.line_no {
+                continue;
+            }
+            let mut text = String::new();
+            for span in &line.spans {
+                text.push_str(&span.text);
+            }
+            return Some((text, row - layout.row));
+        }
+        None
+    }
+
+    fn x_of(&self, row: u32, col: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return f64::from(col) * self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).x_of(col)
+    }
+
+    fn width_between(&self, row: u32, start: u32, end: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return f64::from(end.saturating_sub(start)) * self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment)
+            .width_between(start, end)
+    }
+
+    fn advance_at(&self, row: u32, col: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).advance_at(col)
+    }
+
+    fn x_of_char(&self, line_no: u32, char_col: u32) -> f64 {
+        for line in self.lines {
+            if line.line_no != line_no {
+                continue;
+            }
+            let mut text = String::new();
+            for span in &line.spans {
+                text.push_str(&span.text);
+            }
+            return ColumnRuler::new(&text, self.metrics).x_of_char(char_col);
+        }
+        f64::from(char_col) * self.metrics.narrow
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileMeta {
+    OpensFile,
+    RefreshesOpenFile,
+}
+
+impl FileMeta {
+    fn arriving(abs_path: &str, showing: &str) -> Self {
+        if !showing.is_empty() && showing == abs_path {
+            return Self::RefreshesOpenFile;
+        }
+        Self::OpensFile
+    }
+
+    fn resets_view(self) -> bool {
+        self == Self::OpensFile
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -4926,6 +5214,124 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
     true
 }
 
+pub(crate) fn use_ime_guard() -> ImeGuard {
+    ImeGuard {
+        composition: use_signal(Composition::default),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct ImeGuard {
+    composition: Signal<Composition>,
+}
+
+impl ImeGuard {
+    fn active(self) -> bool {
+        (self.composition)().active
+    }
+
+    pub(crate) fn start(mut self) {
+        let started = self.composition.peek().started();
+        self.composition.set(started);
+    }
+
+    pub(crate) fn commit(mut self) {
+        let committed = self.composition.peek().committed(now_millis());
+        self.composition.set(committed);
+    }
+
+    pub(crate) fn swallows(mut self, event: &Event<KeyboardData>) -> bool {
+        let data = event.data();
+        let (next, verdict) =
+            self.composition
+                .peek()
+                .saw_key(&data.key(), data.is_composing(), now_millis());
+        if *self.composition.peek() != next {
+            self.composition.set(next);
+        }
+        match verdict {
+            ImeVerdict::Editor => false,
+            ImeVerdict::Composing => true,
+            ImeVerdict::Committed => {
+                event.prevent_default();
+                true
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ImeVerdict {
+    Editor,
+    Composing,
+    Committed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct Composition {
+    active: bool,
+    committed_at: Option<i64>,
+}
+
+impl Composition {
+    const COMMIT_GRACE_MS: i64 = 60;
+
+    fn started(self) -> Self {
+        Self {
+            active: true,
+            committed_at: None,
+        }
+    }
+
+    fn committed(self, at: i64) -> Self {
+        Self {
+            active: false,
+            committed_at: Some(at),
+        }
+    }
+
+    fn saw_key(self, key: &Key, composing: bool, at: i64) -> (Self, ImeVerdict) {
+        if composing {
+            return (self.started(), ImeVerdict::Composing);
+        }
+        let candidate = Self::candidate_window_key(key);
+        if self.active {
+            let verdict = match candidate {
+                true => ImeVerdict::Committed,
+                false => ImeVerdict::Editor,
+            };
+            return (Self::default(), verdict);
+        }
+        let Some(committed_at) = self.committed_at else {
+            return (self, ImeVerdict::Editor);
+        };
+        if candidate && at.saturating_sub(committed_at) <= Self::COMMIT_GRACE_MS {
+            return (Self::default(), ImeVerdict::Committed);
+        }
+        (Self::default(), ImeVerdict::Editor)
+    }
+
+    fn candidate_window_key(key: &Key) -> bool {
+        if let Key::Character(text) = key {
+            return text == " ";
+        }
+        matches!(
+            key,
+            Key::Enter
+                | Key::Escape
+                | Key::Tab
+                | Key::ArrowUp
+                | Key::ArrowDown
+                | Key::ArrowLeft
+                | Key::ArrowRight
+                | Key::Accept
+                | Key::Convert
+                | Key::NonConvert
+                | Key::Process
+        )
+    }
+}
+
 #[component]
 fn NativeVideoHost(path: String) -> Element {
     let mut element = use_signal(|| None::<Rc<MountedData>>);
@@ -4963,6 +5369,61 @@ fn NativeVideoHost(path: String) -> Element {
             },
             onresize: move |_| report.call(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod file_meta_tests {
+    use super::*;
+
+    #[test]
+    fn a_meta_for_the_file_already_on_screen_leaves_the_view_alone() {
+        assert!(
+            !FileMeta::arriving("/w/src/main.rs", "/w/src/main.rs").resets_view(),
+            "the host re-sends META whenever a page announces itself ready, and a page that \
+             is already showing that file still holds the scroll position the reader left it at"
+        );
+    }
+
+    #[test]
+    fn a_meta_for_any_other_file_resets_the_view() {
+        assert!(FileMeta::arriving("/w/src/other.rs", "/w/src/main.rs").resets_view());
+        assert!(
+            FileMeta::arriving("/w/src/main.rs", "").resets_view(),
+            "a freshly loaded page shows nothing, so its first META opens the file"
+        );
+        assert!(FileMeta::arriving("", "").resets_view());
+    }
+}
+
+#[cfg(test)]
+mod scrolled_line_height_tests {
+    use super::*;
+
+    #[test]
+    fn a_code_file_scrolls_by_the_cell_height_its_rows_are_drawn_at() {
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 18.0),
+            Some(18.0),
+            "a non-markdown file shows the editor even while the shared view mode is Note, \
+             so an announced scroll moves by the row height the editor lays rows out with"
+        );
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Editor, "/w/notes/a.md", 18.0),
+            Some(18.0)
+        );
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/notes/a.md", 18.0),
+            Some(ScrolledLineHeight::NOTE)
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_cell_refuses_the_scroll_rather_than_landing_at_zero() {
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 0.0),
+            None
+        );
     }
 }
 
@@ -5014,6 +5475,178 @@ mod menu_tests {
         assert_eq!(
             opens, 3,
             "modification, clipboard and the palette; navigation is first so it opens nothing"
+        );
+    }
+}
+
+#[cfg(test)]
+mod composition_tests {
+    use super::*;
+
+    fn after_commit(at: i64) -> Composition {
+        Composition::default().started().committed(at)
+    }
+
+    #[test]
+    fn the_enter_that_confirms_a_conversion_never_reaches_the_editor() {
+        let composed = after_commit(1_000);
+
+        assert_eq!(
+            composed.saw_key(&Key::Enter, false, 1_010).1,
+            ImeVerdict::Committed,
+            "macOS reports compositionend before the Enter that caused it, so the key arrives \
+             claiming no composition is in flight and would otherwise break the line"
+        );
+        assert_eq!(
+            Composition::default()
+                .started()
+                .saw_key(&Key::Enter, true, 1_000)
+                .1,
+            ImeVerdict::Composing
+        );
+    }
+
+    #[test]
+    fn one_commit_absorbs_one_key_and_no_more() {
+        let (next, verdict) = after_commit(1_000).saw_key(&Key::Enter, false, 1_005);
+
+        assert_eq!(verdict, ImeVerdict::Committed);
+        assert_eq!(
+            next.saw_key(&Key::Enter, false, 1_006).1,
+            ImeVerdict::Editor,
+            "a reader who commits a conversion and then wants a new line presses Enter twice"
+        );
+    }
+
+    #[test]
+    fn a_key_the_candidate_window_never_took_goes_straight_through() {
+        let composed = after_commit(1_000);
+
+        assert_eq!(
+            composed
+                .saw_key(&Key::Character("a".to_string()), false, 1_005)
+                .1,
+            ImeVerdict::Editor
+        );
+        assert_eq!(
+            composed.saw_key(&Key::Backspace, false, 1_005).1,
+            ImeVerdict::Editor
+        );
+        assert_eq!(
+            composed
+                .saw_key(&Key::Character(" ".to_string()), false, 1_005)
+                .1,
+            ImeVerdict::Committed,
+            "space walks the candidate list on every Japanese IME"
+        );
+    }
+
+    #[test]
+    fn a_key_arriving_after_the_grace_window_is_the_readers_own() {
+        assert_eq!(
+            after_commit(1_000)
+                .saw_key(&Key::Enter, false, 1_000 + Composition::COMMIT_GRACE_MS + 1)
+                .1,
+            ImeVerdict::Editor
+        );
+    }
+
+    #[test]
+    fn a_composition_that_never_ends_clears_on_the_next_ordinary_key() {
+        let stuck = Composition::default().started();
+        let (next, verdict) = stuck.saw_key(&Key::Character("a".to_string()), false, 1_000);
+
+        assert_eq!(
+            verdict,
+            ImeVerdict::Editor,
+            "a missed compositionend must not swallow ordinary typing forever"
+        );
+        assert_eq!(next, Composition::default());
+        assert_eq!(
+            next.saw_key(&Key::Enter, false, 1_001).1,
+            ImeVerdict::Editor
+        );
+    }
+
+    #[test]
+    fn a_key_seen_while_composing_repairs_a_missed_start() {
+        let (next, verdict) = Composition::default().saw_key(&Key::ArrowDown, true, 1_000);
+
+        assert_eq!(verdict, ImeVerdict::Composing);
+        assert!(next.active);
+    }
+
+    #[test]
+    fn a_fresh_page_routes_every_key_to_the_editor() {
+        for key in [Key::Enter, Key::Escape, Key::Tab, Key::ArrowUp] {
+            assert_eq!(
+                Composition::default().saw_key(&key, false, 1_000).1,
+                ImeVerdict::Editor
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod file_status_scope_tests {
+    use super::*;
+
+    fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> FileStatusScope {
+        FileStatusScope {
+            mode: Mode::Text,
+            view,
+            markdown,
+            has_diff,
+        }
+    }
+
+    #[test]
+    fn a_view_with_no_text_buffer_offers_none_of_the_group() {
+        for mode in [Mode::Dir, Mode::Media(MediaKind::Image)] {
+            let scope = FileStatusScope {
+                mode,
+                view: FileViewMode::Editor,
+                markdown: false,
+                has_diff: false,
+            };
+
+            assert!(!scope.shows_anything());
+            assert!(!scope.shows_caret());
+            assert!(!scope.shows_indent());
+        }
+    }
+
+    #[test]
+    fn the_source_editor_answers_every_item() {
+        let scope = text(FileViewMode::Editor, false, false);
+
+        assert!(scope.shows_anything());
+        assert!(scope.shows_caret());
+        assert!(scope.shows_indent());
+    }
+
+    #[test]
+    fn a_rendered_note_keeps_the_caret_and_drops_the_indent() {
+        let scope = text(FileViewMode::Note, true, false);
+
+        assert!(scope.shows_caret());
+        assert!(!scope.shows_indent());
+        assert!(
+            text(FileViewMode::Note, false, false).shows_indent(),
+            "a non-markdown file shows the source editor whatever the shared view mode says"
+        );
+    }
+
+    #[test]
+    fn a_diff_drops_the_caret_and_the_indent_but_still_describes_the_file() {
+        let scope = text(FileViewMode::Diff, false, true);
+
+        assert!(scope.shows_anything());
+        assert!(!scope.shows_caret());
+        assert!(!scope.shows_indent());
+        assert!(
+            text(FileViewMode::Diff, false, false).shows_caret(),
+            "a file with nothing to diff falls back to the editor, caret and all"
         );
     }
 }

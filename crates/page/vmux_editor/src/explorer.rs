@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
 
+use crate::page::use_ime_guard;
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -579,6 +580,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let mut draft = use_signal(String::new);
     let mut notice = use_signal(|| None::<ExplorerNotice>);
     let notice_generation = use_signal(|| 0u32);
+    let ime = use_ime_guard();
 
     use_effect(move || {
         if !visible() {
@@ -1115,8 +1117,13 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                 autofocus: true,
                                 value: "{draft}",
                                 oninput: move |e| draft.set(e.value()),
-                                onkeydown: move |e| {
+                                oncompositionstart: move |_| ime.start(),
+                                oncompositionend: move |_| ime.commit(),
+                                onkeydown: move |e: Event<KeyboardData>| {
                                     e.stop_propagation();
+                                    if ime.swallows(&e) {
+                                        return;
+                                    }
                                     if e.key() == Key::Enter {
                                         e.prevent_default();
                                         submit_prompt(prompt, draft);

@@ -1,5 +1,6 @@
 pub mod contract;
 pub mod edit;
+pub mod encoding;
 pub mod explorer_model;
 pub mod fold;
 pub mod fold_store;

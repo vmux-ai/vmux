@@ -19,6 +19,7 @@ use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
+use crate::page_model::DisplayCells;
 use crate::preview;
 use crate::wrap::WrapView;
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
@@ -66,6 +67,7 @@ impl Plugin for EditorPlugin {
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(crate::contract::EditorContractPlugin)
+            .add_plugins(EditorHistoryPlugin)
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(crate::app_key::FileKeyPlugin)
             .add_plugins(crate::search::ProjectSearchPlugin)
@@ -111,6 +113,7 @@ impl Plugin for EditorPlugin {
                 ExplorerGoto,
                 ExplorerSearchOpen,
             )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(FileEncodingSet,)>::default())
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -203,6 +206,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_view_mode_set)
             .add_observer(on_file_keymap_set)
             .add_observer(on_file_shape_set)
+            .add_observer(on_file_encoding_set)
             .add_observer(on_explorer_tree_toggle)
             .add_observer(on_explorer_tree_prefetch)
             .add_observer(on_explorer_tree_refresh)
@@ -229,8 +233,36 @@ pub struct FileBuffer {
 }
 
 impl FileBuffer {
-    fn error(message: String) -> Self {
-        Self { language: message }
+    fn failed(reason: LoadFailure, message: String) -> Self {
+        Self {
+            language: format!("{}{message}", reason.marker()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LoadFailure {
+    Fatal,
+    Undecodable,
+}
+
+impl LoadFailure {
+    const FATAL: &'static str = "__error__:";
+    const UNDECODABLE: &'static str = "__undecodable__:";
+
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Fatal => Self::FATAL,
+            Self::Undecodable => Self::UNDECODABLE,
+        }
+    }
+
+    fn of(language: &str) -> Option<(Self, &str)> {
+        if let Some(message) = language.strip_prefix(Self::UNDECODABLE) {
+            return Some((Self::Undecodable, message));
+        }
+        let message = language.strip_prefix(Self::FATAL)?;
+        Some((Self::Fatal, message))
     }
 }
 
@@ -546,6 +578,19 @@ type UnloadedFileView = (
     Without<FileMedia>,
     Without<EditState>,
 );
+type UnloadedFile = (
+    Entity,
+    &'static FileView,
+    Option<&'static mut ParkedEdits>,
+    Option<&'static ForcedEncoding>,
+);
+type EncodingTarget = (
+    &'static FileView,
+    Option<&'static mut EditState>,
+    Option<&'static EditorKeymap>,
+    Option<&'static mut FileViewport>,
+    Option<&'static mut vmux_git::GitDiffSource>,
+);
 type ReadyUnsentMeta = (
     Without<FileInitialMetaSent>,
     With<vmux_core::page::PageReady>,
@@ -622,6 +667,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
             },
             vmux_core::host::page::HostsPage,
             vmux_core::host::page::BindsEditingChords,
+            vmux_core::host::page::HostHistory::default(),
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -709,12 +755,13 @@ fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_co
 }
 
 fn load_file_buffers(
-    mut q: Query<(Entity, &FileView, Option<&mut ParkedEdits>), UnloadedFileView>,
+    mut q: Query<UnloadedFile, UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
-    for (entity, fv, mut parked) in &mut q {
+    for (entity, fv, mut parked, forced) in &mut q {
+        let forced = forced.and_then(|f| f.of(&fv.path));
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
             commands
@@ -743,18 +790,21 @@ fn load_file_buffers(
                 commands
                     .entity(entity)
                     .remove::<MissingFileView>()
-                    .insert(FileBuffer::error(format!(
-                        "__error__:file too large ({len} bytes, max {})",
-                        crate::highlight::FILE_VIEW_MAX_BYTES
-                    )));
+                    .insert(FileBuffer::failed(
+                        LoadFailure::Fatal,
+                        format!(
+                            "file too large ({len} bytes, max {})",
+                            crate::highlight::FILE_VIEW_MAX_BYTES
+                        ),
+                    ));
                 continue;
             }
             Err(e) => {
                 let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::error(format!(
-                    "__error__:cannot open {}: {e}",
-                    fv.path.display()
-                )));
+                entity_commands.insert(FileBuffer::failed(
+                    LoadFailure::Fatal,
+                    format!("cannot open {}: {e}", fv.path.display()),
+                ));
                 if e.kind() == std::io::ErrorKind::NotFound {
                     entity_commands.insert(MissingFileView);
                 } else {
@@ -767,7 +817,8 @@ fn load_file_buffers(
         let kind = settings_keymap(&settings);
         let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
-        if let Some(parked) = parked.as_mut()
+        if forced.is_none()
+            && let Some(parked) = parked.as_mut()
             && let Some(resumed) = parked.resume(&fv.path)
         {
             let mut entity_commands = commands.entity(entity);
@@ -783,26 +834,28 @@ fn load_file_buffers(
             }
             continue;
         }
-        let text = match std::fs::read(&fv.path) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(t) => t,
-                Err(_) => {
-                    commands
-                        .entity(entity)
-                        .remove::<MissingFileView>()
-                        .insert(FileBuffer::error(format!(
-                            "__error__:not a UTF-8 text file: {}",
-                            fv.path.display()
-                        )));
-                    continue;
-                }
+        let decoded = match std::fs::read(&fv.path) {
+            Ok(bytes) => match forced {
+                Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
+                None => match crate::encoding::DecodedText::of(&bytes) {
+                    Some(decoded) => decoded,
+                    None => {
+                        commands.entity(entity).remove::<MissingFileView>().insert(
+                            FileBuffer::failed(
+                                LoadFailure::Undecodable,
+                                format!("not a text file: {}", fv.path.display()),
+                            ),
+                        );
+                        continue;
+                    }
+                },
             },
             Err(e) => {
                 let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::error(format!(
-                    "__error__:cannot read {}: {e}",
-                    fv.path.display()
-                )));
+                entity_commands.insert(FileBuffer::failed(
+                    LoadFailure::Fatal,
+                    format!("cannot read {}: {e}", fv.path.display()),
+                ));
                 if e.kind() == std::io::ErrorKind::NotFound {
                     entity_commands.insert(MissingFileView);
                 } else {
@@ -811,6 +864,7 @@ fn load_file_buffers(
                 continue;
             }
         };
+        let crate::encoding::DecodedText { text, encoding } = decoded;
         let hl = match heavy {
             true => HighlightCache::plain(&fv.path),
             false => HighlightCache::new(&fv.path),
@@ -821,6 +875,7 @@ fn load_file_buffers(
             &text,
             kind.initial_mode(),
         );
+        core.buffer.encoding = encoding;
         let mut folds = crate::fold::FoldState::default();
         if !heavy {
             folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
@@ -926,12 +981,13 @@ fn send_initial_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        if let Some(message) = buf.language.strip_prefix("__error__:") {
+        if let Some((reason, message)) = LoadFailure::of(&buf.language) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 FILE_ERROR_EVENT,
                 &FileErrorEvent {
                     message: message.to_string(),
+                    undecodable: reason == LoadFailure::Undecodable,
                 },
             ));
         }
@@ -968,6 +1024,7 @@ fn send_initial_text_meta(
                 total_lines: edit.core.buffer.len_lines() as u32,
                 indent: shape.indent,
                 line_ending: shape.line_ending,
+                encoding: edit.core.buffer.encoding,
             },
         ));
         if vp.rows > 0 {
@@ -1264,62 +1321,70 @@ fn emit_window(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let total = edit.core.buffer.len_lines() as u32;
-    let wrap = wrapped_view(edit, vp);
-    let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
-    let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
-    let overscan = vmux_core::scroll::overscan_for(
-        vp.rows,
-        vmux_core::scroll::EDITOR_OVERSCAN_K,
-        vmux_core::scroll::OVERSCAN_FLOOR,
-        vmux_core::scroll::OVERSCAN_CAP,
-    );
-    let first_row = vis_first.saturating_sub(overscan);
-    let end_row = (vis_end + overscan).min(visible);
-    let visible_top = wrap.line_at(vis_first);
-    let layouts = wrap.window(first_row, end_row);
-    let first_row = layouts.first().map_or(first_row, |line| line.row);
-    let mut lines = Vec::with_capacity(layouts.len());
-    if let (Some(first_line), Some(last_line)) = (
-        layouts.first().map(|layout| layout.line_no),
-        layouts.last().map(|layout| layout.line_no),
-    ) {
-        let mut window = edit.hl.line_window(
-            &edit.core.buffer.rope,
-            first_line as usize,
-            last_line as usize + 1,
-        );
-        let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
-        for layout in &layouts {
-            let index = (layout.line_no - first_line) as usize;
-            let Some(line) = window.get_mut(index) else {
-                continue;
-            };
-            let mut line = std::mem::take(line);
-            line.fold = edit.folds.gutter(layout.line_no);
-            line.indent_levels = guides.levels(layout.line_no as usize);
-            lines.push(line);
-        }
-    }
-    let mut sticky = Vec::new();
-    if let Some(top) = visible_top {
-        let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
-        for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
-            let at = header as usize;
-            let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
-            if window.is_empty() {
-                continue;
-            }
-            let mut line = window.remove(0);
-            line.fold = edit.folds.gutter(header);
-            line.indent_levels = guides.levels(at);
-            sticky.push(line);
-        }
-    }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
-        &FileViewportPatch {
+        &EditorWindow::of(edit, vp),
+    ));
+}
+
+struct EditorWindow;
+
+impl EditorWindow {
+    fn of(edit: &mut EditState, vp: &FileViewport) -> FileViewportPatch {
+        let total = edit.core.buffer.len_lines() as u32;
+        let wrap = wrapped_view(edit, vp);
+        let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
+        let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
+        let overscan = vmux_core::scroll::overscan_for(
+            vp.rows,
+            vmux_core::scroll::EDITOR_OVERSCAN_K,
+            vmux_core::scroll::OVERSCAN_FLOOR,
+            vmux_core::scroll::OVERSCAN_CAP,
+        );
+        let first_row = vis_first.saturating_sub(overscan);
+        let end_row = (vis_end + overscan).min(visible);
+        let visible_top = wrap.line_at(vis_first);
+        let layouts = wrap.window(first_row, end_row);
+        let first_row = layouts.first().map_or(first_row, |line| line.row);
+        let mut lines = Vec::with_capacity(layouts.len());
+        if let (Some(first_line), Some(last_line)) = (
+            layouts.first().map(|layout| layout.line_no),
+            layouts.last().map(|layout| layout.line_no),
+        ) {
+            let mut window = edit.hl.line_window(
+                &edit.core.buffer.rope,
+                first_line as usize,
+                last_line as usize + 1,
+            );
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
+            for layout in &layouts {
+                let index = (layout.line_no - first_line) as usize;
+                let Some(line) = window.get_mut(index) else {
+                    continue;
+                };
+                let mut line = std::mem::take(line);
+                line.fold = edit.folds.gutter(layout.line_no);
+                line.indent_levels = guides.levels(layout.line_no as usize);
+                lines.push(line);
+            }
+        }
+        let mut sticky = Vec::new();
+        if let Some(top) = visible_top {
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
+            for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
+                let at = header as usize;
+                let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
+                if window.is_empty() {
+                    continue;
+                }
+                let mut line = window.remove(0);
+                line.fold = edit.folds.gutter(header);
+                line.indent_levels = guides.levels(at);
+                sticky.push(line);
+            }
+        }
+        FileViewportPatch {
             first_row,
             total_rows: visible,
             total_lines: total,
@@ -1327,8 +1392,8 @@ fn emit_window(
             layouts,
             lines,
             sticky,
-        },
-    ));
+        }
+    }
 }
 
 /// The buffer lines whose selection, search and word highlights the page can actually show.
@@ -1494,10 +1559,8 @@ impl ScrolledCursor {
         if line == cursor.line {
             return false;
         }
-        let at = edit
-            .core
-            .buffer
-            .coords_to_char(line as usize, cursor.col as usize);
+        let col = edit.core.char_at_cell(line as usize, cursor.col);
+        let at = edit.core.buffer.coords_to_char(line as usize, col);
         if edit.core.mode.is_visual() {
             let anchor = edit.core.primary().anchor;
             edit.core.selections = vec![Selection { anchor, head: at }];
@@ -1516,12 +1579,12 @@ fn wrapped_autoscroll(edit: &mut EditState, vp: &FileViewport) -> Option<u32> {
     let cursor = edit.core.cursor_pos();
     let row = wrapped_view(edit, vp).position(cursor.line, cursor.col).0;
     if row < vp.top_row {
-        Some(row)
-    } else if row >= vp.top_row + vp.rows as u32 {
-        Some(row + 1 - vp.rows as u32)
-    } else {
-        None
+        return Some(row);
     }
+    if row >= vp.top_row + vp.rows as u32 {
+        return Some(row + 1 - vp.rows as u32);
+    }
+    None
 }
 
 fn rehighlight_on_color_scheme(
@@ -1552,17 +1615,22 @@ fn sync_editor_wrap_settings(
     mut commands: Commands,
 ) {
     for (entity, mut viewport, edit, keymap) in &mut views {
+        let wanted_column = settings.editor.word_wrap_column.max(1);
         if viewport.word_wrap == settings.editor.word_wrap
-            && viewport.word_wrap_column == settings.editor.word_wrap_column
+            && viewport.word_wrap_column == wanted_column
         {
             continue;
         }
+        let showing = viewport.top_row;
         viewport.word_wrap = settings.editor.word_wrap;
-        viewport.word_wrap_column = settings.editor.word_wrap_column.max(1);
+        viewport.word_wrap_column = wanted_column;
         viewport.top_row = 0;
         if let Some(mut edit) = edit {
-            if let Some(top) = wrapped_autoscroll(&mut edit, &viewport) {
-                viewport.top_row = top;
+            let wanted = wrapped_autoscroll(&mut edit, &viewport);
+            viewport.top_row = showing;
+            if viewport.rows > 0 {
+                viewport.scroll_to(wanted.unwrap_or(0), entity, &browsers, &mut commands);
+                edit.core.top_row = viewport.top_row;
             }
             emit_window(entity, &mut edit, &viewport, &browsers, &mut commands);
             if let Some(keymap) = keymap {
@@ -1703,6 +1771,67 @@ fn on_file_shape_set(
         &FileShapeEvent {
             indent: shape.indent,
             line_ending: shape.line_ending,
+        },
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_encoding_set(
+    trigger: On<BinReceive<FileEncodingSet>>,
+    mut q: Query<EncodingTarget>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok((fv, edit, keymap, vp, diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    if wanted.action == FileEncodingAction::Reopen {
+        commands
+            .entity(entity)
+            .insert(ForcedEncoding {
+                path: fv.path.clone(),
+                encoding: wanted.encoding,
+            })
+            .remove::<EditState>()
+            .remove::<vmux_git::GitDiffSource>()
+            .remove::<FileBuffer>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LintRan>();
+        manager.change(&fv.path);
+        return;
+    }
+    let (Some(mut edit), Some(keymap), Some(mut vp), Some(mut diff_source)) =
+        (edit, keymap, vp, diff_source)
+    else {
+        return;
+    };
+    edit.core.buffer.encoding = wanted.encoding;
+    run_commands(
+        entity,
+        vec![EditCommand::Save],
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_ENCODING_EVENT,
+        &FileEncodingEvent {
+            encoding: edit.core.buffer.encoding,
         },
     ));
 }
@@ -2035,6 +2164,66 @@ fn on_file_open_external(
     let _ = std::process::Command::new(program).arg(&req_path).spawn();
 }
 
+struct EditorHistoryPlugin;
+
+impl Plugin for EditorHistoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                show_traversed_file_view.in_set(vmux_core::host::page::HostHistorySet::Apply),
+                record_file_view_visit.in_set(vmux_core::host::page::HostHistorySet::Record),
+            ),
+        );
+    }
+}
+
+fn show_traversed_file_view(
+    mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    for event in traversed.read() {
+        let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(event.webview) else {
+            continue;
+        };
+        let Some(path) =
+            vmux_core::file_url::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
+        else {
+            continue;
+        };
+        navigate_file_view(
+            event.webview,
+            path,
+            event.entry.top_line,
+            &mut view,
+            &mut viewport,
+            &mut metadata,
+            &mut manager,
+            &mut commands,
+        );
+    }
+}
+
+fn record_file_view_visit(
+    mut views: Query<
+        (
+            &PageMetadata,
+            &FileViewport,
+            &mut vmux_core::host::page::HostHistory,
+        ),
+        With<FileView>,
+    >,
+) {
+    for (metadata, viewport, mut history) in &mut views {
+        if metadata.url.is_empty() || history.showing(&metadata.url, viewport.top_row) {
+            continue;
+        }
+        history.observe(&metadata.url, viewport.top_row);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn navigate_file_view(
     entity: Entity,
@@ -2144,7 +2333,10 @@ fn on_knowledge_link_open(
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
                             FILE_ERROR_EVENT,
-                            &FileErrorEvent { message: error },
+                            &FileErrorEvent {
+                                message: error,
+                                undecodable: false,
+                            },
                         ));
                     }
                     return;
@@ -2181,6 +2373,21 @@ fn on_knowledge_link_open(
 
 #[derive(Component)]
 struct FileReloadRequested;
+
+#[derive(Component, Clone)]
+struct ForcedEncoding {
+    path: PathBuf,
+    encoding: FileEncoding,
+}
+
+impl ForcedEncoding {
+    fn of(&self, path: &Path) -> Option<FileEncoding> {
+        match self.path == path {
+            true => Some(self.encoding),
+            false => None,
+        }
+    }
+}
 
 #[derive(Component)]
 struct MissingFileView;
@@ -2637,7 +2844,25 @@ fn run_commands(
         if matches!(cmd, EditCommand::Save) {
             let path = edit.core.buffer.path.clone();
             let body = edit.core.buffer.text();
-            match write_atomic(&path, body.as_bytes()) {
+            let encoding = edit.core.buffer.encoding;
+            let bytes = match (crate::encoding::Reencode { encoding }).applied(&body) {
+                Ok(bytes) => bytes,
+                Err(unmappable) => {
+                    tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
+                    if browsers.can_emit_to(&entity) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            FILE_ERROR_EVENT,
+                            &FileErrorEvent {
+                                message: format!("save failed: {unmappable}"),
+                                undecodable: false,
+                            },
+                        ));
+                    }
+                    continue;
+                }
+            };
+            match write_atomic(&path, &bytes) {
                 Ok(()) => {
                     self_writes
                         .0
@@ -2660,6 +2885,7 @@ fn run_commands(
                             FILE_ERROR_EVENT,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
+                                undecodable: false,
                             },
                         ));
                     }
@@ -2986,7 +3212,10 @@ fn on_file_property_edit(
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 FILE_ERROR_EVENT,
-                &FileErrorEvent { message },
+                &FileErrorEvent {
+                    message,
+                    undecodable: false,
+                },
             ));
             return;
         }
@@ -3278,19 +3507,8 @@ fn on_file_hover_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let line = req
-        .line
-        .min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
-    let lt: String = edit
-        .core
-        .buffer
-        .rope
-        .line(line as usize)
-        .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
-        .collect();
-    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, req.col);
-    manager.hover(entity, &edit.core.buffer.path, line, utf16, req.col);
+    let (line, utf16, _, col) = req_pos(edit, req.line, req.col);
+    manager.hover(entity, &edit.core.buffer.path, line, utf16, col);
 }
 
 #[derive(Component)]
@@ -3318,7 +3536,7 @@ fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
     })
 }
 
-fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
+fn req_pos(edit: &EditState, line: u32, cell: u32) -> (u32, u32, String, u32) {
     let line = line.min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
     let lt: String = edit
         .core
@@ -3328,8 +3546,9 @@ fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
         .chars()
         .filter(|c| *c != '\n' && *c != '\r')
         .collect();
+    let col = DisplayCells::char_at(&lt, cell) as u32;
     let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, col);
-    (line, utf16, lt)
+    (line, utf16, lt, col)
 }
 
 fn on_file_definition_request(
@@ -3342,7 +3561,7 @@ fn on_file_definition_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.definition(entity, &path, line, utf16);
 }
@@ -3490,7 +3709,7 @@ fn on_file_rename_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.rename(entity, &path, line, utf16, &req.new_name);
 }
@@ -3505,7 +3724,7 @@ fn on_file_references_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.references(entity, &path, line, utf16);
 }
@@ -3529,8 +3748,8 @@ fn on_file_completion_request(
     {
         return;
     }
-    let (line, utf16, lt) = req_pos(edit, req.line, req.col);
-    let replace_from = word_start_col(&lt, req.col as usize);
+    let (line, utf16, lt, col) = req_pos(edit, req.line, req.col);
+    let replace_from = word_start_col(&lt, col as usize);
     let path = edit.core.buffer.path.clone();
     manager.completion(entity, &path, line, utf16, replace_from);
 }
@@ -3593,7 +3812,15 @@ fn on_file_completion_commit(
     );
 }
 
-fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileViewport) {
+fn goto_caret(
+    entity: Entity,
+    edit: &mut EditState,
+    line: u32,
+    utf16_col: u32,
+    vp: &mut FileViewport,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
     let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
     let lt: String = edit
         .core
@@ -3607,7 +3834,8 @@ fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileView
     let at = edit.core.buffer.coords_to_char(line, ccol as usize);
     edit.core.set_caret(at);
     if let Some(top) = wrapped_autoscroll(edit, vp) {
-        vp.top_row = top;
+        vp.scroll_to(top, entity, browsers, commands);
+        edit.core.top_row = vp.top_row;
     }
 }
 
@@ -3630,7 +3858,15 @@ fn apply_goto(
             continue;
         };
         if canon(&fv.path) == canon(&g.path) {
-            goto_caret(&mut edit, g.line, g.utf16_col, &mut vp);
+            goto_caret(
+                g.entity,
+                &mut edit,
+                g.line,
+                g.utf16_col,
+                &mut vp,
+                &browsers,
+                &mut commands,
+            );
             let vpc = *vp;
             emit_window(g.entity, &mut edit, &vpc, &browsers, &mut commands);
             emit_cursor(
@@ -3686,7 +3922,15 @@ fn apply_pending_goto(
     mut commands: Commands,
 ) {
     for (entity, mut edit, mut vp, keymap, pg) in &mut q {
-        goto_caret(&mut edit, pg.line, pg.utf16_col, &mut vp);
+        goto_caret(
+            entity,
+            &mut edit,
+            pg.line,
+            pg.utf16_col,
+            &mut vp,
+            &browsers,
+            &mut commands,
+        );
         if let Some(end) = pg.select_end_col {
             let line = (pg.line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
             let lt: String = edit
@@ -3728,10 +3972,8 @@ fn on_file_pointer(
     let Ok((mut edit, mut keymap, vp)) = q.get_mut(entity) else {
         return;
     };
-    let at = edit
-        .core
-        .buffer
-        .coords_to_char(p.line as usize, p.col as usize);
+    let col = edit.core.char_at_cell(p.line as usize, p.col);
+    let at = edit.core.buffer.coords_to_char(p.line as usize, col);
     if p.add {
         edit.core.toggle_caret(at);
     } else if p.extend {
@@ -5761,9 +6003,11 @@ mod parked_edit_tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_systems(Update, load_file_buffers)
-                .add_observer(on_file_open);
+                .add_observer(on_file_open)
+                .add_observer(on_file_encoding_set);
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
+            app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut()
                 .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
@@ -5790,6 +6034,38 @@ mod parked_edit_tests {
 
         fn write(&self, name: &str, text: &str) {
             std::fs::write(self.dir.path().join(name), text).unwrap();
+        }
+
+        fn write_bytes(&self, name: &str, bytes: &[u8]) {
+            std::fs::write(self.dir.path().join(name), bytes).unwrap();
+        }
+
+        fn bytes(&self, name: &str) -> Vec<u8> {
+            std::fs::read(self.dir.path().join(name)).unwrap()
+        }
+
+        fn encoding(&self) -> FileEncoding {
+            self.app
+                .world()
+                .get::<EditState>(self.entity)
+                .expect("a loaded buffer")
+                .core
+                .buffer
+                .encoding
+        }
+
+        fn failure(&self) -> Option<LoadFailure> {
+            let buf = self.app.world().get::<FileBuffer>(self.entity)?;
+            let (reason, _) = LoadFailure::of(&buf.language)?;
+            Some(reason)
+        }
+
+        fn encoding_action(&mut self, encoding: FileEncoding, action: FileEncodingAction) {
+            self.app.world_mut().trigger(BinReceive {
+                webview: self.entity,
+                payload: FileEncodingSet { encoding, action },
+            });
+            self.app.update();
         }
 
         fn navigate_to(&mut self, name: &str) {
@@ -5828,6 +6104,111 @@ mod parked_edit_tests {
                 .core
                 .apply(EditCommand::Undo);
         }
+    }
+
+    const SHIFT_JIS_SAMPLE: [u8; 17] = [
+        0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA, 0x82, 0xCC, 0x83, 0x65, 0x83, 0x4C, 0x83, 0x58, 0x83,
+        0x67, 0x0A,
+    ];
+
+    #[test]
+    fn a_shift_jis_file_opens_and_saves_back_as_shift_jis() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+
+        assert_eq!(s.text(), "日本語のテキスト\n", "decoded on load");
+        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
+
+        s.type_into_buffer("EDIT");
+        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+
+        let mut expected = b"EDIT".to_vec();
+        expected.extend_from_slice(&SHIFT_JIS_SAMPLE);
+        assert_eq!(
+            s.bytes("main.txt"),
+            expected,
+            "the file is still shift_jis, not transcoded to utf-8"
+        );
+    }
+
+    #[test]
+    fn saving_a_character_the_encoding_cannot_hold_leaves_the_file_untouched() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+
+        s.type_into_buffer("€");
+        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+
+        assert_eq!(
+            s.bytes("main.txt"),
+            SHIFT_JIS_SAMPLE,
+            "a lossy save is refused rather than written with substitutions"
+        );
+    }
+
+    #[test]
+    fn reopening_with_an_encoding_redecodes_the_same_bytes() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
+
+        s.encoding_action(FileEncoding::EucJp, FileEncodingAction::Reopen);
+        s.app.update();
+
+        assert_eq!(s.encoding(), FileEncoding::EucJp);
+        assert_ne!(
+            s.text(),
+            "日本語のテキスト\n",
+            "the override is honoured over what detection chose"
+        );
+    }
+
+    #[test]
+    fn a_file_that_would_not_decode_can_be_reopened_from_the_failure_itself() {
+        let mut s = Session::open("main.log");
+        s.write_bytes("main.log", b"caf\xe9\x00\x00 log\x00");
+        s.app.update();
+
+        assert_eq!(s.failure(), Some(LoadFailure::Undecodable));
+        assert!(
+            s.app.world().get::<EditState>(s.entity).is_none(),
+            "no buffer is loaded, so the footer chooser has nothing to hang off"
+        );
+
+        s.encoding_action(FileEncoding::Iso8859_1, FileEncodingAction::Reopen);
+        s.app.update();
+
+        assert_eq!(s.failure(), None, "the failure is cleared, not repeated");
+        assert_eq!(s.encoding(), FileEncoding::Iso8859_1);
+        assert_eq!(s.text(), "café\u{0}\u{0} log\u{0}");
+    }
+
+    #[test]
+    fn a_failure_no_encoding_can_rescue_is_not_offered_one() {
+        let mut s = Session::open("gone.log");
+        s.app.update();
+
+        assert_eq!(s.failure(), Some(LoadFailure::Fatal));
+    }
+
+    #[test]
+    fn an_encoding_chosen_for_one_file_does_not_follow_the_pane_to_the_next() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.write("plain.txt", "ascii\n");
+        s.app.update();
+
+        s.encoding_action(FileEncoding::Utf16Le, FileEncodingAction::Reopen);
+        s.app.update();
+        assert_eq!(s.encoding(), FileEncoding::Utf16Le);
+
+        s.navigate_to("plain.txt");
+
+        assert_eq!(s.encoding(), FileEncoding::Utf8);
+        assert_eq!(s.text(), "ascii\n");
     }
 
     #[test]
@@ -6187,5 +6568,368 @@ mod workspace_edit_tests {
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 two 3\n");
         assert_eq!(h.sent.try_recv().unwrap()["result"]["applied"], true);
+    }
+}
+
+#[cfg(test)]
+mod host_history_tests {
+    use super::*;
+    use vmux_core::PageOpenId;
+    use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
+
+    struct Editor {
+        app: App,
+        view: Entity,
+        dir: tempfile::TempDir,
+    }
+
+    impl Editor {
+        fn opened(name: &str) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_plugins(vmux_core::CorePlugin)
+                .add_plugins(EditorHistoryPlugin)
+                .add_message::<vmux_core::event::RecordVisitRequest>()
+                .add_systems(Update, handle_file_page_open)
+                .add_observer(on_file_open);
+            app.world_mut()
+                .insert_resource(crate::lsp::manager::LspManager::new(
+                    crate::lsp::LspOutbox::default(),
+                    crate::lsp::server_request::ServerEvents::default().sender(),
+                ));
+            let stack = app.world_mut().spawn_empty().id();
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: format!("file://{}", dir.path().join(name).display()),
+                request_id: None,
+            });
+            app.update();
+            app.update();
+            let view = app
+                .world_mut()
+                .query_filtered::<Entity, With<FileView>>()
+                .single(app.world())
+                .expect("opening a file:// page spawns one file view");
+            Self { app, view, dir }
+        }
+
+        fn open(&mut self, name: &str) {
+            let path = self.dir.path().join(name).to_string_lossy().into_owned();
+            self.app.world_mut().trigger(BinReceive {
+                webview: self.view,
+                payload: FileOpenEvent { path },
+            });
+            self.app.update();
+        }
+
+        fn scroll_to(&mut self, top_row: u32) {
+            self.app
+                .world_mut()
+                .get_mut::<FileViewport>(self.view)
+                .expect("a file view has a viewport")
+                .top_row = top_row;
+            self.app.update();
+        }
+
+        fn step(&mut self, delta: HostHistoryDelta) {
+            let webview = self.view;
+            self.app
+                .world_mut()
+                .write_message(HostHistoryStep { webview, delta });
+            self.app.update();
+        }
+
+        fn showing(&self) -> String {
+            self.app
+                .world()
+                .get::<FileView>(self.view)
+                .expect("a file view")
+                .path
+                .file_name()
+                .expect("a named file")
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        fn top_row(&self) -> u32 {
+            self.app
+                .world()
+                .get::<FileViewport>(self.view)
+                .expect("a file view has a viewport")
+                .top_row
+        }
+
+        fn history(&self) -> &HostHistory {
+            self.app
+                .world()
+                .get::<HostHistory>(self.view)
+                .expect("a file view owns its history")
+        }
+    }
+
+    #[test]
+    fn back_and_forward_walk_the_files_the_editor_opened() {
+        let mut editor = Editor::opened("a.rs");
+        editor.open("b.rs");
+        editor.open("c.rs");
+        assert!(editor.history().can_go_back());
+        assert!(!editor.history().can_go_forward());
+
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "b.rs");
+        assert!(editor.history().can_go_forward());
+
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "a.rs");
+        assert!(!editor.history().can_go_back());
+
+        editor.step(HostHistoryDelta::Forward);
+        assert_eq!(editor.showing(), "b.rs");
+    }
+
+    #[test]
+    fn opening_a_file_after_going_back_drops_the_forward_trail() {
+        let mut editor = Editor::opened("a.rs");
+        editor.open("b.rs");
+        editor.open("c.rs");
+        editor.step(HostHistoryDelta::Back);
+        editor.step(HostHistoryDelta::Back);
+
+        editor.open("d.rs");
+
+        assert!(!editor.history().can_go_forward());
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "a.rs");
+        editor.step(HostHistoryDelta::Forward);
+        assert_eq!(editor.showing(), "d.rs");
+    }
+
+    #[test]
+    fn going_back_lands_on_the_line_the_file_was_left_at() {
+        let mut editor = Editor::opened("a.rs");
+        editor.scroll_to(120);
+        editor.open("b.rs");
+        assert_eq!(editor.top_row(), 0);
+
+        editor.step(HostHistoryDelta::Back);
+
+        assert_eq!(editor.showing(), "a.rs");
+        assert_eq!(editor.top_row(), 120);
+    }
+}
+
+#[cfg(test)]
+mod editor_window_tests {
+    use super::*;
+
+    impl EditorWindow {
+        fn nested_file(lines: usize) -> EditState {
+            let mut text = String::new();
+            for i in 0..lines {
+                match i % 8 {
+                    0 => text.push_str(&format!("fn f{i}() {{\n")),
+                    7 => text.push_str("}\n"),
+                    _ => text.push_str(&format!("    let v{i} = {i};\n")),
+                }
+            }
+            let path = PathBuf::from("/tmp/window.rs");
+            let core = EditCore::new(
+                path.clone(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let mut folds = crate::fold::FoldState::default();
+            folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+            let mut edit = EditState::new(core, HighlightCache::new(&path), folds);
+            sync_fold_view(&mut edit);
+            edit
+        }
+
+        fn scrolled(top_row: u32, wrap_columns: u16) -> FileViewport {
+            FileViewport {
+                top_row,
+                rows: 40,
+                wrap_columns,
+                word_wrap: vmux_core::editor::WordWrap::On,
+                word_wrap_column: 80,
+            }
+        }
+
+        fn paired(patch: &FileViewportPatch) -> bool {
+            patch.lines.len() == patch.layouts.len()
+                && std::iter::zip(&patch.lines, &patch.layouts)
+                    .all(|(line, layout)| line.line_no == layout.line_no)
+        }
+    }
+
+    #[test]
+    fn every_laid_out_row_carries_its_line_however_the_window_is_placed() {
+        for wrap_columns in [0u16, 12, 100] {
+            for collapsed in [false, true] {
+                let mut edit = EditorWindow::nested_file(400);
+                if collapsed {
+                    for header in (0..400).step_by(8) {
+                        edit.folds.close(header as u32);
+                    }
+                    sync_fold_view(&mut edit);
+                }
+                let rows = EditorWindow::of(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
+                    .total_rows;
+                for top in (0..rows + 40).step_by(11) {
+                    let patch =
+                        EditorWindow::of(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
+                    assert!(
+                        EditorWindow::paired(&patch),
+                        "cols {wrap_columns} collapsed {collapsed} top {top}: \
+                         {} layouts against {} lines",
+                        patch.layouts.len(),
+                        patch.lines.len()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn opening_a_line_deep_in_the_file_keeps_the_window_whole() {
+        let mut edit = EditorWindow::nested_file(400);
+        let vp = EditorWindow::scrolled(300, 100);
+        let at = edit.core.buffer.coords_to_char(316, 0);
+        edit.core.set_caret(at);
+
+        for command in [
+            EditCommand::OpenLine { above: false },
+            EditCommand::InsertText("let inserted = 1;".into()),
+        ] {
+            edit.core.apply(command);
+            let (line, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
+            edit.hl.invalidate_from(line.saturating_sub(1));
+            edit.folds
+                .set_regions(crate::fold::indent_regions(&edit.core.buffer.rope));
+            sync_fold_view(&mut edit);
+            assert!(EditorWindow::paired(&EditorWindow::of(&mut edit, &vp)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod announced_scroll_tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct Emitted(Vec<String>);
+
+    struct GotoSession {
+        app: App,
+        view: Entity,
+    }
+
+    impl GotoSession {
+        fn scrolled_to_the_top_of(path: &Path) -> Self {
+            let text = (0..600)
+                .map(|i| format!("let v{i} = {i};\n"))
+                .collect::<String>();
+            let core = EditCore::new(
+                path.to_path_buf(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let edit = EditState::new(
+                core,
+                HighlightCache::new(path),
+                crate::fold::FoldState::default(),
+            );
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<crate::lsp::manager::LspGoto>()
+                .init_resource::<Emitted>()
+                .add_systems(Update, apply_goto)
+                .add_observer(
+                    |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
+                        emitted.0.push(trigger.event().id.clone());
+                    },
+                );
+            app.world_mut()
+                .insert_resource(crate::lsp::manager::LspManager::new(
+                    crate::lsp::LspOutbox::default(),
+                    crate::lsp::server_request::ServerEvents::default().sender(),
+                ));
+            let view = app
+                .world_mut()
+                .spawn((
+                    edit,
+                    FileView {
+                        path: path.to_path_buf(),
+                    },
+                    FileViewport {
+                        top_row: 0,
+                        rows: 40,
+                        wrap_columns: 0,
+                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap_column: 80,
+                    },
+                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    PageMetadata {
+                        title: String::new(),
+                        url: String::new(),
+                        icon: vmux_core::PageIcon::None,
+                        bg_color: None,
+                    },
+                ))
+                .id();
+            let mut browsers = Browsers::default();
+            browsers.set_externally_hosted(view);
+            app.world_mut().insert_non_send(browsers);
+            Self { app, view }
+        }
+
+        fn goto(&mut self, line: u32) {
+            let entity = self.view;
+            let path = self
+                .app
+                .world()
+                .get::<FileView>(entity)
+                .expect("a file view")
+                .path
+                .clone();
+            self.app
+                .world_mut()
+                .write_message(crate::lsp::manager::LspGoto {
+                    entity,
+                    path,
+                    line,
+                    utf16_col: 0,
+                });
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn a_jump_that_moves_the_viewport_tells_the_page_where_it_went() {
+        let mut session = GotoSession::scrolled_to_the_top_of(Path::new("/tmp/goto.rs"));
+        session.goto(500);
+
+        let top = session
+            .app
+            .world()
+            .get::<FileViewport>(session.view)
+            .expect("a viewport")
+            .top_row;
+        assert!(top > 0, "jumping to line 500 has to move the window");
+        assert!(
+            session
+                .app
+                .world()
+                .resource::<Emitted>()
+                .0
+                .contains(&FILE_SCROLL_BY_EVENT.to_string()),
+            "the window was repainted at row {top}, so a page still parked at row 0 \
+             would render the band off screen unless the move is announced: {:?}",
+            session.app.world().resource::<Emitted>().0
+        );
     }
 }

@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::{message::Messages, relationship::Relationship},
+    ecs::{message::Messages, relationship::Relationship, system::SystemParam},
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -10,7 +10,8 @@ use vmux_command::{
     LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
 };
 use vmux_core::{
-    HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget, page::PageReady,
+    HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
+    page::{HostHistoryDelta, HostHistoryNavigation, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -44,12 +45,7 @@ impl Plugin for CommandPlugin {
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
@@ -58,21 +54,14 @@ fn handle_browser_commands(
     host_spawn: Res<HostSpawnRegistry>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
+    mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
         let AppCommand::Browser(browser_cmd) = cmd else {
             continue;
         };
-        let (_, _, active_stack_opt) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
-        let Some(active) = active_stack_opt else {
+        let Some(active) = active_stack.get() else {
             continue;
         };
         let Some(webview) = browsers
@@ -87,14 +76,16 @@ fn handle_browser_commands(
         match browser_cmd {
             BrowserCommand::Navigation(nav) => match nav {
                 BrowserNavigationCommand::PrevPage => {
-                    if !is_terminal {
-                        commands.trigger(RequestGoBack { webview });
+                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
+                        continue;
                     }
+                    commands.trigger(RequestGoBack { webview });
                 }
                 BrowserNavigationCommand::NextPage => {
-                    if !is_terminal {
-                        commands.trigger(RequestGoForward { webview });
+                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
+                        continue;
                     }
+                    commands.trigger(RequestGoForward { webview });
                 }
                 BrowserNavigationCommand::Reload => {
                     if is_terminal {
@@ -183,6 +174,30 @@ fn handle_browser_commands(
             },
             BrowserCommand::Bar(_) => {}
         }
+    }
+}
+
+#[derive(SystemParam)]
+struct ActiveStack<'w, 's> {
+    active_tab: ActiveTabParam<'w, 's>,
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+}
+
+impl ActiveStack<'_, '_> {
+    fn get(&self) -> Option<Entity> {
+        let (_, _, stack) = focused_stack(
+            self.active_tab.get(),
+            &self.all_children,
+            &self.leaf_panes,
+            &self.pane_ts,
+            &self.pane_children,
+            &self.stack_ts,
+        );
+        stack
     }
 }
 
@@ -437,10 +452,111 @@ fn on_side_sheet_command_emit(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_core::page::HostHistory;
     use vmux_layout::pane::Pane;
     use vmux_layout::space::{Space, SpaceId};
     use vmux_layout::stack::stack_bundle;
     use vmux_layout::tab::Tab;
+
+    #[derive(Resource, Default)]
+    struct CefNavigations(Vec<Entity>);
+
+    impl CefNavigations {
+        fn record_back(trigger: On<RequestGoBack>, mut navigations: ResMut<Self>) {
+            navigations.0.push(trigger.webview);
+        }
+    }
+
+    struct NavArrow {
+        app: App,
+        view: Entity,
+    }
+
+    impl NavArrow {
+        fn over(page: impl Bundle) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_core::CorePlugin, CommandPlugin))
+                .add_message::<AppCommand>()
+                .add_message::<vmux_command::CommandIssued>()
+                .add_message::<PageOpenRequest>()
+                .add_message::<vmux_terminal::TerminalFontSizeCommand>()
+                .init_resource::<HostSpawnRegistry>()
+                .init_resource::<CefNavigations>()
+                .add_observer(CefNavigations::record_back);
+
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt::now()))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id();
+            let view = app.world_mut().spawn((Browser, ChildOf(stack), page)).id();
+
+            Self { app, view }
+        }
+
+        fn over_a_natively_hosted_page() -> Self {
+            let mut history = HostHistory::default();
+            history.observe("file:///a.rs", 0);
+            history.observe("file:///b.rs", 0);
+            Self::over(history)
+        }
+
+        fn pressed(&mut self, button: &str) {
+            self.app
+                .world_mut()
+                .trigger(BinReceive::<HeaderCommandEvent> {
+                    webview: Entity::PLACEHOLDER,
+                    payload: HeaderCommandEvent {
+                        header_command: button.to_string(),
+                    },
+                });
+            self.app.update();
+            self.app.update();
+        }
+
+        fn walked_back(&self) -> bool {
+            self.app
+                .world()
+                .get::<HostHistory>(self.view)
+                .is_some_and(HostHistory::can_go_forward)
+        }
+
+        fn cef_navigations(&self) -> Vec<Entity> {
+            self.app.world().resource::<CefNavigations>().0.clone()
+        }
+    }
+
+    #[test]
+    fn the_back_arrow_walks_host_history_instead_of_asking_chromium() {
+        let mut arrow = NavArrow::over_a_natively_hosted_page();
+
+        arrow.pressed("prev_page");
+
+        assert!(
+            arrow.walked_back(),
+            "the arrow must move the host history cursor off its newest entry"
+        );
+        assert!(
+            arrow.cef_navigations().is_empty(),
+            "a natively hosted page has no Chromium browser to walk back"
+        );
+    }
+
+    #[test]
+    fn the_back_arrow_still_asks_chromium_for_a_page_chromium_renders() {
+        let mut arrow = NavArrow::over(());
+
+        arrow.pressed("prev_page");
+
+        assert_eq!(arrow.cef_navigations(), vec![arrow.view]);
+    }
 
     #[test]
     fn side_sheet_close_routes_through_the_stack_command() {

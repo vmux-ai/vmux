@@ -93,6 +93,22 @@ pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
 pub struct HighlightedFile {
     pub language: String,
     pub lines: Vec<FileLine>,
+    pub encoding: vmux_core::event::FileEncoding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadError {
+    Binary,
+    Unreadable(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Binary => f.write_str("not a text file"),
+            Self::Unreadable(message) => f.write_str(message),
+        }
+    }
 }
 
 pub struct Highlighter {
@@ -140,30 +156,37 @@ impl Highlighter {
         HighlightedFile {
             language: syntax.name.clone(),
             lines,
+            encoding: vmux_core::event::FileEncoding::Utf8,
         }
     }
 
-    pub fn load_file(&self, path: &Path) -> Result<HighlightedFile, String> {
-        let meta =
-            std::fs::metadata(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    pub fn load_file(&self, path: &Path) -> Result<HighlightedFile, LoadError> {
+        let meta = std::fs::metadata(path)
+            .map_err(|e| LoadError::Unreadable(format!("cannot open {}: {e}", path.display())))?;
         if !meta.is_file() {
-            return Err(format!("not a file: {}", path.display()));
+            return Err(LoadError::Unreadable(format!(
+                "not a file: {}",
+                path.display()
+            )));
         }
         if meta.len() > FILE_VIEW_MAX_BYTES {
-            return Err(format!(
+            return Err(LoadError::Unreadable(format!(
                 "file too large ({} bytes, max {})",
                 meta.len(),
                 FILE_VIEW_MAX_BYTES
-            ));
+            )));
         }
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let content = String::from_utf8(bytes)
-            .map_err(|_| format!("not a UTF-8 text file: {}", path.display()))?;
-        if meta.len() > HIGHLIGHT_MAX_BYTES {
-            return Ok(self.plain(&content, path));
-        }
-        Ok(self.highlight(&content, path))
+        let bytes = std::fs::read(path)
+            .map_err(|e| LoadError::Unreadable(format!("cannot read {}: {e}", path.display())))?;
+        let Some(decoded) = crate::encoding::DecodedText::of(&bytes) else {
+            return Err(LoadError::Binary);
+        };
+        let mut out = match meta.len() > HIGHLIGHT_MAX_BYTES {
+            true => self.plain(&decoded.text, path),
+            false => self.highlight(&decoded.text, path),
+        };
+        out.encoding = decoded.encoding;
+        Ok(out)
     }
 
     fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
@@ -186,6 +209,7 @@ impl Highlighter {
         HighlightedFile {
             language: select_syntax(path).name.clone(),
             lines,
+            encoding: vmux_core::event::FileEncoding::Utf8,
         }
     }
 }
@@ -275,7 +299,7 @@ mod tests {
         let err = hl
             .load_file(std::path::Path::new("/no/such/file.rs"))
             .unwrap_err();
-        assert!(err.contains("/no/such/file.rs"), "got: {err}");
+        assert!(err.to_string().contains("/no/such/file.rs"), "got: {err}");
     }
 
     #[test]
@@ -283,7 +307,10 @@ mod tests {
         let hl = Highlighter::new();
         let dir = std::env::temp_dir();
         let err = hl.load_file(&dir).unwrap_err();
-        assert!(err.to_lowercase().contains("not a file"), "got: {err}");
+        assert!(
+            err.to_string().to_lowercase().contains("not a file"),
+            "got: {err}"
+        );
     }
 
     #[test]

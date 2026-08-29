@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::edit::buffer::TextBuffer;
 use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
@@ -9,6 +7,7 @@ use crate::edit::command::{
 };
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
+use crate::page_model::DisplayCells;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -371,7 +370,19 @@ impl EditCore {
             .slice(line_start..line_start + col)
             .chars()
             .collect();
-        UnicodeWidthStr::width(s.as_str()) as u32
+        DisplayCells::of_str(&s)
+    }
+
+    pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let text: String = self
+            .buffer
+            .rope
+            .line(line)
+            .chars()
+            .filter(|ch| *ch != '\n' && *ch != '\r')
+            .collect();
+        DisplayCells::char_at(&text, cell)
     }
 
     pub fn cursor_pos(&self) -> CursorPos {
@@ -391,6 +402,7 @@ impl EditCore {
             line: line as u32,
             row: line as u32,
             col: self.vis_col(line_start, col),
+            char_col: col as u32,
         }
     }
 
@@ -3412,9 +3424,20 @@ mod tests {
             CursorPos {
                 line: 0,
                 row: 0,
-                col: 2
+                col: 2,
+                char_col: 1
             }
         );
+    }
+
+    #[test]
+    fn a_cell_column_resolves_to_the_character_the_pointer_landed_on() {
+        let c = core("今日の予定は？");
+
+        assert_eq!(c.char_at_cell(0, 0), 0);
+        assert_eq!(c.char_at_cell(0, 4), 2);
+        assert_eq!(c.char_at_cell(0, 14), 7);
+        assert_eq!(c.char_at_cell(0, 99), 7);
     }
 
     #[test]

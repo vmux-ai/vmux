@@ -48,6 +48,8 @@ pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
 pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 pub const FILE_SHAPE_EVENT: &str = "file_shape";
 pub const FILE_SHAPE_SET_EVENT: &str = "file_shape_set";
+pub const FILE_ENCODING_EVENT: &str = "file_encoding";
+pub const FILE_ENCODING_SET_EVENT: &str = "file_encoding_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
@@ -167,6 +169,8 @@ pub struct FileMetaEvent {
     pub indent: FileIndent,
     #[serde(default)]
     pub line_ending: FileLineEnding,
+    #[serde(default)]
+    pub encoding: FileEncoding,
 }
 
 #[derive(
@@ -204,6 +208,70 @@ pub enum FileLineEnding {
     #[default]
     Lf,
     Crlf,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileEncoding {
+    #[default]
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+    ShiftJis,
+    EucJp,
+    Iso2022Jp,
+    Gbk,
+    Big5,
+    EucKr,
+    Windows1252,
+    Iso8859_1,
+}
+
+impl FileEncoding {
+    pub const ALL: [Self; 12] = [
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16Le,
+        Self::Utf16Be,
+        Self::ShiftJis,
+        Self::EucJp,
+        Self::Iso2022Jp,
+        Self::Gbk,
+        Self::Big5,
+        Self::EucKr,
+        Self::Windows1252,
+        Self::Iso8859_1,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Utf8Bom => "UTF-8 with BOM",
+            Self::Utf16Le => "UTF-16 LE",
+            Self::Utf16Be => "UTF-16 BE",
+            Self::ShiftJis => "Shift_JIS",
+            Self::EucJp => "EUC-JP",
+            Self::Iso2022Jp => "ISO-2022-JP",
+            Self::Gbk => "GBK",
+            Self::Big5 => "Big5",
+            Self::EucKr => "EUC-KR",
+            Self::Windows1252 => "Windows-1252",
+            Self::Iso8859_1 => "ISO-8859-1",
+        }
+    }
 }
 
 #[derive(
@@ -454,6 +522,8 @@ pub struct KnowledgeLinkOpen {
 )]
 pub struct FileErrorEvent {
     pub message: String,
+    #[serde(default)]
+    pub undecodable: bool,
 }
 
 #[derive(
@@ -1045,7 +1115,16 @@ pub struct OutlineRow {
     pub name: String,
     pub kind: u8,
     pub line: u32,
+    pub end_line: u32,
     pub depth: u16,
+}
+
+impl OutlineRow {
+    pub const OPEN_END: u32 = u32::MAX;
+
+    pub fn contains(&self, line: u32) -> bool {
+        self.line <= line && line <= self.end_line
+    }
 }
 
 #[derive(
@@ -1428,6 +1507,7 @@ mod file_event_tests {
                 name: "## Install".into(),
                 kind: 15,
                 line: 12,
+                end_line: 40,
                 depth: 0,
             }],
         };
@@ -2035,6 +2115,56 @@ pub struct FileShapeSet {
 }
 
 #[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEncodingEvent {
+    pub encoding: FileEncoding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileEncodingAction {
+    Reopen,
+    Save,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEncodingSet {
+    pub encoding: FileEncoding,
+    pub action: FileEncodingAction,
+}
+
+#[derive(
     Clone,
     Copy,
     Debug,
@@ -2495,17 +2625,20 @@ mod tests {
                 line: 3,
                 row: 3,
                 col: 5,
+                char_col: 4,
             },
             carets: vec![
                 CursorPos {
                     line: 3,
                     row: 3,
                     col: 5,
+                    char_col: 4,
                 },
                 CursorPos {
                     line: 4,
                     row: 4,
                     col: 5,
+                    char_col: 4,
                 },
             ],
             selections: vec![SelSpan {
@@ -2518,6 +2651,7 @@ mod tests {
                 line: 3,
                 row: 3,
                 col: 25,
+                char_col: 20,
             },
             source_selections: vec![SelSpan {
                 line: 3,

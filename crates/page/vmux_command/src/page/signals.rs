@@ -108,6 +108,7 @@ impl PaletteKeys {
         let landed = rows.step(rows.selected(*self.signals.selected.peek()), direction);
         drop(rows);
         self.signals.highlight(landed);
+        TextCaret::in_field(COMMAND_BAR_INPUT_ID).to_end();
     }
 
     fn accept_completion(&mut self) {

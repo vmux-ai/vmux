@@ -347,6 +347,16 @@ line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the
 spans, so code looks identical wherever it appears. No tree-sitter, no LSP. The host ships
 only the visible slice of a file and re-slices as you scroll.
 
+The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
+two per wide one — because wrapping and selection are grid problems and the host has no
+font. Only the page can turn a cell into a pixel, so it does: it measures a narrow advance
+and a wide one, and `ColumnRuler` walks the line's own text to place a caret, a selection
+or a click. Multiplying a column by one character width is what put the caret past Japanese
+text — Menlo's advance is 0.6 em, the CJK fallback's is 1.0, and 2 × 0.6 is not 1.0. No
+font stack metric-locks its fallbacks, so the page measures rather than assumes. A cell
+column is also not a character index: pointer columns arrive as cells and the host converts
+once on entry, and the status bar reports the character column, as VS Code does.
+
 ---
 
 ## Mobile Remote
