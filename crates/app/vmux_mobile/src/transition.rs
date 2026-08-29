@@ -84,6 +84,7 @@ mod platform {
     const MARK_DIM: f64 = 0.25;
     const MARK_CLEARANCE: f64 = TAB_BAR_GAP + MARK_BAR_HEIGHT;
     const MARK_GLIDE: f64 = 0.28;
+    const MARK_MOST: usize = 9;
     const DIP: f64 = 0.06;
     const TAB_TRAIL: f64 = 0.5;
     const SHEET_FADE: f64 = 0.55;
@@ -332,11 +333,25 @@ mod platform {
             }
         }
 
-        fn show(&self, count: usize, at: usize) {
+        fn window(count: usize, at: usize) -> usize {
+            if count <= MARK_MOST {
+                return 0;
+            }
+            let half = MARK_MOST / 2;
+            at.saturating_sub(half).min(count - MARK_MOST)
+        }
+
+        fn framed(count: usize, at: usize) -> (usize, usize) {
+            let start = Self::window(count, at);
+            (count.min(MARK_MOST), at.saturating_sub(start))
+        }
+
+        fn show(&self, tabs: usize, index: usize) {
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let wanted = count >= 2;
+            let (count, at) = Self::framed(tabs, index);
+            let wanted = tabs >= 2;
             if wanted && self.capsule.isHidden() {
                 self.capsule.setAlpha(0.0);
                 self.capsule.setHidden(false);
@@ -400,9 +415,11 @@ mod platform {
             }
         }
 
-        fn track(&self, count: usize, from: usize, to: usize, progress: f64) {
+        fn track(&self, tabs: usize, from: usize, to: usize, progress: f64) {
             let gone = progress.clamp(0.0, 1.0);
-            let (here, there) = (self.spot(count, from), self.spot(count, to));
+            let (count, here) = Self::framed(tabs, from);
+            let (_, there) = Self::framed(tabs, to);
+            let (here, there) = (self.spot(count, here), self.spot(count, there));
             let mut seat = here;
             seat.origin.x = here.origin.x + (there.origin.x - here.origin.x) * gone;
             self.glow.setFrame(seat);
@@ -2648,19 +2665,24 @@ mod platform {
                     };
                     let sheets = stack.sheets.len();
                     if sheets > 1 {
-                        let Some(wanted) = stack.indicator.reached(sender, sheets) else {
+                        let (shown, _) = Indicator::framed(sheets, sheets - 1);
+                        let Some(hit) = stack.indicator.reached(sender, shown) else {
                             return;
                         };
+                        let wanted = Indicator::window(sheets, sheets - 1) + hit;
                         TAPPED.with_borrow_mut(|queued| {
-                            for _ in 0..sheets - 1 - wanted {
+                            for _ in 0..sheets - 1 - wanted.min(sheets - 1) {
                                 queued.push(super::ROTATE);
                             }
                         });
                         return;
                     }
-                    let Some(wanted) = stack.indicator.reached(sender, stack.tabs.ids.len()) else {
+                    let tabs = stack.tabs.ids.len();
+                    let (shown, _) = Indicator::framed(tabs, stack.tabs.at);
+                    let Some(hit) = stack.indicator.reached(sender, shown) else {
                         return;
                     };
+                    let wanted = Indicator::window(tabs, stack.tabs.at) + hit;
                     let Some(id) = stack.tabs.ids.get(wanted) else {
                         return;
                     };
