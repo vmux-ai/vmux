@@ -1355,6 +1355,10 @@ mod platform {
                 entry == Entry::Fresh,
                 Some(&raised),
             );
+            if entry != Entry::Fresh {
+                Parallax::sink();
+                next_turn(Parallax::sink);
+            }
         }
 
         pub fn dismiss() {
@@ -1528,6 +1532,7 @@ mod platform {
         incoming: Column,
         entering: f64,
         across: f64,
+        at: Cell<f64>,
         sheet: Option<Parallax>,
     }
 
@@ -1560,6 +1565,7 @@ mod platform {
                 let travelled = -shifted.clamp(-drag.across, drag.across);
                 let scale =
                     1.0 - DIP * (std::f64::consts::PI * travelled / drag.across).sin().abs();
+                drag.at.set(travelled.abs() / drag.across);
                 if let Some(leaving) = Self::leaving(stack) {
                     leaving.setTransform(Self::moved(travelled, scale));
                 }
@@ -1580,12 +1586,7 @@ mod platform {
                 return;
             };
             rising.follow(1.0 - progress);
-            for column in &stack.sheets {
-                let Some(view) = column.navigation.view() else {
-                    continue;
-                };
-                view.setAlpha(1.0);
-            }
+            Parallax::opaque();
         }
 
         fn begin(shifted: f64) -> Option<Drag> {
@@ -1617,6 +1618,7 @@ mod platform {
                     incoming,
                     entering,
                     across,
+                    at: Cell::new(0.0),
                     sheet,
                 })
             })
@@ -1836,17 +1838,7 @@ mod platform {
                 return;
             };
             risen.follow(1.0);
-            STACK.with_borrow(|stack| {
-                let Some(stack) = stack.as_ref() else {
-                    return;
-                };
-                for column in &stack.sheets {
-                    let Some(view) = column.navigation.view() else {
-                        continue;
-                    };
-                    view.setAlpha(1.0);
-                }
-            });
+            Self::opaque();
             let rising = risen.clone();
             let motion = block2::RcBlock::new(move || rising.follow(0.0));
             UIView::animateWithDuration_delay_options_animations_completion(
@@ -1881,10 +1873,33 @@ mod platform {
         }
 
         fn sink() {
-            let Some(sunk) = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?)) else {
+            let placed = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                let risen = match stack.dragging.as_ref() {
+                    Some(drag) => drag.at.get(),
+                    None => 0.0,
+                };
+                Some((Parallax::of(stack)?, risen))
+            });
+            let Some((sunk, risen)) = placed else {
                 return;
             };
-            sunk.follow(1.0);
+            sunk.follow(1.0 - risen);
+            Self::opaque();
+        }
+
+        fn opaque() {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                for column in &stack.sheets {
+                    let Some(view) = column.navigation.view() else {
+                        continue;
+                    };
+                    view.setAlpha(1.0);
+                }
+            });
         }
 
         fn depart(&self, marker: MainThreadMarker, then: impl Fn() + 'static) {
@@ -2185,7 +2200,15 @@ mod platform {
     }
 
     fn after_paint<F: FnOnce() + 'static>(work: F) {
-        let Ok(when) = DispatchTime::try_from(Duration::from_millis(48)) else {
+        on_main(48, work);
+    }
+
+    fn next_turn<F: FnOnce() + 'static>(work: F) {
+        on_main(0, work);
+    }
+
+    fn on_main<F: FnOnce() + 'static>(delay: u64, work: F) {
+        let Ok(when) = DispatchTime::try_from(Duration::from_millis(delay)) else {
             return;
         };
         let work = OnMain(work);
