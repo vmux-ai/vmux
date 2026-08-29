@@ -91,7 +91,6 @@ mod platform {
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Option<String>> = const { RefCell::new(None) };
-        static OVERVIEW: Cell<bool> = const { Cell::new(false) };
     }
 
     struct Held {
@@ -1561,7 +1560,7 @@ mod platform {
 
             #[unsafe(method(tabsTapped:))]
             fn tabs_tapped(&self, _sender: &UIButton) {
-                OVERVIEW.set(true);
+                Overview::toggle();
             }
 
             #[unsafe(method(browseTapped:))]
@@ -1776,10 +1775,6 @@ mod platform {
         CLOSING.with_borrow_mut(Option::take)
     }
 
-    pub fn take_overview() -> bool {
-        OVERVIEW.replace(false)
-    }
-
     fn size_to_parent(view: &UIView, parent: &UIView) {
         view.setFrame(parent.bounds());
         view.setAutoresizingMask(
@@ -1835,10 +1830,6 @@ mod platform {
         None
     }
 
-    pub fn take_overview() -> bool {
-        false
-    }
-
     pub fn take_closed() -> bool {
         false
     }
@@ -1865,6 +1856,5 @@ mod platform {
 #[cfg(target_os = "ios")]
 pub use platform::install;
 pub use platform::{
-    NativeStack, take_closed, take_closing, take_dismissed, take_overview, take_picked,
-    take_popped, take_tapped,
+    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped, take_tapped,
 };
