@@ -5,7 +5,7 @@ use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows};
+use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows, Trail};
 use vmux_mobile::{Router, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -116,10 +116,13 @@ fn describe(mut levels: Query<(&Shows<Page>, &mut Panel)>) {
     }
 }
 
-fn tally(levels: Query<(Entity, &Depth, &Shows<Page>)>, mut panels: Query<&mut Panel>) {
+fn tally(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut panels: Query<&mut Panel>) {
     let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
-    for (entity, route) in Panel::ordered(&levels) {
-        match route {
+    for entity in trail.0.iter().copied() {
+        let Ok(shows) = routes.get(entity) else {
+            continue;
+        };
+        match &shows.0 {
             Page::Card(_) => cards += 1,
             Page::Modal(_) => modals += 1,
             Page::FormSheet(_) => sheets += 1,
@@ -143,40 +146,28 @@ fn tally(levels: Query<(Entity, &Depth, &Shows<Page>)>, mut panels: Query<&mut P
     }
 }
 
-fn trace(levels: Query<(Entity, &Depth, &Shows<Page>)>, mut panels: Query<&mut Panel>) {
-    let ordered = Panel::ordered(&levels);
+fn trace(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut panels: Query<&mut Panel>) {
     let mut crumbs = Vec::new();
-    for (_, route) in &ordered {
-        crumbs.push(route.title());
+    for entity in trail.0.iter().copied() {
+        if let Ok(shows) = routes.get(entity) {
+            crumbs.push(shows.0.title());
+        }
     }
-    let trail = Panel::elide(crumbs);
-    let deepest = ordered.len().saturating_sub(1);
-    for (at, (entity, _)) in ordered.into_iter().enumerate() {
+    let elided = Panel::elide(crumbs);
+    let deepest = trail.0.len().saturating_sub(1);
+    for (at, entity) in trail.0.iter().copied().enumerate() {
         let Ok(mut panel) = panels.get_mut(entity) else {
             continue;
         };
         let rungs = Panel::rungs(deepest, at);
-        if (&panel.trail, &panel.rungs) != (&trail, &rungs) {
-            panel.trail = trail.clone();
+        if (&panel.trail, &panel.rungs) != (&elided, &rungs) {
+            panel.trail = elided.clone();
             panel.rungs = rungs;
         }
     }
 }
 
 impl Panel {
-    fn ordered(levels: &Query<(Entity, &Depth, &Shows<Page>)>) -> Vec<(Entity, Page)> {
-        let mut trail = Vec::new();
-        for (entity, depth, shows) in levels.iter() {
-            trail.push((depth.0, entity, shows.0.clone()));
-        }
-        trail.sort_by_key(|(depth, _, _)| *depth);
-        let mut ordered = Vec::new();
-        for (_, entity, route) in trail {
-            ordered.push((entity, route));
-        }
-        ordered
-    }
-
     fn elide(mut crumbs: Vec<String>) -> String {
         if crumbs.len() > CRUMBS {
             let tail = crumbs.split_off(crumbs.len() - (CRUMBS - 1));
