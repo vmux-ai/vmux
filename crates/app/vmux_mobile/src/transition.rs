@@ -1193,8 +1193,8 @@ mod platform {
                 let Some((presenter, sheet)) = pending else {
                     return;
                 };
-                presenter.presentViewController_animated_completion(&sheet, true, None);
-                Self::front();
+                let raised = block2::RcBlock::new(NativeStack::front);
+                presenter.presentViewController_animated_completion(&sheet, true, Some(&raised));
             });
         }
 
