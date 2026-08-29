@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 
 pub use crate::transition::Presentation;
-use crate::transition::{Level, NativeStack, TabItem};
+use crate::transition::{Level, NativeStack, ROTATE, ROTATE_BACK, TabItem};
 pub use vmux_macro::Route;
 
 pub trait ScreenName: Copy + PartialEq + Send + Sync + 'static {
@@ -144,7 +144,6 @@ impl<S: Route> Screens<S> {
 pub struct Centre(pub &'static str);
 
 const NEW_TAB: &str = "+";
-const ROTATE: &str = "\u{27f3}";
 
 type Listed<'w, 's, S> = Query<
     'w,
@@ -619,23 +618,8 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
-                cycle: None,
                 seat: Seat::taken(&screen),
             });
-        }
-        let mut sheets = 0;
-        for level in &levels {
-            if !level.presentation.pushes() {
-                sheets += 1;
-            }
-        }
-        if sheets > 1 {
-            for level in &mut levels {
-                if level.presentation.pushes() {
-                    continue;
-                }
-                level.cycle = Some(ROTATE);
-            }
         }
         levels
     }
@@ -695,7 +679,6 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
-                cycle: None,
                 seat: Seat::taken(screen),
             });
         }
@@ -714,7 +697,6 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
-                cycle: None,
                 seat: Seat::taken(screen),
             });
         }
@@ -728,10 +710,13 @@ impl Nav {
         mut turns: ResMut<Turns>,
         mut commands: Commands,
     ) {
-        let mut asked = 0;
+        let mut asked = 0i32;
         for Tapped(action) in tapped.read() {
             if *action == ROTATE {
                 asked += 1;
+            }
+            if *action == ROTATE_BACK {
+                asked -= 1;
             }
         }
         if asked == 0 {
@@ -763,11 +748,19 @@ impl Nav {
         if sheets.len() < 2 {
             return;
         }
-        for _ in 0..asked {
-            let Some(deepest) = sheets.pop() else {
-                break;
-            };
-            sheets.insert(0, deepest);
+        for _ in 0..asked.abs() {
+            if asked > 0 {
+                let Some(deepest) = sheets.pop() else {
+                    break;
+                };
+                sheets.insert(0, deepest);
+            } else {
+                if sheets.is_empty() {
+                    break;
+                }
+                let front = sheets.remove(0);
+                sheets.push(front);
+            }
         }
         let mut parent = under;
         for entity in sheets {

@@ -16,6 +16,11 @@ impl Presentation {
 }
 
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub const ROTATE: &str = "\u{27f3}";
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub const ROTATE_BACK: &str = "\u{27f2}";
+
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub struct Level {
     pub key: u64,
     pub page: &'static NativePage,
@@ -23,7 +28,6 @@ pub struct Level {
     pub action: Option<&'static str>,
     pub presentation: Presentation,
     pub detents: &'static [f64],
-    pub cycle: Option<&'static str>,
     pub seat: vmux_native::Instance,
 }
 
@@ -92,6 +96,7 @@ mod platform {
         static DISMISSED: Cell<usize> = const { Cell::new(0) };
         static TAPPED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+        static PARKING: RefCell<Option<Vec<Level>>> = const { RefCell::new(None) };
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -129,9 +134,6 @@ mod platform {
             }
             if !level.presentation.pushes() {
                 item.setRightBarButtonItem(Some(&Bar::closer(delegate, marker)));
-            }
-            if let Some(cycle) = level.cycle {
-                item.setLeftBarButtonItem(Some(&Bar::button(cycle, delegate, marker)));
             }
             Some(Self {
                 controller,
@@ -987,7 +989,7 @@ mod platform {
             }
             let Some((leaving, arriving, entering)) = plan else {
                 Self::shed();
-                Self::present_all(presented, false);
+                Self::present_all(presented, Entry::Fresh);
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
@@ -1004,7 +1006,7 @@ mod platform {
             Drag::glide(leaving, arriving, 0.0, entering, -entering, done, marker);
             let Some(departing) = departing else {
                 Self::shed();
-                Self::present_all(presented, true);
+                Self::present_all(presented, Entry::Rising);
                 return;
             };
             let waiting = RefCell::new(Some(presented));
@@ -1012,7 +1014,7 @@ mod platform {
                 let Some(rest) = waiting.borrow_mut().take() else {
                     return;
                 };
-                NativeStack::present_all(rest, true);
+                NativeStack::present_all(rest, Entry::Rising);
             });
         }
 
@@ -1231,12 +1233,13 @@ mod platform {
         }
 
         pub fn present(level: Level) {
-            Self::present_all(vec![level], false);
+            Self::present_all(vec![level], Entry::Fresh);
         }
 
-        fn present_all(mut levels: Vec<Level>, rising: bool) {
+        fn present_all(mut levels: Vec<Level>, entry: Entry) {
             if levels.is_empty() {
-                if rising {
+                Self::label();
+                if entry == Entry::Rising {
                     Parallax::arrive();
                 }
                 return;
@@ -1245,7 +1248,7 @@ mod platform {
             let (key, presentation, detents) = (level.key, level.presentation, level.detents);
             let reused = STACK.with_borrow_mut(|stack| stack.as_mut()?.kept.remove(&key));
             if let Some(column) = reused {
-                Self::mount(column, presentation, detents, levels, rising);
+                Self::mount(column, presentation, detents, levels, entry);
                 return;
             }
             let drawn = Self::draw(level);
@@ -1261,7 +1264,36 @@ mod platform {
                 let Some(column) = built else {
                     return;
                 };
-                NativeStack::mount(column, presentation, detents, levels, rising);
+                NativeStack::mount(column, presentation, detents, levels, entry);
+            });
+        }
+
+        fn label() {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let many = stack.sheets.len() > 1;
+                for column in &stack.sheets {
+                    let Some(held) = column.levels.first() else {
+                        continue;
+                    };
+                    let item = held.controller.navigationItem();
+                    if many {
+                        let turn = [
+                            Bar::button(super::ROTATE_BACK, &stack.delegate, marker),
+                            Bar::button(super::ROTATE, &stack.delegate, marker),
+                        ];
+                        item.setLeftBarButtonItems(Some(
+                            &objc2_foundation::NSArray::from_retained_slice(&turn),
+                        ));
+                    } else {
+                        item.setLeftBarButtonItems(None);
+                    }
+                }
             });
         }
 
@@ -1270,8 +1302,13 @@ mod platform {
             presentation: Presentation,
             detents: &'static [f64],
             rest: Vec<Level>,
-            rising: bool,
+            entry: Entry,
         ) {
+            if let Some(view) = column.navigation.view() {
+                view.setTransform(Drag::sideways(0.0));
+                view.setHidden(false);
+                view.setAlpha(if entry == Entry::Fresh { 1.0 } else { 0.0 });
+            }
             let pending = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
                 let marker = MainThreadMarker::new()?;
@@ -1300,20 +1337,24 @@ mod platform {
             let Some((presenter, sheet)) = pending else {
                 return;
             };
-            if !rising {
+            if entry == Entry::Fresh {
                 Parallax::recede(&presenter, false);
             }
             let waiting = RefCell::new(Some(rest));
             let raised = block2::RcBlock::new(move || {
-                if rising {
+                if entry != Entry::Fresh {
                     Parallax::sink();
                 }
                 NativeStack::front();
                 if let Some(rest) = waiting.borrow_mut().take() {
-                    NativeStack::present_all(rest, rising);
+                    NativeStack::present_all(rest, entry);
                 }
             });
-            presenter.presentViewController_animated_completion(&sheet, !rising, Some(&raised));
+            presenter.presentViewController_animated_completion(
+                &sheet,
+                entry == Entry::Fresh,
+                Some(&raised),
+            );
         }
 
         pub fn dismiss() {
@@ -1327,6 +1368,7 @@ mod platform {
             departing
                 .navigation
                 .dismissViewControllerAnimated_completion(true, None);
+            Self::label();
             Self::front();
         }
 
@@ -1335,13 +1377,10 @@ mod platform {
                 Some(stack) => std::mem::take(&mut stack.sheets),
                 None => Vec::new(),
             });
-            let Some(first) = sheets.first() else {
-                return;
+            let base = match sheets.first() {
+                Some(first) => first.navigation.presentingViewController(),
+                None => None,
             };
-            let Some(base) = first.navigation.presentingViewController() else {
-                return;
-            };
-            Parallax::recede(&base, true);
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
                     return;
@@ -1350,6 +1389,10 @@ mod platform {
                     stack.kept.insert(column.key, column);
                 }
             });
+            let Some(base) = base else {
+                return;
+            };
+            Parallax::recede(&base, true);
             base.dismissViewControllerAnimated_completion(false, None);
         }
 
@@ -1472,8 +1515,16 @@ mod platform {
         }
     }
 
+    #[derive(Clone, Copy, PartialEq)]
+    enum Entry {
+        Fresh,
+        Rising,
+        Parked,
+    }
+
     struct Drag {
         to: String,
+        parked: bool,
         incoming: Column,
         entering: f64,
         across: f64,
@@ -1495,6 +1546,9 @@ mod platform {
                     };
                     stack.dragging = started;
                 });
+                if let Some(levels) = PARKING.with_borrow_mut(|slot| slot.take()) {
+                    NativeStack::present_all(levels, Entry::Parked);
+                }
             }
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
@@ -1515,7 +1569,23 @@ mod platform {
                 if let Some(sheet) = drag.sheet.as_ref() {
                     sheet.follow(travelled.abs() / drag.across);
                 }
+                if drag.parked {
+                    Self::lift(stack, travelled.abs() / drag.across);
+                }
             });
+        }
+
+        fn lift(stack: &NativeStack, progress: f64) {
+            let Some(rising) = Parallax::of(stack) else {
+                return;
+            };
+            rising.follow(1.0 - progress);
+            for column in &stack.sheets {
+                let Some(view) = column.navigation.view() else {
+                    continue;
+                };
+                view.setAlpha(1.0);
+            }
         }
 
         fn begin(shifted: f64) -> Option<Drag> {
@@ -1530,8 +1600,20 @@ mod platform {
                 view.setTransform(Self::sideways(entering));
                 view.setHidden(false);
                 stack.pager.bringSubviewToFront(&view);
+                let waiting = match sheet {
+                    Some(_) => None,
+                    None => stack.pending.remove(&to),
+                };
+                let parked = match waiting {
+                    Some(levels) if !levels.is_empty() => {
+                        PARKING.with_borrow_mut(|slot| *slot = Some(levels));
+                        true
+                    }
+                    _ => false,
+                };
                 Some(Drag {
                     to,
+                    parked,
                     incoming,
                     entering,
                     across,
@@ -1571,7 +1653,14 @@ mod platform {
             if let Some(sheet) = sheet {
                 sheet.settle(commit, marker);
             }
-            if commit {
+            let parked = STACK
+                .with_borrow(|stack| Some(stack.as_ref()?.dragging.as_ref()?.parked))
+                .unwrap_or(false);
+            if parked {
+                if let Some(rising) = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?)) {
+                    rising.settle(!commit, marker);
+                }
+            } else if commit {
                 Self::hand_over();
             }
             let done = block2::RcBlock::new(move |_| Drag::land(commit));
@@ -1596,13 +1685,15 @@ mod platform {
             let Some(arriving) = arriving else {
                 return;
             };
-            NativeStack::present_all(arriving, true);
+            NativeStack::present_all(arriving, Entry::Rising);
         }
 
         fn land(commit: bool) {
+            let mut parked = false;
             let arrived = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
                 let drag = stack.dragging.take()?;
+                parked = drag.parked;
                 if let Some(view) = drag.incoming.navigation.view() {
                     view.setTransform(Self::sideways(0.0));
                     view.setHidden(!commit);
@@ -1621,6 +1712,9 @@ mod platform {
             let Some(to) = arrived else {
                 return;
             };
+            if !commit && parked {
+                NativeStack::shed();
+            }
             if commit {
                 PICKED.with_borrow_mut(|slot| *slot = Some(to));
             }
@@ -1703,7 +1797,10 @@ mod platform {
                 let Some(view) = sheet.navigation.view() else {
                     continue;
                 };
-                views.push(Self::container(view));
+                let Some(container) = Self::container(view) else {
+                    continue;
+                };
+                views.push(container);
             }
             if views.is_empty() {
                 return None;
@@ -1712,14 +1809,12 @@ mod platform {
             Some(Parallax { views, fall })
         }
 
-        fn container(view: Retained<UIView>) -> Retained<UIView> {
+        fn container(view: Retained<UIView>) -> Option<Retained<UIView>> {
             let mut top = view;
             loop {
-                let Some(parent) = top.superview() else {
-                    return top;
-                };
+                let parent = top.superview()?;
                 if parent.superview().is_none() {
-                    return top;
+                    return Some(top);
                 }
                 top = parent;
             }
@@ -1741,6 +1836,17 @@ mod platform {
                 return;
             };
             risen.follow(1.0);
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                for column in &stack.sheets {
+                    let Some(view) = column.navigation.view() else {
+                        continue;
+                    };
+                    view.setAlpha(1.0);
+                }
+            });
             let rising = risen.clone();
             let motion = block2::RcBlock::new(move || rising.follow(0.0));
             UIView::animateWithDuration_delay_options_animations_completion(
