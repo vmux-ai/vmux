@@ -4,6 +4,7 @@ pub struct NativePage {
     pub(crate) title: &'static str,
     pub(crate) reports_title: bool,
     pub(crate) favicon: bool,
+    #[cfg_attr(not(ui), allow(dead_code))]
     pub(crate) component: crate::PageComponent,
     pub(crate) dom_group: Option<&'static str>,
     pub(crate) root_id: &'static str,
