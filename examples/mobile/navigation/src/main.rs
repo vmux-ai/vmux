@@ -7,28 +7,20 @@ use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows, Trail};
 use vmux_mobile::{Router, Stack, Tabs, use_router};
-use vmux_native::screen;
+use vmux_native::{screen, screens};
 
 const BACKDROP: (u8, u8, u8, u8) = (10, 10, 10, 255);
 const SEEDED: usize = 1;
 const RUNGS: usize = 8;
 const HEAD: usize = 3;
 const CRUMBS: usize = 4;
-
-#[derive(Clone, PartialEq, Route)]
-enum Page {
-    #[blank]
-    #[route("Tab {0}")]
-    Tab(usize),
-    #[route("{0}")]
-    Card(String),
-    #[route("{0}")]
-    Modal(String),
-    #[route("{0}")]
-    FormSheet(String),
-    #[route("{0}")]
-    FullScreenModal(String),
-}
+const HUES: usize = 360;
+const TAB_HUE: usize = 185;
+const TAB_STEP: usize = 37;
+const CARD_HUE: usize = 285;
+const MODAL_HUE: usize = 30;
+const SHEET_HUE: usize = 175;
+const FULL_HUE: usize = 255;
 
 fn main() {
     bevy_app::App::new()
@@ -58,11 +50,11 @@ fn App() -> Element {
     rsx! {
         Stack {
             Tabs {
-                TabScreen {}
-                CardScreen {}
-                ModalScreen {}
-                SheetScreen {}
-                FullScreen {}
+                Tab {}
+                Card {}
+                Modal {}
+                FormSheet {}
+                FullScreenModal {}
             }
         }
     }
@@ -101,11 +93,11 @@ fn sketch(fresh: Query<Entity, Unpainted>, mut commands: Commands) {
 fn describe(mut levels: Query<(&Shows<Page>, &mut Panel)>) {
     for (shows, mut panel) in levels.iter_mut() {
         let (hue, kind) = match &shows.0 {
-            Page::Tab(number) => ((number * 37 + 185) % 360, "tab root"),
-            Page::Card(_) => (285, "card"),
-            Page::Modal(_) => (30, "modal"),
-            Page::FormSheet(_) => (175, "form sheet"),
-            Page::FullScreenModal(_) => (255, "full screen modal"),
+            Page::Tab(number) => ((TAB_HUE + number * TAB_STEP) % HUES, "tab root"),
+            Page::Card(_) => (CARD_HUE, "card"),
+            Page::Modal(_) => (MODAL_HUE, "modal"),
+            Page::FormSheet(_) => (SHEET_HUE, "form sheet"),
+            Page::FullScreenModal(_) => (FULL_HUE, "full screen modal"),
         };
         let title = shows.0.title();
         if (panel.hue, panel.kind, &panel.title) != (hue, kind, &title) {
@@ -215,43 +207,46 @@ fn use_panel() -> (Router<Page>, Panel) {
     (router, router.attached().unwrap_or_default())
 }
 
-#[screen(PageName::Tab)]
-#[component]
-fn TabScreen() -> Element {
-    rsx! {
-        Body {}
+#[screens]
+mod page {
+    #[screen(holds = usize, title = "Tab {0}", blank)]
+    #[component]
+    fn Tab() -> Element {
+        rsx! {
+            Body {}
+        }
     }
-}
 
-#[screen(PageName::Card)]
-#[component]
-fn CardScreen() -> Element {
-    rsx! {
-        Body {}
+    #[screen(holds = String, title = "{0}")]
+    #[component]
+    fn Card() -> Element {
+        rsx! {
+            Body {}
+        }
     }
-}
 
-#[screen(PageName::Modal, presentation = Modal)]
-#[component]
-fn ModalScreen() -> Element {
-    rsx! {
-        Body {}
+    #[screen(holds = String, title = "{0}", presentation = Modal)]
+    #[component]
+    fn Modal() -> Element {
+        rsx! {
+            Body {}
+        }
     }
-}
 
-#[screen(PageName::FormSheet, presentation = FormSheet, detents = [0.75, 1.0])]
-#[component]
-fn SheetScreen() -> Element {
-    rsx! {
-        Body {}
+    #[screen(holds = String, title = "{0}", presentation = FormSheet, detents = [0.75, 1.0])]
+    #[component]
+    fn FormSheet() -> Element {
+        rsx! {
+            Body {}
+        }
     }
-}
 
-#[screen(PageName::FullScreenModal, presentation = FullScreenModal)]
-#[component]
-fn FullScreen() -> Element {
-    rsx! {
-        Body {}
+    #[screen(holds = String, title = "{0}", presentation = FullScreenModal)]
+    #[component]
+    fn FullScreenModal() -> Element {
+        rsx! {
+            Body {}
+        }
     }
 }
 
