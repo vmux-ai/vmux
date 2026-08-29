@@ -139,6 +139,7 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "UIPanGestureRecognizer",
     "UIStackView",
     "UITapGestureRecognizer",
+    "UITouch",
     "UIView",
     "UIViewController",
     "UIViewControllerTransitionCoordinator",
