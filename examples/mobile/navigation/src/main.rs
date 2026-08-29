@@ -5,7 +5,7 @@ use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{Depth, NavPlugin, Presentation, Report, Route, Shows};
+use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows};
 use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -58,24 +58,11 @@ fn App() -> Element {
     rsx! {
         Stack {
             Tabs {
-                Screen { name: PageName::Tab, component: &TAB_SCREEN }
-                Screen { name: PageName::Card, component: &CARD_SCREEN }
-                Screen {
-                    name: PageName::Modal,
-                    component: &MODAL_SCREEN,
-                    presentation: Presentation::Modal,
-                }
-                Screen {
-                    name: PageName::FormSheet,
-                    component: &SHEET_SCREEN,
-                    presentation: Presentation::FormSheet,
-                    detents: &[0.75, 1.0],
-                }
-                Screen {
-                    name: PageName::FullScreenModal,
-                    component: &FULL_SCREEN,
-                    presentation: Presentation::FullScreenModal,
-                }
+                Screen { page: &TAB_SCREEN }
+                Screen { page: &CARD_SCREEN }
+                Screen { page: &MODAL_SCREEN }
+                Screen { page: &SHEET_SCREEN }
+                Screen { page: &FULL_SCREEN }
             }
         }
     }
@@ -206,7 +193,7 @@ fn use_panel() -> (Router<Page>, Panel) {
     (router, router.attached().unwrap_or_default())
 }
 
-#[screen]
+#[screen(PageName::Tab)]
 #[component]
 fn TabScreen() -> Element {
     rsx! {
@@ -214,7 +201,7 @@ fn TabScreen() -> Element {
     }
 }
 
-#[screen]
+#[screen(PageName::Card)]
 #[component]
 fn CardScreen() -> Element {
     rsx! {
@@ -222,7 +209,7 @@ fn CardScreen() -> Element {
     }
 }
 
-#[screen]
+#[screen(PageName::Modal, presentation = Modal)]
 #[component]
 fn ModalScreen() -> Element {
     rsx! {
@@ -230,7 +217,7 @@ fn ModalScreen() -> Element {
     }
 }
 
-#[screen]
+#[screen(PageName::FormSheet, presentation = FormSheet, detents = [0.75, 1.0])]
 #[component]
 fn SheetScreen() -> Element {
     rsx! {
@@ -238,7 +225,7 @@ fn SheetScreen() -> Element {
     }
 }
 
-#[screen]
+#[screen(PageName::FullScreenModal, presentation = FullScreenModal)]
 #[component]
 fn FullScreen() -> Element {
     rsx! {
