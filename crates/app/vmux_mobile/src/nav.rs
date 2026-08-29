@@ -144,6 +144,7 @@ impl<S: Route> Screens<S> {
 pub struct Centre(pub &'static str);
 
 const NEW_TAB: &str = "+";
+const ROTATE: &str = "\u{27f3}";
 
 type Listed<'w, 's, S> = Query<
     'w,
@@ -160,7 +161,11 @@ type Listed<'w, 's, S> = Query<
 struct Painted {
     tabs: Vec<TabItem>,
     seated: Option<String>,
+    turn: u64,
 }
+
+#[derive(Resource, Default)]
+struct Turns(u64);
 
 #[derive(Resource)]
 struct Opened(u64);
@@ -178,6 +183,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
         app.insert_resource(Opened(0))
             .init_resource::<Screens<S>>()
             .init_resource::<Painted>()
+            .init_resource::<Turns>()
             .init_resource::<Trail>()
             .add_message::<Tapped>()
             .add_message::<Declare<S>>()
@@ -201,6 +207,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::open_blank::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
+                    Nav::rotate,
                     Nav::measure,
                     Nav::paint::<S>,
                 )
@@ -365,6 +372,7 @@ impl Nav {
         known: Listed<S>,
         screens: Res<Screens<S>>,
         centre: Option<Res<Centre>>,
+        turns: Res<Turns>,
         mut painted: ResMut<Painted>,
         mut commands: Commands,
     ) {
@@ -402,8 +410,9 @@ impl Nav {
             });
         }
 
-        if ready && painted.seated != selected {
+        if ready && (painted.seated != selected || painted.turn != turns.0) {
             painted.seated = selected.clone();
+            painted.turn = turns.0;
             if let Some(id) = selected.clone() {
                 commands.queue(move |world: &mut World| {
                     NativeStack::seat(id.clone(), Nav::levels::<S>(world, &id));
@@ -610,8 +619,23 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
+                cycle: None,
                 seat: Seat::taken(&screen),
             });
+        }
+        let mut sheets = 0;
+        for level in &levels {
+            if !level.presentation.pushes() {
+                sheets += 1;
+            }
+        }
+        if sheets > 1 {
+            for level in &mut levels {
+                if level.presentation.pushes() {
+                    continue;
+                }
+                level.cycle = Some(ROTATE);
+            }
         }
         levels
     }
@@ -671,6 +695,7 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
+                cycle: None,
                 seat: Seat::taken(screen),
             });
         }
@@ -689,9 +714,67 @@ impl Nav {
                 action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
+                cycle: None,
                 seat: Seat::taken(screen),
             });
         }
+    }
+
+    fn rotate(
+        mut tapped: MessageReader<Tapped>,
+        selected: Query<Entity, With<Selected>>,
+        children: Query<&Children>,
+        presented: Query<&Presented>,
+        mut turns: ResMut<Turns>,
+        mut commands: Commands,
+    ) {
+        let mut asked = 0;
+        for Tapped(action) in tapped.read() {
+            if *action == ROTATE {
+                asked += 1;
+            }
+        }
+        if asked == 0 {
+            return;
+        }
+        let Some(tab) = selected.iter().next() else {
+            return;
+        };
+        let mut chain = Vec::new();
+        let mut at = tab;
+        while let Ok(kids) = children.get(at) {
+            let Some(next) = kids.last().copied() else {
+                break;
+            };
+            chain.push(next);
+            at = next;
+        }
+        let mut sheets = Vec::new();
+        let mut under = tab;
+        for entity in chain {
+            if presented.get(entity).is_ok() {
+                sheets.push(entity);
+                continue;
+            }
+            if sheets.is_empty() {
+                under = entity;
+            }
+        }
+        if sheets.len() < 2 {
+            return;
+        }
+        for _ in 0..asked {
+            let Some(deepest) = sheets.pop() else {
+                break;
+            };
+            sheets.insert(0, deepest);
+        }
+        let mut parent = under;
+        for entity in sheets {
+            commands.entity(entity).insert(ChildOf(parent));
+            parent = entity;
+        }
+        turns.0 = turns.0.wrapping_add(1);
     }
 
     fn unstack(

@@ -23,6 +23,7 @@ pub struct Level {
     pub action: Option<&'static str>,
     pub presentation: Presentation,
     pub detents: &'static [f64],
+    pub cycle: Option<&'static str>,
     pub seat: vmux_native::Instance,
 }
 
@@ -128,6 +129,9 @@ mod platform {
             }
             if !level.presentation.pushes() {
                 item.setRightBarButtonItem(Some(&Bar::closer(delegate, marker)));
+            }
+            if let Some(cycle) = level.cycle {
+                item.setLeftBarButtonItem(Some(&Bar::button(cycle, delegate, marker)));
             }
             Some(Self {
                 controller,
@@ -623,6 +627,7 @@ mod platform {
         stacks: HashMap<String, Column>,
         sheets: Vec<Column>,
         kept: HashMap<u64, Column>,
+        pending: HashMap<String, Vec<Level>>,
         seated: Option<String>,
         dragging: Option<Drag>,
         tabs: Tabs,
@@ -938,15 +943,7 @@ mod platform {
     impl NativeStack {
         pub fn seat(tab: String, levels: Vec<Level>) {
             let departing = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?));
-            let mut pushed = Vec::new();
-            let mut presented = Vec::new();
-            for level in levels {
-                if presented.is_empty() && level.presentation.pushes() {
-                    pushed.push(level);
-                    continue;
-                }
-                presented.push(level);
-            }
+            let (pushed, presented) = Self::split(levels);
             Self::raise(&tab, pushed);
             let plan = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
@@ -985,6 +982,9 @@ mod platform {
                 Some((leaving, arriving, entering))
             });
             Self::front();
+            if Self::already(&presented) {
+                return;
+            }
             let Some((leaving, arriving, entering)) = plan else {
                 Self::shed();
                 Self::present_all(presented, false);
@@ -1016,10 +1016,47 @@ mod platform {
             });
         }
 
+        fn split(levels: Vec<Level>) -> (Vec<Level>, Vec<Level>) {
+            let mut pushed = Vec::new();
+            let mut presented = Vec::new();
+            for level in levels {
+                if presented.is_empty() && level.presentation.pushes() {
+                    pushed.push(level);
+                    continue;
+                }
+                presented.push(level);
+            }
+            (pushed, presented)
+        }
+
+        fn already(wanted: &[Level]) -> bool {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return false;
+                };
+                if stack.sheets.len() != wanted.len() {
+                    return false;
+                }
+                for (column, level) in stack.sheets.iter().zip(wanted) {
+                    if column.key != level.key {
+                        return false;
+                    }
+                }
+                !wanted.is_empty()
+            })
+        }
+
         pub fn warm(wanted: Vec<(String, Vec<Level>)>) {
             let mut keep = Vec::new();
             for (tab, levels) in wanted {
-                Self::raise(&tab, levels);
+                let (pushed, presented) = Self::split(levels);
+                Self::raise(&tab, pushed);
+                STACK.with_borrow_mut(|stack| {
+                    let Some(stack) = stack.as_mut() else {
+                        return;
+                    };
+                    stack.pending.insert(tab.clone(), presented);
+                });
                 keep.push(tab);
             }
             let spent = STACK.with_borrow_mut(|stack| {
@@ -1534,6 +1571,9 @@ mod platform {
             if let Some(sheet) = sheet {
                 sheet.settle(commit, marker);
             }
+            if commit {
+                Self::hand_over();
+            }
             let done = block2::RcBlock::new(move |_| Drag::land(commit));
             Self::glide(
                 Some(leaving),
@@ -1544,6 +1584,19 @@ mod platform {
                 done,
                 marker,
             );
+        }
+
+        fn hand_over() {
+            let arriving = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let to = stack.dragging.as_ref()?.to.clone();
+                stack.pending.remove(&to)
+            });
+            NativeStack::shed();
+            let Some(arriving) = arriving else {
+                return;
+            };
+            NativeStack::present_all(arriving, true);
         }
 
         fn land(commit: bool) {
@@ -1569,7 +1622,6 @@ mod platform {
                 return;
             };
             if commit {
-                NativeStack::shed();
                 PICKED.with_borrow_mut(|slot| *slot = Some(to));
             }
         }
@@ -1976,6 +2028,7 @@ mod platform {
             stacks: HashMap::new(),
             sheets: Vec::new(),
             kept: HashMap::new(),
+            pending: HashMap::new(),
             seated: None,
             dragging: None,
             tabs,
