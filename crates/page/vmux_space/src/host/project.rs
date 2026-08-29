@@ -43,14 +43,21 @@ fn publish_project_roots(
     mut roots: ResMut<vmux_command::snapshot::CommandBarProjectRoots>,
 ) {
     let mut next = Vec::new();
+    let mut active = None;
     for project in projects.active_projects() {
         if project.missing {
             continue;
+        }
+        if project.is_active {
+            active = Some(project.path.clone());
         }
         next.push(project.path);
     }
     if roots.roots != next {
         roots.roots = next;
+    }
+    if roots.active != active {
+        roots.active = active;
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::page::{ExplorerPane, Mode, focus_file_input};
+use crate::page::{ExplorerPane, FindScope, Mode, focus_file_input};
 use dioxus::prelude::*;
 use vmux_core::event::{
     CompletionItem, FILE_KEY_EVENT, FileCompletionCommit, FileGotoRequest, FileKey, FileLine,
@@ -48,6 +48,7 @@ impl FileKeys {
             FileKey::PanelDismiss => self.dismiss(),
             FileKey::Find { forward } => self.page.open_find(forward),
             FileKey::FindClose => self.page.close_find(),
+            FileKey::FindInFiles => self.page.open_find_in_files(),
         }
     }
 
@@ -167,6 +168,7 @@ pub struct FilePage {
     pub references: Signal<Vec<RefItem>>,
     pub find_open: Signal<bool>,
     pub find_forward: Signal<bool>,
+    pub find_scope: Signal<FindScope>,
 }
 
 impl FilePage {
@@ -201,6 +203,18 @@ impl FilePage {
     }
 
     fn open_find(&self, forward: bool) {
+        let mut scope = self.find_scope;
+        scope.set(FindScope::Buffer);
+        self.raise_find(forward);
+    }
+
+    fn open_find_in_files(&self) {
+        let mut scope = self.find_scope;
+        scope.set(FindScope::Project);
+        self.raise_find(true);
+    }
+
+    fn raise_find(&self, forward: bool) {
         let mut open = self.find_open;
         let mut direction = self.find_forward;
         direction.set(forward);

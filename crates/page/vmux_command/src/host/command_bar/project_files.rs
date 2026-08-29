@@ -1,33 +1,18 @@
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::Entity;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
+use ignore::WalkBuilder;
 
-use crate::event::PathEntry;
+use crate::event::{CommandBarRecentFile, PathCompleteResponse, PathEntry};
 
-const MAX_INDEXED_FILES: usize = 40_000;
-const MAX_DEPTH: usize = 12;
-const MAX_RESULTS: usize = 40;
+const MAX_INDEXED_PATHS: usize = 400_000;
+pub const MAX_RESULTS: usize = 200;
 const INDEX_TTL: Duration = Duration::from_secs(60);
-
-const UNINTERESTING_DIRS: &[&str] = &[
-    ".git",
-    ".gradle",
-    ".idea",
-    ".next",
-    ".turbo",
-    ".venv",
-    "DerivedData",
-    "Pods",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "vendor",
-    "venv",
-];
+const ACTIVE_PROJECT_LIFT: i32 = 40;
+const RECENT_FILE_LIFT: i32 = 16;
 
 #[derive(Clone)]
 pub struct Asked {
@@ -35,50 +20,75 @@ pub struct Asked {
     pub query: String,
 }
 
+pub struct ProjectCompletions {
+    pub entries: Vec<PathEntry>,
+    pub partial: bool,
+    pub total: usize,
+}
+
+impl ProjectCompletions {
+    pub fn listed(entries: Vec<PathEntry>, total: usize) -> Self {
+        Self {
+            entries,
+            partial: false,
+            total,
+        }
+    }
+
+    pub fn response(self) -> PathCompleteResponse {
+        PathCompleteResponse {
+            completions: self.entries,
+            truncated: self.partial,
+            total: u32::try_from(self.total).unwrap_or(u32::MAX),
+        }
+    }
+}
+
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
     asked: Option<Asked>,
-    answered_with: usize,
+    generation: u64,
+    answered_with: u64,
 }
 
 impl ProjectIndex {
     pub fn matches(
         &mut self,
         roots: &[PathBuf],
+        bias: &RankBias,
         query: &str,
         webview: Entity,
-    ) -> Option<Vec<PathEntry>> {
+    ) -> Option<ProjectCompletions> {
         self.sync(roots);
         self.asked = Some(Asked {
             webview,
             query: query.to_string(),
         });
-        self.answered_with = self.ready_count();
-        self.rank(query)
+        self.answered_with = self.generation;
+        self.rank(query, bias)
     }
 
     pub fn warm(&mut self, roots: &[PathBuf]) {
         self.sync(roots);
     }
 
-    pub fn settled(&mut self, roots: &[PathBuf]) -> Option<Vec<PathEntry>> {
+    pub fn settled(&mut self, roots: &[PathBuf], bias: &RankBias) -> Option<ProjectCompletions> {
         let query = self.asked.as_ref()?.query.clone();
         self.sync(roots);
-        let ready = self.ready_count();
-        if ready == self.answered_with {
+        if self.generation == self.answered_with {
             self.forget_once_complete();
             return None;
         }
-        self.answered_with = ready;
-        let ranked = self.rank(&query);
+        self.answered_with = self.generation;
+        let ranked = self.rank(&query, bias);
         self.forget_once_complete();
         ranked
     }
 
     fn forget_once_complete(&mut self) {
         for index in &self.roots {
-            if matches!(index, RootIndex::Building { .. }) {
+            if index.walking() {
                 return;
             }
         }
@@ -93,167 +103,368 @@ impl ProjectIndex {
         self.asked.clone()
     }
 
-    fn ready_count(&self) -> usize {
-        let mut ready = 0;
-        for index in &self.roots {
-            if matches!(index, RootIndex::Ready { .. }) {
-                ready += 1;
-            }
-        }
-        ready
-    }
-
-    fn rank(&self, query: &str) -> Option<Vec<PathEntry>> {
+    fn rank(&self, query: &str, bias: &RankBias) -> Option<ProjectCompletions> {
         let mut ready = Vec::new();
+        let mut partial = false;
         for index in &self.roots {
-            let RootIndex::Ready { root, files, .. } = index else {
+            let Some(walk) = index.walked() else {
                 continue;
             };
-            ready.push((root.as_path(), files.as_slice()));
+            partial |= walk.partial;
+            ready.push((index.root.as_path(), walk.paths.as_slice()));
         }
         if ready.is_empty() {
             return None;
         }
-        Some(FuzzyRank::across(&ready, query))
+        let ranked = FuzzyRank::across(&ready, bias, query);
+        Some(ProjectCompletions {
+            entries: ranked.entries,
+            partial,
+            total: ranked.total,
+        })
     }
 
     fn sync(&mut self, roots: &[PathBuf]) {
-        self.roots.retain(|index| roots.contains(index.root()));
+        let held = self.roots.len();
+        self.roots.retain(|index| roots.contains(&index.root));
+        if self.roots.len() != held {
+            self.generation += 1;
+        }
         for root in roots {
-            match self.roots.iter().position(|index| index.root() == root) {
-                Some(at) => self.roots[at].advance(),
-                None => self.roots.push(RootIndex::start(root)),
+            let Some(at) = self.roots.iter().position(|index| &index.root == root) else {
+                self.roots.push(RootIndex::start(root));
+                continue;
+            };
+            if self.roots[at].advance() {
+                self.generation += 1;
             }
         }
     }
 }
 
-enum RootIndex {
-    Building {
-        root: PathBuf,
-        task: Task<Vec<String>>,
-    },
-    Ready {
-        root: PathBuf,
-        files: Vec<String>,
-        built_at: Instant,
-    },
+struct RootIndex {
+    root: PathBuf,
+    walk: Option<ProjectWalk>,
+    built_at: Option<Instant>,
+    walking: Option<Task<ProjectWalk>>,
 }
 
 impl RootIndex {
     fn start(root: &Path) -> Self {
-        let walked = root.to_path_buf();
-        Self::Building {
+        let mut started = Self {
             root: root.to_path_buf(),
-            task: IoTaskPool::get().spawn(async move { ProjectWalk::of(&walked) }),
+            walk: None,
+            built_at: None,
+            walking: None,
+        };
+        started.rewalk();
+        started
+    }
+
+    fn rewalk(&mut self) {
+        let walked = self.root.clone();
+        self.walking = Some(IoTaskPool::get().spawn(async move { ProjectWalk::of(&walked) }));
+    }
+
+    fn walking(&self) -> bool {
+        self.walking.is_some()
+    }
+
+    fn walked(&self) -> Option<&ProjectWalk> {
+        self.walk.as_ref()
+    }
+
+    fn advance(&mut self) -> bool {
+        if let Some(task) = &mut self.walking {
+            let Some(walk) = block_on(future::poll_once(task)) else {
+                return false;
+            };
+            self.walk = Some(walk);
+            self.built_at = Some(Instant::now());
+            self.walking = None;
+            return true;
+        }
+        if self.built_at.is_some_and(|at| at.elapsed() > INDEX_TTL) {
+            self.rewalk();
+        }
+        false
+    }
+}
+
+struct WalkedPath {
+    relative: String,
+    folded: Option<String>,
+    held: PathMask,
+    is_dir: bool,
+}
+
+impl WalkedPath {
+    fn file(relative: String) -> Self {
+        Self::of(relative, false)
+    }
+
+    fn directory(relative: String) -> Self {
+        Self::of(relative, true)
+    }
+
+    fn of(relative: String, is_dir: bool) -> Self {
+        let lowered = relative.to_lowercase();
+        let held = PathMask::of(&lowered);
+        let folded = if lowered == relative {
+            None
+        } else {
+            Some(lowered)
+        };
+        Self {
+            relative,
+            folded,
+            held,
+            is_dir,
         }
     }
 
-    fn root(&self) -> &PathBuf {
-        match self {
-            Self::Building { root, .. } | Self::Ready { root, .. } => root,
-        }
-    }
-
-    fn advance(&mut self) {
-        match self {
-            Self::Building { root, task } => {
-                let Some(files) = block_on(future::poll_once(task)) else {
-                    return;
-                };
-                *self = Self::Ready {
-                    root: std::mem::take(root),
-                    files,
-                    built_at: Instant::now(),
-                };
-            }
-            Self::Ready { root, built_at, .. } => {
-                if built_at.elapsed() > INDEX_TTL {
-                    *self = Self::start(&root.clone());
-                }
-            }
+    fn folded(&self) -> &str {
+        match &self.folded {
+            Some(folded) => folded,
+            None => &self.relative,
         }
     }
 }
 
-struct ProjectWalk;
+struct ProjectWalk {
+    paths: Vec<WalkedPath>,
+    ceiling: usize,
+    partial: bool,
+}
 
 impl ProjectWalk {
-    fn of(root: &Path) -> Vec<String> {
-        let mut files = Vec::new();
-        let mut frontier = vec![(root.to_path_buf(), 0usize)];
-        while let Some((dir, depth)) = frontier.pop() {
-            if files.len() >= MAX_INDEXED_FILES {
-                break;
-            }
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let Some(name) = name.to_str() else {
-                    continue;
-                };
-                let Ok(kind) = entry.file_type() else {
-                    continue;
-                };
-                if kind.is_dir() {
-                    if depth + 1 > MAX_DEPTH || Self::is_uninteresting(name) {
-                        continue;
-                    }
-                    frontier.push((entry.path(), depth + 1));
-                    continue;
-                }
-                if name.starts_with('.') {
-                    continue;
-                }
-                let Ok(relative) = entry.path().strip_prefix(root).map(Path::to_path_buf) else {
-                    continue;
-                };
-                files.push(relative.to_string_lossy().into_owned());
-                if files.len() >= MAX_INDEXED_FILES {
-                    break;
-                }
-            }
+    fn holding(ceiling: usize) -> Self {
+        Self {
+            paths: Vec::new(),
+            ceiling,
+            partial: false,
         }
-        files
     }
 
-    fn is_uninteresting(name: &str) -> bool {
-        name.starts_with('.') || UNINTERESTING_DIRS.contains(&name)
+    fn of(root: &Path) -> Self {
+        let mut walked = Self::holding(MAX_INDEXED_PATHS);
+        let walk = WalkBuilder::new(root)
+            .hidden(true)
+            .parents(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .follow_links(false)
+            .build();
+        for entry in walk {
+            if !walked.wants_more() {
+                walked.partial = true;
+                break;
+            }
+            let Ok(entry) = entry else {
+                continue;
+            };
+            if entry.depth() == 0 {
+                continue;
+            }
+            let Some(kind) = entry.file_type() else {
+                continue;
+            };
+            let Ok(relative) = entry.path().strip_prefix(root) else {
+                continue;
+            };
+            walked.push(relative.to_string_lossy().into_owned(), kind.is_dir());
+        }
+        walked
     }
+
+    fn wants_more(&self) -> bool {
+        self.paths.len() < self.ceiling
+    }
+
+    fn push(&mut self, relative: String, is_dir: bool) {
+        if !self.wants_more() {
+            self.partial = true;
+            return;
+        }
+        if is_dir {
+            self.paths.push(WalkedPath::directory(relative));
+            return;
+        }
+        self.paths.push(WalkedPath::file(relative));
+    }
+}
+
+#[derive(Default)]
+pub struct RankBias {
+    active: Option<PathBuf>,
+    recent: Vec<String>,
+}
+
+impl RankBias {
+    pub fn of(active: Option<&str>, recent: &[CommandBarRecentFile]) -> Self {
+        let mut opened = Vec::with_capacity(recent.len());
+        for file in recent {
+            let Some(path) = file.url.strip_prefix("file://") else {
+                continue;
+            };
+            opened.push(path.to_string());
+        }
+        let active = match active {
+            Some(active) if !active.trim().is_empty() => Some(PathBuf::from(active.trim())),
+            _ => None,
+        };
+        Self {
+            active,
+            recent: opened,
+        }
+    }
+
+    fn favours(&self, root: &Path) -> bool {
+        self.active.as_deref() == Some(root)
+    }
+
+    fn lift(&self, root: &Path) -> i32 {
+        match self.favours(root) {
+            true => ACTIVE_PROJECT_LIFT,
+            false => 0,
+        }
+    }
+
+    fn opened(&self, root: &str, relative: &str) -> bool {
+        for path in &self.recent {
+            let Some(held) = path.strip_prefix(root) else {
+                continue;
+            };
+            if held.strip_prefix('/').unwrap_or(held) == relative {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub struct Ranked {
+    pub entries: Vec<PathEntry>,
+    pub total: usize,
 }
 
 struct FuzzyRank;
 
 impl FuzzyRank {
-    fn across(roots: &[(&Path, &[String])], query: &str) -> Vec<PathEntry> {
+    fn across(roots: &[(&Path, &[WalkedPath])], bias: &RankBias, query: &str) -> Ranked {
         let wanted = FuzzyQuery::of(query);
-        let mut scored: Vec<(i32, &Path, &String)> = Vec::new();
-        for (root, files) in roots {
-            for file in files.iter() {
-                let Some(score) = wanted.score(file) else {
+        let mut best = TopMatches::holding(MAX_RESULTS);
+        for favoured in [true, false] {
+            for (root, paths) in roots {
+                if bias.favours(root) != favoured {
                     continue;
-                };
-                scored.push((score, root, file));
+                }
+                let lift = bias.lift(root);
+                for path in paths.iter() {
+                    let Some(score) = wanted.score(path) else {
+                        continue;
+                    };
+                    best.offer(Match {
+                        score: score + lift,
+                        root,
+                        path,
+                    });
+                }
             }
         }
-        scored.sort_by(|a, b| {
-            b.0.cmp(&a.0)
-                .then(a.2.len().cmp(&b.2.len()))
-                .then(a.2.cmp(b.2))
-        });
-        scored.truncate(MAX_RESULTS);
-        let mut entries = Vec::with_capacity(scored.len());
-        for (_, root, file) in scored {
+        best.ranked(bias)
+    }
+}
+
+struct TopMatches<'a> {
+    keeping: usize,
+    seen: usize,
+    best: Vec<Match<'a>>,
+}
+
+impl<'a> TopMatches<'a> {
+    fn holding(keeping: usize) -> Self {
+        Self {
+            keeping,
+            seen: 0,
+            best: Vec::with_capacity(keeping + 1),
+        }
+    }
+
+    fn offer(&mut self, found: Match<'a>) {
+        self.seen += 1;
+        if self.best.len() == self.keeping {
+            let Some(worst) = self.best.last() else {
+                return;
+            };
+            if found.ranks_after(worst) {
+                return;
+            }
+        }
+        let at = self.best.partition_point(|held| found.ranks_after(held));
+        self.best.insert(at, found);
+        self.best.truncate(self.keeping);
+    }
+
+    fn resettle(&mut self, bias: &RankBias) {
+        if bias.recent.is_empty() {
+            return;
+        }
+        let mut lifted = false;
+        for found in &mut self.best {
+            let Some(root) = found.root.to_str() else {
+                continue;
+            };
+            if !bias.opened(root, &found.path.relative) {
+                continue;
+            }
+            found.score += RECENT_FILE_LIFT;
+            lifted = true;
+        }
+        if !lifted {
+            return;
+        }
+        self.best.sort_by(Match::order);
+    }
+
+    fn ranked(mut self, bias: &RankBias) -> Ranked {
+        self.resettle(bias);
+        let total = self.seen;
+        let mut entries = Vec::with_capacity(self.best.len());
+        for found in self.best {
             entries.push(PathEntry {
-                name: file.clone(),
-                is_dir: false,
-                full_path: root.join(file).to_string_lossy().into_owned(),
-                project: ProjectLabel::of(root),
+                name: found.path.relative.clone(),
+                is_dir: found.path.is_dir,
+                full_path: found
+                    .root
+                    .join(&found.path.relative)
+                    .to_string_lossy()
+                    .into_owned(),
+                project: ProjectLabel::of(found.root),
             });
         }
-        entries
+        Ranked { entries, total }
+    }
+}
+
+struct Match<'a> {
+    score: i32,
+    root: &'a Path,
+    path: &'a WalkedPath,
+}
+
+impl Match<'_> {
+    fn order(&self, other: &Self) -> Ordering {
+        other
+            .score
+            .cmp(&self.score)
+            .then(self.path.relative.len().cmp(&other.path.relative.len()))
+            .then(self.path.relative.cmp(&other.path.relative))
+    }
+
+    fn ranks_after(&self, other: &Self) -> bool {
+        self.order(other).is_ge()
     }
 }
 
@@ -268,24 +479,62 @@ impl ProjectLabel {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct PathMask(u64);
+
+impl PathMask {
+    fn of(folded: &str) -> Self {
+        let mut held = 0u64;
+        for c in folded.chars() {
+            held |= Self::bit(c);
+        }
+        Self(held)
+    }
+
+    fn bit(c: char) -> u64 {
+        if c.is_ascii_lowercase() {
+            return 1 << (c as u8 - b'a');
+        }
+        if c.is_ascii_digit() {
+            return 1 << (26 + c as u8 - b'0');
+        }
+        0
+    }
+
+    fn with(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    fn covers(self, needed: Self) -> bool {
+        self.0 & needed.0 == needed.0
+    }
+}
+
 struct FuzzyQuery {
     terms: Vec<String>,
+    needed: PathMask,
 }
 
 impl FuzzyQuery {
     fn of(query: &str) -> Self {
         let mut terms = Vec::new();
+        let mut needed = PathMask::default();
         for term in query.split_whitespace() {
-            terms.push(term.to_lowercase());
+            let term = term.to_lowercase();
+            needed = needed.with(PathMask::of(&term));
+            terms.push(term);
         }
-        Self { terms }
+        Self { terms, needed }
     }
 
-    fn score(&self, haystack: &str) -> Option<i32> {
-        let lowered = haystack.to_lowercase();
+    fn score(&self, path: &WalkedPath) -> Option<i32> {
+        if !path.held.covers(self.needed) {
+            return None;
+        }
+        let folded = path.folded();
         let mut total = 0;
         for term in &self.terms {
-            total += FuzzyScore::of(&lowered, term)?;
+            total += FuzzyScore::of(folded, term)?;
         }
         Some(total)
     }
@@ -312,35 +561,34 @@ impl FuzzyScore {
     }
 
     fn walk(haystack: &str, needle: &str) -> Option<i32> {
+        let mut remaining = needle.chars();
+        let Some(mut wanted) = remaining.next() else {
+            return Some(0);
+        };
         let mut score = 0i32;
         let mut previous_end: Option<usize> = None;
-        let mut cursor = 0usize;
-        let bytes: Vec<char> = haystack.chars().collect();
-        for wanted in needle.chars() {
-            let mut found: Option<usize> = None;
-            let mut index = cursor;
-            while index < bytes.len() {
-                if bytes[index] == wanted {
-                    found = Some(index);
-                    break;
+        let mut previous_char: Option<char> = None;
+        for (at, c) in haystack.chars().enumerate() {
+            if c == wanted {
+                score += match previous_end {
+                    Some(previous) if previous + 1 == at => 12,
+                    Some(previous) => -((at - previous - 1).min(8usize) as i32),
+                    None => 0,
+                };
+                if at == 0 {
+                    score += 10;
+                } else if previous_char.is_some_and(Self::is_boundary) {
+                    score += 8;
                 }
-                index += 1;
+                previous_end = Some(at);
+                let Some(next) = remaining.next() else {
+                    return Some(score);
+                };
+                wanted = next;
             }
-            let at = found?;
-            score += match previous_end {
-                Some(previous) if previous + 1 == at => 12,
-                Some(previous) => -((at - previous - 1).min(8usize) as i32),
-                None => 0,
-            };
-            if at == 0 {
-                score += 10;
-            } else if Self::is_boundary(bytes[at - 1]) {
-                score += 8;
-            }
-            previous_end = Some(at);
-            cursor = at + 1;
+            previous_char = Some(c);
         }
-        Some(score)
+        None
     }
 
     fn is_boundary(c: char) -> bool {
@@ -352,23 +600,184 @@ impl FuzzyScore {
 mod tests {
     use super::*;
 
+    struct Project {
+        dir: tempfile::TempDir,
+    }
+
+    impl Project {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::create_dir_all(dir.path().join(".git")).expect("git");
+            Self { dir }
+        }
+
+        fn write(&self, relative: &str, body: &str) -> &Self {
+            let path = self.dir.path().join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("parent");
+            }
+            std::fs::write(path, body).expect("write");
+            self
+        }
+
+        fn indexed(&self) -> Vec<String> {
+            let mut named = Vec::new();
+            for path in &ProjectWalk::of(self.dir.path()).paths {
+                let suffix = if path.is_dir { "/" } else { "" };
+                named.push(format!("{}{suffix}", path.relative));
+            }
+            named.sort();
+            named
+        }
+    }
+
+    impl FuzzyRank {
+        fn listed(
+            roots: &[(&Path, &[WalkedPath])],
+            bias: &RankBias,
+            query: &str,
+        ) -> Vec<PathEntry> {
+            Self::across(roots, bias, query).entries
+        }
+    }
+
+    fn files(paths: &[&str]) -> Vec<WalkedPath> {
+        let mut walked = Vec::new();
+        for path in paths {
+            walked.push(WalkedPath::file(path.to_string()));
+        }
+        walked
+    }
+
+    struct Synthetic;
+
+    impl Synthetic {
+        fn paths(count: usize) -> Vec<WalkedPath> {
+            let areas = [
+                "crates", "apps", "packages", "services", "libs", "tools", "infra", "docs",
+            ];
+            let kinds = [
+                "Handler",
+                "Service",
+                "Model",
+                "View",
+                "Router",
+                "Client",
+                "Store",
+                "Widget",
+                "Adapter",
+                "Registry",
+                "設定",
+                "Café",
+                "İstanbul",
+                "Größe",
+            ];
+            let extensions = ["rs", "ts", "tsx", "py", "go", "css", "md", "json"];
+            let mut walked = Vec::with_capacity(count);
+            let mut at = 0usize;
+            while walked.len() < count {
+                let area = areas[at % areas.len()];
+                let package = at % 900;
+                let module = (at / 7) % 60;
+                let kind = kinds[(at / 3) % kinds.len()];
+                let extension = extensions[(at / 11) % extensions.len()];
+                walked.push(WalkedPath::file(format!(
+                    "{area}/pkg_{package:03}/src/module_{module:02}/{kind}Impl{at}.{extension}"
+                )));
+                at += 1;
+            }
+            walked
+        }
+    }
+
+    #[test]
+    fn the_prefilter_never_rejects_a_path_the_scorer_would_have_matched() {
+        let paths = Synthetic::paths(20_000);
+        let terms = [
+            "handler",
+            "設定",
+            "İstanbul",
+            "Café",
+            "Größe",
+            "42",
+            "impl7",
+            "a",
+            "z9",
+            "router.ts",
+        ];
+        for term in terms {
+            let term = term.to_lowercase();
+            let needed = PathMask::of(&term);
+            for path in &paths {
+                if FuzzyScore::of(path.folded(), &term).is_none() {
+                    continue;
+                }
+                assert!(
+                    path.held.covers(needed),
+                    "{term:?} matched {:?} but the prefilter rejected it",
+                    path.relative
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_monorepo_sized_index_ranks_a_late_best_hit_over_the_matches_before_it() {
+        let mut paths = Synthetic::paths(300_000);
+        paths.push(WalkedPath::file("handler.rs".to_string()));
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/code/monorepo"), &paths)],
+            &RankBias::default(),
+            "handler",
+        );
+
+        assert!(
+            ranked.len() > 1,
+            "nothing competed with the late hit, so its placement proves nothing"
+        );
+        assert_eq!(ranked[0].name, "handler.rs");
+    }
+
+    #[test]
+    fn the_ranker_reports_how_many_matched_even_though_it_ships_only_the_best() {
+        let mut paths = Vec::new();
+        for at in 0..(MAX_RESULTS + 25) {
+            paths.push(WalkedPath::file(format!("src/dir_{at:03}/main.rs")));
+        }
+        paths.push(WalkedPath::file("docs/readme.md".to_string()));
+
+        let ranked = FuzzyRank::across(
+            &[(Path::new("/code/monorepo"), &paths)],
+            &RankBias::default(),
+            "main.rs",
+        );
+
+        assert_eq!(ranked.entries.len(), MAX_RESULTS);
+        assert_eq!(ranked.total, MAX_RESULTS + 25);
+    }
+
     #[test]
     fn a_basename_hit_outranks_a_scattered_path_hit() {
-        let files = vec![
-            "crates/vmux_core/src/handler.rs".to_string(),
-            "docs/h/a/n/dler.md".to_string(),
-        ];
-        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "handler");
+        let paths = files(&["crates/vmux_core/src/handler.rs", "docs/h/a/n/dler.md"]);
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/root"), &paths)],
+            &RankBias::default(),
+            "handler",
+        );
         assert_eq!(ranked[0].name, "crates/vmux_core/src/handler.rs");
     }
 
     #[test]
     fn a_path_fragment_query_matches_across_separators() {
-        let files = vec![
-            "crates/page/vmux_command/src/page.rs".to_string(),
-            "crates/vmux_ui/src/page.rs".to_string(),
-        ];
-        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "command/page");
+        let paths = files(&[
+            "crates/page/vmux_command/src/page.rs",
+            "crates/vmux_ui/src/page.rs",
+        ]);
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/root"), &paths)],
+            &RankBias::default(),
+            "command/page",
+        );
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].name, "crates/page/vmux_command/src/page.rs");
     }
@@ -380,11 +789,15 @@ mod tests {
 
     #[test]
     fn every_space_separated_term_must_match_the_same_path() {
-        let files = vec![
-            "crates/app/vmux_mobile/src/main.rs".to_string(),
-            "crates/app/vmux_desktop/src/main.rs".to_string(),
-        ];
-        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "mobile main.rs");
+        let paths = files(&[
+            "crates/app/vmux_mobile/src/main.rs",
+            "crates/app/vmux_desktop/src/main.rs",
+        ]);
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/root"), &paths)],
+            &RankBias::default(),
+            "mobile main.rs",
+        );
 
         let named: Vec<&str> = ranked.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(named, ["crates/app/vmux_mobile/src/main.rs"]);
@@ -392,13 +805,14 @@ mod tests {
 
     #[test]
     fn a_hit_in_every_project_is_ranked_together_and_named_by_its_project() {
-        let dashboard = vec!["src/main.rs".to_string()];
-        let vmux = vec!["src/main.rs".to_string()];
-        let ranked = FuzzyRank::across(
+        let dashboard = files(&["src/main.rs"]);
+        let vmux = files(&["src/main.rs"]);
+        let ranked = FuzzyRank::listed(
             &[
                 (Path::new("/code/dashboard"), &dashboard),
                 (Path::new("/code/vmux"), &vmux),
             ],
+            &RankBias::default(),
             "main",
         );
 
@@ -422,10 +836,11 @@ mod tests {
 
     #[test]
     fn a_better_hit_in_a_later_project_outranks_a_worse_hit_in_the_first() {
-        let first = vec!["src/unrelated_handler_helper.rs".to_string()];
-        let second = vec!["handler.rs".to_string()];
-        let ranked = FuzzyRank::across(
+        let first = files(&["src/unrelated_handler_helper.rs"]);
+        let second = files(&["handler.rs"]);
+        let ranked = FuzzyRank::listed(
             &[(Path::new("/a"), &first), (Path::new("/b"), &second)],
+            &RankBias::default(),
             "handler",
         );
 
@@ -433,25 +848,151 @@ mod tests {
         assert_eq!(ranked[0].name, "handler.rs");
     }
 
+    impl RankBias {
+        fn after_visiting(urls: &[&str]) -> Self {
+            let mut recent = Vec::new();
+            for url in urls {
+                recent.push(CommandBarRecentFile {
+                    url: url.to_string(),
+                    title: String::new(),
+                });
+            }
+            Self::of(None, &recent)
+        }
+    }
+
+    #[test]
+    fn the_active_project_lifts_a_deep_hit_over_a_shallow_one_elsewhere() {
+        let dashboard = files(&["src/main.rs"]);
+        let vmux = files(&["client/crates/app/vmux_mobile/src/main.rs"]);
+        let roots = [
+            (Path::new("/code/dashboard"), dashboard.as_slice()),
+            (Path::new("/code/vmux"), vmux.as_slice()),
+        ];
+
+        let cold = FuzzyRank::listed(&roots, &RankBias::default(), "main.rs");
+        assert_eq!(
+            cold[0].project, "dashboard",
+            "the shallow path wins on its own, so the lift is what this test measures"
+        );
+
+        let lifted = FuzzyRank::listed(&roots, &RankBias::of(Some("/code/vmux"), &[]), "main.rs");
+        assert_eq!(lifted[0].project, "vmux");
+        assert_eq!(lifted[0].name, "client/crates/app/vmux_mobile/src/main.rs");
+    }
+
+    #[test]
+    fn an_exact_name_match_elsewhere_outranks_a_scattered_hit_in_the_active_project() {
+        let active = files(&["docs/h/a/n/dler.md"]);
+        let other = files(&["handler.rs"]);
+        let ranked = FuzzyRank::listed(
+            &[
+                (Path::new("/code/active"), active.as_slice()),
+                (Path::new("/code/other"), other.as_slice()),
+            ],
+            &RankBias::of(Some("/code/active"), &[]),
+            "handler",
+        );
+
+        assert_eq!(ranked[0].project, "other");
+        assert_eq!(ranked[0].name, "handler.rs");
+    }
+
+    #[test]
+    fn a_recently_opened_file_outranks_an_equally_named_cold_one() {
+        let first = files(&["src/main.rs"]);
+        let second = files(&["src/main.rs"]);
+        let roots = [
+            (Path::new("/code/first"), first.as_slice()),
+            (Path::new("/code/second"), second.as_slice()),
+        ];
+
+        let cold = FuzzyRank::listed(&roots, &RankBias::default(), "main");
+        assert_eq!(
+            cold[0].project, "first",
+            "the two score alike, so order alone decides until recency speaks"
+        );
+
+        let opened = RankBias::after_visiting(&["file:///code/second/src/main.rs"]);
+        let lifted = FuzzyRank::listed(&roots, &opened, "main");
+        assert_eq!(lifted[0].project, "second");
+    }
+
     #[test]
     fn ranked_entries_carry_an_absolute_path_for_opening() {
-        let files = vec!["src/main.rs".to_string()];
-        let ranked = FuzzyRank::across(&[(Path::new("/root"), &files)], "main");
+        let paths = files(&["src/main.rs"]);
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/root"), &paths)],
+            &RankBias::default(),
+            "main",
+        );
         assert_eq!(ranked[0].full_path, "/root/src/main.rs");
     }
 
     #[test]
-    fn the_walk_skips_build_output_and_dotted_directories() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let keep = root.path().join("src");
-        std::fs::create_dir_all(&keep).expect("src");
-        std::fs::write(keep.join("main.rs"), "").expect("main");
-        for skipped in ["target", "node_modules", ".git"] {
-            let dir = root.path().join(skipped);
-            std::fs::create_dir_all(&dir).expect("dir");
-            std::fs::write(dir.join("noise.rs"), "").expect("noise");
-        }
-        let files = ProjectWalk::of(root.path());
-        assert_eq!(files, vec!["src/main.rs".to_string()]);
+    fn a_folder_named_by_the_query_outranks_every_file_inside_it() {
+        let paths = vec![
+            WalkedPath::directory("apps/mobile".to_string()),
+            WalkedPath::file("apps/mobile/index.ts".to_string()),
+            WalkedPath::file("apps/mobile/src/mobile_shell.ts".to_string()),
+            WalkedPath::file("apps/web/mobile_breakpoints.css".to_string()),
+        ];
+        let ranked = FuzzyRank::listed(
+            &[(Path::new("/root"), &paths)],
+            &RankBias::default(),
+            "mobile",
+        );
+
+        assert_eq!(ranked[0].name, "apps/mobile");
+        assert!(ranked[0].is_dir);
+        assert_eq!(ranked[0].full_path, "/root/apps/mobile");
+    }
+
+    #[test]
+    fn the_walk_indexes_folders_beside_the_files_they_hold() {
+        let project = Project::new();
+        project.write("apps/mobile/index.ts", "");
+
+        assert_eq!(
+            project.indexed(),
+            vec![
+                "apps/".to_string(),
+                "apps/mobile/".to_string(),
+                "apps/mobile/index.ts".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_walk_obeys_gitignore_instead_of_a_hardcoded_name_list() {
+        let project = Project::new();
+        project
+            .write(".gitignore", "generated/\n")
+            .write("generated/noise.rs", "")
+            .write("vendor/real_source.rs", "")
+            .write("src/main.rs", "");
+
+        assert_eq!(
+            project.indexed(),
+            vec![
+                "src/".to_string(),
+                "src/main.rs".to_string(),
+                "vendor/".to_string(),
+                "vendor/real_source.rs".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_walk_that_hits_its_ceiling_drops_the_rest_and_owns_up_to_it() {
+        let mut walk = ProjectWalk::holding(2);
+
+        walk.push("apps/mobile".to_string(), true);
+        walk.push("apps/mobile/index.ts".to_string(), false);
+        assert!(!walk.partial);
+
+        walk.push("apps/mobile/late.ts".to_string(), false);
+        assert!(walk.partial);
+        assert_eq!(walk.paths.len(), 2);
     }
 }

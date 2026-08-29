@@ -1,7 +1,7 @@
 use vmux_wire::agent::supports_inline_agent_transition;
 use vmux_wire::command_bar::{
     AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPromptContext,
-    CommandBarQuery, HistoryEntry, PathEntry, is_data_uri,
+    CommandBarQuery, ExCommandName, HistoryEntry, PathEntry, is_data_uri,
 };
 use vmux_wire::open_target::OpenTarget;
 use vmux_wire::prompt_media::ChatAttachment;
@@ -29,6 +29,74 @@ impl PaletteSurface {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaletteMode {
+    #[default]
+    Search,
+    Command,
+    Ex,
+    Path,
+    Url,
+    Space,
+}
+
+impl PaletteMode {
+    pub fn of(query: &str, space_switch: bool) -> Self {
+        if space_switch {
+            return Self::Space;
+        }
+        if ExLine::claims(query) {
+            return Self::Ex;
+        }
+        let trimmed = query.trim();
+        if trimmed.starts_with('>') {
+            return Self::Command;
+        }
+        if trimmed.starts_with('/') || trimmed.starts_with('~') {
+            return Self::Path;
+        }
+        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
+            return Self::Url;
+        }
+        Self::Search
+    }
+
+    pub fn opened(state: &CommandBarOpenEvent) -> Self {
+        Self::of(&state.url, state.space_switch)
+    }
+
+    pub const fn is_ex(self) -> bool {
+        matches!(self, Self::Ex)
+    }
+
+    pub const fn is_space(self) -> bool {
+        matches!(self, Self::Space)
+    }
+
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Ex => ":",
+            Self::Command => ">",
+            Self::Path => "/",
+            Self::Search | Self::Url | Self::Space => "",
+        }
+    }
+
+    pub fn opens_at_end(self, query: &str) -> bool {
+        let prefix = self.prefix();
+        !prefix.is_empty() && query == prefix
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Ex => translate("palette-mode-ex"),
+            Self::Command => translate("palette-mode-command"),
+            Self::Path => translate("palette-mode-path"),
+            Self::Search | Self::Url | Self::Space => String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {
     pub query: String,
@@ -36,6 +104,8 @@ pub struct PaletteDraft {
     pub nav_mode: bool,
     pub target_url: String,
     pub completions: Vec<PathEntry>,
+    pub completions_partial: bool,
+    pub completions_total: usize,
     pub history: Vec<HistoryEntry>,
 }
 
@@ -63,7 +133,20 @@ impl PaletteDraft {
     }
 
     pub fn completing(mut self, completions: Vec<PathEntry>) -> Self {
+        self.completions_total = completions.len();
         self.completions = completions;
+        self
+    }
+
+    pub fn partially_completing(mut self, completions: Vec<PathEntry>) -> Self {
+        self.completions_total = completions.len();
+        self.completions = completions;
+        self.completions_partial = true;
+        self
+    }
+
+    pub fn out_of(mut self, total: usize) -> Self {
+        self.completions_total = total;
         self
     }
 }
@@ -75,12 +158,14 @@ pub struct PaletteRows {
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,
     pub start_prompt_mode: bool,
+    pub mode: PaletteMode,
 }
 
 impl PaletteRows {
     pub fn of(state: &CommandBarOpenEvent, draft: &PaletteDraft, surface: PaletteSurface) -> Self {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
+        let mode = PaletteMode::of(query, state.space_switch);
         let prompt_targets = if is_start {
             prompt_target_results(&state.pages, "")
         } else {
@@ -94,7 +179,7 @@ impl PaletteRows {
         let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
 
         let mut items = FileRows::under_projects(
-            Self::listed(state, draft, surface, start_prompt_mode),
+            Self::listed(state, draft, surface, mode, start_prompt_mode),
             &state.projects,
         );
         if start_prompt_mode {
@@ -107,6 +192,7 @@ impl PaletteRows {
             default_target,
             ghost: Self::ghost_of(query, &draft.completions),
             start_prompt_mode,
+            mode,
         }
     }
 
@@ -115,26 +201,25 @@ impl PaletteRows {
         draft: &PaletteDraft,
         matched: Vec<CommandBarResultItem>,
     ) -> Vec<CommandBarResultItem> {
-        let completions: &[PathEntry] = if CompletionQuery::of(query).is_some() {
-            &draft.completions
-        } else {
-            &[]
-        };
-        FileRows::merge(query, completions, matched)
+        FileRows::merge(query, Completions::of(draft, query), matched)
     }
 
     fn listed(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
         surface: PaletteSurface,
+        mode: PaletteMode,
         start_prompt_mode: bool,
     ) -> Vec<CommandBarResultItem> {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
-        if ExLine::claims(query) {
-            return Vec::new();
+        if mode.is_ex() {
+            if is_start {
+                return Vec::new();
+            }
+            return ExLine::suggestions(query);
         }
-        if state.space_switch {
+        if mode.is_space() {
             return space_switch_results(&state.spaces, &state.pages, query);
         }
         if is_start && query.trim().is_empty() {
@@ -224,17 +309,19 @@ pub enum PaletteGlyph {
 }
 
 impl PaletteGlyph {
-    fn of(navigating: Option<&CommandBarResultItem>, query: &str) -> Self {
+    fn of(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Self {
         let Some(item) = navigating else {
-            return Self::typed(query);
+            return Self::in_mode(mode);
         };
         match item {
-            CommandBarResultItem::Command { .. } => Self::Command,
+            CommandBarResultItem::Command { .. } | CommandBarResultItem::Ex { .. } => Self::Command,
             CommandBarResultItem::Terminal { path } if path.is_empty() => Self::Command,
             CommandBarResultItem::Terminal { .. }
             | CommandBarResultItem::Editor { .. }
             | CommandBarResultItem::File { .. }
             | CommandBarResultItem::WorkDir { .. }
+            | CommandBarResultItem::PartialIndex
+            | CommandBarResultItem::MoreMatches { .. }
             | CommandBarResultItem::RecentFile { .. } => Self::Path,
             CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => Self::Url,
             CommandBarResultItem::Navigate { url } => {
@@ -247,18 +334,13 @@ impl PaletteGlyph {
         }
     }
 
-    fn typed(query: &str) -> Self {
-        let trimmed = query.trim();
-        if trimmed.starts_with('>') {
-            return Self::Command;
+    const fn in_mode(mode: PaletteMode) -> Self {
+        match mode {
+            PaletteMode::Command | PaletteMode::Ex => Self::Command,
+            PaletteMode::Path => Self::Path,
+            PaletteMode::Url => Self::Url,
+            PaletteMode::Search | PaletteMode::Space => Self::Search,
         }
-        if trimmed.starts_with('/') || trimmed.starts_with('~') {
-            return Self::Path;
-        }
-        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
-            return Self::Url;
-        }
-        Self::Search
     }
 }
 
@@ -272,6 +354,18 @@ impl ExLine {
     pub fn of(query: &str) -> Option<String> {
         let body = query.strip_prefix(':')?.trim();
         (!body.is_empty()).then(|| body.to_string())
+    }
+
+    pub fn suggestions(query: &str) -> Vec<CommandBarResultItem> {
+        let typed = query.strip_prefix(':').unwrap_or(query).trim_start();
+        let mut rows = Vec::new();
+        for entry in ExCommandName::matching(typed) {
+            rows.push(CommandBarResultItem::Ex {
+                name: entry.name.to_string(),
+                hint: translate(entry.hint),
+            });
+        }
+        rows
     }
 }
 
@@ -415,6 +509,7 @@ pub struct PaletteState {
     pub display_text: String,
     pub placeholder: String,
     pub glyph: PaletteGlyph,
+    pub mode: PaletteMode,
     pub start_prompt_mode: bool,
     pub space_switch: bool,
     pub nav_mode: bool,
@@ -473,8 +568,9 @@ impl PaletteState {
             selected,
             ghost: rows.ghost.clone(),
             display_text,
-            placeholder: Placeholder::of(state, surface),
-            glyph: PaletteGlyph::of(navigating, &draft.query),
+            placeholder: Placeholder::of(rows.mode, state, surface),
+            glyph: PaletteGlyph::of(navigating, rows.mode),
+            mode: rows.mode,
             start_prompt_mode: rows.start_prompt_mode,
             space_switch: state.space_switch,
             nav_mode: draft.nav_mode,
@@ -578,6 +674,9 @@ impl PaletteState {
                 id: id.clone(),
                 open: self.open_target,
             }),
+            CommandBarResultItem::Ex { name, .. } => {
+                Some(CommandBarActionEvent::Ex { line: name.clone() })
+            }
             CommandBarResultItem::Space { id, .. } => {
                 Some(CommandBarActionEvent::Space { id: id.clone() })
             }
@@ -593,11 +692,17 @@ impl PaletteState {
                 &engine.search_url(query),
                 self.open_target,
             )),
+            CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => None,
         }
     }
 
     pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
-        if ExLine::claims(&self.query) {
+        if self.mode.is_ex() {
+            if self.nav_mode
+                && let Some(item) = self.row(self.selected)
+            {
+                return self.activate(item, attachments);
+            }
             let Some(line) = ExLine::of(&self.query) else {
                 return Submission::default();
             };
@@ -698,9 +803,12 @@ impl PaletteState {
 struct Placeholder;
 
 impl Placeholder {
-    fn of(state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
-        if state.space_switch {
+    fn of(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
+        if mode.is_space() {
             return translate("command-switch-space");
+        }
+        if mode.is_ex() {
+            return translate("command-ex-placeholder");
         }
         match surface {
             PaletteSurface::Start => translate("command-search-ask"),
@@ -721,6 +829,7 @@ impl DisplayText {
     fn of(item: Option<&CommandBarResultItem>, query: &str) -> String {
         match item {
             Some(CommandBarResultItem::Command { name, .. }) => format!("> {name}"),
+            Some(CommandBarResultItem::Ex { name, .. }) => format!(":{name}"),
             Some(CommandBarResultItem::Navigate { url }) => url.clone(),
             Some(CommandBarResultItem::Search { query, .. }) => query.clone(),
             Some(CommandBarResultItem::Stack { url, .. }) => url.clone(),
@@ -735,7 +844,9 @@ impl DisplayText {
             Some(CommandBarResultItem::File { path, .. }) => path.clone(),
             Some(CommandBarResultItem::WorkDir { path, .. }) => path.clone(),
             Some(CommandBarResultItem::RecentFile { title, url }) => Self::titled(title, url),
-            None => query.to_string(),
+            Some(CommandBarResultItem::PartialIndex)
+            | Some(CommandBarResultItem::MoreMatches { .. })
+            | None => query.to_string(),
         }
     }
 
@@ -842,27 +953,47 @@ impl CompletionQuery {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Completions<'a> {
+    pub entries: &'a [PathEntry],
+    pub partial: bool,
+    pub total: usize,
+}
+
+impl<'a> Completions<'a> {
+    pub fn of(draft: &'a PaletteDraft, query: &str) -> Self {
+        if CompletionQuery::of(query).is_none() {
+            return Self::default();
+        }
+        Self {
+            entries: &draft.completions,
+            partial: draft.completions_partial,
+            total: draft.completions_total,
+        }
+    }
+
+    fn withheld(&self) -> usize {
+        self.total.saturating_sub(self.entries.len())
+    }
+}
+
 pub struct FileRows;
 
 impl FileRows {
-    const LEADING: usize = 8;
-    const TRAILING: usize = 5;
-
     pub fn merge(
         query: &str,
-        completions: &[PathEntry],
+        completions: Completions<'_>,
         matched: Vec<CommandBarResultItem>,
     ) -> Vec<CommandBarResultItem> {
-        if completions.is_empty() {
+        if completions.entries.is_empty() && !completions.partial {
             return matched;
         }
         let trimmed = query.trim();
         let leads =
             CompletionQuery::looks_like_path(trimmed) || CompletionQuery::names_a_file(trimmed);
-        let take = if leads { Self::LEADING } else { Self::TRAILING };
-        let mut files = Vec::with_capacity(take);
-        let mut listed = Vec::with_capacity(take);
-        for entry in completions.iter().take(take) {
+        let mut files = Vec::with_capacity(completions.entries.len());
+        let mut listed = Vec::with_capacity(completions.entries.len());
+        for entry in completions.entries {
             files.push(CommandBarResultItem::File {
                 path: entry.full_path.clone(),
                 is_dir: entry.is_dir,
@@ -878,12 +1009,23 @@ impl FileRows {
             }
             rest.push(item);
         }
-        if leads {
+        let mut merged = if leads {
             files.extend(rest);
-            return files;
+            files
+        } else {
+            rest.extend(files);
+            rest
+        };
+        if completions.partial {
+            merged.push(CommandBarResultItem::PartialIndex);
         }
-        rest.extend(files);
-        rest
+        if completions.withheld() > 0 {
+            merged.push(CommandBarResultItem::MoreMatches {
+                shown: completions.entries.len(),
+                total: completions.total,
+            });
+        }
+        merged
     }
 
     fn already_listed(item: &CommandBarResultItem, listed: &[&str]) -> bool {
@@ -959,6 +1101,24 @@ mod tests {
     use vmux_wire::command_bar::{
         CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
     };
+
+    impl<'a> Completions<'a> {
+        fn listing(entries: &'a [PathEntry]) -> Self {
+            Self {
+                entries,
+                partial: false,
+                total: entries.len(),
+            }
+        }
+
+        fn partial(entries: &'a [PathEntry]) -> Self {
+            Self {
+                entries,
+                partial: true,
+                total: entries.len(),
+            }
+        }
+    }
 
     impl FileRows {
         fn hits(paths: &[&str]) -> Vec<PathEntry> {
@@ -1065,6 +1225,21 @@ mod tests {
         }
     }
 
+    struct ExNames;
+
+    impl ExNames {
+        fn of(palette: &PaletteState) -> Vec<String> {
+            let mut names = Vec::new();
+            for row in &palette.rows {
+                let CommandBarResultItem::Ex { name, .. } = row else {
+                    continue;
+                };
+                names.push(name.clone());
+            }
+            names
+        }
+    }
+
     impl PaletteState {
         fn start(state: &CommandBarOpenEvent, draft: PaletteDraft) -> Self {
             Self::resolve(state, &draft, PaletteSurface::Start)
@@ -1077,9 +1252,10 @@ mod tests {
 
     #[test]
     fn a_bare_word_keeps_commands_above_the_files_it_also_matched() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "settings",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
         assert!(matches!(merged[0], CommandBarResultItem::Command { .. }));
@@ -1088,9 +1264,10 @@ mod tests {
 
     #[test]
     fn a_typed_path_puts_its_files_first() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "~/src",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
         assert!(matches!(merged[0], CommandBarResultItem::File { .. }));
@@ -1099,15 +1276,110 @@ mod tests {
 
     #[test]
     fn an_editor_row_for_an_already_listed_file_is_dropped() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "~/src",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![CommandBarResultItem::Editor {
                 path: "/root/src/settings.rs".to_string(),
             }],
         );
         assert_eq!(merged.len(), 1);
         assert!(matches!(merged[0], CommandBarResultItem::File { .. }));
+    }
+
+    #[test]
+    fn every_ranked_completion_is_listed_rather_than_the_first_handful() {
+        let paths: Vec<String> = (0..40).map(|at| format!("src/main_{at:02}.rs")).collect();
+        let named: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let hits = FileRows::hits(&named);
+        let merged = FileRows::merge("main.rs", Completions::listing(&hits), Vec::new());
+
+        assert_eq!(merged.len(), 40);
+        assert!(
+            !merged
+                .iter()
+                .any(|row| matches!(row, CommandBarResultItem::MoreMatches { .. })),
+            "nothing was withheld, so the palette must not claim otherwise"
+        );
+    }
+
+    #[test]
+    fn a_withheld_tail_is_counted_in_the_last_row() {
+        let state = Launcher::state();
+        let palette = PaletteState::modal(
+            &state,
+            PaletteDraft::typed("main.rs")
+                .completing(FileRows::hits(&["src/main.rs", "src/other/main.rs"]))
+                .out_of(14),
+        );
+
+        assert_eq!(
+            palette.rows.last(),
+            Some(&CommandBarResultItem::MoreMatches {
+                shown: 2,
+                total: 14
+            })
+        );
+    }
+
+    #[test]
+    fn a_partial_index_owns_up_to_it_below_the_files_it_did_find() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
+        let merged = FileRows::merge(
+            "settings",
+            Completions::partial(&hits),
+            vec![FileRows::a_command()],
+        );
+
+        assert_eq!(merged.last(), Some(&CommandBarResultItem::PartialIndex));
+        assert!(matches!(merged[1], CommandBarResultItem::File { .. }));
+    }
+
+    #[test]
+    fn a_partial_index_that_found_nothing_still_says_why() {
+        let merged = FileRows::merge("settings", Completions::partial(&[]), Vec::new());
+
+        assert_eq!(merged, vec![CommandBarResultItem::PartialIndex]);
+    }
+
+    #[test]
+    fn the_partial_index_notice_does_nothing_and_leaves_the_typed_text_alone() {
+        let state = Launcher::state();
+        let palette = PaletteState::modal(
+            &state,
+            PaletteDraft::typed("settings")
+                .partially_completing(FileRows::hits(&["src/settings.rs"]))
+                .navigating(),
+        );
+        let at = palette
+            .rows
+            .iter()
+            .position(|row| matches!(row, CommandBarResultItem::PartialIndex))
+            .expect("the notice is listed");
+
+        let submission = palette.activate(&palette.rows[at], &[]);
+        assert_eq!(submission.action, None);
+        assert_eq!(
+            DisplayText::of(Some(&CommandBarResultItem::PartialIndex), "settings"),
+            "settings"
+        );
+    }
+
+    #[test]
+    fn a_complete_index_says_nothing() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
+        let merged = FileRows::merge(
+            "settings",
+            Completions::listing(&hits),
+            vec![FileRows::a_command()],
+        );
+
+        assert!(
+            !merged
+                .iter()
+                .any(|row| matches!(row, CommandBarResultItem::PartialIndex))
+        );
     }
 
     #[test]
@@ -1249,9 +1521,67 @@ mod tests {
             PaletteState::modal(&state, PaletteDraft::typed("close").at(0).navigating());
         assert_eq!(
             navigated.glyph,
-            PaletteGlyph::of(navigated.row(0), "close"),
+            PaletteGlyph::of(navigated.row(0), navigated.mode),
             "navigating reads the row, not the text"
         );
+    }
+
+    #[test]
+    fn a_colon_offers_the_ex_commands_and_narrows_them_as_the_line_grows() {
+        let state = Launcher::state();
+
+        let offered = PaletteState::modal(&state, PaletteDraft::typed(":"));
+        let names = ExNames::of(&offered);
+        assert_eq!(names.len(), ExCommandName::ALL.len(), "{names:?}");
+
+        let narrowed = PaletteState::modal(&state, PaletteDraft::typed(":w"));
+        assert_eq!(ExNames::of(&narrowed), vec!["w", "wq"]);
+
+        let typed_out = PaletteState::modal(&state, PaletteDraft::typed(":%s/a/b/g"));
+        assert!(
+            typed_out.rows.is_empty(),
+            "a line the catalog cannot complete offers nothing: {:?}",
+            typed_out.rows
+        );
+    }
+
+    #[test]
+    fn an_ex_line_runs_what_was_typed_unless_a_suggestion_is_highlighted() {
+        let state = Launcher::state();
+
+        let typed = PaletteState::modal(&state, PaletteDraft::typed(":noh"));
+        assert_eq!(
+            typed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Ex {
+                line: "noh".to_string()
+            })
+        );
+
+        let picked = PaletteState::modal(&state, PaletteDraft::typed(":").at(1).navigating());
+        assert_eq!(
+            picked.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Ex {
+                line: ExCommandName::ALL[1].name.to_string()
+            }),
+            "an empty line still runs the row the user walked to: {:?}",
+            picked.rows
+        );
+    }
+
+    #[test]
+    fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
+        for seed in [":", ">", "/"] {
+            assert!(
+                PaletteMode::of(seed, false).opens_at_end(seed),
+                "`{seed}` opens a mode, so the next keystroke must append to it"
+            );
+        }
+        for seed in ["https://example.com", "", ":w"] {
+            assert!(
+                !PaletteMode::of(seed, false).opens_at_end(seed),
+                "`{seed}` is a value, so the next keystroke must replace it"
+            );
+        }
     }
 
     #[test]

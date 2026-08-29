@@ -18,7 +18,7 @@ use crate::event::{
     StartSelectWorkspace,
 };
 use vmux_command::build_command_bar_open_payload;
-use vmux_core::launcher::{FocusLauncherInput, HostsLauncher, InlineTransitionRequested};
+use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
@@ -35,13 +35,11 @@ impl Plugin for StartPlugin {
             },
         ));
         app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
                 (
                     mark_start_pages_as_launcher_hosts,
-                    focus_start_input_on_request,
                     begin_requested_inline_transition,
                 ),
             );
@@ -629,23 +627,6 @@ fn mark_start_pages_as_launcher_hosts(
         if meta.url.starts_with(START_PAGE_URL) {
             commands.entity(entity).try_insert(HostsLauncher);
         }
-    }
-}
-
-fn focus_start_input_on_request(
-    mut requests: MessageReader<FocusLauncherInput>,
-    starts: Query<(), With<HostsLauncher>>,
-    mut commands: Commands,
-) {
-    for request in requests.read() {
-        if !starts.contains(request.webview) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            request.webview,
-            crate::event::START_FOCUS_INPUT_EVENT,
-            &crate::event::StartFocusInput,
-        ));
     }
 }
 

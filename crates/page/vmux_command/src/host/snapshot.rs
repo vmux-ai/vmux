@@ -36,6 +36,7 @@ pub struct CommandBarWorkspaceSnapshot {
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarProjectRoots {
     pub roots: Vec<String>,
+    pub active: Option<String>,
 }
 
 #[derive(Resource, Default, Clone, Debug, PartialEq)]

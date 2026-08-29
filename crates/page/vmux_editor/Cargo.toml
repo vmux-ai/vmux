@@ -27,6 +27,7 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 crossbeam-channel = { workspace = true }
 flate2 = "1"
+ignore = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 lsp-types = "0.97"
 notify = { workspace = true }
@@ -49,6 +50,7 @@ vmux_flex = { path = "../../vmux_flex" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
+vmux_wire = { path = "../../vmux_wire" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]

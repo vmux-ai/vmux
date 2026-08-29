@@ -3,15 +3,16 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::ExplorerPanel;
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
-    dir_select_index, editor_drag_started, gutter_width, heading_class, image_mime, line_severity,
-    note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
-    note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
-    squiggle_style,
+    GotoLine, NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top,
+    clamp_selection, dir_select_index, editor_drag_started, gutter_width, heading_class,
+    image_mime, line_severity, note_cursor_activation, note_inline_nodes,
+    note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
+    should_apply_explorer_chrome, span_style, squiggle_style,
 };
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::html::input_data::MouseButton;
@@ -46,6 +47,7 @@ pub fn Page() -> Element {
     let mut line_ending = use_signal(vmux_core::event::FileLineEnding::default);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut sticky_lines = use_signal(Vec::<FileLine>::new);
+    let mut outline = use_signal(Vec::<OutlineRow>::new);
     let mut line_layouts = use_signal(Vec::<FileLineLayout>::new);
     let mut wrap_columns = use_signal(|| 0u16);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
@@ -115,6 +117,7 @@ pub fn Page() -> Element {
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
     let find_forward = use_signal(|| true);
+    let find_scope = use_signal(FindScope::default);
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
@@ -178,6 +181,7 @@ pub fn Page() -> Element {
         references: refs,
         find_open,
         find_forward,
+        find_scope,
     };
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
@@ -238,6 +242,11 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
+    let _shape = use_listener::<FileShapeEvent, _>(FILE_SHAPE_EVENT, move |s| {
+        indent.set(s.indent);
+        line_ending.set(s.line_ending);
+    });
+
     let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
@@ -253,6 +262,10 @@ pub fn Page() -> Element {
             sticky_lines.set(p.sticky);
         }
         lsp_hover.set(None);
+    });
+
+    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+        outline.set(e.items);
     });
 
     let _cur = use_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
@@ -701,6 +714,19 @@ pub fn Page() -> Element {
         .next()
         .unwrap_or_default()
         .to_string();
+    let breadcrumb_path = match error().is_empty() {
+        true => git_path(),
+        false => String::new(),
+    };
+    let breadcrumb_outline = match mode() {
+        Mode::Text => outline(),
+        Mode::Dir | Mode::Media(_) => Vec::new(),
+    };
+    let breadcrumb_caret_line =
+        match file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
+            true => source_cursor().line,
+            false => cursor().line,
+        };
     let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
     let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
@@ -928,6 +954,7 @@ pub fn Page() -> Element {
                         query: find_query,
                         open: find_open,
                         forward: find_forward,
+                        scope: find_scope,
                         vim: keymap() == vmux_core::KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
@@ -1071,6 +1098,14 @@ pub fn Page() -> Element {
                         }
                     })
                 }
+            }
+
+            EditorBreadcrumbs {
+                display_path: path(),
+                abs_path: breadcrumb_path,
+                leaf_is_dir: mode() == Mode::Dir,
+                outline: breadcrumb_outline,
+                caret_line: breadcrumb_caret_line,
             }
 
             {
@@ -2354,6 +2389,10 @@ fn FileStatusInfo(
     line_ending: vmux_core::event::FileLineEnding,
     language: String,
 ) -> Element {
+    let menus = StatusMenus {
+        open: use_signal(|| None::<StatusMenu>),
+        goto: use_signal(String::new),
+    };
     let position = translate_with(
         "editor-status-position",
         &[
@@ -2361,26 +2400,296 @@ fn FileStatusInfo(
             ("col", TranslationValue::Number(i64::from(col))),
         ],
     );
-    let indent_id = match indent.spaces {
-        true => "editor-status-spaces",
-        false => "editor-status-tabs",
-    };
-    let indent_label = translate_with(
-        indent_id,
-        &[("width", TranslationValue::Number(i64::from(indent.width)))],
-    );
     let eol = match line_ending {
         vmux_core::event::FileLineEnding::Crlf => "CRLF",
         vmux_core::event::FileLineEnding::Lf => "LF",
     };
     rsx! {
-        span { class: "flex shrink-0 items-center gap-3 tabular-nums", "{position}" }
-        span { class: "shrink-0", "{indent_label}" }
+        StatusItemButton {
+            label: position,
+            title: translate("editor-status-goto-title"),
+            extra: "tabular-nums",
+            kind: StatusMenuKind::Goto,
+            menus,
+        }
+        StatusItemButton {
+            label: IndentChoice::of(indent).label(),
+            title: translate("editor-status-indent-title"),
+            extra: "",
+            kind: StatusMenuKind::Indent,
+            menus,
+        }
         span { class: "shrink-0", "UTF-8" }
-        span { class: "shrink-0", "{eol}" }
+        StatusItemButton {
+            label: eol.to_string(),
+            title: translate("editor-status-eol-title"),
+            extra: "",
+            kind: StatusMenuKind::LineEnding,
+            menus,
+        }
         if !language.is_empty() {
             span { class: "shrink-0", "{language}" }
         }
+
+        if let Some(current) = menus.current() {
+            div {
+                class: "fixed inset-0 z-[1]",
+                onclick: move |_| menus.hide(),
+                oncontextmenu: move |event: Event<MouseData>| {
+                    event.prevent_default();
+                    menus.hide();
+                },
+            }
+            StatusMenuList {
+                menu: current,
+                indent,
+                line_ending,
+                goto: menus.goto,
+                on_close: EventHandler::new(move |()| menus.hide()),
+            }
+        }
+    }
+}
+
+#[component]
+fn StatusItemButton(
+    label: String,
+    title: String,
+    extra: String,
+    kind: StatusMenuKind,
+    menus: StatusMenus,
+) -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
+            title,
+            onclick: move |event: Event<MouseData>| {
+                let at = event.client_coordinates();
+                menus.show(StatusMenu {
+                    x: at.x,
+                    y: at.y,
+                    kind,
+                });
+            },
+            "{label}"
+        }
+    }
+}
+
+#[component]
+fn StatusMenuList(
+    menu: StatusMenu,
+    indent: vmux_core::event::FileIndent,
+    line_ending: vmux_core::event::FileLineEnding,
+    goto: Signal<String>,
+    on_close: EventHandler<()>,
+) -> Element {
+    let x = menu.x;
+    let y = menu.y;
+    rsx! {
+        div {
+            class: "fixed z-[2] max-h-[60dvh] min-w-[180px] max-w-[320px] overflow-y-auto rounded-lg bg-background p-1 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28),inset_0_0_0_1px_var(--border)]",
+            style: "left:clamp(8px, {x}px - 60px, 100dvw - 330px);bottom:clamp(8px, 100dvh - {y}px + 12px, 100dvh - 60px);",
+            onclick: move |event: Event<MouseData>| event.stop_propagation(),
+            match menu.kind {
+                StatusMenuKind::Goto => rsx! {
+                    GotoLineField { goto, on_close }
+                },
+                StatusMenuKind::Indent => rsx! {
+                    for choice in IndentChoice::ALL {
+                        {
+                            let active = choice == IndentChoice::of(indent);
+                            rsx! {
+                                button {
+                                    key: "{choice.spaces}-{choice.width}",
+                                    class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
+                                    onclick: move |_| {
+                                        let _ = send(&FileShapeSet {
+                                            indent: choice.indent(),
+                                            line_ending,
+                                        });
+                                        on_close.call(());
+                                    },
+                                    span { class: "truncate", {choice.label()} }
+                                }
+                            }
+                        }
+                    }
+                },
+                StatusMenuKind::LineEnding => rsx! {
+                    for choice in [vmux_core::event::FileLineEnding::Lf, vmux_core::event::FileLineEnding::Crlf] {
+                        {
+                            let active = choice == line_ending;
+                            let label = match choice {
+                                vmux_core::event::FileLineEnding::Crlf => "CRLF",
+                                vmux_core::event::FileLineEnding::Lf => "LF",
+                            };
+                            rsx! {
+                                button {
+                                    key: "{label}",
+                                    class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
+                                    onclick: move |_| {
+                                        let _ = send(&FileShapeSet {
+                                            indent,
+                                            line_ending: choice,
+                                        });
+                                        on_close.call(());
+                                    },
+                                    span { class: "truncate", "{label}" }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn GotoLineField(goto: Signal<String>, on_close: EventHandler<()>) -> Element {
+    let mut draft = goto;
+    rsx! {
+        input {
+            r#type: "text",
+            class: "w-full rounded-md bg-foreground/[0.06] px-2 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 focus:ring-cyan-400/40",
+            placeholder: translate("editor-status-goto-placeholder"),
+            value: "{draft}",
+            onmounted: move |event: Event<MountedData>| {
+                let data = event.data();
+                spawn(async move {
+                    let _ = data.set_focus(true).await;
+                });
+            },
+            oninput: move |event: Event<FormData>| draft.set(event.value()),
+            onkeydown: move |event: Event<KeyboardData>| {
+                event.stop_propagation();
+                match event.key() {
+                    Key::Escape => {
+                        draft.set(String::new());
+                        on_close.call(());
+                    }
+                    Key::Enter => {
+                        if let Some(line) = GotoLine::parse(&draft()) {
+                            let _ = send(&ExplorerGoto {
+                                path: String::new(),
+                                line,
+                            });
+                        }
+                        draft.set(String::new());
+                        on_close.call(());
+                    }
+                    _ => {}
+                }
+            },
+        }
+    }
+}
+
+const STATUS_MENU_ITEM_CLASS: &str = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
+const STATUS_MENU_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md bg-cyan-400/12 px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
+
+#[derive(Clone, Copy, PartialEq)]
+struct StatusMenus {
+    open: Signal<Option<StatusMenu>>,
+    goto: Signal<String>,
+}
+
+impl StatusMenus {
+    fn show(mut self, next: StatusMenu) {
+        let same = self
+            .open
+            .peek()
+            .as_ref()
+            .is_some_and(|open| open.kind == next.kind);
+        if same {
+            self.open.set(None);
+            return;
+        }
+        self.goto.set(String::new());
+        self.open.set(Some(next));
+    }
+
+    fn hide(mut self) {
+        self.open.set(None);
+    }
+
+    fn current(self) -> Option<StatusMenu> {
+        (self.open)()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct StatusMenu {
+    x: f64,
+    y: f64,
+    kind: StatusMenuKind,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum StatusMenuKind {
+    Goto,
+    Indent,
+    LineEnding,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct IndentChoice {
+    spaces: bool,
+    width: u16,
+}
+
+impl IndentChoice {
+    const ALL: [Self; 6] = [
+        Self {
+            spaces: true,
+            width: 2,
+        },
+        Self {
+            spaces: true,
+            width: 4,
+        },
+        Self {
+            spaces: true,
+            width: 8,
+        },
+        Self {
+            spaces: false,
+            width: 2,
+        },
+        Self {
+            spaces: false,
+            width: 4,
+        },
+        Self {
+            spaces: false,
+            width: 8,
+        },
+    ];
+
+    fn of(indent: vmux_core::event::FileIndent) -> Self {
+        Self {
+            spaces: indent.spaces,
+            width: indent.width,
+        }
+    }
+
+    fn indent(self) -> vmux_core::event::FileIndent {
+        vmux_core::event::FileIndent {
+            spaces: self.spaces,
+            width: self.width,
+        }
+    }
+
+    fn label(self) -> String {
+        let id = match self.spaces {
+            true => "editor-status-spaces",
+            false => "editor-status-tabs",
+        };
+        translate_with(
+            id,
+            &[("width", TranslationValue::Number(i64::from(self.width)))],
+        )
     }
 }
 
@@ -2987,18 +3296,56 @@ fn VimStatus(label: String) -> Element {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum FindScope {
+    #[default]
+    Buffer,
+    Project,
+}
+
+impl FindScope {
+    fn is_project(self) -> bool {
+        self == Self::Project
+    }
+
+    fn toggled(self) -> Self {
+        match self {
+            Self::Buffer => Self::Project,
+            Self::Project => Self::Buffer,
+        }
+    }
+
+    fn placeholder(self) -> String {
+        match self {
+            Self::Buffer => translate("editor-find-placeholder"),
+            Self::Project => translate("editor-find-in-files-placeholder"),
+        }
+    }
+
+    fn hint(self) -> String {
+        match self {
+            Self::Buffer => translate("editor-find-in-files"),
+            Self::Project => translate("editor-find-in-file"),
+        }
+    }
+}
+
 #[component]
 fn FindBar(
     query: Signal<String>,
     open: Signal<bool>,
     forward: Signal<bool>,
+    scope: Signal<FindScope>,
     vim: bool,
     total: u32,
     index: u32,
 ) -> Element {
     let mut query = query;
     let mut open = open;
+    let mut scope = scope;
     let mut regex = use_signal(|| vim);
+    let mut case_sensitive = use_signal(|| false);
+    let project = scope().is_project();
     let mut close = move || {
         open.set(false);
         query.set(String::new());
@@ -3018,6 +3365,19 @@ fn FindBar(
             forward: forward(),
         });
     };
+    let sweep = move || {
+        let _ = send(&ExplorerSearchRequest {
+            query: query.peek().clone(),
+            regex: regex(),
+            case_sensitive: case_sensitive(),
+        });
+    };
+    let mut retype = move |text: String| {
+        query.set(text.clone());
+        if !scope.peek().is_project() {
+            ask(text);
+        }
+    };
     let step = move |reverse: bool| {
         let _ = send(&FileFindRequest {
             query: query.peek().clone(),
@@ -3029,6 +3389,10 @@ fn FindBar(
         });
     };
     let confirm = move |reverse: bool| {
+        if scope.peek().is_project() {
+            sweep();
+            return;
+        }
         step(reverse);
         if vim {
             focus_file_input();
@@ -3042,18 +3406,29 @@ fn FindBar(
 
     rsx! {
         div {
-            class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-2 pr-1 ring-1 ring-inset ring-foreground/10",
+            class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-1 pr-1 ring-1 ring-inset ring-foreground/10",
+            button {
+                r#type: "button",
+                class: if project {
+                    "shrink-0 rounded bg-foreground/15 px-1 text-[10px] text-foreground"
+                } else {
+                    "shrink-0 rounded px-1 text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
+                },
+                title: scope().hint(),
+                onclick: move |_| {
+                    let next = scope.peek().toggled();
+                    scope.set(next);
+                    focus_find_input();
+                },
+                "\u{2637}"
+            }
             input {
                 id: FIND_INPUT_ID,
                 r#type: "text",
                 class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
-                placeholder: translate("editor-find-placeholder"),
+                placeholder: scope().placeholder(),
                 value: "{query}",
-                oninput: move |event| {
-                    let text = event.value();
-                    query.set(text.clone());
-                    ask(text);
-                },
+                oninput: move |event| retype(event.value()),
                 onkeydown: move |event: Event<KeyboardData>| {
                     event.stop_propagation();
                     match event.key() {
@@ -3079,31 +3454,55 @@ fn FindBar(
                 title: translate("editor-find-regex"),
                 onclick: move |_| {
                     regex.toggle();
+                    if project {
+                        return;
+                    }
                     ask(query.peek().clone());
                 },
                 ".*"
             }
-            span {
-                class: if total == 0 && !query().is_empty() {
-                    "shrink-0 tabular-nums text-[10px] text-destructive"
-                } else {
-                    "shrink-0 tabular-nums text-[10px] text-muted-foreground"
-                },
-                "{count}"
-            }
-            button {
-                r#type: "button",
-                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
-                title: translate("editor-find-previous"),
-                onclick: move |_| step(true),
-                "‹"
-            }
-            button {
-                r#type: "button",
-                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
-                title: translate("editor-find-next"),
-                onclick: move |_| step(false),
-                "›"
+            if project {
+                button {
+                    r#type: "button",
+                    class: if case_sensitive() {
+                        "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
+                    } else {
+                        "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    title: translate("editor-find-case"),
+                    onclick: move |_| case_sensitive.toggle(),
+                    "Aa"
+                }
+                button {
+                    r#type: "button",
+                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                    title: translate("editor-find-run"),
+                    onclick: move |_| sweep(),
+                    "\u{23CE}"
+                }
+            } else {
+                span {
+                    class: if total == 0 && !query().is_empty() {
+                        "shrink-0 tabular-nums text-[10px] text-destructive"
+                    } else {
+                        "shrink-0 tabular-nums text-[10px] text-muted-foreground"
+                    },
+                    "{count}"
+                }
+                button {
+                    r#type: "button",
+                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                    title: translate("editor-find-previous"),
+                    onclick: move |_| step(true),
+                    "‹"
+                }
+                button {
+                    r#type: "button",
+                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                    title: translate("editor-find-next"),
+                    onclick: move |_| step(false),
+                    "›"
+                }
             }
             button {
                 r#type: "button",
@@ -4046,6 +4445,7 @@ fn explorer_client_id() -> u64 {
 }
 
 const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
+const EDITOR_MIN_WIDTH_PX: u32 = 320;
 
 #[derive(Clone, Copy)]
 struct ExplorerRoom {
@@ -4064,6 +4464,13 @@ impl ExplorerRoom {
             needed = needed.saturating_sub(EXPLORER_SQUEEZE_TOLERANCE_PX);
         }
         self.page_width >= needed
+    }
+
+    fn leaves_editor_usable(self) -> bool {
+        if self.page_width == 0 {
+            return false;
+        }
+        self.page_width >= self.explorer_width.saturating_add(EDITOR_MIN_WIDTH_PX)
     }
 }
 
@@ -4086,13 +4493,16 @@ pub struct ExplorerPane {
 }
 
 impl ExplorerPane {
-    fn has_room(self) -> bool {
+    fn room(self) -> ExplorerRoom {
         ExplorerRoom {
             page_width: (self.page_width)(),
             explorer_width: (self.width)(),
             open: (self.visible)(),
         }
-        .fits()
+    }
+
+    fn has_room(self) -> bool {
+        self.room().fits()
     }
 
     fn reflow_key(self) -> ExplorerReflowKey {
@@ -4108,7 +4518,9 @@ impl ExplorerPane {
             return;
         }
         self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible && ((self.user_chose)() || self.has_room());
+        let next = key.preferred_visible
+            && self.room().leaves_editor_usable()
+            && ((self.user_chose)() || self.has_room());
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -4341,6 +4753,10 @@ fn focus_container() {
 
 pub(crate) fn focus_file_input() {
     FocusClaim::new(INPUT_ID).request();
+}
+
+pub(crate) fn focus_find_input() {
+    FocusClaim::new(FIND_INPUT_ID).request();
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -4626,6 +5042,32 @@ mod explorer_room_tests {
                 open: false,
             }
             .fits()
+        );
+    }
+
+    #[test]
+    fn the_editor_floor_never_preempts_the_squeeze_tolerance() {
+        let explorer_width = 240;
+        let auto_closes_below =
+            NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - EXPLORER_SQUEEZE_TOLERANCE_PX;
+        let floor = explorer_width + EDITOR_MIN_WIDTH_PX;
+
+        assert!(floor < auto_closes_below);
+        assert!(
+            ExplorerRoom {
+                page_width: floor,
+                explorer_width,
+                open: true,
+            }
+            .leaves_editor_usable()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: floor - 1,
+                explorer_width,
+                open: true,
+            }
+            .leaves_editor_usable()
         );
     }
 

@@ -254,7 +254,7 @@ impl VimKeymap {
                 "Enter" => {
                     let line = std::mem::take(body);
                     ex = None;
-                    out.extend(self.run_ex(&line));
+                    out.extend(crate::edit::ex::ExLine::edits(&line));
                 }
                 "Escape" => ex = None,
                 typed => {
@@ -982,42 +982,11 @@ impl VimKeymap {
             _ => vec![],
         }
     }
-
-    fn run_ex(&mut self, body: &str) -> Vec<EditCommand> {
-        use crate::edit::ex::{ExCommand, parse};
-        let Some(cmd) = parse(body) else {
-            return vec![];
-        };
-        match cmd {
-            ExCommand::Write => vec![EditCommand::Save],
-            ExCommand::WriteQuit => vec![EditCommand::Save],
-            ExCommand::Quit { .. } => vec![],
-            ExCommand::NoHighlight => vec![EditCommand::ClearSearchHighlight],
-            ExCommand::Goto(line) => vec![EditCommand::Move(Motion::GotoLine(line as u32))],
-            ExCommand::Delete(range) => vec![EditCommand::ExDelete(range)],
-            ExCommand::Yank(range) => vec![EditCommand::ExYank(range)],
-            ExCommand::Substitute {
-                range,
-                pattern,
-                replacement,
-                all,
-            } => vec![EditCommand::Substitute {
-                range,
-                pattern,
-                replacement,
-                all,
-            }],
-        }
-    }
 }
 
 impl Keymap for VimKeymap {
     fn mode(&self) -> EditMode {
         self.mode
-    }
-
-    fn run_command_line(&mut self, line: &str) -> Vec<EditCommand> {
-        self.run_ex(line)
     }
 
     fn record_text(&mut self, text: &str) {
@@ -2170,13 +2139,6 @@ mod tests {
     }
 
     #[test]
-    fn ex_write_saves() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.run_command_line("w"), vec![EditCommand::Save]);
-        assert_eq!(km.run_command_line("q"), vec![]);
-    }
-
-    #[test]
     fn colon_hands_the_line_to_the_command_bar() {
         let mut km = VimKeymap::default();
         assert_eq!(run(&mut km, &[":"]), vec![EditCommand::OpenCommandLine]);
@@ -2207,33 +2169,6 @@ mod tests {
         assert_eq!(
             run(&mut km, &["?"]),
             vec![EditCommand::OpenFind { forward: false }]
-        );
-    }
-
-    #[test]
-    fn ex_substitute_and_nohl_reach_the_core() {
-        let mut km = VimKeymap::default();
-        assert_eq!(
-            km.run_command_line("%s/a/b/g"),
-            vec![EditCommand::Substitute {
-                range: crate::edit::ex::ExRange::WholeFile,
-                pattern: "a".into(),
-                replacement: "b".into(),
-                all: true,
-            }]
-        );
-        assert_eq!(
-            km.run_command_line("noh"),
-            vec![EditCommand::ClearSearchHighlight]
-        );
-    }
-
-    #[test]
-    fn a_bare_line_number_jumps() {
-        let mut km = VimKeymap::default();
-        assert_eq!(
-            km.run_command_line("12"),
-            vec![EditCommand::Move(Motion::GotoLine(11))]
         );
     }
 

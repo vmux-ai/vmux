@@ -46,6 +46,8 @@ pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
 pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
 pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
+pub const FILE_SHAPE_EVENT: &str = "file_shape";
+pub const FILE_SHAPE_SET_EVENT: &str = "file_shape_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
@@ -1375,6 +1377,24 @@ pub struct ExplorerSearchOpen {
     pub end_col: u32,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerSearchRequest {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+}
+
 #[cfg(test)]
 mod file_event_tests {
     use super::*;
@@ -1981,6 +2001,40 @@ pub struct FileKeymapSet {
 }
 
 #[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileShapeEvent {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileShapeSet {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[derive(
     Clone,
     Copy,
     Debug,
@@ -2001,6 +2055,7 @@ pub enum FileKey {
     PanelDismiss,
     Find { forward: bool },
     FindClose,
+    FindInFiles,
 }
 
 #[derive(

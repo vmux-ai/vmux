@@ -181,38 +181,18 @@ pub fn Page() -> Element {
         listener_ready(spaces_state_received(), &spaces_error),
     );
     let radius_px = state.radius;
-    let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
+    let reveal = StackReveal(use_signal(|| None::<(u64, u32)>));
     use_effect(move || set_root_radius_px(radius_px));
     use_effect(move || {
         if !layout_state().side_sheet_open {
+            reveal.forget();
             return;
         }
         let PaneTreeEvent { panes } = pane_tree_state();
-        let active_pane = panes.iter().find(|p| p.is_active);
-        let target = active_pane
-            .and_then(|p| {
-                p.stacks
-                    .iter()
-                    .find(|s| s.is_active)
-                    .map(|s| (p.id, s.stack_index))
-            })
-            .or_else(|| {
-                panes.iter().find_map(|p| {
-                    p.stacks
-                        .iter()
-                        .find(|s| s.is_active)
-                        .map(|s| (p.id, s.stack_index))
-                })
-            });
-        let Some((pane_id, stack_index)) = target else {
+        let Some(target) = ActiveStack::of(&panes) else {
             return;
         };
-        if last_scrolled_stack() == Some((pane_id, stack_index)) {
-            return;
-        }
-        if ScrollIntoView::nearest(&format!("sidesheet-stack-{pane_id}-{stack_index}")) {
-            last_scrolled_stack.set(Some((pane_id, stack_index)));
-        }
+        reveal.follow(target);
     });
     let host_sheet_width = state.side_sheet_width;
     let sheet_left = state.window_pad_left;
@@ -317,6 +297,53 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
                 resizing.set(true);
             },
             div { class: "mx-auto h-full w-px bg-transparent transition-colors duration-150 hover:bg-cyan-400/40" }
+        }
+    }
+}
+
+struct ActiveStack;
+
+impl ActiveStack {
+    fn of(panes: &[PaneNode]) -> Option<(u64, u32)> {
+        let mut fallback = None;
+        for pane in panes {
+            for stack in &pane.stacks {
+                if !stack.is_active {
+                    continue;
+                }
+                if pane.is_active {
+                    return Some((pane.id, stack.stack_index));
+                }
+                if fallback.is_none() {
+                    fallback = Some((pane.id, stack.stack_index));
+                }
+            }
+        }
+        fallback
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StackReveal(Signal<Option<(u64, u32)>>);
+
+impl StackReveal {
+    fn forget(mut self) {
+        if (self.0)().is_some() {
+            self.0.set(None);
+        }
+    }
+
+    fn follow(mut self, target: (u64, u32)) {
+        let Some(settled) = (self.0)() else {
+            self.0.set(Some(target));
+            return;
+        };
+        if settled == target {
+            return;
+        }
+        let (pane_id, stack_index) = target;
+        if ScrollIntoView::nearest(&format!("sidesheet-stack-{pane_id}-{stack_index}")) {
+            self.0.set(Some(target));
         }
     }
 }

@@ -68,6 +68,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::contract::EditorContractPlugin)
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(crate::app_key::FileKeyPlugin)
+            .add_plugins(crate::search::ProjectSearchPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
@@ -91,6 +92,7 @@ impl Plugin for EditorPlugin {
                 FileVideoRect,
                 FileViewModeSet,
                 FileKeymapSet,
+                FileShapeSet,
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,
@@ -200,6 +202,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_fold_toggle)
             .add_observer(on_file_view_mode_set)
             .add_observer(on_file_keymap_set)
+            .add_observer(on_file_shape_set)
             .add_observer(on_explorer_tree_toggle)
             .add_observer(on_explorer_tree_prefetch)
             .add_observer(on_explorer_tree_refresh)
@@ -1652,6 +1655,56 @@ fn on_file_keymap_set(
         }
         Err(error) => bevy::log::warn!("editor: keymap update rejected: {error}"),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_shape_set(
+    trigger: On<BinReceive<FileShapeSet>>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    run_commands(
+        entity,
+        vec![EditCommand::Reshape(crate::shape::BufferShape {
+            indent: wanted.indent,
+            line_ending: wanted.line_ending,
+        })],
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_SHAPE_EVENT,
+        &FileShapeEvent {
+            indent: shape.indent,
+            line_ending: shape.line_ending,
+        },
+    ));
 }
 
 fn on_file_resize(
@@ -3135,7 +3188,7 @@ fn run_submitted_ex_lines(
     children: Query<&Children>,
     mut q: Query<(
         &mut EditState,
-        &mut EditorKeymap,
+        &EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
     )>,
@@ -3146,6 +3199,10 @@ fn run_submitted_ex_lines(
     mut commands: Commands,
 ) {
     for message in submitted.read() {
+        let cmds = crate::edit::ex::ExLine::edits(&message.line);
+        if cmds.is_empty() {
+            continue;
+        }
         let Some(stack) = message.stack else {
             continue;
         };
@@ -3155,13 +3212,9 @@ fn run_submitted_ex_lines(
         let Some(entity) = kids.iter().find(|child| q.contains(*child)) else {
             continue;
         };
-        let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+        let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
             continue;
         };
-        let cmds = keymap.0.run_command_line(&message.line);
-        if cmds.is_empty() {
-            continue;
-        }
         run_commands(
             entity,
             cmds,

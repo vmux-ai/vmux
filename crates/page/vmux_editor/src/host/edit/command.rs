@@ -230,6 +230,7 @@ pub enum EditCommand {
     },
     ExDelete(crate::edit::ex::ExRange),
     ExYank(crate::edit::ex::ExRange),
+    Reshape(crate::shape::BufferShape),
     SetMark(char),
     GotoMark {
         name: char,

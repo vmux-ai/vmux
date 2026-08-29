@@ -73,6 +73,10 @@ pub enum FileKeyCommand {
     #[menu(id = "file_find", label = "Find In File")]
     #[shortcut(direct = "Super+f", when = "files")]
     Find,
+    #[menu(id = "file_find_in_files", label = "Find In Files")]
+    #[shortcut(direct = "Super+Shift+f", when = "files")]
+    #[shortcut(direct = "Ctrl+Shift+f", when = "files")]
+    FindInFiles,
 }
 
 impl From<FileKeyCommand> for vmux_core::event::FileKey {
@@ -85,6 +89,7 @@ impl From<FileKeyCommand> for vmux_core::event::FileKey {
             FileKeyCommand::PanelChoose => Self::PanelChoose,
             FileKeyCommand::PanelDismiss => Self::PanelDismiss,
             FileKeyCommand::Find => Self::Find { forward: true },
+            FileKeyCommand::FindInFiles => Self::FindInFiles,
         }
     }
 }

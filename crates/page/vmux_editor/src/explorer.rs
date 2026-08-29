@@ -2,10 +2,12 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::rc::Rc;
 
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_ui::components::tree_row::SIDEBAR_TREE_ROW_FOCUS;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_listener};
@@ -15,6 +17,8 @@ use vmux_ui::scroll::ScrollIntoView;
 
 const TREE_MOTION_MS: u32 = 170;
 const NOTICE_MS: u32 = 2400;
+const TREE_ROW_HEIGHT: f64 = 22.0;
+const STICKY_DEPTH_MAX: usize = 5;
 
 #[derive(Clone, PartialEq)]
 struct MotionRow {
@@ -235,6 +239,131 @@ impl TreeRows {
         generation.set(id);
         id
     }
+
+    fn paths(self) -> Vec<String> {
+        let mut paths = Vec::new();
+        for motion in self.rows.peek().iter() {
+            paths.push(motion.row.path.clone());
+        }
+        paths
+    }
+}
+
+struct AncestorChain;
+
+impl AncestorChain {
+    fn of(depths: &[u16], top: usize) -> Vec<usize> {
+        let Some(&start) = depths.get(top) else {
+            return Vec::new();
+        };
+        let mut lowest = start;
+        let mut chain = Vec::new();
+        for index in (0..top).rev() {
+            let depth = depths[index];
+            if depth >= lowest {
+                continue;
+            }
+            lowest = depth;
+            chain.push(index);
+            if depth == 0 {
+                break;
+            }
+        }
+        chain.reverse();
+        chain.truncate(STICKY_DEPTH_MAX);
+        chain
+    }
+}
+
+struct OutlineKey;
+
+impl OutlineKey {
+    fn of(row: &OutlineRow) -> String {
+        format!("{}-{}", row.line, row.name)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StickySection {
+    scroller: Signal<Option<Rc<MountedData>>>,
+    list: Signal<Option<Rc<MountedData>>>,
+    top: Signal<usize>,
+    measuring: Signal<bool>,
+    pending: Signal<bool>,
+}
+
+impl StickySection {
+    fn mounted(self, element: Rc<MountedData>) {
+        let mut list = self.list;
+        list.set(Some(element));
+        self.measure();
+    }
+
+    fn measure(self) {
+        let mut pending = self.pending;
+        if *self.measuring.peek() {
+            pending.set(true);
+            return;
+        }
+        let scroller = self.scroller.peek().clone();
+        let list = self.list.peek().clone();
+        let (Some(scroller), Some(list)) = (scroller, list) else {
+            return;
+        };
+        let mut measuring = self.measuring;
+        let mut top = self.top;
+        measuring.set(true);
+        spawn(async move {
+            let outer = scroller.get_client_rect().await;
+            let inner = list.get_client_rect().await;
+            measuring.set(false);
+            if let (Ok(outer), Ok(inner)) = (outer, inner) {
+                let hidden = outer.origin.y - inner.origin.y;
+                let index = (hidden / TREE_ROW_HEIGHT).floor().max(0.0) as usize;
+                if *top.peek() != index {
+                    top.set(index);
+                }
+            }
+            if *pending.peek() {
+                pending.set(false);
+                self.measure();
+            }
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TreeFocus {
+    key: Signal<String>,
+}
+
+impl TreeFocus {
+    fn at(self, key: String) {
+        let mut current = self.key;
+        current.set(key);
+    }
+
+    fn reveal(self, key: String) {
+        let id = tree_row_id(&key);
+        self.at(key);
+        ScrollIntoView::nearest(&id);
+        FocusClaim::new(id).request();
+    }
+
+    fn step(self, keys: &[String], forward: bool) {
+        if keys.is_empty() {
+            return;
+        }
+        let current = self.key.peek().clone();
+        let at = keys.iter().position(|key| *key == current);
+        let next = match (at, forward) {
+            (Some(index), true) => (index + 1).min(keys.len() - 1),
+            (Some(index), false) => index.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => keys.len() - 1,
+        };
+        self.reveal(keys[next].clone());
+    }
 }
 
 fn show_notice(
@@ -310,6 +439,69 @@ fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>)
     }
 }
 
+#[component]
+fn StickyFolders(rows: Vec<TreeRow>, on_pick: EventHandler<String>) -> Element {
+    if rows.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "sticky top-0 z-[12] h-0",
+            div { class: "absolute inset-x-0 top-0 border-b border-foreground/10 bg-background/95 backdrop-blur",
+                for row in rows {
+                    StickyFolderRow { key: "{row.path}", row, on_pick }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StickyFolderRow(row: TreeRow, on_pick: EventHandler<String>) -> Element {
+    let pad = u32::from(row.depth) * 12 + 8;
+    let path = row.path.clone();
+    rsx! {
+        div {
+            class: "flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 transition-colors duration-100 hover:bg-foreground/[0.08]",
+            style: "padding-left:{pad}px;",
+            title: "{row.path}",
+            onclick: move |_| on_pick.call(path.clone()),
+            Chevron { expanded: true, loading: false }
+            span { class: "truncate", "{row.name}" }
+        }
+    }
+}
+
+#[component]
+fn StickyOutline(rows: Vec<OutlineRow>, on_pick: EventHandler<u32>) -> Element {
+    if rows.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "sticky top-0 z-[12] h-0",
+            div { class: "absolute inset-x-0 top-0 border-b border-foreground/10 bg-background/95 backdrop-blur",
+                for row in rows {
+                    StickyOutlineRow { key: "{OutlineKey::of(&row)}", row, on_pick }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StickyOutlineRow(row: OutlineRow, on_pick: EventHandler<u32>) -> Element {
+    let pad = u32::from(row.depth) * 12 + 20;
+    let line = row.line;
+    rsx! {
+        div {
+            class: "flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 transition-colors duration-100 hover:bg-foreground/[0.08]",
+            style: "padding-left:{pad}px;",
+            onclick: move |_| on_pick.call(line),
+            OutlineGlyph { kind: row.kind }
+            span { class: "truncate", "{row.name}" }
+        }
+    }
+}
+
 fn prompt_title(kind: PromptKind) -> String {
     match kind {
         PromptKind::CreateFile => translate("editor-new-file"),
@@ -346,6 +538,35 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         generation: row_generation,
     };
     let focus_generation = use_signal(|| 0u32);
+    let scroller = use_signal(|| None::<Rc<MountedData>>);
+    let files_list = use_signal(|| None::<Rc<MountedData>>);
+    let files_top = use_signal(|| 0usize);
+    let files_measuring = use_signal(|| false);
+    let files_pending = use_signal(|| false);
+    let files_sticky = StickySection {
+        scroller,
+        list: files_list,
+        top: files_top,
+        measuring: files_measuring,
+        pending: files_pending,
+    };
+    let outline_list = use_signal(|| None::<Rc<MountedData>>);
+    let outline_top = use_signal(|| 0usize);
+    let outline_measuring = use_signal(|| false);
+    let outline_pending = use_signal(|| false);
+    let outline_sticky = StickySection {
+        scroller,
+        list: outline_list,
+        top: outline_top,
+        measuring: outline_measuring,
+        pending: outline_pending,
+    };
+    let tree_focus = TreeFocus {
+        key: use_signal(String::new),
+    };
+    let outline_focus = TreeFocus {
+        key: use_signal(String::new),
+    };
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
     let mut search = use_signal(|| None::<ExplorerSearchEvent>);
@@ -372,6 +593,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         root_loading.set(e.loading);
         tree.reconcile(e.rows);
         if visible() && !e.focus_path.is_empty() {
+            tree_focus.at(e.focus_path.clone());
             schedule_tree_focus(e.focus_path, focus_generation);
         }
     });
@@ -380,6 +602,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             current_path.set(e.path.clone());
         }
         if visible() {
+            tree_focus.at(e.path.clone());
             schedule_tree_focus(e.path, focus_generation);
         }
     });
@@ -432,12 +655,70 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
     };
 
+    use_effect(move || {
+        let _layout = (
+            visible(),
+            show_open(),
+            show_search(),
+            show_files(),
+            show_outline(),
+            open_editors.read().len(),
+            rows.read().len(),
+            outline.read().len(),
+            search.read().as_ref().map_or(0, |it| it.matches.len()),
+        );
+        spawn(async move {
+            sleep_ms(TREE_MOTION_MS + 60).await;
+            files_sticky.measure();
+            outline_sticky.measure();
+        });
+    });
+
+    let sticky_files = {
+        let current = rows.read();
+        let mut depths = Vec::with_capacity(current.len());
+        for motion in current.iter() {
+            depths.push(motion.row.depth);
+        }
+        let mut picked = Vec::new();
+        for index in AncestorChain::of(&depths, files_top()) {
+            picked.push(current[index].row.clone());
+        }
+        picked
+    };
+    let sticky_outline = {
+        let current = outline.read();
+        let mut depths = Vec::with_capacity(current.len());
+        for row in current.iter() {
+            depths.push(row.depth);
+        }
+        let mut picked = Vec::new();
+        for index in AncestorChain::of(&depths, outline_top()) {
+            picked.push(current[index].clone());
+        }
+        picked
+    };
+    let focused_path = tree_focus.key.cloned();
+    let focused_symbol = outline_focus.key.cloned();
+    let tree_empty = rows.read().is_empty();
+
     rsx! {
         div { class: "relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
             div { class: "flex h-9 shrink-0 items-center px-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
                 {translate("editor-explorer")}
             }
-            div { class: "group/tree min-h-0 flex-1 overflow-y-auto pb-4",
+            div {
+                class: "group/tree min-h-0 flex-1 overflow-y-auto pb-4",
+                onmounted: move |event: Event<MountedData>| {
+                    let mut handle = scroller;
+                    handle.set(Some(event.data()));
+                    files_sticky.measure();
+                    outline_sticky.measure();
+                },
+                onscroll: move |_| {
+                    files_sticky.measure();
+                    outline_sticky.measure();
+                },
                 SectionHeader { title: translate("editor-open-editors"), open: show_open, on_toggle: EventHandler::new(move |_| show_open.set(!show_open())) }
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
@@ -538,24 +819,46 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     },
                     SectionHeader { title: root_name(), open: show_files, on_toggle: EventHandler::new(move |_| show_files.set(!show_files())) }
                 }
+                StickyFolders {
+                    rows: sticky_files,
+                    on_pick: move |path: String| {
+                        ScrollIntoView::nearest(&tree_row_id(&path));
+                    },
+                }
                 div { class: "{files_body}",
-                    div { class: "min-h-0 overflow-hidden",
-                        if root_loading() && rows.read().is_empty() {
-                            div { class: "flex h-6 items-center gap-2 px-3 text-foreground/45",
-                                span { class: "h-3 w-3 animate-spin rounded-full border border-foreground/20 border-t-foreground/60" }
-                                {translate("common-loading")}
+                    div {
+                        class: "min-h-0 overflow-hidden",
+                        onmounted: move |event: Event<MountedData>| files_sticky.mounted(event.data()),
+                        if tree_empty {
+                            if root_loading() {
+                                div { class: "flex h-6 items-center gap-2 px-3 text-foreground/45",
+                                    span { class: "h-3 w-3 animate-spin rounded-full border border-foreground/20 border-t-foreground/60" }
+                                    {translate("common-loading")}
+                                }
+                            } else {
+                                div { class: "flex h-6 items-center px-3 text-foreground/45",
+                                    {translate("editor-explorer-empty")}
+                                }
                             }
                         }
                         for motion in rows() {
                             {
                                 let row = motion.row.clone();
                                 let path_click = row.path.clone();
+                                let path_key = row.path.clone();
                                 let path_prefetch = row.path.clone();
                                 let path_menu = row.path.clone();
                                 let name_menu = row.name.clone();
                                 let is_dir = row.is_dir;
                                 let was_expanded = row.expanded;
                                 let active = row.path == current_path();
+                                let focused = row.path == focused_path;
+                                let focus_class = if focused { SIDEBAR_TREE_ROW_FOCUS } else { "" };
+                                let row_class = if active {
+                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default bg-cyan-400/12 text-foreground outline-none transition-colors duration-100"
+                                } else {
+                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 outline-none transition-colors duration-100 hover:bg-foreground/[0.08]"
+                                };
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
                                     "opacity-100 translate-y-0 transition-[opacity,translate] duration-150 ease-out"
@@ -568,11 +871,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                             div {
                                                 id: "{tree_row_id(&row.path)}",
                                                 tabindex: "-1",
-                                                class: if active {
-                                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default bg-cyan-400/12 text-foreground outline-none transition-colors duration-100"
-                                                } else {
-                                                    "relative flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 outline-none transition-colors duration-100 hover:bg-foreground/[0.08]"
-                                                },
+                                                class: "{row_class} {focus_class}",
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
                                                 onmouseenter: move |_| {
@@ -585,6 +884,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                     e.stop_propagation();
                                                     let coordinates = e.client_coordinates();
                                                     let (x, y) = (coordinates.x, coordinates.y);
+                                                    tree_focus.at(path_menu.clone());
                                                     menu.set(Some(TreeMenu {
                                                         path: path_menu.clone(),
                                                         name: name_menu.clone(),
@@ -594,7 +894,37 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                         y,
                                                     }));
                                                 },
+                                                onkeydown: move |e: Event<KeyboardData>| {
+                                                    match e.key() {
+                                                        Key::ArrowDown => {
+                                                            e.prevent_default();
+                                                            e.stop_propagation();
+                                                            tree_focus.step(&tree.paths(), true);
+                                                        }
+                                                        Key::ArrowUp => {
+                                                            e.prevent_default();
+                                                            e.stop_propagation();
+                                                            tree_focus.step(&tree.paths(), false);
+                                                        }
+                                                        Key::Enter => {
+                                                            e.prevent_default();
+                                                            e.stop_propagation();
+                                                            if is_dir {
+                                                                if was_expanded {
+                                                                    tree.collapse(&path_key);
+                                                                } else {
+                                                                    tree.expand(&path_key);
+                                                                }
+                                                                toggle_dir(path_key.clone());
+                                                            } else {
+                                                                open_file(path_key.clone());
+                                                            }
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                },
                                                 onclick: move |_| {
+                                                    tree_focus.at(path_click.clone());
                                                     if is_dir {
                                                         if was_expanded {
                                                             tree.collapse(&path_click);
@@ -626,18 +956,49 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 }
 
                 SectionHeader { title: translate("editor-outline"), open: show_outline, on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())) }
+                StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
-                    div { class: "min-h-0 overflow-hidden",
+                    div {
+                        class: "min-h-0 overflow-hidden",
+                        onmounted: move |event: Event<MountedData>| outline_sticky.mounted(event.data()),
                         for s in outline() {
                             {
                                 let line = s.line;
+                                let key = OutlineKey::of(&s);
+                                let key_step = key.clone();
+                                let focus_class = if key == focused_symbol { SIDEBAR_TREE_ROW_FOCUS } else { "" };
                                 let pad = (s.depth as u32) * 12 + 20;
                                 rsx! {
                                     div {
-                                        key: "{s.line}-{s.name}",
-                                        class: "relative flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                                        key: "{key}",
+                                        id: "{tree_row_id(&key)}",
+                                        tabindex: "-1",
+                                        class: "relative flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/75 outline-none transition-colors duration-100 hover:bg-foreground/[0.08] {focus_class}",
                                         style: "padding-left:{pad}px;",
-                                        onclick: move |_| goto_line(line),
+                                        onkeydown: move |e: Event<KeyboardData>| {
+                                            let forward = match e.key() {
+                                                Key::ArrowDown => true,
+                                                Key::ArrowUp => false,
+                                                Key::Enter => {
+                                                    e.prevent_default();
+                                                    e.stop_propagation();
+                                                    goto_line(line);
+                                                    return;
+                                                }
+                                                _ => return,
+                                            };
+                                            e.prevent_default();
+                                            e.stop_propagation();
+                                            let mut keys = Vec::new();
+                                            for row in outline.peek().iter() {
+                                                keys.push(OutlineKey::of(row));
+                                            }
+                                            outline_focus.step(&keys, forward);
+                                        },
+                                        onclick: move |_| {
+                                            outline_focus.at(key_step.clone());
+                                            goto_line(line);
+                                        },
                                         TreeIndentGuides { depth: s.depth, base: 26 }
                                         OutlineGlyph { kind: s.kind }
                                         span { class: "truncate", "{s.name}" }
@@ -805,7 +1166,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
 }
 
 #[component]
-fn OutlineGlyph(kind: u8) -> Element {
+pub fn OutlineGlyph(kind: u8) -> Element {
     let label = match kind {
         15 => "abc",
         12 => "fn",
@@ -814,5 +1175,39 @@ fn OutlineGlyph(kind: u8) -> Element {
     };
     rsx! {
         span { class: "inline-block w-6 shrink-0 text-center text-[9px] font-semibold text-cyan-600 dark:text-cyan-300/80", "{label}" }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_is_the_enclosing_folders_outermost_first() {
+        let depths = [0, 1, 2, 3, 3, 1];
+        assert_eq!(AncestorChain::of(&depths, 4), vec![0, 1, 2]);
+        assert_eq!(AncestorChain::of(&depths, 5), vec![0]);
+    }
+
+    #[test]
+    fn chain_skips_siblings_and_deeper_rows_above() {
+        let depths = [0, 1, 2, 2, 1, 2];
+        assert_eq!(AncestorChain::of(&depths, 5), vec![0, 4]);
+    }
+
+    #[test]
+    fn chain_is_empty_at_the_first_row_and_past_the_end() {
+        let depths = [0, 1, 2];
+        assert!(AncestorChain::of(&depths, 0).is_empty());
+        assert!(AncestorChain::of(&depths, 3).is_empty());
+        assert!(AncestorChain::of(&[], 0).is_empty());
+    }
+
+    #[test]
+    fn chain_keeps_the_outermost_levels_within_the_cap() {
+        let depths: Vec<u16> = (0..12u16).collect();
+        let chain = AncestorChain::of(&depths, 11);
+        assert_eq!(chain.len(), STICKY_DEPTH_MAX);
+        assert_eq!(chain, vec![0, 1, 2, 3, 4]);
     }
 }

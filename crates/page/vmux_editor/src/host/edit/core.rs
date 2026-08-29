@@ -1290,6 +1290,23 @@ impl EditCore {
         true
     }
 
+    fn reshape(&mut self, to: crate::shape::BufferShape) -> bool {
+        let source: String = self.buffer.rope.chars().collect();
+        let from = crate::shape::BufferShape::of(&self.buffer.rope).indent;
+        let out = crate::shape::Reindent { from, to }.applied(&source);
+        if out == source {
+            return false;
+        }
+        let line = self.cursor_pos().line as usize;
+        self.checkpoint(Group::Other);
+        self.buf_remove(0..self.buffer.len_chars());
+        self.buf_insert(0, &out);
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let at = self.buffer.line_to_char(line);
+        self.set_caret(self.first_non_blank(at));
+        true
+    }
+
     fn apply_line_shift(
         &mut self,
         operator: Operator,
@@ -1924,6 +1941,9 @@ impl EditCore {
                     self.registers.write_yank(None, value.clone());
                     yank = Some(value);
                 }
+            }
+            EditCommand::Reshape(shape) => {
+                text_changed = self.reshape(shape);
             }
             EditCommand::SetMark(name) => {
                 self.marks.insert(name, self.primary().head);
@@ -2944,6 +2964,42 @@ mod tests {
             all: false,
         });
         assert_eq!(text_of(&c), "[cat]\n");
+    }
+
+    #[test]
+    fn reshape_rewrites_the_indentation_as_one_undoable_edit() {
+        let mut c = core("fn a() {\n\tb();\n\t\tc();\n}\n");
+        c.mode = EditMode::Normal;
+
+        c.apply(EditCommand::Reshape(crate::shape::BufferShape {
+            indent: vmux_core::event::FileIndent {
+                spaces: true,
+                width: 2,
+            },
+            line_ending: vmux_core::event::FileLineEnding::Lf,
+        }));
+
+        assert_eq!(text_of(&c), "fn a() {\n  b();\n    c();\n}\n");
+        assert!(c.dirty);
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "fn a() {\n\tb();\n\t\tc();\n}\n");
+    }
+
+    #[test]
+    fn reshaping_to_the_current_shape_leaves_the_buffer_unchanged() {
+        let mut c = core("a\n  b\n");
+        c.mode = EditMode::Normal;
+
+        c.apply(EditCommand::Reshape(crate::shape::BufferShape {
+            indent: vmux_core::event::FileIndent {
+                spaces: true,
+                width: 2,
+            },
+            line_ending: vmux_core::event::FileLineEnding::Lf,
+        }));
+
+        assert_eq!(text_of(&c), "a\n  b\n");
+        assert!(!c.dirty);
     }
 
     #[test]

@@ -324,6 +324,59 @@ pub enum CommandBarActionEvent {
     Dismiss,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExCommandName {
+    pub name: &'static str,
+    pub hint: &'static str,
+}
+
+impl ExCommandName {
+    pub const ALL: [Self; 8] = [
+        Self {
+            name: "w",
+            hint: "ex-write",
+        },
+        Self {
+            name: "wq",
+            hint: "ex-write-quit",
+        },
+        Self {
+            name: "q",
+            hint: "ex-quit",
+        },
+        Self {
+            name: "q!",
+            hint: "ex-quit-force",
+        },
+        Self {
+            name: "noh",
+            hint: "ex-nohighlight",
+        },
+        Self {
+            name: "d",
+            hint: "ex-delete",
+        },
+        Self {
+            name: "y",
+            hint: "ex-yank",
+        },
+        Self {
+            name: "s/",
+            hint: "ex-substitute",
+        },
+    ];
+
+    pub fn matching(typed: &str) -> Vec<Self> {
+        let mut found = Vec::new();
+        for entry in Self::ALL {
+            if entry.name.starts_with(typed) {
+                found.push(entry);
+            }
+        }
+        found
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -604,6 +657,8 @@ pub struct PathEntry {
 )]
 pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
+    pub truncated: bool,
+    pub total: u32,
 }
 
 pub fn is_data_uri(s: &str) -> bool {

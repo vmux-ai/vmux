@@ -8,6 +8,8 @@ pub const SIDEBAR_TREE_ROW_GROUP: &str =
 
 pub const SIDEBAR_TREE_ROW: &str = "flex h-[22px] w-full min-w-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-1 text-left text-muted-foreground group-hover/row:text-foreground";
 
+pub const SIDEBAR_TREE_ROW_FOCUS: &str = "ring-1 ring-inset ring-cyan-400/70";
+
 pub const SIDEBAR_TREE_SCROLLER: &str = "overflow-x-hidden";
 
 pub const SIDEBAR_TREE_COLUMN: &str = "flex min-w-0 flex-col";

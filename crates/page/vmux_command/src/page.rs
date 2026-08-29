@@ -81,11 +81,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
-        if signals.refocus(state().open_id) {
+        let opened = state();
+        if signals.refocus(opened.open_id) {
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
             } else {
-                CommandBarField::focus();
+                CommandBarField::focus(&opened);
             }
         }
     });
@@ -113,7 +114,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         use_listener::<CommandBarKey, _>(COMMAND_BAR_KEY_EVENT, move |key| palette_keys.apply(key));
 
     let state_val = state();
-    let palette = PaletteState::of(&rows(), &state_val, &signals.draft(), surface);
+    let palette = std::rc::Rc::new(PaletteState::of(
+        &rows(),
+        &state_val,
+        &signals.draft(),
+        surface,
+    ));
     let query = signals.query;
     let mut attachments = media.attachments;
     let q = palette.query.clone();
@@ -356,6 +362,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 "{palette.space_name}"
                             }
                         }
+                        PaletteModeChip { label: palette.mode.label() }
                         PaletteGlyphIcon { glyph: palette.glyph }
                         div { class: command_bar_input_wrap_class(),
                             if !ghost_text.is_empty() {
@@ -423,6 +430,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn PaletteModeChip(label: String) -> Element {
+    rsx! {
+        if !label.is_empty() {
+            span {
+                class: "shrink-0 rounded-md bg-accent/15 px-2 py-1 text-ui-xs font-medium text-accent-foreground",
+                "{label}"
             }
         }
     }

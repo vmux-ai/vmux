@@ -3,17 +3,18 @@ use crate::build_command_bar_open_payload;
 use std::time::{Duration, Instant};
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
-    FocusLauncherInput, HostsLauncher, InlineTransitionRequested, RendersLauncherPanel,
-    RestoreKeyboardToStack, StackInPaneChosen,
+    HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
+    StackInPaneChosen,
 };
 
 use crate::command_bar::panel::CommandBarPanelActive;
+use crate::command_bar::project_files::{ProjectCompletions, RankBias};
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, SearchEngine, SearchEngineSetting,
+    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathEntry,
+    SearchEngine, SearchEngineSetting,
 };
 use crate::event::{
     CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
@@ -22,7 +23,7 @@ use crate::open::OpenCommand;
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
-    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
+    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
 };
 use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -52,7 +53,6 @@ impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingLaunch>()
             .add_message::<vmux_core::ContributedCommandChosen>()
-            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
@@ -455,30 +455,6 @@ fn command_bar_open_request(
     request
 }
 
-#[derive(SystemParam)]
-struct LauncherHosts<'w, 's> {
-    pages: Query<'w, 's, (), With<HostsLauncher>>,
-    focus: MessageWriter<'w, FocusLauncherInput>,
-}
-
-impl LauncherHosts<'_, '_> {
-    fn hosts_one(&self, webview: Entity) -> bool {
-        self.pages.contains(webview)
-    }
-
-    fn focus(&mut self, webview: Entity) {
-        self.focus.write(FocusLauncherInput { webview });
-    }
-}
-
-fn command_bar_should_focus_start(
-    space_switch: bool,
-    active_page_is_start: bool,
-    replace_active_stack: bool,
-) -> bool {
-    !replace_active_stack && !space_switch && active_page_is_start
-}
-
 fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
     !is_open || space_switch
 }
@@ -490,7 +466,6 @@ fn handle_open_command_bar(
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
     focus: Res<CommandBarWorkspaceSnapshot>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    mut launcher_hosts: LauncherHosts,
     contributions: Contributions,
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
@@ -539,24 +514,6 @@ fn handle_open_command_bar(
 
     if !should_toggle || toggle_closes {
         return;
-    }
-
-    {
-        let start_browser = focus.stack.and_then(|stack| {
-            all_children
-                .get(stack)
-                .ok()
-                .and_then(|children| children.iter().find(|e| launcher_hosts.hosts_one(*e)))
-        });
-        if command_bar_should_focus_start(
-            space_switch,
-            start_browser.is_some(),
-            replace_active_stack,
-        ) && let Some(browser_e) = start_browser
-        {
-            launcher_hosts.focus(browser_e);
-            return;
-        }
     }
 
     let current_url = if let Some(override_url) = url_override {
@@ -1121,6 +1078,7 @@ fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
+    work: Res<CommandBarWorkSnapshot>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
@@ -1136,14 +1094,20 @@ fn on_path_complete_request(
     if roots.is_empty() {
         index.forget();
     } else {
-        completions = index.matches(&roots, query, asking);
+        let bias = RankBias::of(
+            ProjectQuery::favoured(
+                projects.active.as_deref(),
+                workspace.project_root.as_deref(),
+            ),
+            &work.recent_files,
+        );
+        completions = index.matches(&roots, &bias, query, asking);
     }
     let completions = completions.unwrap_or_else(|| complete_path(query));
-    let payload = PathCompleteResponse { completions };
     commands.trigger(BinHostEmitEvent::from_rkyv(
         asking,
         PATH_COMPLETE_RESPONSE,
-        &payload,
+        &completions.response(),
     ));
 }
 
@@ -1175,6 +1139,7 @@ fn warm_project_index(
 fn answer_settled_project_index(
     workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
+    work: Res<CommandBarWorkSnapshot>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
@@ -1193,13 +1158,20 @@ fn answer_settled_project_index(
     if roots.is_empty() {
         return;
     }
-    let Some(completions) = index.settled(&roots) else {
+    let bias = RankBias::of(
+        ProjectQuery::favoured(
+            projects.active.as_deref(),
+            workspace.project_root.as_deref(),
+        ),
+        &work.recent_files,
+    );
+    let Some(completions) = index.settled(&roots, &bias) else {
         return;
     };
     commands.trigger(BinHostEmitEvent::from_rkyv(
         asked.webview,
         PATH_COMPLETE_RESPONSE,
-        &PathCompleteResponse { completions },
+        &completions.response(),
     ));
 }
 
@@ -1217,6 +1189,19 @@ impl ProjectQuery {
             return Vec::new();
         }
         Self::all(project_root, registered)
+    }
+
+    fn favoured<'a>(active: Option<&'a str>, project_root: Option<&'a str>) -> Option<&'a str> {
+        for candidate in [active, project_root] {
+            let Some(candidate) = candidate else {
+                continue;
+            };
+            let candidate = candidate.trim();
+            if !candidate.is_empty() {
+                return Some(candidate);
+            }
+        }
+        None
     }
 
     fn all(project_root: Option<&str>, registered: &[String]) -> Vec<std::path::PathBuf> {
@@ -1239,7 +1224,7 @@ impl ProjectQuery {
     }
 }
 
-fn complete_path(query: &str) -> Vec<PathEntry> {
+fn complete_path(query: &str) -> ProjectCompletions {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
 
     let (parent_str, prefix) = if let Some(pos) = query.rfind('/') {
@@ -1259,7 +1244,7 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
     };
 
     let Ok(entries) = std::fs::read_dir(&resolved_parent) else {
-        return Vec::new();
+        return ProjectCompletions::listed(Vec::new(), 0);
     };
 
     let prefix_lower = prefix.to_lowercase();
@@ -1303,8 +1288,9 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    results.truncate(20);
-    results
+    let total = results.len();
+    results.truncate(crate::command_bar::project_files::MAX_RESULTS);
+    ProjectCompletions::listed(results, total)
 }
 
 #[cfg(test)]
@@ -1779,14 +1765,6 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_focuses_start_only_for_generic_open() {
-        assert!(command_bar_should_focus_start(false, true, false));
-        assert!(!command_bar_should_focus_start(true, true, false));
-        assert!(!command_bar_should_focus_start(false, false, false));
-        assert!(!command_bar_should_focus_start(false, true, true));
-    }
-
-    #[test]
     fn duplicate_open_is_ignored_while_command_bar_is_visible() {
         assert!(command_bar_toggle_should_open(false, false));
         assert!(!command_bar_toggle_should_open(true, false));
@@ -1836,7 +1814,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AppCommand>()
             .add_message::<PageOpenRequest>()
-            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
@@ -1891,6 +1868,36 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
         );
+    }
+
+    #[test]
+    fn the_start_page_gets_the_same_empty_command_bar_as_every_other_page() {
+        let mut app = panel_app();
+        let layout = app.world_mut().spawn(RendersLauncherPanel).id();
+        let stack = app.world_mut().spawn(()).id();
+        app.world_mut().spawn((
+            HostsLauncher,
+            HostsPage,
+            PageMetadata {
+                url: "vmux://start/".to_string(),
+                ..default()
+            },
+            ChildOf(stack),
+        ));
+        app.world_mut()
+            .resource_mut::<CommandBarWorkspaceSnapshot>()
+            .stack = Some(stack);
+
+        send(
+            &mut app,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
+        );
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+        );
+        assert_eq!(open_payload(&app).url, "");
     }
 
     #[test]
@@ -1975,7 +1982,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(CommandBarInputPlugin)
             .add_message::<TerminalSpawnRequest>()
-            .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()

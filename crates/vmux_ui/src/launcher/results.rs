@@ -33,6 +33,10 @@ pub enum CommandBarResultItem {
         name: String,
         shortcut: String,
     },
+    Ex {
+        name: String,
+        hint: String,
+    },
     Page {
         url: String,
         title: String,
@@ -67,6 +71,11 @@ pub enum CommandBarResultItem {
     RecentFile {
         url: String,
         title: String,
+    },
+    PartialIndex,
+    MoreMatches {
+        shown: usize,
+        total: usize,
     },
 }
 
