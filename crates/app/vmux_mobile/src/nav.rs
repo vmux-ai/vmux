@@ -587,23 +587,24 @@ impl Nav {
 
         let mut shown = Vec::new();
         if let Some(shows) = world.get::<Shows<S>>(at_tab) {
-            shown.push(shows.0.clone());
+            shown.push((at_tab, shows.0.clone()));
         }
         for entity in chain {
             let Some(shows) = world.get::<Shows<S>>(entity) else {
                 continue;
             };
-            shown.push(shows.0.clone());
+            shown.push((entity, shows.0.clone()));
         }
         let Some(screens) = world.get_resource::<Screens<S>>() else {
             return Vec::new();
         };
         let mut levels = Vec::new();
-        for screen in shown {
+        for (entity, screen) in shown {
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             levels.push(Level {
+                key: entity.to_bits(),
                 page: options.component,
                 title: screen.title(),
                 action: options.action,
@@ -659,11 +660,12 @@ impl Nav {
         };
         for Push(screen) in pushes.read() {
             let onto = Self::top(tab, &children);
-            commands.spawn((Shows(screen.clone()), ChildOf(onto)));
+            let spawned = commands.spawn((Shows(screen.clone()), ChildOf(onto))).id();
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             NativeStack::push(Level {
+                key: spawned.to_bits(),
                 page: options.component,
                 title: screen.title(),
                 action: options.action,
@@ -674,11 +676,14 @@ impl Nav {
         }
         for Present(screen) in presents.read() {
             let onto = Self::top(tab, &children);
-            commands.spawn((Shows(screen.clone()), Presented, ChildOf(onto)));
+            let spawned = commands
+                .spawn((Shows(screen.clone()), Presented, ChildOf(onto)))
+                .id();
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             NativeStack::present(Level {
+                key: spawned.to_bits(),
                 page: options.component,
                 title: screen.title(),
                 action: options.action,
