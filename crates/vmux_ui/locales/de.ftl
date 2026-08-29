@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = Umbenennen
 common-expand = Aufklappen
 common-collapse = Zuklappen
+common-collapse-all = Alles zuklappen
 common-loading = Lädt…
 common-error = Fehler
 common-output = Ausgabe

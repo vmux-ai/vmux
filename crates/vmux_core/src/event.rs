@@ -1160,6 +1160,24 @@ pub struct ExplorerTreeEvent {
 )]
 pub struct ExplorerFocusEvent {
     pub path: String,
+    pub reveal: ExplorerReveal,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ExplorerReveal {
+    Requested,
+    Followed,
 }
 
 #[derive(
@@ -1287,6 +1305,21 @@ pub struct ExplorerTreeRefresh {
     rkyv::Deserialize,
 )]
 pub struct ExplorerRevealCurrent;
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerCollapseAll;
 
 #[derive(
     Debug,

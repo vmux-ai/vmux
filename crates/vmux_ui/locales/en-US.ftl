@@ -14,6 +14,7 @@ common-copy = Copy
 common-rename = Rename
 common-expand = Expand
 common-collapse = Collapse
+common-collapse-all = Collapse All
 common-loading = Loading…
 common-error = Error
 common-output = Output

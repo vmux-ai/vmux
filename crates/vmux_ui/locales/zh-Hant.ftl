@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = 重新命名
 common-expand = 展開
 common-collapse = 收合
+common-collapse-all = 全部收合
 common-loading = 載入中…
 common-error = 錯誤
 common-output = 輸出

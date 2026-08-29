@@ -74,6 +74,10 @@ fn refresh_dir(path: String) {
     let _ = send(&ExplorerTreeRefresh { path });
 }
 
+fn collapse_all_dirs() {
+    let _ = send(&ExplorerCollapseAll);
+}
+
 fn close_editor(path: String) {
     let _ = send(&ExplorerCloseEditor { path });
 }
@@ -128,7 +132,7 @@ fn tree_row_id(path: &str) -> String {
     format!("explorer-row-{hash:016x}")
 }
 
-fn schedule_tree_focus(path: String, mut generation: Signal<u32>) {
+fn schedule_tree_focus(path: String, mut generation: Signal<u32>, reveal: ExplorerReveal) {
     let id = generation().wrapping_add(1);
     generation.set(id);
     spawn(async move {
@@ -138,7 +142,9 @@ fn schedule_tree_focus(path: String, mut generation: Signal<u32>) {
         }
         let row = tree_row_id(&path);
         ScrollIntoView::nearest(&row);
-        FocusClaim::new(row).request();
+        if reveal == ExplorerReveal::Requested {
+            FocusClaim::new(row).request();
+        }
     });
 }
 
@@ -221,6 +227,35 @@ impl TreeRows {
         rows.set(kept);
     }
 
+    fn collapse_all(self) {
+        self.claim();
+        let mut kept = Vec::new();
+        for motion in self.rows.read().iter() {
+            if motion.row.depth > 0 {
+                continue;
+            }
+            let mut motion = motion.clone();
+            motion.row.expanded = false;
+            kept.push(motion);
+        }
+        let mut rows = self.rows;
+        rows.set(kept);
+        collapse_all_dirs();
+    }
+
+    fn refresh(self, root: String) {
+        refresh_dir(root);
+        for motion in self.rows.peek().iter() {
+            if motion.row.is_dir && motion.row.expanded {
+                refresh_dir(motion.row.path.clone());
+            }
+        }
+    }
+
+    fn create_parent(self, focus: &str, root: &str) -> String {
+        CreateTarget::of(self.rows.peek().as_slice(), focus, root)
+    }
+
     fn expand(self, path: &str) {
         self.claim();
         let mut opened = self.rows.read().clone();
@@ -273,6 +308,29 @@ impl AncestorChain {
         chain.reverse();
         chain.truncate(STICKY_DEPTH_MAX);
         chain
+    }
+}
+
+struct CreateTarget;
+
+impl CreateTarget {
+    fn of(rows: &[MotionRow], focus: &str, root: &str) -> String {
+        if focus.is_empty() {
+            return root.to_string();
+        }
+        for motion in rows {
+            if motion.row.path != focus {
+                continue;
+            }
+            if motion.row.is_dir {
+                return focus.to_string();
+            }
+            let Some(parent) = Path::new(focus).parent() else {
+                return root.to_string();
+            };
+            return parent.to_string_lossy().into_owned();
+        }
+        root.to_string()
     }
 }
 
@@ -440,6 +498,72 @@ fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>)
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum TitleGlyph {
+    NewFile,
+    NewFolder,
+    Refresh,
+    CollapseAll,
+}
+
+impl TitleGlyph {
+    fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::NewFile => &[
+                "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+                "M14 2v4a2 2 0 0 0 2 2h4",
+                "M12 12v6",
+                "M9 15h6",
+            ],
+            Self::NewFolder => &[
+                "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+                "M12 10v6",
+                "M9 13h6",
+            ],
+            Self::Refresh => &[
+                "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
+                "M21 3v5h-5",
+                "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
+                "M8 16H3v5",
+            ],
+            Self::CollapseAll => &["m7 20 5-5 5 5", "m7 4 5 5 5-5"],
+        }
+    }
+}
+
+#[component]
+fn TitleAction(glyph: TitleGlyph, label: String, on_press: EventHandler<()>) -> Element {
+    rsx! {
+        button {
+            class: "flex h-5 w-5 shrink-0 items-center justify-center rounded text-foreground/55 outline-none transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:bg-foreground/[0.12] focus-visible:text-foreground",
+            title: "{label}",
+            onclick: move |e: Event<MouseData>| {
+                e.stop_propagation();
+                on_press.call(());
+            },
+            TitleActionIcon { glyph }
+        }
+    }
+}
+
+#[component]
+fn TitleActionIcon(glyph: TitleGlyph) -> Element {
+    rsx! {
+        svg {
+            class: "h-3.5 w-3.5",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "1.8",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            for d in glyph.paths() {
+                path { key: "{d}", d: "{d}" }
+            }
+        }
+    }
+}
+
 #[component]
 fn StickyFolders(rows: Vec<TreeRow>, on_pick: EventHandler<String>) -> Element {
     if rows.is_empty() {
@@ -596,7 +720,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         tree.reconcile(e.rows);
         if visible() && !e.focus_path.is_empty() {
             tree_focus.at(e.focus_path.clone());
-            schedule_tree_focus(e.focus_path, focus_generation);
+            schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
         }
     });
     let _focus = use_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
@@ -605,7 +729,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         }
         if visible() {
             tree_focus.at(e.path.clone());
-            schedule_tree_focus(e.path, focus_generation);
+            schedule_tree_focus(e.path, focus_generation, e.reveal);
         }
     });
     let _open = use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
@@ -705,9 +829,54 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let tree_empty = rows.read().is_empty();
 
     rsx! {
-        div { class: "relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
-            div { class: "flex h-9 shrink-0 items-center px-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                {translate("editor-explorer")}
+        div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
+            div { class: "flex h-9 shrink-0 items-center gap-2 pl-4 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+                span { class: "truncate", {translate("editor-explorer")} }
+                div {
+                    class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
+                    TitleAction {
+                        glyph: TitleGlyph::NewFile,
+                        label: translate("editor-new-file"),
+                        on_press: move |_| {
+                            let focus = tree_focus.key.peek().clone();
+                            draft.set(String::new());
+                            prompt
+                                .set(
+                                    Some(TreePrompt {
+                                        kind: PromptKind::CreateFile,
+                                        path: tree.create_parent(&focus, &root_path()),
+                                        name: String::new(),
+                                    }),
+                                );
+                        },
+                    }
+                    TitleAction {
+                        glyph: TitleGlyph::NewFolder,
+                        label: translate("editor-new-folder"),
+                        on_press: move |_| {
+                            let focus = tree_focus.key.peek().clone();
+                            draft.set(String::new());
+                            prompt
+                                .set(
+                                    Some(TreePrompt {
+                                        kind: PromptKind::CreateDir,
+                                        path: tree.create_parent(&focus, &root_path()),
+                                        name: String::new(),
+                                    }),
+                                );
+                        },
+                    }
+                    TitleAction {
+                        glyph: TitleGlyph::Refresh,
+                        label: translate("common-refresh"),
+                        on_press: move |_| tree.refresh(root_path()),
+                    }
+                    TitleAction {
+                        glyph: TitleGlyph::CollapseAll,
+                        label: translate("common-collapse-all"),
+                        on_press: move |_| tree.collapse_all(),
+                    }
+                }
             }
             div {
                 class: "group/tree min-h-0 flex-1 overflow-y-auto pb-4",
@@ -819,7 +988,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                             y,
                         }));
                     },
-                    SectionHeader { title: root_name(), open: show_files, on_toggle: EventHandler::new(move |_| show_files.set(!show_files())) }
+                    SectionHeader {
+                        title: root_name(),
+                        open: show_files,
+                        on_toggle: EventHandler::new(move |_| show_files.set(!show_files())),
+                    }
                 }
                 StickyFolders {
                     rows: sticky_files,
@@ -957,7 +1130,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     }
                 }
 
-                SectionHeader { title: translate("editor-outline"), open: show_outline, on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())) }
+                SectionHeader {
+                    title: translate("editor-outline"),
+                    open: show_outline,
+                    on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())),
+                }
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
                     div {
@@ -1188,6 +1365,42 @@ pub fn OutlineGlyph(kind: u8) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl MotionRow {
+        fn dir(path: &str) -> Self {
+            Self {
+                row: TreeRow {
+                    name: String::new(),
+                    path: path.to_string(),
+                    depth: 0,
+                    is_dir: true,
+                    expanded: false,
+                    loading: false,
+                },
+                visible: true,
+            }
+        }
+
+        fn file(path: &str) -> Self {
+            let mut motion = Self::dir(path);
+            motion.row.is_dir = false;
+            motion
+        }
+    }
+
+    #[test]
+    fn a_new_entry_lands_in_the_selected_folder_or_the_selected_file_s_folder() {
+        let rows = vec![MotionRow::dir("/r/src"), MotionRow::file("/r/src/lib.rs")];
+        assert_eq!(CreateTarget::of(&rows, "/r/src", "/r"), "/r/src");
+        assert_eq!(CreateTarget::of(&rows, "/r/src/lib.rs", "/r"), "/r/src");
+    }
+
+    #[test]
+    fn a_new_entry_lands_in_the_root_without_a_live_selection() {
+        let rows = vec![MotionRow::dir("/r/src")];
+        assert_eq!(CreateTarget::of(&rows, "", "/r"), "/r");
+        assert_eq!(CreateTarget::of(&rows, "/r/dropped", "/r"), "/r");
+    }
 
     #[test]
     fn chain_is_the_enclosing_folders_outermost_first() {

@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = إعادة تسمية
 common-expand = توسيع
 common-collapse = طيّ
+common-collapse-all = طيّ الكل
 common-loading = جارٍ التحميل…
 common-error = خطأ
 common-output = المخرجات

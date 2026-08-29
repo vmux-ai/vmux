@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = 이름 변경
 common-expand = 펼치기
 common-collapse = 접기
+common-collapse-all = 모두 접기
 common-loading = 로드 중…
 common-error = 오류
 common-output = 출력

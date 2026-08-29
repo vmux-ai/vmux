@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = Hernoem
 common-expand = Vouw uit
 common-collapse = Vouw samen
+common-collapse-all = Alles samenvouwen
 common-loading = Laden…
 common-error = Fout
 common-output = Uitvoer

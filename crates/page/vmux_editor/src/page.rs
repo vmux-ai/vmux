@@ -80,7 +80,7 @@ pub fn Page() -> Element {
     let mut theme_style = use_signal(String::new);
     let mut cell_dims = use_signal(CellMetrics::default);
     let viewport = FileViewport::new();
-    let mut page_width = use_signal(|| 0u32);
+    let page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
     let mut git_has_diff = use_signal(|| false);
@@ -760,17 +760,12 @@ pub fn Page() -> Element {
         }
         div {
             id: PAGE_ID,
-            class: "flex h-full w-full flex-row overflow-hidden bg-background",
-            onresize: move |event: Event<ResizeData>| {
-                let Ok(size) = event.get_border_box_size() else {
-                    return;
-                };
-                page_width.set(size.width.max(0.0) as u32);
-            },
+            class: "relative flex h-full w-full flex-row overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
                     let x = e.client_coordinates().x as i32;
-                    explorer_width.set((x.max(0) as u32).clamp(160, 600));
+                    explorer_width
+                        .set((x.max(0) as u32).clamp(EXPLORER_MIN_WIDTH_PX, EXPLORER_MAX_WIDTH_PX));
                 }
             },
             onmouseup: move |_| {
@@ -783,6 +778,8 @@ pub fn Page() -> Element {
                 }
             },
 
+            PaneWidth { width: page_width }
+
             ExplorerSidebar {
                 visible: explorer_visible,
                 width: explorer_width,
@@ -792,8 +789,8 @@ pub fn Page() -> Element {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
-            style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{cell_dims().vars()}{theme_style}",
+            class: "relative flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
+            style: "min-width:{EDITOR_MIN_WIDTH_PX}px;outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
                 match mode() {
@@ -1429,7 +1426,9 @@ pub fn Page() -> Element {
                             let cursor_key =
                                 format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
                             let spacer = total_rows() as f64 * ch;
-                            let txtcol = if ime.active() { "inherit" } else { "transparent" };
+                            let preedit = PreeditField::of(ime);
+                            let txtcol = preedit.text_color();
+                            let field_caret = preedit.caret_class();
                             rsx! {
                                 div {
                                     id: SCROLL_ID,
@@ -1611,10 +1610,12 @@ pub fn Page() -> Element {
                                             }
                                         }
 
-                                        div {
-                                            key: "{cursor_key}",
-                                            class: "pointer-events-none absolute z-20 rounded-[1px]",
-                                            style: "{cursor_style}",
+                                        if !preedit.owns_caret() {
+                                            div {
+                                                key: "{cursor_key}",
+                                                class: "pointer-events-none absolute z-20 rounded-[1px]",
+                                                style: "{cursor_style}",
+                                            }
                                         }
 
                                         for extra in carets().iter().filter(|c| **c != cursor()) {
@@ -1639,7 +1640,7 @@ pub fn Page() -> Element {
                                             onmounted: move |event: Event<MountedData>| {
                                                 viewport.field_mounted(event.data());
                                             },
-                                            class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 caret-transparent outline-none",
+                                            class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 outline-none {field_caret}",
                                             style: "left:{cx}px;top:{cy}px;min-width:2ch;height:{ch}px;color:{txtcol};",
                                             autocomplete: "off",
                                             autocapitalize: "off",
@@ -3441,6 +3442,21 @@ fn NoteCaret(width_class: String) -> Element {
 }
 
 #[component]
+fn PaneWidth(mut width: Signal<u32>) -> Element {
+    rsx! {
+        div {
+            class: "pointer-events-none absolute inset-x-0 top-0 h-0",
+            onresize: move |event: Event<ResizeData>| {
+                let Ok(size) = event.get_border_box_size() else {
+                    return;
+                };
+                width.set(size.width.max(0.0) as u32);
+            },
+        }
+    }
+}
+
+#[component]
 fn ExplorerSidebar(
     visible: Signal<bool>,
     width: Signal<u32>,
@@ -3450,11 +3466,15 @@ fn ExplorerSidebar(
     let open = visible();
     let panel_width = width();
     let wrapper_style = if open {
-        format!("width:{panel_width}px;contain:layout style;")
+        format!("width:{panel_width}px;min-width:{EXPLORER_MIN_WIDTH_PX}px;contain:layout style;")
     } else {
-        "width:0px;contain:layout style;".to_string()
+        "width:0px;min-width:0px;contain:layout style;".to_string()
     };
-    let panel_style = format!("width:{panel_width}px;");
+    let panel_style = if open {
+        "width:100%;".to_string()
+    } else {
+        format!("width:{panel_width}px;")
+    };
     let panel_class = if open {
         "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     } else {
@@ -3462,7 +3482,7 @@ fn ExplorerSidebar(
     };
     rsx! {
         div {
-            class: "relative z-[2] h-full shrink-0",
+            class: "relative z-[2] h-full shrink",
             style: "{wrapper_style}",
             onkeydown: move |event| {
                 keys.offer(&event);
@@ -4642,6 +4662,8 @@ fn explorer_client_id() -> u64 {
 
 const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
 const EDITOR_MIN_WIDTH_PX: u32 = 320;
+const EXPLORER_MIN_WIDTH_PX: u32 = 160;
+const EXPLORER_MAX_WIDTH_PX: u32 = 600;
 
 #[derive(Clone, Copy)]
 struct ExplorerRoom {
@@ -4701,6 +4723,11 @@ impl ExplorerPane {
         self.room().fits()
     }
 
+    fn opens_unasked(self) -> bool {
+        let room = self.room();
+        room.leaves_editor_usable() && room.fits()
+    }
+
     fn reflow_key(self) -> ExplorerReflowKey {
         ExplorerReflowKey {
             page_width: (self.page_width)(),
@@ -4714,9 +4741,7 @@ impl ExplorerPane {
             return;
         }
         self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible
-            && self.room().leaves_editor_usable()
-            && ((self.user_chose)() || self.has_room());
+        let next = key.preferred_visible && ((self.user_chose)() || self.opens_unasked());
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -5260,6 +5285,33 @@ impl ImeGuard {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PreeditField(bool);
+
+impl PreeditField {
+    fn of(ime: ImeGuard) -> Self {
+        Self(ime.active())
+    }
+
+    fn text_color(self) -> &'static str {
+        match self.0 {
+            true => "inherit",
+            false => "transparent",
+        }
+    }
+
+    fn caret_class(self) -> &'static str {
+        match self.0 {
+            true => "",
+            false => "caret-transparent",
+        }
+    }
+
+    fn owns_caret(self) -> bool {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ImeVerdict {
     Editor,
@@ -5702,6 +5754,35 @@ mod explorer_room_tests {
             }
             .leaves_editor_usable()
         );
+    }
+
+    #[test]
+    fn the_row_settles_even_when_what_it_measures_follows_the_panel_it_renders() {
+        let explorer_width = 240;
+        let grip = 4;
+
+        for pane_width in [480u32, 502, 560, 746, 1496] {
+            let mut open = true;
+            let mut seen = Vec::new();
+
+            for _ in 0..6 {
+                let panel = explorer_width;
+                let measured = pane_width.saturating_sub(panel + grip);
+                let room = ExplorerRoom {
+                    page_width: measured,
+                    explorer_width,
+                    open,
+                };
+                open = room.fits() && room.leaves_editor_usable();
+                seen.push((measured, open));
+            }
+
+            let settled = seen[seen.len() - 1];
+            assert!(
+                seen[2..].iter().all(|step| *step == settled),
+                "a pane of {pane_width} never settled: {seen:?}"
+            );
+        }
     }
 
     #[test]

@@ -414,6 +414,7 @@ common-copy = Copy
 common-rename = 名前を変更
 common-expand = 展開
 common-collapse = 折りたたむ
+common-collapse-all = すべて折りたたむ
 common-loading = 読み込み中…
 common-error = エラー
 common-output = 出力

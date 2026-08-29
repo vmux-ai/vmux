@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = Renombrar
 common-expand = Expandir
 common-collapse = Contraer
+common-collapse-all = Contraer todo
 common-loading = Cargando…
 common-error = Error
 common-output = Salida

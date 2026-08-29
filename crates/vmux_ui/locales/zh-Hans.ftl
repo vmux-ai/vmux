@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = 重命名
 common-expand = 展开
 common-collapse = 折叠
+common-collapse-all = 全部折叠
 common-loading = 正在加载…
 common-error = 错误
 common-output = 输出

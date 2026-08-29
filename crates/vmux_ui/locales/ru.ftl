@@ -429,6 +429,7 @@ common-copy = Copy
 common-rename = Переименовать
 common-expand = Развернуть
 common-collapse = Свернуть
+common-collapse-all = Свернуть все
 common-loading = Загрузка…
 common-error = Ошибка
 common-output = Вывод
