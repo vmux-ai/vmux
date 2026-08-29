@@ -83,7 +83,9 @@ mod platform {
     const MARK_LIT: f64 = 0.9;
     const MARK_DIM: f64 = 0.25;
     const MARK_CLEARANCE: f64 = TAB_BAR_GAP + MARK_BAR_HEIGHT;
+    const MARK_GLIDE: f64 = 0.28;
     const DIP: f64 = 0.06;
+    const TAB_TRAIL: f64 = 0.5;
     const SHEET_FADE: f64 = 0.55;
     const SHEET_RECEDE: f64 = 0.92;
     const SHEET_CORNER: f64 = 30.0;
@@ -191,8 +193,8 @@ mod platform {
             }
         }
 
-        fn clear(&self, top: f64) {
-            self.navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
+        fn inset(navigation: &UINavigationController, top: f64) {
+            navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
                 top,
                 left: 0.0,
                 bottom: 0.0,
@@ -321,27 +323,64 @@ mod platform {
         }
 
         fn show(&self, count: usize, at: usize) {
-            self.capsule.setHidden(count < 2);
-            if count < 2 {
-                return;
-            }
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let standing = self.lines.arrangedSubviews();
-            if standing.count() != count {
-                for spent in standing.iter() {
-                    self.lines.removeArrangedSubview(&spent);
+            let wanted = count >= 2;
+            if wanted && self.capsule.isHidden() {
+                self.capsule.setAlpha(0.0);
+                self.capsule.setHidden(false);
+            }
+            let mut marks: Vec<Retained<UIView>> = self.lines.arrangedSubviews().iter().collect();
+            while marks.len() < count {
+                let mark = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
+                mark.layer().setCornerRadius(MARK_HEIGHT / 2.0);
+                mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, MARK_DIM)));
+                mark.setHidden(true);
+                mark.setAlpha(0.0);
+                self.lines.addArrangedSubview(&mark);
+                marks.push(mark);
+            }
+
+            let (capsule, showing) = (self.capsule.clone(), marks.clone());
+            let dressing = RcBlock::new(move || {
+                capsule.setAlpha(if wanted { 1.0 } else { 0.0 });
+                for (index, mark) in showing.iter().enumerate() {
+                    let live = index < count;
+                    mark.setHidden(!live);
+                    mark.setAlpha(if live { 1.0 } else { 0.0 });
+                    let lit = if index == at { MARK_LIT } else { MARK_DIM };
+                    mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, lit)));
+                }
+            });
+            let (capsule, lines) = (self.capsule.clone(), self.lines.clone());
+            let dressed = RcBlock::new(move |_| {
+                capsule.setHidden(!wanted);
+                for spent in marks.iter().skip(count) {
+                    lines.removeArrangedSubview(spent);
                     spent.removeFromSuperview();
                 }
-                for _ in 0..count {
-                    let mark = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
-                    mark.layer().setCornerRadius(MARK_HEIGHT / 2.0);
-                    self.lines.addArrangedSubview(&mark);
-                }
-            }
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                MARK_GLIDE,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &dressing,
+                Some(&dressed),
+                marker,
+            );
+        }
+
+        fn track(&self, from: usize, to: usize, progress: f64) {
+            let gone = progress.clamp(0.0, 1.0);
             for (index, mark) in self.lines.arrangedSubviews().iter().enumerate() {
-                let lit = if index == at { MARK_LIT } else { MARK_DIM };
+                let lit = if index == from {
+                    MARK_LIT + (MARK_DIM - MARK_LIT) * gone
+                } else if index == to {
+                    MARK_DIM + (MARK_LIT - MARK_DIM) * gone
+                } else {
+                    MARK_DIM
+                };
                 mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, lit)));
             }
         }
@@ -910,6 +949,7 @@ mod platform {
                 pager.setTransform(Drag::moved(0.0, scale));
                 for (view, shape) in &places {
                     view.layer().setTransform(*shape);
+                    Overview::round(view, on);
                 }
             });
             UIView::animateWithDuration_animations_completion(
@@ -978,6 +1018,7 @@ mod platform {
                 }
                 view.setHidden(false);
                 view.setUserInteractionEnabled(false);
+                Self::round(&view, true);
                 fresh.push(Card { at, view, snapshot });
             }
             for card in stack.row.drain(..) {
@@ -994,6 +1035,16 @@ mod platform {
             stack.row = fresh;
         }
 
+        fn round(view: &UIView, on: bool) {
+            let layer = view.layer();
+            layer.setMasksToBounds(true);
+            layer.setCornerCurve(unsafe { kCACornerCurveContinuous });
+            layer.setCornerRadius(match on {
+                true => SHEET_CORNER / OVERVIEW_SCALE,
+                false => 0.0,
+            });
+        }
+
         fn clear() {
             STACK.with_borrow_mut(|stack| {
                 let Some(stack) = stack.as_mut() else {
@@ -1002,6 +1053,7 @@ mod platform {
                 for card in stack.row.drain(..) {
                     card.view.setUserInteractionEnabled(true);
                     card.view.layer().setTransform(Self::flat());
+                    Self::round(&card.view, false);
                     if card.snapshot {
                         card.view.removeFromSuperview();
                     }
@@ -1193,8 +1245,11 @@ mod platform {
                 {
                     stack.snaps.insert(vacated.clone(), shot);
                 }
-                arriving.setTransform(Drag::sideways(entering));
+                arriving.setTransform(Drag::sideways(entering * TAB_TRAIL));
                 arriving.setHidden(false);
+                if let Some(leaving) = leaving.as_ref() {
+                    stack.pager.bringSubviewToFront(leaving);
+                }
                 Some((leaving, arriving, entering))
             });
             Self::front();
@@ -1502,9 +1557,26 @@ mod platform {
                     true => MARK_CLEARANCE,
                     false => 0.0,
                 };
+                let mut clearing = Vec::new();
                 for column in stack.stacks.values().chain(stack.sheets.iter()) {
-                    column.clear(clearance);
+                    clearing.push(column.navigation.clone());
                 }
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let sliding = RcBlock::new(move || {
+                    for navigation in &clearing {
+                        Column::inset(navigation, clearance);
+                    }
+                });
+                UIView::animateWithDuration_delay_options_animations_completion(
+                    MARK_GLIDE,
+                    0.0,
+                    UIViewAnimationOptions::CurveEaseOut,
+                    &sliding,
+                    None,
+                    marker,
+                );
             });
         }
 
@@ -1889,13 +1961,25 @@ mod platform {
                     leaving.setTransform(Self::moved(travelled, scale));
                 }
                 if let Some(arriving) = drag.incoming.navigation.view() {
-                    arriving.setTransform(Self::moved(travelled + drag.entering, scale));
+                    arriving
+                        .setTransform(Self::moved((travelled + drag.entering) * TAB_TRAIL, scale));
                 }
                 if let Some(sheet) = drag.sheet.as_ref() {
                     sheet.follow(travelled.abs() / drag.across);
                 }
                 if let Some(rising) = drag.rising.as_ref() {
                     rising.follow(1.0 - travelled.abs() / drag.across);
+                }
+                let mut landing = None;
+                for (index, id) in stack.tabs.ids.iter().enumerate() {
+                    if *id == drag.to {
+                        landing = Some(index);
+                    }
+                }
+                if let Some(landing) = landing {
+                    stack
+                        .indicator
+                        .track(stack.tabs.at, landing, travelled.abs() / drag.across);
                 }
             });
         }
@@ -1909,9 +1993,11 @@ mod platform {
                 let across = stack.pager.bounds().size.width;
                 let entering = if shifted > 0.0 { across } else { -across };
                 let view = incoming.navigation.view()?;
-                view.setTransform(Self::sideways(entering));
+                view.setTransform(Self::sideways(entering * TAB_TRAIL));
                 view.setHidden(false);
-                stack.pager.bringSubviewToFront(&view);
+                if let Some(leaving) = Self::leaving(stack) {
+                    stack.pager.bringSubviewToFront(&leaving);
+                }
                 if let Some(sheet) = sheet.as_ref()
                     && let Some(seated) = stack.seated.clone()
                     && let Some(ghosts) = sheet.ghosts()
@@ -2043,6 +2129,7 @@ mod platform {
             let Some(to) = arrived else {
                 return;
             };
+            NativeStack::chrome();
             if commit {
                 PICKED.with_borrow_mut(|slot| *slot = Some(to));
             }
@@ -2085,7 +2172,7 @@ mod platform {
                     if let Some(leaving) = leaving.as_ref() {
                         leaving.setTransform(Drag::moved(midway, 1.0 - DIP));
                     }
-                    arriving.setTransform(Drag::moved(midway + entering, 1.0 - DIP));
+                    arriving.setTransform(Drag::moved((midway + entering) * TAB_TRAIL, 1.0 - DIP));
                 });
                 UIView::addKeyframeWithRelativeStartTime_relativeDuration_animations(
                     0.0, 0.5, &dip, marker,
@@ -2095,7 +2182,7 @@ mod platform {
                     if let Some(leaving) = leaving.as_ref() {
                         leaving.setTransform(Drag::sideways(landing));
                     }
-                    arriving.setTransform(Drag::sideways(landing + entering));
+                    arriving.setTransform(Drag::sideways((landing + entering) * TAB_TRAIL));
                 });
                 UIView::addKeyframeWithRelativeStartTime_relativeDuration_animations(
                     0.5, 0.5, &rise, marker,
