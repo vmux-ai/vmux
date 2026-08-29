@@ -9,7 +9,7 @@ pub use instance::{Instance, PageScope};
 pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
-pub use vmux_macro::screen;
+pub use vmux_macro::{screen, screens};
 
 #[cfg(ui)]
 mod webview;

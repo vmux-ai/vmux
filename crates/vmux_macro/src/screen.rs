@@ -5,13 +5,13 @@ use syn::punctuated::Punctuated;
 use syn::{Error, Expr, ExprArray, ItemFn, LitStr, Path, Token};
 
 pub struct Args {
-    url: Option<LitStr>,
-    route: Option<Path>,
-    presentation: Option<syn::Ident>,
-    detents: Option<ExprArray>,
-    painted: Option<Expr>,
-    served_from: Option<LitStr>,
-    owning_subtree: bool,
+    pub(crate) url: Option<LitStr>,
+    pub(crate) route: Option<Path>,
+    pub(crate) presentation: Option<syn::Ident>,
+    pub(crate) detents: Option<ExprArray>,
+    pub(crate) painted: Option<Expr>,
+    pub(crate) served_from: Option<LitStr>,
+    pub(crate) owning_subtree: bool,
 }
 
 impl Parse for Args {
