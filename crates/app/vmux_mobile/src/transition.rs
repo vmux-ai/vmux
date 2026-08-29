@@ -474,23 +474,71 @@ mod platform {
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
             );
             self.browse.contentView().addSubview(&counter);
-            self.browse.setHidden(self.ids.len() < 2);
-
             self.capsule.setHidden(self.ids.is_empty());
             self.strip
                 .setHidden(self.ids.is_empty() && centre.is_none());
-            self.lay_out();
+
+            let wanted = (centre.is_some(), self.ids.len() >= 2);
+            let settled =
+                (self.circle.isHidden(), self.browse.isHidden()) == (!wanted.0, !wanted.1);
+            for (pane, wanted) in [(&self.circle, wanted.0), (&self.browse, wanted.1)] {
+                if wanted && pane.isHidden() {
+                    pane.setAlpha(0.0);
+                    pane.setHidden(false);
+                }
+            }
+            if settled {
+                self.lay_out(wanted);
+                return;
+            }
+
+            let (circle, browse) = (self.circle.clone(), self.browse.clone());
+            let (capsule, strip) = (self.capsule.clone(), self.strip.clone());
+            let dressing = block2::RcBlock::new(move || {
+                circle.setAlpha(if wanted.0 { 1.0 } else { 0.0 });
+                browse.setAlpha(if wanted.1 { 1.0 } else { 0.0 });
+                Tabs::place(&strip, &capsule, &circle, &browse, wanted);
+            });
+            let (circle, browse) = (self.circle.clone(), self.browse.clone());
+            let dressed = block2::RcBlock::new(move |_| {
+                circle.setHidden(!wanted.0);
+                browse.setHidden(!wanted.1);
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.24,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &dressing,
+                Some(&dressed),
+                marker,
+            );
         }
 
-        fn lay_out(&self) {
-            let width = self.strip.bounds().size.width;
+        fn lay_out(&self, wanted: (bool, bool)) {
+            Self::place(
+                &self.strip,
+                &self.capsule,
+                &self.circle,
+                &self.browse,
+                wanted,
+            );
+        }
+
+        fn place(
+            strip: &UIVisualEffectView,
+            capsule: &UIVisualEffectView,
+            circle: &UIVisualEffectView,
+            browse: &UIVisualEffectView,
+            wanted: (bool, bool),
+        ) {
+            let width = strip.bounds().size.width;
             let square = CGSize {
                 width: TAB_BAR_HEIGHT,
                 height: TAB_BAR_HEIGHT,
             };
             let mut edge = TAB_BAR_EDGE;
-            for pane in [&self.circle, &self.browse] {
-                if pane.isHidden() {
+            for (pane, shown) in [(circle, wanted.0), (browse, wanted.1)] {
+                if !shown {
                     continue;
                 }
                 pane.setFrame(CGRect {
@@ -502,7 +550,7 @@ mod platform {
                 });
                 edge += TAB_BAR_HEIGHT + TAB_BAR_GAP;
             }
-            self.capsule.setFrame(CGRect {
+            capsule.setFrame(CGRect {
                 origin: CGPoint {
                     x: TAB_BAR_EDGE,
                     y: 0.0,
@@ -641,6 +689,21 @@ mod platform {
             );
         }
 
+        fn plate(stack: &NativeStack) -> Option<Retained<UIView>> {
+            let marker = MainThreadMarker::new()?;
+            let (red, green, blue, alpha) = stack.backdrop;
+            let plate = UIView::initWithFrame(UIView::alloc(marker), stack.pager.bounds());
+            plate.setBackgroundColor(Some(&UIColor::colorWithRed_green_blue_alpha(
+                red as f64 / 255.0,
+                green as f64 / 255.0,
+                blue as f64 / 255.0,
+                alpha as f64 / 255.0,
+            )));
+            size_to_parent(&plate, &stack.pager);
+            stack.pager.addSubview(&plate);
+            Some(plate)
+        }
+
         fn capture(stack: &mut NativeStack) {
             let Some(showing) = stack.tabs.ids.get(stack.tabs.at).cloned() else {
                 return;
@@ -672,7 +735,10 @@ mod platform {
                     }
                     None => match live {
                         Some(view) => (view, false),
-                        None => continue,
+                        None => match Self::plate(stack) {
+                            Some(plate) => (plate, true),
+                            None => continue,
+                        },
                     },
                 };
                 if snapshot && view.superview().is_none() {
@@ -985,7 +1051,7 @@ mod platform {
                 }
             });
             UIView::animateWithDuration_delay_options_animations_completion(
-                0.45,
+                0.22,
                 0.0,
                 UIViewAnimationOptions::CurveEaseOut,
                 &sliding,
@@ -1150,9 +1216,12 @@ mod platform {
                 None => Vec::new(),
             });
             for sheet in sheets {
-                sheet
-                    .navigation
-                    .dismissViewControllerAnimated_completion(false, None);
+                let navigation = sheet.navigation.clone();
+                let holding = RefCell::new(Some(sheet));
+                let dropped = block2::RcBlock::new(move || {
+                    holding.borrow_mut().take();
+                });
+                navigation.dismissViewControllerAnimated_completion(false, Some(&dropped));
             }
         }
 
