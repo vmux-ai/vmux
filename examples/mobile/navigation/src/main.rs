@@ -6,7 +6,7 @@ use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows};
-use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
+use vmux_mobile::{Router, Stack, Tabs, use_router};
 use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (10, 10, 10, 255);
@@ -58,11 +58,11 @@ fn App() -> Element {
     rsx! {
         Stack {
             Tabs {
-                Screen { page: &TAB_SCREEN }
-                Screen { page: &CARD_SCREEN }
-                Screen { page: &MODAL_SCREEN }
-                Screen { page: &SHEET_SCREEN }
-                Screen { page: &FULL_SCREEN }
+                TabScreen {}
+                CardScreen {}
+                ModalScreen {}
+                SheetScreen {}
+                FullScreen {}
             }
         }
     }

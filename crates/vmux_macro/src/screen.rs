@@ -93,8 +93,10 @@ impl Parse for Setting {
 }
 
 pub fn expand(args: Args, component: ItemFn) -> TokenStream {
-    let name = &component.sig.ident;
-    let visibility = &component.vis;
+    let name = component.sig.ident.clone();
+    let name = &name;
+    let visibility = component.vis.clone();
+    let visibility = &visibility;
     let spelled = name.to_string();
     let named = format_ident!("{}", screaming(&spelled));
     let url = match &args.url {
@@ -105,7 +107,11 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
         }
     };
 
-    let mut page = quote! { ::vmux_native::NativePage::pane(#url, #name) };
+    let drawn_by = match &args.route {
+        Some(_) => format_ident!("{}Body", name),
+        None => name.clone(),
+    };
+    let mut page = quote! { ::vmux_native::NativePage::pane(#url, #drawn_by) };
     if let Some(url) = &args.served_from {
         page = quote! { #page.served_from(#url) };
     }
@@ -142,6 +148,7 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
         segments: owner,
     };
     let drawn = format_ident!("{}_PAGE", named);
+    let body = format_ident!("{}Body", name);
     let presentation = match &args.presentation {
         Some(kind) => quote! { ::vmux_mobile::nav::Presentation::#kind },
         None => quote! { ::vmux_mobile::nav::Presentation::Card },
@@ -150,6 +157,9 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
         Some(sizes) => quote! { &#sizes },
         None => quote! { &[] },
     };
+    let mut drawing = component;
+    drawing.sig.ident = body.clone();
+    let page = quote! { #page };
     quote! {
         #visibility static #drawn: ::vmux_native::NativePage = #page;
 
@@ -161,7 +171,14 @@ pub fn expand(args: Args, component: ItemFn) -> TokenStream {
                 detents: #detents,
             };
 
-        #component
+        #[::dioxus::prelude::component]
+        #visibility fn #name() -> ::dioxus::prelude::Element {
+            ::dioxus::prelude::rsx! {
+                vmux_mobile::Screen { page: &#named }
+            }
+        }
+
+        #drawing
     }
 }
 
