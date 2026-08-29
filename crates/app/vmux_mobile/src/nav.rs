@@ -105,6 +105,14 @@ pub struct Declare<S: Route> {
     pub action: Option<&'static str>,
 }
 
+#[derive(PartialEq)]
+pub struct ScreenPage<N: ScreenName> {
+    pub page: &'static vmux_native::NativePage,
+    pub name: N,
+    pub presentation: Presentation,
+    pub detents: &'static [f64],
+}
+
 pub struct ScreenOptions {
     pub component: &'static vmux_native::NativePage,
     pub presentation: Presentation,

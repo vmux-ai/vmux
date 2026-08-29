@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::nav::{
-    Declare, Dismiss, GoBack, Nav, NavigationState, Present, Presentation, Push, Route, ScreenName,
+    Declare, Dismiss, GoBack, Nav, NavigationState, Present, Push, Route, ScreenName, ScreenPage,
     Screens, Seat, Select,
 };
 use crate::runtime::World;
@@ -162,19 +162,16 @@ pub fn Tabs(children: Element) -> Element {
 
 #[component]
 pub fn Screen<N: ScreenName>(
-    name: N,
-    component: &'static vmux_native::NativePage,
-    #[props(default = Presentation::Card)] presentation: Presentation,
-    #[props(default = &[])] detents: &'static [f64],
+    page: &'static ScreenPage<N>,
     #[props(default)] action: Option<&'static str>,
 ) -> Element {
     use_effect(move || {
         World::with(|world| {
             world.send(Declare::<N::Route> {
-                name,
-                component,
-                presentation,
-                detents,
+                name: page.name,
+                component: page.page,
+                presentation: page.presentation,
+                detents: page.detents,
                 action,
             })
         });
