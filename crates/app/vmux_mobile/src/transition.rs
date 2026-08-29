@@ -55,11 +55,11 @@ mod platform {
     use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
     use objc2_quartz_core::{CATransform3D, kCACornerCurveContinuous};
     use objc2_ui_kit::{
-        UIAction, UIAdaptivePresentationControllerDelegate, UIButton, UIButtonType, UIColor,
-        UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIGestureRecognizer,
-        UIGestureRecognizerDelegate, UIGestureRecognizerState, UIGlassContainerEffect,
-        UIGlassEffect, UIImage, UILayoutConstraintAxis, UIMenu, UIMenuElement,
-        UIMenuElementAttributes, UIModalPresentationStyle, UINavigationController,
+        NSTextAlignment, UIAction, UIAdaptivePresentationControllerDelegate, UIButton,
+        UIButtonType, UIColor, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
+        UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
+        UIGlassContainerEffect, UIGlassEffect, UIImage, UILabel, UILayoutConstraintAxis, UIMenu,
+        UIMenuElement, UIMenuElementAttributes, UIModalPresentationStyle, UINavigationController,
         UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
         UISheetPresentationController, UISheetPresentationControllerDelegate,
         UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
@@ -84,7 +84,8 @@ mod platform {
     const MARK_DIM: f64 = 0.25;
     const MARK_CLEARANCE: f64 = TAB_BAR_GAP + MARK_BAR_HEIGHT;
     const MARK_GLIDE: f64 = 0.28;
-    const MARK_MOST: usize = 9;
+    const MARK_MOST: usize = 8;
+    const MARK_TALLY: f64 = 11.0;
     const DIP: f64 = 0.06;
     const TAB_TRAIL: f64 = 0.5;
     const SHEET_FADE: f64 = 0.55;
@@ -257,9 +258,60 @@ mod platform {
         }
     }
 
+    enum Rung {
+        Mark(usize),
+        Gap(usize),
+    }
+
+    impl Rung {
+        fn over(count: usize, at: usize) -> Vec<Self> {
+            let mut rungs = Vec::new();
+            if count <= MARK_MOST {
+                for index in 0..count {
+                    rungs.push(Self::Mark(index));
+                }
+                return rungs;
+            }
+            let room = MARK_MOST - 2;
+            let mut start = at.saturating_sub(room / 2);
+            if start + room >= count {
+                start = count - room;
+            }
+            if start > 0 {
+                rungs.push(Self::Gap(start));
+            }
+            for index in start..start + room {
+                rungs.push(Self::Mark(index));
+            }
+            let after = count - (start + room);
+            if after > 0 {
+                rungs.push(Self::Gap(after));
+            }
+            rungs
+        }
+
+        fn slot(rungs: &[Self], wanted: usize) -> Option<usize> {
+            for (slot, rung) in rungs.iter().enumerate() {
+                if let Self::Mark(index) = rung
+                    && *index == wanted
+                {
+                    return Some(slot);
+                }
+            }
+            None
+        }
+
+        fn tab(rungs: &[Self], slot: usize) -> Option<usize> {
+            match rungs.get(slot)? {
+                Self::Mark(index) => Some(*index),
+                Self::Gap(_) => None,
+            }
+        }
+    }
+
     struct Indicator {
         capsule: Retained<UIVisualEffectView>,
-        lines: Retained<UIStackView>,
+        lines: Retained<UIView>,
         glow: Retained<UIView>,
     }
 
@@ -285,33 +337,26 @@ mod platform {
             );
             capsule.setHidden(true);
 
-            let lines = UIStackView::initWithFrame(
-                UIStackView::alloc(marker),
+            let lines = UIView::initWithFrame(
+                UIView::alloc(marker),
                 CGRect {
                     origin: CGPoint {
                         x: MARK_INSET,
-                        y: (MARK_BAR_HEIGHT - MARK_HEIGHT) / 2.0,
+                        y: 0.0,
                     },
                     size: CGSize {
                         width: width - TAB_BAR_EDGE * 2.0 - MARK_INSET * 2.0,
-                        height: MARK_HEIGHT,
+                        height: MARK_BAR_HEIGHT,
                     },
                 },
             );
-            lines.setAxis(UILayoutConstraintAxis::Horizontal);
-            lines.setDistribution(UIStackViewDistribution::FillEqually);
-            lines.setSpacing(MARK_GAP);
-            lines.setAutoresizingMask(
-                UIViewAutoresizing::FlexibleWidth
-                    | UIViewAutoresizing::FlexibleTopMargin
-                    | UIViewAutoresizing::FlexibleBottomMargin,
-            );
+            lines.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
             capsule.contentView().addSubview(&lines);
 
             let glow = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
             glow.layer().setCornerRadius(MARK_HEIGHT / 2.0);
             glow.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, MARK_LIT)));
-            capsule.contentView().addSubview(&glow);
+            lines.addSubview(&glow);
 
             let tap = unsafe {
                 UITapGestureRecognizer::initWithTarget_action(
@@ -333,60 +378,32 @@ mod platform {
             }
         }
 
-        fn window(count: usize, at: usize) -> usize {
-            if count <= MARK_MOST {
-                return 0;
-            }
-            let half = MARK_MOST / 2;
-            at.saturating_sub(half).min(count - MARK_MOST)
-        }
-
-        fn framed(count: usize, at: usize) -> (usize, usize) {
-            let start = Self::window(count, at);
-            (count.min(MARK_MOST), at.saturating_sub(start))
-        }
-
         fn show(&self, tabs: usize, index: usize) {
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let (count, at) = Self::framed(tabs, index);
+            let rungs = Rung::over(tabs, index);
             let wanted = tabs >= 2;
             if wanted && self.capsule.isHidden() {
                 self.capsule.setAlpha(0.0);
                 self.capsule.setHidden(false);
-                self.glow.setFrame(self.spot(count, at));
             }
-            let mut marks: Vec<Retained<UIView>> = self.lines.arrangedSubviews().iter().collect();
-            while marks.len() < count {
-                let mark = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
-                mark.layer().setCornerRadius(MARK_HEIGHT / 2.0);
-                mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, MARK_DIM)));
-                mark.setHidden(true);
-                mark.setAlpha(0.0);
-                self.lines.addArrangedSubview(&mark);
-                marks.push(mark);
+            self.fill(&rungs, marker);
+            let seat = match Rung::slot(&rungs, index) {
+                Some(slot) => self.spot(rungs.len(), slot),
+                None => self.glow.frame(),
+            };
+            if self.capsule.alpha() < 0.5 {
+                self.glow.setFrame(seat);
             }
 
             let (capsule, glow) = (self.capsule.clone(), self.glow.clone());
-            let (showing, seat) = (marks.clone(), self.spot(count, at));
             let dressing = RcBlock::new(move || {
                 capsule.setAlpha(if wanted { 1.0 } else { 0.0 });
                 glow.setFrame(seat);
-                for (index, mark) in showing.iter().enumerate() {
-                    let live = index < count;
-                    mark.setHidden(!live);
-                    mark.setAlpha(if live { 1.0 } else { 0.0 });
-                }
             });
-            let (capsule, lines) = (self.capsule.clone(), self.lines.clone());
-            let dressed = RcBlock::new(move |_| {
-                capsule.setHidden(!wanted);
-                for spent in marks.iter().skip(count) {
-                    lines.removeArrangedSubview(spent);
-                    spent.removeFromSuperview();
-                }
-            });
+            let capsule = self.capsule.clone();
+            let dressed = RcBlock::new(move |_| capsule.setHidden(!wanted));
             UIView::animateWithDuration_delay_options_animations_completion(
                 MARK_GLIDE,
                 0.0,
@@ -397,15 +414,63 @@ mod platform {
             );
         }
 
-        fn spot(&self, count: usize, index: usize) -> CGRect {
-            let across = self.capsule.bounds().size.width - MARK_INSET * 2.0;
-            if count == 0 || across <= 0.0 {
+        fn fill(&self, rungs: &[Rung], marker: MainThreadMarker) {
+            for spent in self.lines.subviews().iter() {
+                if std::ptr::eq(&*spent as *const UIView, &*self.glow as *const UIView) {
+                    continue;
+                }
+                spent.removeFromSuperview();
+            }
+            for (slot, rung) in rungs.iter().enumerate() {
+                let seat = self.spot(rungs.len(), slot);
+                match rung {
+                    Rung::Mark(_) => {
+                        let mark = UIView::initWithFrame(UIView::alloc(marker), seat);
+                        mark.layer().setCornerRadius(MARK_HEIGHT / 2.0);
+                        mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(
+                            1.0, MARK_DIM,
+                        )));
+                        self.lines.addSubview(&mark);
+                    }
+                    Rung::Gap(hidden) => {
+                        let tally = UILabel::initWithFrame(
+                            UILabel::alloc(marker),
+                            CGRect {
+                                origin: CGPoint {
+                                    x: seat.origin.x,
+                                    y: 0.0,
+                                },
+                                size: CGSize {
+                                    width: seat.size.width,
+                                    height: MARK_BAR_HEIGHT,
+                                },
+                            },
+                        );
+                        tally.setText(Some(&NSString::from_str(&format!("+{hidden}"))));
+                        tally.setTextAlignment(NSTextAlignment(1));
+                        unsafe { tally.setFont(Some(&UIFont::systemFontOfSize(MARK_TALLY))) };
+                        unsafe {
+                            tally.setTextColor(Some(&UIColor::colorWithWhite_alpha(
+                                1.0,
+                                MARK_DIM * 2.0,
+                            )))
+                        };
+                        self.lines.addSubview(&tally);
+                    }
+                }
+            }
+            self.lines.bringSubviewToFront(&self.glow);
+        }
+
+        fn spot(&self, slots: usize, slot: usize) -> CGRect {
+            let across = self.lines.bounds().size.width;
+            if slots == 0 || across <= 0.0 {
                 return CGRect::default();
             }
-            let width = (across - MARK_GAP * (count - 1) as f64) / count as f64;
+            let width = (across - MARK_GAP * (slots - 1) as f64) / slots as f64;
             CGRect {
                 origin: CGPoint {
-                    x: MARK_INSET + index as f64 * (width + MARK_GAP),
+                    x: slot as f64 * (width + MARK_GAP),
                     y: (MARK_BAR_HEIGHT - MARK_HEIGHT) / 2.0,
                 },
                 size: CGSize {
@@ -417,16 +482,19 @@ mod platform {
 
         fn track(&self, tabs: usize, from: usize, to: usize, progress: f64) {
             let gone = progress.clamp(0.0, 1.0);
-            let (count, here) = Self::framed(tabs, from);
-            let (_, there) = Self::framed(tabs, to);
-            let (here, there) = (self.spot(count, here), self.spot(count, there));
+            let rungs = Rung::over(tabs, from);
+            let (Some(here), Some(there)) = (Rung::slot(&rungs, from), Rung::slot(&rungs, to))
+            else {
+                return;
+            };
+            let (here, there) = (self.spot(rungs.len(), here), self.spot(rungs.len(), there));
             let mut seat = here;
             seat.origin.x = here.origin.x + (there.origin.x - here.origin.x) * gone;
             self.glow.setFrame(seat);
         }
 
-        fn reached(&self, sender: &UITapGestureRecognizer, count: usize) -> Option<usize> {
-            if count == 0 {
+        fn reached(&self, sender: &UITapGestureRecognizer, slots: usize) -> Option<usize> {
+            if slots == 0 {
                 return None;
             }
             let across = self.lines.bounds().size.width;
@@ -434,8 +502,8 @@ mod platform {
                 return None;
             }
             let x = sender.locationInView(Some(&self.lines)).x;
-            let step = across / count as f64;
-            Some(((x / step).floor().max(0.0) as usize).min(count - 1))
+            let step = across / slots as f64;
+            Some(((x / step).floor().max(0.0) as usize).min(slots - 1))
         }
 
         fn front(&self) {
@@ -2665,11 +2733,13 @@ mod platform {
                     };
                     let sheets = stack.sheets.len();
                     if sheets > 1 {
-                        let (shown, _) = Indicator::framed(sheets, sheets - 1);
-                        let Some(hit) = stack.indicator.reached(sender, shown) else {
+                        let rungs = Rung::over(sheets, sheets - 1);
+                        let Some(hit) = stack.indicator.reached(sender, rungs.len()) else {
                             return;
                         };
-                        let wanted = Indicator::window(sheets, sheets - 1) + hit;
+                        let Some(wanted) = Rung::tab(&rungs, hit) else {
+                            return;
+                        };
                         TAPPED.with_borrow_mut(|queued| {
                             for _ in 0..sheets - 1 - wanted.min(sheets - 1) {
                                 queued.push(super::ROTATE);
@@ -2678,11 +2748,13 @@ mod platform {
                         return;
                     }
                     let tabs = stack.tabs.ids.len();
-                    let (shown, _) = Indicator::framed(tabs, stack.tabs.at);
-                    let Some(hit) = stack.indicator.reached(sender, shown) else {
+                    let rungs = Rung::over(tabs, stack.tabs.at);
+                    let Some(hit) = stack.indicator.reached(sender, rungs.len()) else {
                         return;
                     };
-                    let wanted = Indicator::window(tabs, stack.tabs.at) + hit;
+                    let Some(wanted) = Rung::tab(&rungs, hit) else {
+                        return;
+                    };
                     let Some(id) = stack.tabs.ids.get(wanted) else {
                         return;
                     };
