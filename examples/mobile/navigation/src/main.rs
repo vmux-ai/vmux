@@ -5,9 +5,7 @@ use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{
-    Nav, NavPlugin, NavigationState, Presentation, Report, Route, Selected, Tab,
-};
+use vmux_mobile::nav::{Depth, NavPlugin, Presentation, Report, Route, Shows};
 use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -58,22 +56,22 @@ fn setup(mut reported: MessageWriter<Report<Page>>) {
 #[component]
 fn App() -> Element {
     rsx! {
-        Stack::<Page> {
+        Stack {
             Tabs {
-                Screen::<Page> { name: PageName::Tab, component: &TAB_SCREEN }
-                Screen::<Page> { name: PageName::Card, component: &CARD_SCREEN }
-                Screen::<Page> {
+                Screen { name: PageName::Tab, component: &TAB_SCREEN }
+                Screen { name: PageName::Card, component: &CARD_SCREEN }
+                Screen {
                     name: PageName::Modal,
                     component: &MODAL_SCREEN,
                     presentation: Presentation::Modal,
                 }
-                Screen::<Page> {
+                Screen {
                     name: PageName::FormSheet,
                     component: &SHEET_SCREEN,
                     presentation: Presentation::FormSheet,
                     detents: &[0.75, 1.0],
                 }
-                Screen::<Page> {
+                Screen {
                     name: PageName::FullScreenModal,
                     component: &FULL_SCREEN,
                     presentation: Presentation::FullScreenModal,
@@ -105,40 +103,28 @@ enum Step {
     Lone,
 }
 
-fn chart(world: &mut World) {
-    let seen = Nav::state::<Page>(world);
-    let panels = Panel::over(&seen);
-    for (entity, panel) in Panel::levels(world).into_iter().zip(panels) {
-        if world.get::<Panel>(entity) != Some(&panel) {
-            world.entity_mut(entity).insert(panel);
-        }
+fn chart(levels: Query<(Entity, &Shows<Page>, &Depth)>, mut commands: Commands) {
+    let mut trail: Vec<(usize, Entity, Page)> = Vec::new();
+    for (entity, shows, depth) in levels.iter() {
+        trail.push((depth.0, entity, shows.0.clone()));
+    }
+    trail.sort_by_key(|(depth, _, _)| *depth);
+
+    let mut routes = Vec::new();
+    for (_, _, route) in &trail {
+        routes.push(route.clone());
+    }
+    for ((_, entity, _), panel) in trail.iter().zip(Panel::over(&routes)) {
+        commands.entity(*entity).insert(panel);
     }
 }
 
 impl Panel {
-    fn levels(world: &mut World) -> Vec<Entity> {
-        let mut selected = world.query_filtered::<Entity, (With<Tab>, With<Selected>)>();
-        let Some(tab) = selected.iter(world).next() else {
-            return Vec::new();
-        };
-        let mut chain = vec![tab];
-        let mut children = world.query::<&Children>();
-        let mut at = tab;
-        while let Ok(kids) = children.get(world, at) {
-            let Some(next) = kids.last().copied() else {
-                break;
-            };
-            chain.push(next);
-            at = next;
-        }
-        chain
-    }
-
-    fn over(seen: &NavigationState<Page>) -> Vec<Panel> {
+    fn over(trail: &[Page]) -> Vec<Panel> {
         let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
         let mut crumbs = Vec::new();
         let mut panels = Vec::new();
-        for (at, route) in seen.trail.iter().enumerate() {
+        for (at, route) in trail.iter().enumerate() {
             let (hue, kind) = match route {
                 Page::Tab(number) => ((number * 37 + 185) % 360, "tab root"),
                 Page::Card(_) => (285, "card"),
@@ -159,7 +145,7 @@ impl Panel {
                 kind,
                 title: route.title(),
                 trail: String::new(),
-                rungs: Self::rungs(seen.depth, at),
+                rungs: Self::rungs(trail.len() - 1, at),
                 card: format!("Card {}", cards + 1),
                 modal: format!("Modal {}", modals + 1),
                 sheet: format!("Sheet {}", sheets + 1),

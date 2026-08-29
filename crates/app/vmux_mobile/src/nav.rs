@@ -5,8 +5,12 @@ pub use crate::transition::Presentation;
 use crate::transition::{Level, NativeStack, TabItem};
 pub use vmux_macro::Route;
 
+pub trait ScreenName: Copy + PartialEq + Send + Sync + 'static {
+    type Route: Route<Name = Self>;
+}
+
 pub trait Route: Clone + PartialEq + Send + Sync + 'static {
-    type Name: Copy + PartialEq + Send + Sync + 'static;
+    type Name: ScreenName<Route = Self>;
 
     fn name(&self) -> Self::Name;
 
@@ -34,6 +38,9 @@ pub struct Selected;
 
 #[derive(Component)]
 pub struct Presented;
+
+#[derive(Component)]
+pub struct Depth(pub usize);
 
 #[derive(Component)]
 pub struct Shows<S: Route>(pub S);
@@ -186,6 +193,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::open_blank::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
+                    Nav::measure,
                     Nav::paint::<S>,
                 )
                     .chain(),
@@ -314,6 +322,34 @@ impl Nav {
         }
         if crate::transition::take_overview() {
             overview.write(Overview);
+        }
+    }
+
+    fn measure(
+        selected: Query<Entity, (With<Tab>, With<Selected>)>,
+        children: Query<&Children>,
+        measured: Query<Entity, With<Depth>>,
+        mut commands: Commands,
+    ) {
+        let mut chain = Vec::new();
+        if let Some(tab) = selected.iter().next() {
+            chain.push(tab);
+            let mut at = tab;
+            while let Ok(kids) = children.get(at) {
+                let Some(next) = kids.last().copied() else {
+                    break;
+                };
+                chain.push(next);
+                at = next;
+            }
+        }
+        for entity in measured.iter() {
+            if !chain.contains(&entity) {
+                commands.entity(entity).remove::<Depth>();
+            }
+        }
+        for (at, entity) in chain.into_iter().enumerate() {
+            commands.entity(entity).insert(Depth(at));
         }
     }
 
@@ -709,6 +745,10 @@ mod tests {
         Home,
         Note(&'static str),
         Unsaved,
+    }
+
+    impl ScreenName for PageName {
+        type Route = Page;
     }
 
     impl Route for Page {
