@@ -48,6 +48,10 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             #(#cases,)*
         }
 
+        impl ::vmux_mobile::nav::ScreenName for #named {
+            type Route = #route;
+        }
+
         impl ::vmux_mobile::nav::Route for #route {
             type Name = #named;
 

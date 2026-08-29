@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::nav::{
-    Declare, Dismiss, GoBack, Nav, NavigationState, Present, Presentation, Push, Route, Screens,
-    Seat, Select,
+    Declare, Dismiss, GoBack, Nav, NavigationState, Present, Presentation, Push, Route, ScreenName,
+    Screens, Seat, Select,
 };
 use crate::runtime::World;
 
@@ -147,11 +147,7 @@ pub fn use_route<R: Route>() -> Option<R> {
 }
 
 #[component]
-pub fn Stack<R: Route>(
-    #[props(default)] route: std::marker::PhantomData<R>,
-    children: Element,
-) -> Element {
-    let _ = route;
+pub fn Stack(children: Element) -> Element {
     rsx! {
         {children}
     }
@@ -165,8 +161,8 @@ pub fn Tabs(children: Element) -> Element {
 }
 
 #[component]
-pub fn Screen<R: Route>(
-    name: R::Name,
+pub fn Screen<N: ScreenName>(
+    name: N,
     component: &'static vmux_native::NativePage,
     #[props(default = Presentation::Card)] presentation: Presentation,
     #[props(default = &[])] detents: &'static [f64],
@@ -174,7 +170,7 @@ pub fn Screen<R: Route>(
 ) -> Element {
     use_effect(move || {
         World::with(|world| {
-            world.send(Declare::<R> {
+            world.send(Declare::<N::Route> {
                 name,
                 component,
                 presentation,
