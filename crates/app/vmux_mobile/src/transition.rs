@@ -395,7 +395,7 @@ mod platform {
 
         fn pane(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
             let effect = UIGlassEffect::new(marker);
-            effect.setInteractive(true);
+            effect.setInteractive(false);
             let pane = UIVisualEffectView::initWithEffect(
                 UIVisualEffectView::alloc(marker),
                 Some(effect.as_super()),
