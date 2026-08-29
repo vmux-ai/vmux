@@ -1370,11 +1370,16 @@ mod platform {
         }
 
         pub fn dismiss() {
-            let departing = STACK.with_borrow_mut(|stack| stack.as_mut()?.sheets.pop());
-            let Some(departing) = departing else {
+            let leaving = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let departing = stack.sheets.pop()?;
+                let presenter = Self::topmost(stack).map(|column| column.navigation.clone());
+                Some((departing, presenter))
+            });
+            let Some((departing, presenter)) = leaving else {
                 return;
             };
-            if let Some(presenter) = departing.navigation.presentingViewController() {
+            if let Some(presenter) = presenter {
                 Parallax::recede(&presenter, true);
             }
             departing
