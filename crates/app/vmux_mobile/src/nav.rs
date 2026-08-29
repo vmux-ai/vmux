@@ -9,12 +9,19 @@ pub trait ScreenName: Copy + PartialEq + Send + Sync + 'static {
     type Route: Route<Name = Self>;
 }
 
-pub trait Route: Clone + PartialEq + Send + Sync + 'static {
+pub trait Route: Clone + PartialEq + std::hash::Hash + Send + Sync + 'static {
     type Name: ScreenName<Route = Self>;
 
     fn name(&self) -> Self::Name;
 
     fn title(&self) -> String;
+
+    fn key(&self) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 
     fn blank(_at: usize) -> Option<Self> {
         None
@@ -603,12 +610,12 @@ impl Nav {
             return Vec::new();
         };
         let mut levels = Vec::new();
-        for (entity, screen) in shown {
+        for (_, screen) in shown {
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             levels.push(Level {
-                key: entity.to_bits(),
+                key: screen.key(),
                 page: options.component,
                 title: screen.title(),
                 presentation: options.presentation,
@@ -663,12 +670,12 @@ impl Nav {
         };
         for Push(screen) in pushes.read() {
             let onto = Self::top(tab, &children);
-            let spawned = commands.spawn((Shows(screen.clone()), ChildOf(onto))).id();
+            commands.spawn((Shows(screen.clone()), ChildOf(onto)));
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             NativeStack::push(Level {
-                key: spawned.to_bits(),
+                key: screen.key(),
                 page: options.component,
                 title: screen.title(),
                 presentation: options.presentation,
@@ -678,14 +685,12 @@ impl Nav {
         }
         for Present(screen) in presents.read() {
             let onto = Self::top(tab, &children);
-            let spawned = commands
-                .spawn((Shows(screen.clone()), Presented, ChildOf(onto)))
-                .id();
+            commands.spawn((Shows(screen.clone()), Presented, ChildOf(onto)));
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
             NativeStack::present(Level {
-                key: spawned.to_bits(),
+                key: screen.key(),
                 page: options.component,
                 title: screen.title(),
                 presentation: options.presentation,
@@ -822,7 +827,7 @@ mod tests {
         Unsaved,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Hash)]
     enum Page {
         Home,
         Note(&'static str),

@@ -87,6 +87,7 @@ mod platform {
     const MARK_MOST: usize = 8;
     const MARK_TALLY: f64 = 11.0;
     const MARK_EDGE: usize = 1;
+    const KEPT_MOST: usize = 6;
     const DIP: f64 = 0.06;
     const TAB_TRAIL: f64 = 0.5;
     const SHEET_FADE: f64 = 0.55;
@@ -1843,11 +1844,37 @@ mod platform {
             if let Some(presenter) = presenter {
                 Parallax::recede(&presenter, true);
             }
-            departing
-                .navigation
-                .dismissViewControllerAnimated_completion(true, None);
+            let navigation = departing.navigation.clone();
+            let spent = RefCell::new(Some(departing));
+            let parked = RcBlock::new(move || {
+                let Some(column) = spent.borrow_mut().take() else {
+                    return;
+                };
+                STACK.with_borrow_mut(|stack| {
+                    let Some(stack) = stack.as_mut() else {
+                        return;
+                    };
+                    NativeStack::park(stack, column);
+                });
+            });
+            navigation.dismissViewControllerAnimated_completion(true, Some(&parked));
             Self::chrome();
             Self::front();
+        }
+
+        fn park(stack: &mut NativeStack, column: Column) {
+            if let Some(view) = column.navigation.view() {
+                view.removeFromSuperview();
+            }
+            column.navigation.willMoveToParentViewController(None);
+            column.navigation.removeFromParentViewController();
+            while stack.kept.len() >= KEPT_MOST {
+                let Some(oldest) = stack.kept.keys().next().copied() else {
+                    break;
+                };
+                stack.kept.remove(&oldest);
+            }
+            stack.kept.insert(column.key, column);
         }
 
         fn shed(then: impl FnOnce() + 'static) {
@@ -2896,6 +2923,7 @@ mod platform {
                     let stack = stack.as_mut()?;
                     let departing = stack.sheets.pop()?;
                     DISMISSED.set(DISMISSED.get() + departing.levels.len());
+                    NativeStack::park(stack, departing);
                     Some(NativeStack::topmost(stack)?.navigation.clone())
                 });
                 let Some(presenter) = presenter else {

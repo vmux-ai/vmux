@@ -241,7 +241,7 @@ fn use_shown() -> (Router<Page>, Shown) {
     (router, shown)
 }
 
-#[derive(Clone, PartialEq, Route)]
+#[derive(Clone, PartialEq, Hash, Route)]
 enum Page {
     #[blank]
     #[route("Tab {0}")]
