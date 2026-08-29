@@ -2177,15 +2177,17 @@ mod platform {
         unsafe impl UIAdaptivePresentationControllerDelegate for NavDelegate {
             #[unsafe(method(presentationControllerDidDismiss:))]
             fn did_dismiss(&self, _controller: &UIPresentationController) {
-                STACK.with_borrow_mut(|stack| {
-                    let Some(stack) = stack.as_mut() else {
-                        return;
-                    };
-                    let Some(departing) = stack.sheets.pop() else {
-                        return;
-                    };
+                let presenter = STACK.with_borrow_mut(|stack| {
+                    let stack = stack.as_mut()?;
+                    let departing = stack.sheets.pop()?;
                     DISMISSED.set(DISMISSED.get() + departing.levels.len());
+                    Some(NativeStack::topmost(stack)?.navigation.clone())
                 });
+                let Some(presenter) = presenter else {
+                    return;
+                };
+                Parallax::recede(&presenter, true);
+                NativeStack::label();
             }
         }
 
