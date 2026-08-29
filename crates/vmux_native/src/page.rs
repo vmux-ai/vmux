@@ -1,6 +1,7 @@
 pub struct NativePage {
     pub(crate) url: &'static str,
     pub(crate) document_url: Option<&'static str>,
+    #[cfg_attr(not(ui), allow(dead_code))]
     pub(crate) component: crate::PageComponent,
     pub(crate) root_id: &'static str,
     pub(crate) root_class: &'static str,
