@@ -36,7 +36,7 @@ fn main() {
             world
                 .add_plugins(NavPlugin::<Page>::default())
                 .add_systems(Startup, setup)
-                .add_systems(Update, chart);
+                .add_systems(Update, (sketch, describe, tally, trace).chain());
         }))
         .run();
 }
@@ -90,60 +90,91 @@ enum Step {
     Lone,
 }
 
-fn chart(levels: Query<(Entity, &Shows<Page>, &Depth)>, mut commands: Commands) {
-    let mut trail: Vec<(usize, Entity, Page)> = Vec::new();
-    for (entity, shows, depth) in levels.iter() {
-        trail.push((depth.0, entity, shows.0.clone()));
-    }
-    trail.sort_by_key(|(depth, _, _)| *depth);
+type Unpainted = (With<Depth>, With<Shows<Page>>, Without<Panel>);
 
-    let mut routes = Vec::new();
-    for (_, _, route) in &trail {
-        routes.push(route.clone());
+fn sketch(fresh: Query<Entity, Unpainted>, mut commands: Commands) {
+    for entity in fresh.iter() {
+        commands.entity(entity).insert(Panel::default());
     }
-    for ((_, entity, _), panel) in trail.iter().zip(Panel::over(&routes)) {
-        commands.entity(*entity).insert(panel);
+}
+
+fn describe(mut levels: Query<(&Shows<Page>, &mut Panel)>) {
+    for (shows, mut panel) in levels.iter_mut() {
+        let (hue, kind) = match &shows.0 {
+            Page::Tab(number) => ((number * 37 + 185) % 360, "tab root"),
+            Page::Card(_) => (285, "card"),
+            Page::Modal(_) => (30, "modal"),
+            Page::FormSheet(_) => (175, "form sheet"),
+            Page::FullScreenModal(_) => (255, "full screen modal"),
+        };
+        let title = shows.0.title();
+        if (panel.hue, panel.kind, &panel.title) != (hue, kind, &title) {
+            panel.hue = hue;
+            panel.kind = kind;
+            panel.title = title;
+        }
+    }
+}
+
+fn tally(levels: Query<(Entity, &Depth, &Shows<Page>)>, mut panels: Query<&mut Panel>) {
+    let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
+    for (entity, route) in Panel::ordered(&levels) {
+        match route {
+            Page::Card(_) => cards += 1,
+            Page::Modal(_) => modals += 1,
+            Page::FormSheet(_) => sheets += 1,
+            Page::FullScreenModal(_) => fulls += 1,
+            Page::Tab(_) => {}
+        }
+        let Ok(mut panel) = panels.get_mut(entity) else {
+            continue;
+        };
+        let ahead = (
+            format!("Card {}", cards + 1),
+            format!("Modal {}", modals + 1),
+            format!("Sheet {}", sheets + 1),
+            format!("Full {}", fulls + 1),
+        );
+        if (&panel.card, &panel.modal, &panel.sheet, &panel.full)
+            != (&ahead.0, &ahead.1, &ahead.2, &ahead.3)
+        {
+            (panel.card, panel.modal, panel.sheet, panel.full) = ahead;
+        }
+    }
+}
+
+fn trace(levels: Query<(Entity, &Depth, &Shows<Page>)>, mut panels: Query<&mut Panel>) {
+    let ordered = Panel::ordered(&levels);
+    let mut crumbs = Vec::new();
+    for (_, route) in &ordered {
+        crumbs.push(route.title());
+    }
+    let trail = Panel::elide(crumbs);
+    let deepest = ordered.len().saturating_sub(1);
+    for (at, (entity, _)) in ordered.into_iter().enumerate() {
+        let Ok(mut panel) = panels.get_mut(entity) else {
+            continue;
+        };
+        let rungs = Panel::rungs(deepest, at);
+        if (&panel.trail, &panel.rungs) != (&trail, &rungs) {
+            panel.trail = trail.clone();
+            panel.rungs = rungs;
+        }
     }
 }
 
 impl Panel {
-    fn over(trail: &[Page]) -> Vec<Panel> {
-        let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
-        let mut crumbs = Vec::new();
-        let mut panels = Vec::new();
-        for (at, route) in trail.iter().enumerate() {
-            let (hue, kind) = match route {
-                Page::Tab(number) => ((number * 37 + 185) % 360, "tab root"),
-                Page::Card(_) => (285, "card"),
-                Page::Modal(_) => (30, "modal"),
-                Page::FormSheet(_) => (175, "form sheet"),
-                Page::FullScreenModal(_) => (255, "full screen modal"),
-            };
-            match route {
-                Page::Card(_) => cards += 1,
-                Page::Modal(_) => modals += 1,
-                Page::FormSheet(_) => sheets += 1,
-                Page::FullScreenModal(_) => fulls += 1,
-                Page::Tab(_) => {}
-            }
-            crumbs.push(route.title());
-            panels.push(Panel {
-                hue,
-                kind,
-                title: route.title(),
-                trail: String::new(),
-                rungs: Self::rungs(trail.len() - 1, at),
-                card: format!("Card {}", cards + 1),
-                modal: format!("Modal {}", modals + 1),
-                sheet: format!("Sheet {}", sheets + 1),
-                full: format!("Full {}", fulls + 1),
-            });
+    fn ordered(levels: &Query<(Entity, &Depth, &Shows<Page>)>) -> Vec<(Entity, Page)> {
+        let mut trail = Vec::new();
+        for (entity, depth, shows) in levels.iter() {
+            trail.push((depth.0, entity, shows.0.clone()));
         }
-        let trail = Self::elide(crumbs);
-        for panel in &mut panels {
-            panel.trail = trail.clone();
+        trail.sort_by_key(|(depth, _, _)| *depth);
+        let mut ordered = Vec::new();
+        for (_, entity, route) in trail {
+            ordered.push((entity, route));
         }
-        panels
+        ordered
     }
 
     fn elide(mut crumbs: Vec<String>) -> String {
