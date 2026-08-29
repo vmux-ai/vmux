@@ -947,6 +947,9 @@ mod platform {
         pub fn seat(tab: String, levels: Vec<Level>) {
             let departing = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?));
             let vacated = STACK.with_borrow(|stack| stack.as_ref()?.seated.clone());
+            if let Some(departing) = departing.as_ref() {
+                departing.haunt(vacated.clone());
+            }
             let (pushed, presented) = Self::split(levels);
             Self::raise(&tab, pushed);
             let plan = STACK.with_borrow_mut(|stack| {
@@ -990,7 +993,7 @@ mod platform {
                 return;
             }
             let Some((leaving, arriving, entering)) = plan else {
-                Self::shed(vacated, move || Self::present_all(presented, Entry::Fresh));
+                Self::shed(move || Self::present_all(presented, Entry::Fresh));
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
@@ -1006,10 +1009,10 @@ mod platform {
             });
             Drag::glide(leaving, arriving, 0.0, entering, -entering, done, marker);
             let Some(departing) = departing else {
-                Self::shed(vacated, move || Self::present_all(presented, Entry::Rising));
+                Self::shed(move || Self::present_all(presented, Entry::Rising));
                 return;
             };
-            departing.depart(marker, vacated, move || {
+            departing.depart(marker, move || {
                 NativeStack::present_all(presented, Entry::Rising);
             });
         }
@@ -1305,7 +1308,7 @@ mod platform {
             if let Some(view) = column.navigation.view() {
                 view.setTransform(Drag::sideways(0.0));
                 view.setHidden(false);
-                view.setAlpha(if entry.sinks() { 0.0 } else { 1.0 });
+                view.setAlpha(if entry == Entry::Fresh { 1.0 } else { 0.0 });
             }
             let pending = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
@@ -1374,17 +1377,7 @@ mod platform {
             Self::front();
         }
 
-        fn shed(owner: Option<String>, then: impl FnOnce() + 'static) {
-            let haunted = STACK.with_borrow_mut(|stack| {
-                let stack = stack.as_mut()?;
-                let owner = owner?;
-                let live = Parallax::of(stack)?;
-                let ghosts = live.ghosts()?;
-                stack.ghosts.insert(owner, ghosts)
-            });
-            if let Some(stale) = haunted {
-                stale.discard();
-            }
+        fn shed(then: impl FnOnce() + 'static) {
             let sheets = STACK.with_borrow_mut(|stack| match stack.as_mut() {
                 Some(stack) => std::mem::take(&mut stack.sheets),
                 None => Vec::new(),
@@ -1612,6 +1605,13 @@ mod platform {
                 view.setTransform(Self::sideways(entering));
                 view.setHidden(false);
                 stack.pager.bringSubviewToFront(&view);
+                if let Some(sheet) = sheet.as_ref()
+                    && let Some(seated) = stack.seated.clone()
+                    && let Some(ghosts) = sheet.ghosts()
+                    && let Some(stale) = stack.ghosts.insert(seated, ghosts)
+                {
+                    stale.discard();
+                }
                 let parked = stack
                     .pending
                     .get(&to)
@@ -1695,10 +1695,9 @@ mod platform {
                 stack.arriving = drag.rising.clone();
                 stack.pending.remove(&to)
             });
-            let owner = STACK.with_borrow(|stack| stack.as_ref()?.seated.clone());
             let standing = STACK
                 .with_borrow(|stack| stack.as_ref().is_some_and(|stack| stack.arriving.is_some()));
-            NativeStack::shed(owner, move || {
+            NativeStack::shed(move || {
                 let Some(arriving) = arriving else {
                     Parallax::unghost();
                     return;
@@ -1865,6 +1864,19 @@ mod platform {
             })
         }
 
+        fn haunt(&self, owner: Option<String>) {
+            let Some(owner) = owner else {
+                return;
+            };
+            let Some(ghosts) = self.ghosts() else {
+                return;
+            };
+            let stale = STACK.with_borrow_mut(|stack| stack.as_mut()?.ghosts.insert(owner, ghosts));
+            if let Some(stale) = stale {
+                stale.discard();
+            }
+        }
+
         fn show(&self) {
             for view in &self.views {
                 if let Some(parent) = view.superview() {
@@ -1891,6 +1903,7 @@ mod platform {
             let Some(spent) = spent else {
                 return;
             };
+            Self::opaque();
             spent.discard();
         }
 
@@ -1974,20 +1987,15 @@ mod platform {
             });
         }
 
-        fn depart(
-            &self,
-            marker: MainThreadMarker,
-            owner: Option<String>,
-            then: impl FnOnce() + 'static,
-        ) {
+        fn depart(&self, marker: MainThreadMarker, then: impl FnOnce() + 'static) {
             let falling = self.clone();
             let motion = RcBlock::new(move || falling.follow(1.0));
-            let leaving = RefCell::new(Some((owner, then)));
+            let leaving = RefCell::new(Some(then));
             let done = RcBlock::new(move |_| {
-                let Some((owner, then)) = leaving.borrow_mut().take() else {
+                let Some(then) = leaving.borrow_mut().take() else {
                     return;
                 };
-                NativeStack::shed(owner, then);
+                NativeStack::shed(then);
             });
             UIView::animateWithDuration_delay_options_animations_completion(
                 0.34,
