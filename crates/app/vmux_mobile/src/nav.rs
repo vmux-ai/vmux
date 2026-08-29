@@ -79,9 +79,6 @@ pub struct OpenBlank<S: Route>(pub S);
 pub struct Close(pub String);
 
 #[derive(Message)]
-pub struct Overview;
-
-#[derive(Message)]
 pub struct Push<S: Route>(pub S);
 
 #[derive(Message)]
@@ -188,7 +185,6 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
             .add_message::<Close>()
-            .add_message::<Overview>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
             .add_message::<GoBack>()
@@ -314,7 +310,6 @@ impl Nav {
         mut picked: MessageWriter<Select>,
         mut closed: MessageWriter<Dismiss>,
         mut closing: MessageWriter<Close>,
-        mut overview: MessageWriter<Overview>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -331,9 +326,6 @@ impl Nav {
         }
         if let Some(id) = crate::transition::take_closing() {
             closing.write(Close(id));
-        }
-        if crate::transition::take_overview() {
-            overview.write(Overview);
         }
     }
 
