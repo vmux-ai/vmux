@@ -259,6 +259,7 @@ mod platform {
     struct Indicator {
         capsule: Retained<UIVisualEffectView>,
         lines: Retained<UIStackView>,
+        glow: Retained<UIView>,
     }
 
     impl Indicator {
@@ -306,6 +307,11 @@ mod platform {
             );
             capsule.contentView().addSubview(&lines);
 
+            let glow = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
+            glow.layer().setCornerRadius(MARK_HEIGHT / 2.0);
+            glow.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, MARK_LIT)));
+            capsule.contentView().addSubview(&glow);
+
             let tap = unsafe {
                 UITapGestureRecognizer::initWithTarget_action(
                     UITapGestureRecognizer::alloc(marker),
@@ -319,7 +325,11 @@ mod platform {
                 Some(window) => window.addSubview(&capsule),
                 None => root_view.addSubview(&capsule),
             }
-            Self { capsule, lines }
+            Self {
+                capsule,
+                lines,
+                glow,
+            }
         }
 
         fn show(&self, count: usize, at: usize) {
@@ -330,6 +340,7 @@ mod platform {
             if wanted && self.capsule.isHidden() {
                 self.capsule.setAlpha(0.0);
                 self.capsule.setHidden(false);
+                self.glow.setFrame(self.spot(count, at));
             }
             let mut marks: Vec<Retained<UIView>> = self.lines.arrangedSubviews().iter().collect();
             while marks.len() < count {
@@ -342,15 +353,15 @@ mod platform {
                 marks.push(mark);
             }
 
-            let (capsule, showing) = (self.capsule.clone(), marks.clone());
+            let (capsule, glow) = (self.capsule.clone(), self.glow.clone());
+            let (showing, seat) = (marks.clone(), self.spot(count, at));
             let dressing = RcBlock::new(move || {
                 capsule.setAlpha(if wanted { 1.0 } else { 0.0 });
+                glow.setFrame(seat);
                 for (index, mark) in showing.iter().enumerate() {
                     let live = index < count;
                     mark.setHidden(!live);
                     mark.setAlpha(if live { 1.0 } else { 0.0 });
-                    let lit = if index == at { MARK_LIT } else { MARK_DIM };
-                    mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, lit)));
                 }
             });
             let (capsule, lines) = (self.capsule.clone(), self.lines.clone());
@@ -371,18 +382,30 @@ mod platform {
             );
         }
 
-        fn track(&self, from: usize, to: usize, progress: f64) {
-            let gone = progress.clamp(0.0, 1.0);
-            for (index, mark) in self.lines.arrangedSubviews().iter().enumerate() {
-                let lit = if index == from {
-                    MARK_LIT + (MARK_DIM - MARK_LIT) * gone
-                } else if index == to {
-                    MARK_DIM + (MARK_LIT - MARK_DIM) * gone
-                } else {
-                    MARK_DIM
-                };
-                mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, lit)));
+        fn spot(&self, count: usize, index: usize) -> CGRect {
+            let across = self.capsule.bounds().size.width - MARK_INSET * 2.0;
+            if count == 0 || across <= 0.0 {
+                return CGRect::default();
             }
+            let width = (across - MARK_GAP * (count - 1) as f64) / count as f64;
+            CGRect {
+                origin: CGPoint {
+                    x: MARK_INSET + index as f64 * (width + MARK_GAP),
+                    y: (MARK_BAR_HEIGHT - MARK_HEIGHT) / 2.0,
+                },
+                size: CGSize {
+                    width,
+                    height: MARK_HEIGHT,
+                },
+            }
+        }
+
+        fn track(&self, count: usize, from: usize, to: usize, progress: f64) {
+            let gone = progress.clamp(0.0, 1.0);
+            let (here, there) = (self.spot(count, from), self.spot(count, to));
+            let mut seat = here;
+            seat.origin.x = here.origin.x + (there.origin.x - here.origin.x) * gone;
+            self.glow.setFrame(seat);
         }
 
         fn reached(&self, sender: &UITapGestureRecognizer, count: usize) -> Option<usize> {
@@ -1977,9 +2000,12 @@ mod platform {
                     }
                 }
                 if let Some(landing) = landing {
-                    stack
-                        .indicator
-                        .track(stack.tabs.at, landing, travelled.abs() / drag.across);
+                    stack.indicator.track(
+                        stack.tabs.ids.len(),
+                        stack.tabs.at,
+                        landing,
+                        travelled.abs() / drag.across,
+                    );
                 }
             });
         }
@@ -2086,6 +2112,15 @@ mod platform {
                 let drag = stack.dragging.as_ref()?;
                 let to = drag.to.clone();
                 stack.arriving = drag.rising.clone();
+                let mut landed = None;
+                for (index, id) in stack.tabs.ids.iter().enumerate() {
+                    if *id == to {
+                        landed = Some(index);
+                    }
+                }
+                if let Some(landed) = landed {
+                    stack.tabs.at = landed;
+                }
                 stack.pending.remove(&to)
             });
             let standing = STACK
