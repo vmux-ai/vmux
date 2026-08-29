@@ -86,6 +86,7 @@ mod platform {
     const MARK_GLIDE: f64 = 0.28;
     const MARK_MOST: usize = 8;
     const MARK_TALLY: f64 = 11.0;
+    const MARK_EDGE: usize = 1;
     const DIP: f64 = 0.06;
     const TAB_TRAIL: f64 = 0.5;
     const SHEET_FADE: f64 = 0.55;
@@ -264,7 +265,7 @@ mod platform {
     }
 
     impl Rung {
-        fn over(count: usize, at: usize) -> Vec<Self> {
+        fn over(count: usize, start: usize) -> Vec<Self> {
             let mut rungs = Vec::new();
             if count <= MARK_MOST {
                 for index in 0..count {
@@ -273,10 +274,7 @@ mod platform {
                 return rungs;
             }
             let room = MARK_MOST - 2;
-            let mut start = at.saturating_sub(room / 2);
-            if start + room >= count {
-                start = count - room;
-            }
+            let start = start.min(count - room);
             if start > 0 {
                 rungs.push(Self::Gap(start));
             }
@@ -313,6 +311,7 @@ mod platform {
         capsule: Retained<UIVisualEffectView>,
         lines: Retained<UIView>,
         glow: Retained<UIView>,
+        anchor: Cell<usize>,
     }
 
     impl Indicator {
@@ -375,6 +374,7 @@ mod platform {
                 capsule,
                 lines,
                 glow,
+                anchor: Cell::new(0),
             }
         }
 
@@ -382,7 +382,8 @@ mod platform {
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let rungs = Rung::over(tabs, index);
+            self.settle(tabs, index);
+            let rungs = self.seats(tabs);
             let wanted = tabs >= 2;
             if wanted && self.capsule.isHidden() {
                 self.capsule.setAlpha(0.0);
@@ -412,6 +413,26 @@ mod platform {
                 Some(&dressed),
                 marker,
             );
+        }
+
+        fn seats(&self, count: usize) -> Vec<Rung> {
+            Rung::over(count, self.anchor.get())
+        }
+
+        fn settle(&self, count: usize, at: usize) {
+            let room = MARK_MOST - 2;
+            if count <= MARK_MOST {
+                self.anchor.set(0);
+                return;
+            }
+            let mut start = self.anchor.get().min(count - room);
+            if at < start + MARK_EDGE {
+                start = at.saturating_sub(MARK_EDGE);
+            }
+            if at + MARK_EDGE >= start + room {
+                start = (at + MARK_EDGE + 1).saturating_sub(room);
+            }
+            self.anchor.set(start.min(count - room));
         }
 
         fn fill(&self, rungs: &[Rung], marker: MainThreadMarker) {
@@ -482,7 +503,7 @@ mod platform {
 
         fn track(&self, tabs: usize, from: usize, to: usize, progress: f64) {
             let gone = progress.clamp(0.0, 1.0);
-            let rungs = Rung::over(tabs, from);
+            let rungs = self.seats(tabs);
             let (Some(here), Some(there)) = (Rung::slot(&rungs, from), Rung::slot(&rungs, to))
             else {
                 return;
@@ -2733,7 +2754,7 @@ mod platform {
                     };
                     let sheets = stack.sheets.len();
                     if sheets > 1 {
-                        let rungs = Rung::over(sheets, sheets - 1);
+                        let rungs = stack.indicator.seats(sheets);
                         let Some(hit) = stack.indicator.reached(sender, rungs.len()) else {
                             return;
                         };
@@ -2748,7 +2769,7 @@ mod platform {
                         return;
                     }
                     let tabs = stack.tabs.ids.len();
-                    let rungs = Rung::over(tabs, stack.tabs.at);
+                    let rungs = stack.indicator.seats(tabs);
                     let Some(hit) = stack.indicator.reached(sender, rungs.len()) else {
                         return;
                     };
