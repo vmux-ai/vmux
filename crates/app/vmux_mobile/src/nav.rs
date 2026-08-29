@@ -42,6 +42,9 @@ pub struct Presented;
 #[derive(Component)]
 pub struct Depth(pub usize);
 
+#[derive(Resource, Default)]
+pub struct Trail(pub Vec<Entity>);
+
 #[derive(Component)]
 pub struct Shows<S: Route>(pub S);
 
@@ -178,6 +181,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
         app.insert_resource(Opened(0))
             .init_resource::<Screens<S>>()
             .init_resource::<Painted>()
+            .init_resource::<Trail>()
             .add_message::<Tapped>()
             .add_message::<Declare<S>>()
             .add_message::<Report<S>>()
@@ -337,6 +341,7 @@ impl Nav {
         selected: Query<Entity, (With<Tab>, With<Selected>)>,
         children: Query<&Children>,
         measured: Query<Entity, With<Depth>>,
+        mut trail: ResMut<Trail>,
         mut commands: Commands,
     ) {
         let mut chain = Vec::new();
@@ -356,8 +361,11 @@ impl Nav {
                 commands.entity(entity).remove::<Depth>();
             }
         }
-        for (at, entity) in chain.into_iter().enumerate() {
+        for (at, entity) in chain.iter().copied().enumerate() {
             commands.entity(entity).insert(Depth(at));
+        }
+        if trail.0 != chain {
+            trail.0 = chain;
         }
     }
 
