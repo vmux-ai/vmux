@@ -9,7 +9,7 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, ItemFn, LitStr, parse_macro_input};
 
-#[proc_macro_derive(Route, attributes(route))]
+#[proc_macro_derive(Route, attributes(route, blank))]
 pub fn derive_route(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match route::expand(input) {

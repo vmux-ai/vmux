@@ -17,8 +17,22 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut cases = Vec::new();
     let mut names = Vec::new();
     let mut titles = Vec::new();
+    let mut blank = quote! { ::std::option::Option::None };
     for variant in &routes.variants {
         let case = &variant.ident;
+        if variant
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("blank"))
+        {
+            if !matches!(&variant.fields, Fields::Unnamed(fields) if fields.unnamed.len() == 1) {
+                return Err(Error::new_spanned(
+                    case,
+                    "a blank route takes the tab's number, so it holds exactly one field",
+                ));
+            }
+            blank = quote! { ::std::option::Option::Some(Self::#case(at)) };
+        }
         cases.push(quote! { #case });
         names.push(match &variant.fields {
             Fields::Unit => quote! { Self::#case => #named::#case },
@@ -47,6 +61,11 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
                 match self {
                     #(#titles,)*
                 }
+            }
+
+            fn blank(at: usize) -> ::std::option::Option<Self> {
+                let _ = at;
+                #blank
             }
         }
     })

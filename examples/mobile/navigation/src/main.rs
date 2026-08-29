@@ -1,11 +1,11 @@
 //! The navigation on a simulator, with no Mac: tabs are canned rather than reported, so push,
 //! the back-swipe, a dragged tab switch and every `presentation` can be driven by hand.
 
-use bevy_app::{Startup, Update};
+use bevy_app::Startup;
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{Centre, NavPlugin, OpenBlank, Presentation, Report, Route, Tapped};
+use vmux_mobile::nav::{NavPlugin, Presentation, Report, Route};
 use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -14,10 +14,10 @@ const SEEDED: usize = 1;
 const RUNGS: usize = 8;
 const HEAD: usize = 3;
 const CRUMBS: usize = 4;
-const PLUS: &str = "+";
 
 #[derive(Clone, PartialEq, Route)]
 enum Page {
+    #[blank]
     #[route("Tab {0}")]
     Tab(usize),
     #[route("{0}")]
@@ -35,9 +35,7 @@ fn main() {
         .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
-                .insert_resource(Centre(PLUS))
-                .add_systems(Startup, setup)
-                .add_systems(Update, open_new_tab);
+                .add_systems(Startup, setup);
         }))
         .run();
 }
@@ -51,20 +49,6 @@ fn setup(mut reported: MessageWriter<Report<Page>>) {
         tabs,
         focused: Some("tab:1".to_string()),
     });
-}
-
-fn open_new_tab(
-    mut tapped: MessageReader<Tapped>,
-    mut opened: Local<usize>,
-    mut opening: MessageWriter<OpenBlank<Page>>,
-) {
-    for Tapped(action) in tapped.read() {
-        if *action != PLUS {
-            continue;
-        }
-        *opened += 1;
-        opening.write(OpenBlank(Page::Tab(SEEDED + *opened)));
-    }
 }
 
 #[screen(background = BACKDROP)]
