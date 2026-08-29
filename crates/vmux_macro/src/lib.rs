@@ -2,7 +2,6 @@ mod expand;
 mod named_fields;
 mod route;
 mod screen;
-mod screens;
 mod string_id;
 mod variant_names;
 
@@ -24,15 +23,6 @@ pub fn screen(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as screen::Args);
     let component = parse_macro_input!(input as ItemFn);
     screen::expand(args, component).into()
-}
-
-#[proc_macro_attribute]
-pub fn screens(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let module = parse_macro_input!(input as syn::ItemMod);
-    match screens::expand(module) {
-        Ok(tokens) => tokens.into(),
-        Err(error) => error.to_compile_error().into(),
-    }
 }
 
 #[proc_macro_attribute]
