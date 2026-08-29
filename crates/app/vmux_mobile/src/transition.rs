@@ -17,6 +17,7 @@ impl Presentation {
 
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub struct Level {
+    pub key: u64,
     pub page: &'static NativePage,
     pub title: String,
     pub action: Option<&'static str>,
@@ -72,6 +73,8 @@ mod platform {
     const TAB_BAR_EDGE: f64 = 16.0;
     const TAB_BAR_GAP: f64 = 10.0;
     const DIP: f64 = 0.06;
+    const SHEET_FADE: f64 = 0.55;
+    const SHEET_RECEDE: f64 = 0.92;
     const OVERVIEW_SCALE: f64 = 0.54;
     const OVERVIEW_TILT: f64 = 0.95;
     const OVERVIEW_SPREAD: f64 = 0.82;
@@ -192,12 +195,13 @@ mod platform {
     }
 
     struct Column {
+        key: u64,
         navigation: Retained<UINavigationController>,
         levels: Vec<Held>,
     }
 
     impl Column {
-        fn over(root: Held, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
+        fn over(key: u64, root: Held, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
             let navigation = UINavigationController::initWithRootViewController(
                 UINavigationController::alloc(marker),
                 &root.controller,
@@ -217,6 +221,7 @@ mod platform {
                 gesture.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(delegate)));
             }
             Self {
+                key,
                 navigation,
                 levels: vec![root],
             }
@@ -617,6 +622,7 @@ mod platform {
         backdrop: (u8, u8, u8, u8),
         stacks: HashMap<String, Column>,
         sheets: Vec<Column>,
+        kept: HashMap<u64, Column>,
         seated: Option<String>,
         dragging: Option<Drag>,
         tabs: Tabs,
@@ -638,9 +644,18 @@ mod platform {
 
     impl Overview {
         fn toggle() {
+            let parked = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                Some((Parallax::of(stack)?, !stack.overviewing))
+            });
+            if let Some((sheets, leaving)) = parked
+                && let Some(marker) = MainThreadMarker::new()
+            {
+                sheets.settle(leaving, marker);
+            }
             let plan = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
-                if !stack.sheets.is_empty() || stack.tabs.ids.len() < 2 {
+                if stack.tabs.ids.len() < 2 {
                     return None;
                 }
                 stack.overviewing = !stack.overviewing;
@@ -922,8 +937,17 @@ mod platform {
 
     impl NativeStack {
         pub fn seat(tab: String, levels: Vec<Level>) {
-            Self::shed();
-            Self::raise(&tab, levels);
+            let departing = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?));
+            let mut pushed = Vec::new();
+            let mut presented = Vec::new();
+            for level in levels {
+                if presented.is_empty() && level.presentation.pushes() {
+                    pushed.push(level);
+                    continue;
+                }
+                presented.push(level);
+            }
+            Self::raise(&tab, pushed);
             let plan = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
                 let arriving = stack.stacks.get(&tab)?.navigation.view()?;
@@ -962,20 +986,34 @@ mod platform {
             });
             Self::front();
             let Some((leaving, arriving, entering)) = plan else {
+                Self::shed();
+                Self::present_all(presented, false);
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
-            let departing = leaving.clone();
+            let vacating = leaving.clone();
             let done = block2::RcBlock::new(move |_| {
-                let Some(departing) = departing.as_ref() else {
+                let Some(vacating) = vacating.as_ref() else {
                     return;
                 };
-                departing.setHidden(true);
-                departing.setTransform(Drag::sideways(0.0));
+                vacating.setHidden(true);
+                vacating.setTransform(Drag::sideways(0.0));
             });
             Drag::glide(leaving, arriving, 0.0, entering, -entering, done, marker);
+            let Some(departing) = departing else {
+                Self::shed();
+                Self::present_all(presented, true);
+                return;
+            };
+            let waiting = RefCell::new(Some(presented));
+            departing.depart(marker, move || {
+                let Some(rest) = waiting.borrow_mut().take() else {
+                    return;
+                };
+                NativeStack::present_all(rest, true);
+            });
         }
 
         pub fn warm(wanted: Vec<(String, Vec<Level>)>) {
@@ -1090,7 +1128,7 @@ mod platform {
             if held.is_empty() {
                 return;
             }
-            let mut column = Column::over(held.remove(0), &delegate, marker);
+            let mut column = Column::over(0, held.remove(0), &delegate, marker);
             column.levels.extend(held);
 
             root_controller.addChildViewController(&column.navigation);
@@ -1156,46 +1194,89 @@ mod platform {
         }
 
         pub fn present(level: Level) {
-            let (presentation, detents) = (level.presentation, level.detents);
+            Self::present_all(vec![level], false);
+        }
+
+        fn present_all(mut levels: Vec<Level>, rising: bool) {
+            if levels.is_empty() {
+                if rising {
+                    Parallax::arrive();
+                }
+                return;
+            }
+            let level = levels.remove(0);
+            let (key, presentation, detents) = (level.key, level.presentation, level.detents);
+            let reused = STACK.with_borrow_mut(|stack| stack.as_mut()?.kept.remove(&key));
+            if let Some(column) = reused {
+                Self::mount(column, presentation, detents, levels, rising);
+                return;
+            }
             let drawn = Self::draw(level);
             after_paint(move || {
                 let Some(drawn) = drawn else {
                     return;
                 };
-                let pending = STACK.with_borrow_mut(|stack| {
-                    let stack = stack.as_mut()?;
+                let built = STACK.with_borrow(|stack| {
+                    let stack = stack.as_ref()?;
                     let marker = MainThreadMarker::new()?;
-                    let presenter = Self::topmost(stack)?.navigation.clone();
-                    let column = Column::over(drawn, &stack.delegate, marker);
-                    let sheet = column.navigation.clone();
-                    sheet.setModalPresentationStyle(match presentation {
-                        Presentation::FullScreenModal | Presentation::TransparentModal => {
-                            UIModalPresentationStyle::OverFullScreen
-                        }
-                        Presentation::FormSheet => UIModalPresentationStyle::FormSheet,
-                        Presentation::Modal | Presentation::Card => {
-                            UIModalPresentationStyle::PageSheet
-                        }
-                    });
-                    if let Some(controller) = sheet.sheetPresentationController() {
-                        unsafe {
-                            controller.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
-                                &*stack.delegate,
-                            )));
-                        }
-                        if presentation == Presentation::FormSheet {
-                            Self::detents(&controller, detents, marker);
-                        }
-                    }
-                    stack.sheets.push(column);
-                    Some((presenter, sheet))
+                    Some(Column::over(key, drawn, &stack.delegate, marker))
                 });
-                let Some((presenter, sheet)) = pending else {
+                let Some(column) = built else {
                     return;
                 };
-                let raised = block2::RcBlock::new(NativeStack::front);
-                presenter.presentViewController_animated_completion(&sheet, true, Some(&raised));
+                NativeStack::mount(column, presentation, detents, levels, rising);
             });
+        }
+
+        fn mount(
+            column: Column,
+            presentation: Presentation,
+            detents: &'static [f64],
+            rest: Vec<Level>,
+            rising: bool,
+        ) {
+            let pending = STACK.with_borrow_mut(|stack| {
+                let stack = stack.as_mut()?;
+                let marker = MainThreadMarker::new()?;
+                let presenter = Self::topmost(stack)?.navigation.clone();
+                let sheet = column.navigation.clone();
+                sheet.setModalPresentationStyle(match presentation {
+                    Presentation::FullScreenModal | Presentation::TransparentModal => {
+                        UIModalPresentationStyle::OverFullScreen
+                    }
+                    Presentation::FormSheet => UIModalPresentationStyle::FormSheet,
+                    Presentation::Modal | Presentation::Card => UIModalPresentationStyle::PageSheet,
+                });
+                if let Some(controller) = sheet.sheetPresentationController() {
+                    unsafe {
+                        controller.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
+                            &*stack.delegate,
+                        )));
+                    }
+                    if presentation == Presentation::FormSheet {
+                        Self::detents(&controller, detents, marker);
+                    }
+                }
+                stack.sheets.push(column);
+                Some((presenter, sheet))
+            });
+            let Some((presenter, sheet)) = pending else {
+                return;
+            };
+            if !rising {
+                Parallax::recede(&presenter, false);
+            }
+            let waiting = RefCell::new(Some(rest));
+            let raised = block2::RcBlock::new(move || {
+                if rising {
+                    Parallax::sink();
+                }
+                NativeStack::front();
+                if let Some(rest) = waiting.borrow_mut().take() {
+                    NativeStack::present_all(rest, rising);
+                }
+            });
+            presenter.presentViewController_animated_completion(&sheet, !rising, Some(&raised));
         }
 
         pub fn dismiss() {
@@ -1203,6 +1284,9 @@ mod platform {
             let Some(departing) = departing else {
                 return;
             };
+            if let Some(presenter) = departing.navigation.presentingViewController() {
+                Parallax::recede(&presenter, true);
+            }
             departing
                 .navigation
                 .dismissViewControllerAnimated_completion(true, None);
@@ -1214,14 +1298,22 @@ mod platform {
                 Some(stack) => std::mem::take(&mut stack.sheets),
                 None => Vec::new(),
             });
-            for sheet in sheets {
-                let navigation = sheet.navigation.clone();
-                let holding = RefCell::new(Some(sheet));
-                let dropped = block2::RcBlock::new(move || {
-                    holding.borrow_mut().take();
-                });
-                navigation.dismissViewControllerAnimated_completion(false, Some(&dropped));
-            }
+            let Some(first) = sheets.first() else {
+                return;
+            };
+            let Some(base) = first.navigation.presentingViewController() else {
+                return;
+            };
+            Parallax::recede(&base, true);
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                for column in sheets {
+                    stack.kept.insert(column.key, column);
+                }
+            });
+            base.dismissViewControllerAnimated_completion(false, None);
         }
 
         pub fn tabs(entries: Vec<TabItem>, centre: Option<&'static str>) {
@@ -1348,6 +1440,7 @@ mod platform {
         incoming: Column,
         entering: f64,
         across: f64,
+        sheet: Option<Parallax>,
     }
 
     impl Drag {
@@ -1382,14 +1475,15 @@ mod platform {
                 if let Some(arriving) = drag.incoming.navigation.view() {
                     arriving.setTransform(Self::moved(travelled + drag.entering, scale));
                 }
+                if let Some(sheet) = drag.sheet.as_ref() {
+                    sheet.follow(travelled.abs() / drag.across);
+                }
             });
         }
 
         fn begin(shifted: f64) -> Option<Drag> {
             STACK.with_borrow_mut(|stack| {
-                if !stack.as_ref()?.sheets.is_empty() {
-                    return None;
-                }
+                let sheet = Parallax::of(stack.as_ref()?);
                 let to = stack.as_ref()?.tabs.neighbour(shifted)?;
                 let stack = stack.as_mut()?;
                 let incoming = stack.stacks.remove(&to)?;
@@ -1404,6 +1498,7 @@ mod platform {
                     incoming,
                     entering,
                     across,
+                    sheet,
                 })
             })
         }
@@ -1419,14 +1514,26 @@ mod platform {
                 let commit = far && agreed;
                 let landing = if commit { -drag.entering } else { 0.0 };
                 let from = -shifted.clamp(-drag.across, drag.across);
-                Some((leaving, arriving, landing, drag.entering, commit, from))
+                let sheet = drag.sheet.clone();
+                Some((
+                    leaving,
+                    arriving,
+                    landing,
+                    drag.entering,
+                    commit,
+                    from,
+                    sheet,
+                ))
             });
-            let Some((leaving, arriving, landing, entering, commit, from)) = plan else {
+            let Some((leaving, arriving, landing, entering, commit, from, sheet)) = plan else {
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
+            if let Some(sheet) = sheet {
+                sheet.settle(commit, marker);
+            }
             let done = block2::RcBlock::new(move |_| Drag::land(commit));
             Self::glide(
                 Some(leaving),
@@ -1462,6 +1569,7 @@ mod platform {
                 return;
             };
             if commit {
+                NativeStack::shed();
                 PICKED.with_borrow_mut(|slot| *slot = Some(to));
             }
         }
@@ -1527,6 +1635,140 @@ mod platform {
                 Some(&settled),
                 marker,
             );
+        }
+    }
+
+    #[derive(Clone)]
+    struct Parallax {
+        views: Vec<Retained<UIView>>,
+        fall: f64,
+    }
+
+    impl Parallax {
+        fn of(stack: &NativeStack) -> Option<Parallax> {
+            let mut views = Vec::new();
+            for sheet in &stack.sheets {
+                let Some(view) = sheet.navigation.view() else {
+                    continue;
+                };
+                views.push(Self::container(view));
+            }
+            if views.is_empty() {
+                return None;
+            }
+            let fall = stack.pager.bounds().size.height;
+            Some(Parallax { views, fall })
+        }
+
+        fn container(view: Retained<UIView>) -> Retained<UIView> {
+            let mut top = view;
+            loop {
+                let Some(parent) = top.superview() else {
+                    return top;
+                };
+                if parent.superview().is_none() {
+                    return top;
+                }
+                top = parent;
+            }
+        }
+
+        fn follow(&self, progress: f64) {
+            let gone = progress.clamp(0.0, 1.0);
+            for view in &self.views {
+                view.setTransform(Self::fallen(gone * self.fall));
+                view.setAlpha(1.0 - gone * SHEET_FADE);
+            }
+        }
+
+        fn arrive() {
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let Some(risen) = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?)) else {
+                return;
+            };
+            risen.follow(1.0);
+            let rising = risen.clone();
+            let motion = block2::RcBlock::new(move || rising.follow(0.0));
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.34,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &motion,
+                None,
+                marker,
+            );
+        }
+
+        fn recede(presenter: &UIViewController, back: bool) {
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let Some(view) = presenter.view() else {
+                return;
+            };
+            let scale = if back { 1.0 } else { SHEET_RECEDE };
+            let motion = block2::RcBlock::new(move || {
+                view.setTransform(Drag::moved(0.0, scale));
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.34,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &motion,
+                None,
+                marker,
+            );
+        }
+
+        fn sink() {
+            let Some(sunk) = STACK.with_borrow(|stack| Parallax::of(stack.as_ref()?)) else {
+                return;
+            };
+            sunk.follow(1.0);
+        }
+
+        fn depart(&self, marker: MainThreadMarker, then: impl Fn() + 'static) {
+            let falling = self.clone();
+            let motion = block2::RcBlock::new(move || falling.follow(1.0));
+            let done = block2::RcBlock::new(move |_| {
+                NativeStack::shed();
+                then();
+            });
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.34,
+                0.0,
+                UIViewAnimationOptions::CurveEaseIn,
+                &motion,
+                Some(&done),
+                marker,
+            );
+        }
+
+        fn settle(&self, commit: bool, marker: MainThreadMarker) {
+            let landing = if commit { 1.0 } else { 0.0 };
+            let settling = self.clone();
+            let motion = block2::RcBlock::new(move || settling.follow(landing));
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.34,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &motion,
+                None,
+                marker,
+            );
+        }
+
+        fn fallen(by: f64) -> CGAffineTransform {
+            CGAffineTransform {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                tx: 0.0,
+                ty: by,
+            }
         }
     }
 
@@ -1733,6 +1975,7 @@ mod platform {
             backdrop: page.background_or(crate::root::webview_background()),
             stacks: HashMap::new(),
             sheets: Vec::new(),
+            kept: HashMap::new(),
             seated: None,
             dragging: None,
             tabs,
