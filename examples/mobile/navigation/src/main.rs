@@ -61,17 +61,25 @@ fn App() -> Element {
 }
 
 #[derive(Component, Clone, Default, PartialEq)]
-struct Panel {
+struct Look {
     hue: usize,
     kind: &'static str,
     title: String,
-    trail: String,
-    rungs: Vec<Step>,
+}
+
+#[derive(Component, Clone, Default, PartialEq)]
+struct Ahead {
     card: String,
     modal: String,
     sheet: String,
     full: String,
 }
+
+#[derive(Component, Clone, Default, PartialEq)]
+struct Crumbs(String);
+
+#[derive(Component, Clone, Default, PartialEq)]
+struct Rungs(Vec<Step>);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
@@ -82,16 +90,21 @@ enum Step {
     Lone,
 }
 
-type Unpainted = (With<Depth>, With<Shows<Page>>, Without<Panel>);
+type Unseen = (With<Depth>, With<Shows<Page>>, Without<Look>);
 
-fn sketch(fresh: Query<Entity, Unpainted>, mut commands: Commands) {
+fn sketch(fresh: Query<Entity, Unseen>, mut commands: Commands) {
     for entity in fresh.iter() {
-        commands.entity(entity).insert(Panel::default());
+        commands.entity(entity).insert((
+            Look::default(),
+            Ahead::default(),
+            Crumbs::default(),
+            Rungs::default(),
+        ));
     }
 }
 
-fn describe(mut levels: Query<(&Shows<Page>, &mut Panel)>) {
-    for (shows, mut panel) in levels.iter_mut() {
+fn describe(mut levels: Query<(&Shows<Page>, &mut Look)>) {
+    for (shows, mut look) in levels.iter_mut() {
         let (hue, kind) = match &shows.0 {
             Page::Tab(number) => ((TAB_HUE + number * TAB_STEP) % HUES, "tab root"),
             Page::Card(_) => (CARD_HUE, "card"),
@@ -100,15 +113,15 @@ fn describe(mut levels: Query<(&Shows<Page>, &mut Panel)>) {
             Page::FullScreenModal(_) => (FULL_HUE, "full screen modal"),
         };
         let title = shows.0.title();
-        if (panel.hue, panel.kind, &panel.title) != (hue, kind, &title) {
-            panel.hue = hue;
-            panel.kind = kind;
-            panel.title = title;
+        if (look.hue, look.kind, &look.title) != (hue, kind, &title) {
+            look.hue = hue;
+            look.kind = kind;
+            look.title = title;
         }
     }
 }
 
-fn tally(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut panels: Query<&mut Panel>) {
+fn tally(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut ahead: Query<&mut Ahead>) {
     let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
     for entity in trail.0.iter().copied() {
         let Ok(shows) = routes.get(entity) else {
@@ -121,45 +134,51 @@ fn tally(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut panels: Query<&mut 
             Page::FullScreenModal(_) => fulls += 1,
             Page::Tab(_) => {}
         }
-        let Ok(mut panel) = panels.get_mut(entity) else {
+        let Ok(mut next) = ahead.get_mut(entity) else {
             continue;
         };
-        let ahead = (
+        let named = (
             format!("Card {}", cards + 1),
             format!("Modal {}", modals + 1),
             format!("Sheet {}", sheets + 1),
             format!("Full {}", fulls + 1),
         );
-        if (&panel.card, &panel.modal, &panel.sheet, &panel.full)
-            != (&ahead.0, &ahead.1, &ahead.2, &ahead.3)
+        if (&next.card, &next.modal, &next.sheet, &next.full)
+            != (&named.0, &named.1, &named.2, &named.3)
         {
-            (panel.card, panel.modal, panel.sheet, panel.full) = ahead;
+            (next.card, next.modal, next.sheet, next.full) = named;
         }
     }
 }
 
-fn trace(trail: Res<Trail>, routes: Query<&Shows<Page>>, mut panels: Query<&mut Panel>) {
+fn trace(
+    trail: Res<Trail>,
+    routes: Query<&Shows<Page>>,
+    mut drawn: Query<(&mut Crumbs, &mut Rungs)>,
+) {
     let mut crumbs = Vec::new();
     for entity in trail.0.iter().copied() {
         if let Ok(shows) = routes.get(entity) {
             crumbs.push(shows.0.title());
         }
     }
-    let elided = Panel::elide(crumbs);
+    let elided = Crumbs::elide(crumbs);
     let deepest = trail.0.len().saturating_sub(1);
     for (at, entity) in trail.0.iter().copied().enumerate() {
-        let Ok(mut panel) = panels.get_mut(entity) else {
+        let Ok((mut crumbs, mut steps)) = drawn.get_mut(entity) else {
             continue;
         };
-        let rungs = Panel::rungs(deepest, at);
-        if (&panel.trail, &panel.rungs) != (&elided, &rungs) {
-            panel.trail = elided.clone();
-            panel.rungs = rungs;
+        let rungs = Rungs::over(deepest, at);
+        if crumbs.0 != elided {
+            crumbs.0 = elided.clone();
+        }
+        if steps.0 != rungs {
+            steps.0 = rungs;
         }
     }
 }
 
-impl Panel {
+impl Crumbs {
     fn elide(mut crumbs: Vec<String>) -> String {
         if crumbs.len() > CRUMBS {
             let tail = crumbs.split_off(crumbs.len() - (CRUMBS - 1));
@@ -171,8 +190,10 @@ impl Panel {
         }
         crumbs.join(" \u{203a} ")
     }
+}
 
-    fn rungs(depth: usize, at: usize) -> Vec<Step> {
+impl Rungs {
+    fn over(depth: usize, at: usize) -> Vec<Step> {
         let levels = depth + 1;
         let mut steps = Vec::new();
         if levels <= RUNGS {
@@ -202,9 +223,22 @@ impl Panel {
     }
 }
 
-fn use_panel() -> (Router<Page>, Panel) {
+struct Shown {
+    look: Look,
+    ahead: Ahead,
+    crumbs: String,
+    rungs: Vec<Step>,
+}
+
+fn use_shown() -> (Router<Page>, Shown) {
     let router = use_router::<Page>();
-    (router, router.attached().unwrap_or_default())
+    let shown = Shown {
+        look: router.attached().unwrap_or_default(),
+        ahead: router.attached().unwrap_or_default(),
+        crumbs: router.attached::<Crumbs>().unwrap_or_default().0,
+        rungs: router.attached::<Rungs>().unwrap_or_default().0,
+    };
+    (router, shown)
 }
 
 #[screens]
@@ -252,9 +286,10 @@ mod page {
 
 #[component]
 fn Body() -> Element {
-    let (router, panel) = use_panel();
-    let (hue, kind, title, trail) = (panel.hue, panel.kind, panel.title, panel.trail);
-    let rungs = panel.rungs;
+    let (router, shown) = use_shown();
+    let (hue, kind) = (shown.look.hue, shown.look.kind);
+    let (title, trail) = (shown.look.title, shown.crumbs);
+    let rungs = shown.rungs;
 
     rsx! {
     div {
@@ -278,22 +313,22 @@ fn Body() -> Element {
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Button {
                         label: "Card",
-                        onpress: move |_| router.push(Page::Card(panel.card.clone())),
+                        onpress: move |_| router.push(Page::Card(shown.ahead.card.clone())),
                     }
                     Button {
                         label: "Modal",
-                        onpress: move |_| router.push(Page::Modal(panel.modal.clone())),
+                        onpress: move |_| router.push(Page::Modal(shown.ahead.modal.clone())),
                     }
                     Button {
                         label: "Form Sheet",
                         onpress: move |_| {
-                            router.push(Page::FormSheet(panel.sheet.clone()))
+                            router.push(Page::FormSheet(shown.ahead.sheet.clone()))
                         },
                     }
                     Button {
                         label: "Full Screen Modal",
                         onpress: move |_| {
-                            router.push(Page::FullScreenModal(panel.full.clone()))
+                            router.push(Page::FullScreenModal(shown.ahead.full.clone()))
                         },
                     }
                 }
