@@ -1,11 +1,11 @@
 //! The navigation on a simulator, with no Mac: tabs are canned rather than reported, so push,
 //! the back-swipe, a dragged tab switch and every `presentation` can be driven by hand.
 
-use bevy_app::Startup;
+use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{NavPlugin, Presentation, Report, Route};
+use vmux_mobile::nav::{Nav, NavPlugin, NavigationState, Presentation, Report, Route};
 use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -35,7 +35,9 @@ fn main() {
         .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
-                .add_systems(Startup, setup);
+                .init_resource::<Board>()
+                .add_systems(Startup, setup)
+                .add_systems(Update, chart);
         }))
         .run();
 }
@@ -80,62 +82,81 @@ fn App() -> Element {
     }
 }
 
-struct Demo {
-    router: Router<Page>,
+#[derive(Resource, Clone, Default, PartialEq)]
+struct Board(Vec<Panel>);
+
+#[derive(Clone, Default, PartialEq)]
+struct Panel {
     hue: usize,
     kind: &'static str,
     title: String,
     trail: String,
-    rungs: Vec<(&'static str, String)>,
+    rungs: Vec<Step>,
     card: String,
     modal: String,
     sheet: String,
     full: String,
 }
 
-fn use_demo() -> Demo {
-    Demo::of(use_router::<Page>())
+#[derive(Clone, Copy, PartialEq)]
+enum Step {
+    Spare,
+    Gap(usize),
+    Walked,
+    Here,
+    Lone,
 }
 
-impl Demo {
-    fn of(router: Router<Page>) -> Self {
-        let here = router.route();
-        let (hue, kind) = match &here {
-            Some(Page::Tab(at)) => ((at * 37 + 185) % 360, "tab root"),
-            Some(Page::Card(_)) => (285, "card"),
-            Some(Page::Modal(_)) => (30, "modal"),
-            Some(Page::FormSheet(_)) => (175, "form sheet"),
-            Some(Page::FullScreenModal(_)) => (255, "full screen modal"),
-            None => (185, "nowhere"),
-        };
-        let title = match &here {
-            Some(route) => route.title(),
-            None => "Nothing".to_string(),
-        };
-        let (mut cards, mut modals, mut sheets, mut full_screens) = (0, 0, 0, 0);
+fn chart(world: &mut World) {
+    let seen = Nav::state::<Page>(world);
+    let board = Board::of(&seen);
+    if world.get_resource::<Board>() != Some(&board) {
+        world.insert_resource(board);
+    }
+}
+
+impl Board {
+    fn of(seen: &NavigationState<Page>) -> Self {
+        let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
         let mut crumbs = Vec::new();
-        for route in router.segments() {
+        let mut panels = Vec::new();
+        for (at, route) in seen.trail.iter().enumerate() {
+            let (hue, kind) = match route {
+                Page::Tab(number) => ((number * 37 + 185) % 360, "tab root"),
+                Page::Card(_) => (285, "card"),
+                Page::Modal(_) => (30, "modal"),
+                Page::FormSheet(_) => (175, "form sheet"),
+                Page::FullScreenModal(_) => (255, "full screen modal"),
+            };
             match route {
                 Page::Card(_) => cards += 1,
                 Page::Modal(_) => modals += 1,
                 Page::FormSheet(_) => sheets += 1,
-                Page::FullScreenModal(_) => full_screens += 1,
+                Page::FullScreenModal(_) => fulls += 1,
                 Page::Tab(_) => {}
             }
             crumbs.push(route.title());
+            panels.push(Panel {
+                hue,
+                kind,
+                title: route.title(),
+                trail: String::new(),
+                rungs: Self::rungs(seen.depth, at),
+                card: format!("Card {}", cards + 1),
+                modal: format!("Modal {}", modals + 1),
+                sheet: format!("Sheet {}", sheets + 1),
+                full: format!("Full {}", fulls + 1),
+            });
         }
-        Self {
-            router,
-            hue,
-            kind,
-            title,
-            trail: Self::elide(crumbs),
-            rungs: Self::rungs(router.depth(), router.position()),
-            card: format!("Card {}", cards + 1),
-            modal: format!("Modal {}", modals + 1),
-            sheet: format!("Sheet {}", sheets + 1),
-            full: format!("Full {}", full_screens + 1),
+        let trail = Self::elide(crumbs);
+        for panel in &mut panels {
+            panel.trail = trail.clone();
         }
+        Self(panels)
+    }
+
+    fn at(&self, at: usize) -> Panel {
+        self.0.get(at).cloned().unwrap_or_default()
     }
 
     fn elide(mut crumbs: Vec<String>) -> String {
@@ -150,54 +171,49 @@ impl Demo {
         crumbs.join(" \u{203a} ")
     }
 
-    fn rungs(depth: usize, at: usize) -> Vec<(&'static str, String)> {
+    fn rungs(depth: usize, at: usize) -> Vec<Step> {
         let levels = depth + 1;
-        let mut slots = Vec::new();
+        let mut steps = Vec::new();
         if levels <= RUNGS {
             for level in 0..levels {
-                slots.push(Some(level));
+                steps.push(Some(level));
             }
         } else {
             for level in 0..HEAD {
-                slots.push(Some(level));
+                steps.push(Some(level));
             }
-            slots.push(None);
+            steps.push(None);
             for level in (levels - (RUNGS - HEAD - 1))..levels {
-                slots.push(Some(level));
+                steps.push(Some(level));
             }
         }
         let mut rungs = Vec::new();
         for slot in 0..RUNGS {
-            let Some(level) = slots.get(slot) else {
-                rungs.push(("mx-0 h-1 w-0 flex-none bg-border opacity-0", String::new()));
-                continue;
-            };
-            let Some(level) = level else {
-                rungs.push((
-                    "mx-1.5 flex-none text-xs font-medium leading-none text-muted-foreground",
-                    format!("+{}", levels - (RUNGS - 1)),
-                ));
-                continue;
-            };
-            if depth == 0 {
-                rungs.push(("mx-0.5 h-1 flex-1 bg-border", String::new()));
-            } else if *level == at {
-                rungs.push(("mx-0.5 h-1 flex-1 bg-chart-3", String::new()));
-            } else {
-                rungs.push(("mx-0.5 h-1 flex-1 bg-foreground", String::new()));
-            }
+            rungs.push(match steps.get(slot) {
+                None => Step::Spare,
+                Some(None) => Step::Gap(levels - (RUNGS - 1)),
+                Some(Some(_)) if depth == 0 => Step::Lone,
+                Some(Some(level)) if *level == at => Step::Here,
+                Some(Some(_)) => Step::Walked,
+            });
         }
         rungs
     }
 }
 
+fn use_panel() -> (Router<Page>, Panel) {
+    let router = use_router::<Page>();
+    let at = router.position();
+    let board: Board = vmux_mobile::resource().unwrap_or_default();
+    (router, board.at(at))
+}
+
 #[screen]
 #[component]
 fn TabScreen() -> Element {
-    let demo = use_demo();
-    let (hue, kind, title, trail) = (demo.hue, demo.kind, demo.title.clone(), demo.trail.clone());
-    let rungs = demo.rungs.clone();
-    let router = demo.router;
+    let (router, panel) = use_panel();
+    let (hue, kind, title, trail) = (panel.hue, panel.kind, panel.title, panel.trail);
+    let rungs = panel.rungs;
 
     rsx! {
     div {
@@ -213,7 +229,7 @@ fn TabScreen() -> Element {
                 div { class: "mt-2 text-4xl font-semibold leading-tight tracking-tight", "{title}" }
                 div { class: "-mx-0.5 mt-4 flex h-4 items-center",
                     for (step , rung) in rungs.iter().enumerate() {
-                        Rung { key: "{step}", tone: rung.0, label: rung.1.clone() }
+                        Rung { key: "{step}", step: *rung }
                     }
                 }
                 div { class: "mt-2 truncate text-sm text-muted-foreground", "{trail}" }
@@ -221,22 +237,22 @@ fn TabScreen() -> Element {
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
                     Key {
                         label: "Card",
-                        onpick: move |_| router.push(Page::Card(demo.card.clone())),
+                        onpick: move |_| router.push(Page::Card(panel.card.clone())),
                     }
                     Key {
                         label: "Modal",
-                        onpick: move |_| router.push(Page::Modal(demo.modal.clone())),
+                        onpick: move |_| router.push(Page::Modal(panel.modal.clone())),
                     }
                     Key {
                         label: "Form Sheet",
                         onpick: move |_| {
-                            router.push(Page::FormSheet(demo.sheet.clone()))
+                            router.push(Page::FormSheet(panel.sheet.clone()))
                         },
                     }
                     Key {
                         label: "Full Screen Modal",
                         onpick: move |_| {
-                            router.push(Page::FullScreenModal(demo.full.clone()))
+                            router.push(Page::FullScreenModal(panel.full.clone()))
                         },
                     }
                 }
@@ -246,7 +262,17 @@ fn TabScreen() -> Element {
 }
 
 #[component]
-fn Rung(tone: &'static str, label: String) -> Element {
+fn Rung(step: Step) -> Element {
+    let (tone, label) = match step {
+        Step::Spare => ("mx-0 h-1 w-0 flex-none bg-border opacity-0", String::new()),
+        Step::Gap(hidden) => (
+            "mx-1.5 flex-none text-xs font-medium leading-none text-muted-foreground",
+            format!("+{hidden}"),
+        ),
+        Step::Lone => ("mx-0.5 h-1 flex-1 bg-border", String::new()),
+        Step::Here => ("mx-0.5 h-1 flex-1 bg-chart-3", String::new()),
+        Step::Walked => ("mx-0.5 h-1 flex-1 bg-foreground", String::new()),
+    };
     rsx! {
         div { class: "rounded-sm transition-all duration-300 ease-out {tone}", "{label}" }
     }
