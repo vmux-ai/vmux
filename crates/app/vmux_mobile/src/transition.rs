@@ -67,6 +67,7 @@ mod platform {
         UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
         UIStackView, UIStackViewDistribution, UITapGestureRecognizer, UIUserInterfaceStyle, UIView,
         UIViewAnimationOptions, UIViewAutoresizing, UIViewController,
+        UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
         UIViewKeyframeAnimationOptions, UIVisualEffectView,
     };
     use vmux_native::WebView;
@@ -99,6 +100,7 @@ mod platform {
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Option<String>> = const { RefCell::new(None) };
+        static SLIDING: RefCell<Option<Slide>> = const { RefCell::new(None) };
     }
 
     struct Held {
@@ -203,6 +205,7 @@ mod platform {
         key: u64,
         navigation: Retained<UINavigationController>,
         levels: Vec<Held>,
+        watched: bool,
     }
 
     impl Column {
@@ -229,6 +232,7 @@ mod platform {
                 key,
                 navigation,
                 levels: vec![root],
+                watched: false,
             }
         }
 
@@ -635,6 +639,7 @@ mod platform {
         dragging: Option<Drag>,
         tabs: Tabs,
         delegate: Retained<NavDelegate>,
+        dismissal: Retained<Dismissal>,
         overviewing: bool,
         leave: Retained<UITapGestureRecognizer>,
         sweep: Retained<UIPanGestureRecognizer>,
@@ -1299,7 +1304,7 @@ mod platform {
         }
 
         fn mount(
-            column: Column,
+            mut column: Column,
             presentation: Presentation,
             detents: &'static [f64],
             rest: Vec<Level>,
@@ -1331,6 +1336,12 @@ mod platform {
                     if presentation == Presentation::FormSheet {
                         Self::detents(&controller, detents, marker);
                     }
+                }
+                if !column.watched
+                    && let Some(view) = sheet.view()
+                {
+                    stack.dismissal.clone().watch(&view, marker);
+                    column.watched = true;
                 }
                 stack.sheets.push(column);
                 Some((presenter, sheet))
@@ -1482,6 +1493,14 @@ mod platform {
             }
             let seated = stack.seated.clone()?;
             stack.stacks.get_mut(&seated)
+        }
+
+        fn beneath(stack: &NativeStack) -> Option<Retained<UIView>> {
+            if let Some(under) = stack.sheets.len().checked_sub(2) {
+                return stack.sheets[under].navigation.view();
+            }
+            let seated = stack.seated.as_ref()?;
+            stack.stacks.get(seated)?.navigation.view()
         }
 
         fn front() {
@@ -1961,13 +1980,17 @@ mod platform {
         }
 
         fn recede(presenter: &UIViewController, back: bool) {
-            let Some(marker) = MainThreadMarker::new() else {
-                return;
-            };
             let Some(view) = presenter.view() else {
                 return;
             };
-            let scale = if back { 1.0 } else { SHEET_RECEDE };
+            Self::glide_to(&view, if back { 1.0 } else { SHEET_RECEDE });
+        }
+
+        fn glide_to(view: &UIView, scale: f64) {
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let view = view.retain();
             let motion = block2::RcBlock::new(move || {
                 view.setTransform(Drag::moved(0.0, scale));
             });
@@ -2054,6 +2077,147 @@ mod platform {
                 tx: 0.0,
                 ty: by,
             }
+        }
+    }
+
+    struct Slide {
+        sheet: Retained<UINavigationController>,
+        moving: Retained<UIView>,
+        under: Retained<UIView>,
+        resting: f64,
+        fall: f64,
+    }
+
+    impl Slide {
+        fn starting() -> Option<Self> {
+            let (sheet, moving, under) = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                let sheet = stack.sheets.last()?.navigation.clone();
+                let moving = sheet.presentationController()?.presentedView()?;
+                let under = NativeStack::beneath(stack)?;
+                Some((sheet, moving, under))
+            })?;
+            let window = moving.window()?;
+            let resting = moving.frame().origin.y;
+            let fall = window.bounds().size.height - resting;
+            if fall <= 0.0 {
+                return None;
+            }
+            Some(Self {
+                sheet,
+                moving,
+                under,
+                resting,
+                fall,
+            })
+        }
+
+        fn fallen(&self) -> f64 {
+            ((self.moving.frame().origin.y - self.resting) / self.fall).clamp(0.0, 1.0)
+        }
+
+        fn scale(&self) -> f64 {
+            SHEET_RECEDE + (1.0 - SHEET_RECEDE) * self.fallen()
+        }
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "VmuxSheetDismissal"]
+        struct Dismissal;
+
+        impl Dismissal {
+            #[unsafe(method(dragged:))]
+            fn dragged(&self, sender: &UIPanGestureRecognizer) {
+                match sender.state() {
+                    UIGestureRecognizerState::Began => Self::begin(),
+                    UIGestureRecognizerState::Changed => Self::follow(),
+                    UIGestureRecognizerState::Ended
+                    | UIGestureRecognizerState::Cancelled
+                    | UIGestureRecognizerState::Failed => Self::release(),
+                    _ => {}
+                }
+            }
+        }
+
+        unsafe impl NSObjectProtocol for Dismissal {}
+
+        unsafe impl UIGestureRecognizerDelegate for Dismissal {
+            #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
+            fn simultaneous(
+                &self,
+                _gesture: &UIGestureRecognizer,
+                _other: &UIGestureRecognizer,
+            ) -> bool {
+                true
+            }
+        }
+    );
+
+    impl Dismissal {
+        fn new(marker: MainThreadMarker) -> Retained<Self> {
+            unsafe { objc2::msg_send![Self::alloc(marker), init] }
+        }
+
+        fn watch(&self, sheet: &UIView, marker: MainThreadMarker) {
+            let pan = unsafe {
+                UIPanGestureRecognizer::initWithTarget_action(
+                    UIPanGestureRecognizer::alloc(marker),
+                    Some(self),
+                    Some(sel!(dragged:)),
+                )
+            };
+            pan.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(self)));
+            sheet.addGestureRecognizer(&pan);
+        }
+
+        fn begin() {
+            SLIDING.with_borrow_mut(|held| *held = Slide::starting());
+        }
+
+        fn follow() {
+            SLIDING.with_borrow(|held| {
+                let Some(slide) = held.as_ref() else {
+                    return;
+                };
+                slide.under.setTransform(Drag::moved(0.0, slide.scale()));
+            });
+        }
+
+        fn release() {
+            let Some(slide) = SLIDING.with_borrow_mut(Option::take) else {
+                return;
+            };
+            next_turn(move || {
+                let Some(coordinator) = slide.sheet.transitionCoordinator() else {
+                    Parallax::glide_to(&slide.under, SHEET_RECEDE);
+                    return;
+                };
+                let leaving = slide.under.clone();
+                let riding = RcBlock::new(
+                    move |_: std::ptr::NonNull<
+                        objc2::runtime::ProtocolObject<
+                            dyn UIViewControllerTransitionCoordinatorContext,
+                        >,
+                    >| {
+                        leaving.setTransform(Drag::moved(0.0, 1.0));
+                    },
+                );
+                let staying = slide.under.clone();
+                let landed = RcBlock::new(
+                    move |context: std::ptr::NonNull<
+                        objc2::runtime::ProtocolObject<
+                            dyn UIViewControllerTransitionCoordinatorContext,
+                        >,
+                    >| {
+                        if unsafe { context.as_ref() }.isCancelled() {
+                            Parallax::glide_to(&staying, SHEET_RECEDE);
+                        }
+                    },
+                );
+                coordinator.animateAlongsideTransition_completion(Some(&riding), Some(&landed));
+            });
         }
     }
 
@@ -2270,6 +2434,7 @@ mod platform {
             dragging: None,
             tabs,
             delegate,
+            dismissal: Dismissal::new(marker),
             overviewing: false,
             leave,
             sweep,
