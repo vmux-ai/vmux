@@ -60,22 +60,22 @@ fn App() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {
-                Screen::<Page> { name: PageName::Tab, component: &ROUTE_SCREEN }
-                Screen::<Page> { name: PageName::Card, component: &ROUTE_SCREEN }
+                Screen::<Page> { name: PageName::Tab, component: &TAB_SCREEN }
+                Screen::<Page> { name: PageName::Card, component: &CARD_SCREEN }
                 Screen::<Page> {
                     name: PageName::Modal,
-                    component: &ROUTE_SCREEN,
+                    component: &MODAL_SCREEN,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
                     name: PageName::FormSheet,
-                    component: &ROUTE_SCREEN,
+                    component: &SHEET_SCREEN,
                     presentation: Presentation::FormSheet,
                     detents: &[0.75, 1.0],
                 }
                 Screen::<Page> {
                     name: PageName::FullScreenModal,
-                    component: &ROUTE_SCREEN,
+                    component: &FULL_SCREEN,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -222,7 +222,46 @@ fn use_panel() -> (Router<Page>, Panel) {
 
 #[screen]
 #[component]
-fn RouteScreen() -> Element {
+fn TabScreen() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[screen]
+#[component]
+fn CardScreen() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[screen]
+#[component]
+fn ModalScreen() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[screen]
+#[component]
+fn SheetScreen() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[screen]
+#[component]
+fn FullScreen() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[component]
+fn Body() -> Element {
     let (router, panel) = use_panel();
     let (hue, kind, title, trail) = (panel.hue, panel.kind, panel.title, panel.trail);
     let rungs = panel.rungs;
