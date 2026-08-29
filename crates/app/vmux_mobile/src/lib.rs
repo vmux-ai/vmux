@@ -65,11 +65,9 @@ impl Default for MobilePlugin {
 }
 
 impl MobilePlugin {
-    pub fn showing(root: &'static vmux_native::NativePage) -> Self {
-        Self {
-            root,
-            ..Self::default()
-        }
+    pub fn rooted(mut self, root: &'static vmux_native::NativePage) -> Self {
+        self.root = root;
+        self
     }
 
     pub fn serving(mut self, pages: impl Fn(&mut bevy_app::App) + Send + Sync + 'static) -> Self {
