@@ -58,6 +58,21 @@ impl<R: Route> Router<R> {
         at
     }
 
+    pub fn attached<C: bevy_ecs::prelude::Component + Clone>(&self) -> Option<C> {
+        let here = self.here.read().clone()?;
+        World::with(|world| {
+            world.read(|world| {
+                let mut screens = world.query::<(&crate::nav::Shows<R>, &C)>();
+                for (shows, found) in screens.iter(world) {
+                    if shows.0 == here {
+                        return Some(found.clone());
+                    }
+                }
+                None
+            })
+        })?
+    }
+
     pub fn pathname(&self) -> String {
         let mut crumbs = Vec::new();
         for route in self.state.read().trail.iter() {

@@ -5,7 +5,9 @@ use bevy_app::{Startup, Update};
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
-use vmux_mobile::nav::{Nav, NavPlugin, NavigationState, Presentation, Report, Route};
+use vmux_mobile::nav::{
+    Nav, NavPlugin, NavigationState, Presentation, Report, Route, Selected, Tab,
+};
 use vmux_mobile::{Router, Screen, Stack, Tabs, use_router};
 use vmux_native::screen;
 
@@ -35,7 +37,6 @@ fn main() {
         .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
-                .init_resource::<Board>()
                 .add_systems(Startup, setup)
                 .add_systems(Update, chart);
         }))
@@ -59,22 +60,22 @@ fn App() -> Element {
     rsx! {
         Stack::<Page> {
             Tabs {
-                Screen::<Page> { name: PageName::Tab, component: &TAB_SCREEN }
-                Screen::<Page> { name: PageName::Card, component: &TAB_SCREEN }
+                Screen::<Page> { name: PageName::Tab, component: &ROUTE_SCREEN }
+                Screen::<Page> { name: PageName::Card, component: &ROUTE_SCREEN }
                 Screen::<Page> {
                     name: PageName::Modal,
-                    component: &TAB_SCREEN,
+                    component: &ROUTE_SCREEN,
                     presentation: Presentation::Modal,
                 }
                 Screen::<Page> {
                     name: PageName::FormSheet,
-                    component: &TAB_SCREEN,
+                    component: &ROUTE_SCREEN,
                     presentation: Presentation::FormSheet,
                     detents: &[0.75, 1.0],
                 }
                 Screen::<Page> {
                     name: PageName::FullScreenModal,
-                    component: &TAB_SCREEN,
+                    component: &ROUTE_SCREEN,
                     presentation: Presentation::FullScreenModal,
                 }
             }
@@ -82,10 +83,7 @@ fn App() -> Element {
     }
 }
 
-#[derive(Resource, Clone, Default, PartialEq)]
-struct Board(Vec<Panel>);
-
-#[derive(Clone, Default, PartialEq)]
+#[derive(Component, Clone, Default, PartialEq)]
 struct Panel {
     hue: usize,
     kind: &'static str,
@@ -109,14 +107,34 @@ enum Step {
 
 fn chart(world: &mut World) {
     let seen = Nav::state::<Page>(world);
-    let board = Board::of(&seen);
-    if world.get_resource::<Board>() != Some(&board) {
-        world.insert_resource(board);
+    let panels = Panel::over(&seen);
+    for (entity, panel) in Panel::levels(world).into_iter().zip(panels) {
+        if world.get::<Panel>(entity) != Some(&panel) {
+            world.entity_mut(entity).insert(panel);
+        }
     }
 }
 
-impl Board {
-    fn of(seen: &NavigationState<Page>) -> Self {
+impl Panel {
+    fn levels(world: &mut World) -> Vec<Entity> {
+        let mut selected = world.query_filtered::<Entity, (With<Tab>, With<Selected>)>();
+        let Some(tab) = selected.iter(world).next() else {
+            return Vec::new();
+        };
+        let mut chain = vec![tab];
+        let mut children = world.query::<&Children>();
+        let mut at = tab;
+        while let Ok(kids) = children.get(world, at) {
+            let Some(next) = kids.last().copied() else {
+                break;
+            };
+            chain.push(next);
+            at = next;
+        }
+        chain
+    }
+
+    fn over(seen: &NavigationState<Page>) -> Vec<Panel> {
         let (mut cards, mut modals, mut sheets, mut fulls) = (0, 0, 0, 0);
         let mut crumbs = Vec::new();
         let mut panels = Vec::new();
@@ -152,11 +170,7 @@ impl Board {
         for panel in &mut panels {
             panel.trail = trail.clone();
         }
-        Self(panels)
-    }
-
-    fn at(&self, at: usize) -> Panel {
-        self.0.get(at).cloned().unwrap_or_default()
+        panels
     }
 
     fn elide(mut crumbs: Vec<String>) -> String {
@@ -203,14 +217,12 @@ impl Board {
 
 fn use_panel() -> (Router<Page>, Panel) {
     let router = use_router::<Page>();
-    let at = router.position();
-    let board: Board = vmux_mobile::resource().unwrap_or_default();
-    (router, board.at(at))
+    (router, router.attached().unwrap_or_default())
 }
 
 #[screen]
 #[component]
-fn TabScreen() -> Element {
+fn RouteScreen() -> Element {
     let (router, panel) = use_panel();
     let (hue, kind, title, trail) = (panel.hue, panel.kind, panel.title, panel.trail);
     let rungs = panel.rungs;
@@ -235,23 +247,23 @@ fn TabScreen() -> Element {
                 div { class: "mt-2 truncate text-sm text-muted-foreground", "{trail}" }
 
                 div { class: "my-auto flex flex-wrap justify-center gap-2",
-                    Key {
+                    Button {
                         label: "Card",
-                        onpick: move |_| router.push(Page::Card(panel.card.clone())),
+                        onpress: move |_| router.push(Page::Card(panel.card.clone())),
                     }
-                    Key {
+                    Button {
                         label: "Modal",
-                        onpick: move |_| router.push(Page::Modal(panel.modal.clone())),
+                        onpress: move |_| router.push(Page::Modal(panel.modal.clone())),
                     }
-                    Key {
+                    Button {
                         label: "Form Sheet",
-                        onpick: move |_| {
+                        onpress: move |_| {
                             router.push(Page::FormSheet(panel.sheet.clone()))
                         },
                     }
-                    Key {
+                    Button {
                         label: "Full Screen Modal",
-                        onpick: move |_| {
+                        onpress: move |_| {
                             router.push(Page::FullScreenModal(panel.full.clone()))
                         },
                     }
@@ -279,11 +291,11 @@ fn Rung(step: Step) -> Element {
 }
 
 #[component]
-fn Key(label: String, onpick: EventHandler<()>) -> Element {
+fn Button(label: String, onpress: EventHandler<()>) -> Element {
     rsx! {
         button {
             class: "rounded-lg border border-border bg-card px-4 py-3 text-base font-medium backdrop-blur-lg transition active:scale-95 active:bg-accent",
-            onclick: move |_| onpick.call(()),
+            onclick: move |_| onpress.call(()),
             "{label}"
         }
     }
