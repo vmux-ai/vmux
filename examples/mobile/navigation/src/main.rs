@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use vmux_mobile::MobilePlugin;
 use vmux_mobile::nav::{Depth, NavPlugin, Report, Route, Shows, Trail};
 use vmux_mobile::{Router, Stack, Tabs, use_router};
-use vmux_native::{screen, screens};
+use vmux_native::screen;
 
 const BACKDROP: (u8, u8, u8, u8) = (10, 10, 10, 255);
 const SEEDED: usize = 1;
@@ -241,46 +241,58 @@ fn use_shown() -> (Router<Page>, Shown) {
     (router, shown)
 }
 
-#[screens]
-mod page {
-    #[screen(holds = usize, title = "Tab {0}", blank)]
-    #[component]
-    fn Tab() -> Element {
-        rsx! {
-            Body {}
-        }
-    }
+#[derive(Clone, PartialEq, Route)]
+enum Page {
+    #[blank]
+    #[route("Tab {0}")]
+    Tab(usize),
+    #[route("{0}")]
+    Card(String),
+    #[route("{0}")]
+    Modal(String),
+    #[route("{0}")]
+    FormSheet(String),
+    #[route("{0}")]
+    FullScreenModal(String),
+}
 
-    #[screen(holds = String, title = "{0}")]
-    #[component]
-    fn Card() -> Element {
-        rsx! {
-            Body {}
-        }
+#[screen(PageName::Tab)]
+#[component]
+fn Tab() -> Element {
+    rsx! {
+        Body {}
     }
+}
 
-    #[screen(holds = String, title = "{0}", presentation = Modal)]
-    #[component]
-    fn Modal() -> Element {
-        rsx! {
-            Body {}
-        }
+#[screen(PageName::Card)]
+#[component]
+fn Card() -> Element {
+    rsx! {
+        Body {}
     }
+}
 
-    #[screen(holds = String, title = "{0}", presentation = FormSheet, detents = [0.75, 1.0])]
-    #[component]
-    fn FormSheet() -> Element {
-        rsx! {
-            Body {}
-        }
+#[screen(PageName::Modal, presentation = Modal)]
+#[component]
+fn Modal() -> Element {
+    rsx! {
+        Body {}
     }
+}
 
-    #[screen(holds = String, title = "{0}", presentation = FullScreenModal)]
-    #[component]
-    fn FullScreenModal() -> Element {
-        rsx! {
-            Body {}
-        }
+#[screen(PageName::FormSheet, presentation = FormSheet, detents = [0.75, 1.0])]
+#[component]
+fn FormSheet() -> Element {
+    rsx! {
+        Body {}
+    }
+}
+
+#[screen(PageName::FullScreenModal, presentation = FullScreenModal)]
+#[component]
+fn FullScreenModal() -> Element {
+    rsx! {
+        Body {}
     }
 }
 
