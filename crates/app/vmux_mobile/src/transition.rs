@@ -1308,7 +1308,7 @@ mod platform {
             if let Some(view) = column.navigation.view() {
                 view.setTransform(Drag::sideways(0.0));
                 view.setHidden(false);
-                view.setAlpha(if entry == Entry::Fresh { 1.0 } else { 0.0 });
+                view.setAlpha(if entry.sinks() { 0.0 } else { 1.0 });
             }
             let pending = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
@@ -1346,6 +1346,7 @@ mod platform {
                 if entry.sinks() {
                     Parallax::sink();
                 }
+                Parallax::atop();
                 NativeStack::front();
                 if let Some(rest) = queued.borrow_mut().take() {
                     NativeStack::present_all(rest, entry);
@@ -1356,6 +1357,12 @@ mod platform {
                 entry == Entry::Fresh,
                 Some(&raised),
             );
+            Parallax::atop();
+            NativeStack::front();
+            next_turn(|| {
+                Parallax::atop();
+                NativeStack::front();
+            });
             if entry.sinks() {
                 Parallax::sink();
                 next_turn(Parallax::sink);
@@ -1875,6 +1882,18 @@ mod platform {
             if let Some(stale) = stale {
                 stale.discard();
             }
+        }
+
+        fn atop() {
+            STACK.with_borrow(|stack| {
+                let Some(stack) = stack.as_ref() else {
+                    return;
+                };
+                let Some(arriving) = stack.arriving.as_ref() else {
+                    return;
+                };
+                arriving.show();
+            });
         }
 
         fn show(&self) {
