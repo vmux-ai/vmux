@@ -161,10 +161,7 @@ pub fn Tabs(children: Element) -> Element {
 }
 
 #[component]
-pub fn Screen<N: ScreenName>(
-    page: &'static ScreenPage<N>,
-    #[props(default)] action: Option<&'static str>,
-) -> Element {
+pub fn Screen<N: ScreenName>(page: &'static ScreenPage<N>) -> Element {
     use_effect(move || {
         World::with(|world| {
             world.send(Declare::<N::Route> {
@@ -172,7 +169,6 @@ pub fn Screen<N: ScreenName>(
                 component: page.page,
                 presentation: page.presentation,
                 detents: page.detents,
-                action,
             })
         });
     });

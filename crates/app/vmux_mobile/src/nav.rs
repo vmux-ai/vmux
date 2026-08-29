@@ -102,7 +102,6 @@ pub struct Declare<S: Route> {
     pub component: &'static vmux_native::NativePage,
     pub presentation: Presentation,
     pub detents: &'static [f64],
-    pub action: Option<&'static str>,
 }
 
 #[derive(PartialEq)]
@@ -117,7 +116,6 @@ pub struct ScreenOptions {
     pub component: &'static vmux_native::NativePage,
     pub presentation: Presentation,
     pub detents: &'static [f64],
-    pub action: Option<&'static str>,
 }
 
 #[derive(Resource)]
@@ -441,7 +439,6 @@ impl Nav {
             component,
             presentation,
             detents,
-            action,
         } in asked.read()
         {
             if screens.of(*name).is_some() {
@@ -453,7 +450,6 @@ impl Nav {
                     component,
                     presentation: *presentation,
                     detents,
-                    action: *action,
                 },
             ));
         }
@@ -615,7 +611,6 @@ impl Nav {
                 key: entity.to_bits(),
                 page: options.component,
                 title: screen.title(),
-                action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
                 seat: Seat::taken(&screen),
@@ -676,7 +671,6 @@ impl Nav {
                 key: spawned.to_bits(),
                 page: options.component,
                 title: screen.title(),
-                action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
                 seat: Seat::taken(screen),
@@ -694,7 +688,6 @@ impl Nav {
                 key: spawned.to_bits(),
                 page: options.component,
                 title: screen.title(),
-                action: options.action,
                 presentation: options.presentation,
                 detents: options.detents,
                 seat: Seat::taken(screen),

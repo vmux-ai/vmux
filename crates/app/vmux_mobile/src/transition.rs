@@ -25,7 +25,6 @@ pub struct Level {
     pub key: u64,
     pub page: &'static NativePage,
     pub title: String,
-    pub action: Option<&'static str>,
     pub presentation: Presentation,
     pub detents: &'static [f64],
     pub seat: vmux_native::Instance,
@@ -56,12 +55,11 @@ mod platform {
     use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
     use objc2_quartz_core::CATransform3D;
     use objc2_ui_kit::{
-        UIAction, UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
-        UIBarButtonSystemItem, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState,
-        UIEdgeInsets, UIFont, UIGestureRecognizer, UIGestureRecognizerDelegate,
-        UIGestureRecognizerState, UIGlassContainerEffect, UIGlassEffect, UIImage,
-        UILayoutConstraintAxis, UIMenu, UIMenuElement, UIMenuElementAttributes,
-        UIModalPresentationStyle, UINavigationBarAppearance, UINavigationController,
+        UIAction, UIAdaptivePresentationControllerDelegate, UIButton, UIButtonType, UIColor,
+        UIControlEvents, UIControlState, UIEdgeInsets, UIFont, UIGestureRecognizer,
+        UIGestureRecognizerDelegate, UIGestureRecognizerState, UIGlassContainerEffect,
+        UIGlassEffect, UIImage, UILayoutConstraintAxis, UIMenu, UIMenuElement,
+        UIMenuElementAttributes, UIModalPresentationStyle, UINavigationController,
         UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
         UISheetPresentationController, UISheetPresentationControllerDelegate,
         UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
@@ -78,6 +76,13 @@ mod platform {
     const TAB_BAR_HEIGHT: f64 = 56.0;
     const TAB_BAR_EDGE: f64 = 16.0;
     const TAB_BAR_GAP: f64 = 10.0;
+    const MARK_BAR_HEIGHT: f64 = 26.0;
+    const MARK_HEIGHT: f64 = 4.0;
+    const MARK_GAP: f64 = 6.0;
+    const MARK_INSET: f64 = 14.0;
+    const MARK_LIT: f64 = 0.9;
+    const MARK_DIM: f64 = 0.25;
+    const MARK_CLEARANCE: f64 = TAB_BAR_GAP + MARK_BAR_HEIGHT;
     const DIP: f64 = 0.06;
     const SHEET_FADE: f64 = 0.55;
     const SHEET_RECEDE: f64 = 0.92;
@@ -106,6 +111,7 @@ mod platform {
     struct Held {
         controller: Retained<UIViewController>,
         web: Option<WebView>,
+        title: String,
     }
 
     impl Held {
@@ -113,7 +119,6 @@ mod platform {
             level: Level,
             root_view: &UIView,
             backdrop: (u8, u8, u8, u8),
-            delegate: &NavDelegate,
             marker: MainThreadMarker,
         ) -> Option<Self> {
             let web = Surfaces::build(level.page, level.seat)?;
@@ -128,17 +133,10 @@ mod platform {
                 None,
             );
             controller.setView(Some(&view));
-            let item = controller.navigationItem();
-            item.setTitle(Some(&NSString::from_str(&level.title)));
-            if let Some(action) = level.action {
-                item.setRightBarButtonItem(Some(&Bar::button(action, delegate, marker)));
-            }
-            if !level.presentation.pushes() {
-                item.setRightBarButtonItem(Some(&Bar::closer(delegate, marker)));
-            }
             Some(Self {
                 controller,
                 web: Some(web),
+                title: level.title,
             })
         }
     }
@@ -146,35 +144,6 @@ mod platform {
     struct Bar;
 
     impl Bar {
-        fn button(
-            action: &'static str,
-            delegate: &NavDelegate,
-            marker: MainThreadMarker,
-        ) -> Retained<UIBarButtonItem> {
-            let item = unsafe {
-                UIBarButtonItem::initWithTitle_style_target_action(
-                    UIBarButtonItem::alloc(marker),
-                    Some(&NSString::from_str(action)),
-                    UIBarButtonItemStyle::Plain,
-                    Some(delegate),
-                    Some(sel!(barTapped:)),
-                )
-            };
-            item.setTag(Self::remember(action));
-            item
-        }
-
-        fn closer(delegate: &NavDelegate, marker: MainThreadMarker) -> Retained<UIBarButtonItem> {
-            unsafe {
-                UIBarButtonItem::initWithBarButtonSystemItem_target_action(
-                    UIBarButtonItem::alloc(marker),
-                    UIBarButtonSystemItem::Close,
-                    Some(delegate),
-                    Some(sel!(closeTapped:)),
-                )
-            }
-        }
-
         fn remember(action: &'static str) -> isize {
             ACTIONS.with_borrow_mut(|known| {
                 for (at, seen) in known.iter().enumerate() {
@@ -189,15 +158,6 @@ mod platform {
 
         fn recall(tag: isize) -> Option<&'static str> {
             ACTIONS.with_borrow(|known| known.get(tag as usize).copied())
-        }
-
-        fn glassy(navigation: &UINavigationController, marker: MainThreadMarker) {
-            navigation.setNavigationBarHidden(false);
-            let appearance = UINavigationBarAppearance::new(marker);
-            appearance.configureWithDefaultBackground();
-            let bar = navigation.navigationBar();
-            bar.setStandardAppearance(&appearance);
-            bar.setScrollEdgeAppearance(Some(&appearance));
         }
     }
 
@@ -214,13 +174,7 @@ mod platform {
                 UINavigationController::alloc(marker),
                 &root.controller,
             );
-            Bar::glassy(&navigation, marker);
-            navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
-                top: 0.0,
-                left: 0.0,
-                bottom: TAB_BAR_HEIGHT + TAB_BAR_GAP * 2.0,
-                right: 0.0,
-            });
+            navigation.setNavigationBarHidden(true);
             unsafe {
                 navigation.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(delegate)));
             }
@@ -236,6 +190,15 @@ mod platform {
             }
         }
 
+        fn clear(&self, top: f64) {
+            self.navigation.setAdditionalSafeAreaInsets(UIEdgeInsets {
+                top,
+                left: 0.0,
+                bottom: 0.0,
+                right: 0.0,
+            });
+        }
+
         fn owns(&self, navigation: &UINavigationController) -> bool {
             std::ptr::eq(
                 &*self.navigation as *const UINavigationController,
@@ -244,8 +207,180 @@ mod platform {
         }
     }
 
+    struct Pane;
+
+    impl Pane {
+        fn glass(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
+            let effect = UIGlassEffect::new(marker);
+            effect.setInteractive(true);
+            let pane = UIVisualEffectView::initWithEffect(
+                UIVisualEffectView::alloc(marker),
+                Some(effect.as_super()),
+            );
+            let layer = pane.layer();
+            layer.setCornerRadius(height / 2.0);
+            layer.setMasksToBounds(true);
+            pane
+        }
+
+        fn glyph(
+            name: &str,
+            delegate: &NavDelegate,
+            action: objc2::runtime::Sel,
+            marker: MainThreadMarker,
+        ) -> Retained<UIButton> {
+            let button = UIButton::buttonWithType(UIButtonType::System, marker);
+            if let Some(glyph) = UIImage::systemImageNamed(&NSString::from_str(name)) {
+                button.setImage_forState(Some(&glyph), UIControlState::Normal);
+            }
+            unsafe { button.setTintColor(Some(&UIColor::labelColor())) };
+            unsafe {
+                button.addTarget_action_forControlEvents(
+                    Some(delegate),
+                    action,
+                    UIControlEvents::TouchUpInside,
+                );
+            }
+            button
+        }
+
+        fn fill(button: &UIButton, host: &UIVisualEffectView) {
+            button.setFrame(host.bounds());
+            button.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            host.contentView().addSubview(button);
+        }
+    }
+
+    struct Indicator {
+        capsule: Retained<UIVisualEffectView>,
+        lines: Retained<UIStackView>,
+    }
+
+    impl Indicator {
+        fn over(root_view: &UIView, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
+            let bounds = root_view.bounds();
+            let above = root_view.safeAreaInsets().top;
+            let width = bounds.size.width;
+
+            let capsule = Pane::glass(MARK_BAR_HEIGHT, marker);
+            capsule.setFrame(CGRect {
+                origin: CGPoint {
+                    x: TAB_BAR_EDGE,
+                    y: above + TAB_BAR_GAP,
+                },
+                size: CGSize {
+                    width: width - TAB_BAR_EDGE * 2.0,
+                    height: MARK_BAR_HEIGHT,
+                },
+            });
+            capsule.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleBottomMargin,
+            );
+            capsule.setHidden(true);
+
+            let lines = UIStackView::initWithFrame(
+                UIStackView::alloc(marker),
+                CGRect {
+                    origin: CGPoint {
+                        x: MARK_INSET,
+                        y: (MARK_BAR_HEIGHT - MARK_HEIGHT) / 2.0,
+                    },
+                    size: CGSize {
+                        width: width - TAB_BAR_EDGE * 2.0 - MARK_INSET * 2.0,
+                        height: MARK_HEIGHT,
+                    },
+                },
+            );
+            lines.setAxis(UILayoutConstraintAxis::Horizontal);
+            lines.setDistribution(UIStackViewDistribution::FillEqually);
+            lines.setSpacing(MARK_GAP);
+            lines.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth
+                    | UIViewAutoresizing::FlexibleTopMargin
+                    | UIViewAutoresizing::FlexibleBottomMargin,
+            );
+            capsule.contentView().addSubview(&lines);
+
+            let tap = unsafe {
+                UITapGestureRecognizer::initWithTarget_action(
+                    UITapGestureRecognizer::alloc(marker),
+                    Some(delegate),
+                    Some(sel!(linesTapped:)),
+                )
+            };
+            capsule.addGestureRecognizer(&tap);
+
+            match root_view.window() {
+                Some(window) => window.addSubview(&capsule),
+                None => root_view.addSubview(&capsule),
+            }
+            Self { capsule, lines }
+        }
+
+        fn show(&self, count: usize, at: usize) {
+            self.capsule.setHidden(count < 2);
+            if count < 2 {
+                return;
+            }
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let standing = self.lines.arrangedSubviews();
+            if standing.count() != count {
+                for spent in standing.iter() {
+                    self.lines.removeArrangedSubview(&spent);
+                    spent.removeFromSuperview();
+                }
+                for _ in 0..count {
+                    let mark = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
+                    mark.layer().setCornerRadius(MARK_HEIGHT / 2.0);
+                    self.lines.addArrangedSubview(&mark);
+                }
+            }
+            for (index, mark) in self.lines.arrangedSubviews().iter().enumerate() {
+                let lit = if index == at { MARK_LIT } else { MARK_DIM };
+                mark.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(1.0, lit)));
+            }
+        }
+
+        fn reached(&self, sender: &UITapGestureRecognizer, count: usize) -> Option<usize> {
+            if count == 0 {
+                return None;
+            }
+            let across = self.lines.bounds().size.width;
+            if across <= 0.0 {
+                return None;
+            }
+            let x = sender.locationInView(Some(&self.lines)).x;
+            let step = across / count as f64;
+            Some(((x / step).floor().max(0.0) as usize).min(count - 1))
+        }
+
+        fn front(&self) {
+            let Some(parent) = self.capsule.superview() else {
+                return;
+            };
+            parent.bringSubviewToFront(&self.capsule);
+        }
+    }
+
+    enum Retreat {
+        Close,
+        Pop(Retained<UINavigationController>),
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    struct Slots {
+        centre: bool,
+        browse: bool,
+        back: bool,
+    }
+
     struct Tabs {
         strip: Retained<UIVisualEffectView>,
+        back: Retained<UIVisualEffectView>,
         capsule: Retained<UIVisualEffectView>,
         row: Retained<UIStackView>,
         circle: Retained<UIVisualEffectView>,
@@ -255,7 +390,7 @@ mod platform {
     }
 
     impl Tabs {
-        fn under(root_view: &UIView, marker: MainThreadMarker) -> Self {
+        fn under(root_view: &UIView, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
             let bounds = root_view.bounds();
             let below = root_view.safeAreaInsets().bottom;
             let (width, height) = (bounds.size.width, bounds.size.height);
@@ -280,7 +415,24 @@ mod platform {
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleTopMargin,
             );
 
-            let circle = Self::pane(TAB_BAR_HEIGHT, marker);
+            let back = Pane::glass(TAB_BAR_HEIGHT, marker);
+            back.setFrame(CGRect {
+                origin: CGPoint {
+                    x: TAB_BAR_EDGE,
+                    y: 0.0,
+                },
+                size: CGSize {
+                    width: TAB_BAR_HEIGHT,
+                    height: TAB_BAR_HEIGHT,
+                },
+            });
+            back.setHidden(true);
+            Pane::fill(
+                &Pane::glyph("chevron.left", delegate, sel!(backTapped:), marker),
+                &back,
+            );
+
+            let circle = Pane::glass(TAB_BAR_HEIGHT, marker);
             circle.setFrame(CGRect {
                 origin: CGPoint {
                     x: width - TAB_BAR_EDGE - TAB_BAR_HEIGHT,
@@ -293,7 +445,7 @@ mod platform {
             });
             circle.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
 
-            let browse = Self::pane(TAB_BAR_HEIGHT, marker);
+            let browse = Pane::glass(TAB_BAR_HEIGHT, marker);
             browse.setFrame(CGRect {
                 origin: CGPoint {
                     x: width - TAB_BAR_EDGE - TAB_BAR_HEIGHT * 2.0 - TAB_BAR_GAP,
@@ -306,7 +458,7 @@ mod platform {
             });
             browse.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
 
-            let capsule = Self::pane(TAB_BAR_HEIGHT, marker);
+            let capsule = Pane::glass(TAB_BAR_HEIGHT, marker);
             let across = width - TAB_BAR_EDGE * 2.0 - TAB_BAR_HEIGHT * 2.0 - TAB_BAR_GAP * 2.0;
             capsule.setFrame(CGRect {
                 origin: CGPoint {
@@ -338,6 +490,7 @@ mod platform {
             capsule.contentView().addSubview(&row);
 
             strip.contentView().addSubview(&capsule);
+            strip.contentView().addSubview(&back);
             strip.contentView().addSubview(&browse);
             strip.contentView().addSubview(&circle);
             match root_view.window() {
@@ -346,6 +499,7 @@ mod platform {
             }
             Self {
                 strip,
+                back,
                 capsule,
                 row,
                 circle,
@@ -391,19 +545,6 @@ mod platform {
                 }
             }
             false
-        }
-
-        fn pane(height: f64, marker: MainThreadMarker) -> Retained<UIVisualEffectView> {
-            let effect = UIGlassEffect::new(marker);
-            effect.setInteractive(false);
-            let pane = UIVisualEffectView::initWithEffect(
-                UIVisualEffectView::alloc(marker),
-                Some(effect.as_super()),
-            );
-            let layer = pane.layer();
-            layer.setCornerRadius(height / 2.0);
-            layer.setMasksToBounds(true);
-            pane
         }
 
         fn show(
@@ -491,31 +632,34 @@ mod platform {
             self.strip
                 .setHidden(self.ids.is_empty() && centre.is_none());
 
-            let wanted = (centre.is_some(), self.ids.len() >= 2);
-            let settled =
-                (self.circle.isHidden(), self.browse.isHidden()) == (!wanted.0, !wanted.1);
-            for (pane, wanted) in [(&self.circle, wanted.0), (&self.browse, wanted.1)] {
-                if wanted && pane.isHidden() {
+            let wanted = Slots {
+                centre: centre.is_some(),
+                browse: self.ids.len() >= 2,
+                back: !self.back.isHidden(),
+            };
+            if self.slots() == wanted {
+                self.lay_out(wanted);
+                return;
+            }
+            for (pane, shown) in [(&self.circle, wanted.centre), (&self.browse, wanted.browse)] {
+                if shown && pane.isHidden() {
                     pane.setAlpha(0.0);
                     pane.setHidden(false);
                 }
             }
-            if settled {
-                self.lay_out(wanted);
-                return;
-            }
 
-            let (circle, browse) = (self.circle.clone(), self.browse.clone());
+            let (back, circle, browse) =
+                (self.back.clone(), self.circle.clone(), self.browse.clone());
             let (capsule, strip) = (self.capsule.clone(), self.strip.clone());
             let dressing = block2::RcBlock::new(move || {
-                circle.setAlpha(if wanted.0 { 1.0 } else { 0.0 });
-                browse.setAlpha(if wanted.1 { 1.0 } else { 0.0 });
-                Tabs::place(&strip, &capsule, &circle, &browse, wanted);
+                circle.setAlpha(if wanted.centre { 1.0 } else { 0.0 });
+                browse.setAlpha(if wanted.browse { 1.0 } else { 0.0 });
+                Tabs::place(&strip, &capsule, &back, &circle, &browse, wanted);
             });
             let (circle, browse) = (self.circle.clone(), self.browse.clone());
             let dressed = block2::RcBlock::new(move |_| {
-                circle.setHidden(!wanted.0);
-                browse.setHidden(!wanted.1);
+                circle.setHidden(!wanted.centre);
+                browse.setHidden(!wanted.browse);
             });
             UIView::animateWithDuration_delay_options_animations_completion(
                 0.24,
@@ -527,10 +671,52 @@ mod platform {
             );
         }
 
-        fn lay_out(&self, wanted: (bool, bool)) {
+        fn slots(&self) -> Slots {
+            Slots {
+                centre: !self.circle.isHidden(),
+                browse: !self.browse.isHidden(),
+                back: !self.back.isHidden(),
+            }
+        }
+
+        fn reveal(&self, back: bool) {
+            let mut wanted = self.slots();
+            if wanted.back == back {
+                return;
+            }
+            if back {
+                self.back.setAlpha(0.0);
+                self.back.setHidden(false);
+            }
+            wanted.back = back;
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let showing = self.back.clone();
+            let (capsule, strip) = (self.capsule.clone(), self.strip.clone());
+            let (back_pane, circle, browse) =
+                (self.back.clone(), self.circle.clone(), self.browse.clone());
+            let dressing = block2::RcBlock::new(move || {
+                showing.setAlpha(if back { 1.0 } else { 0.0 });
+                Tabs::place(&strip, &capsule, &back_pane, &circle, &browse, wanted);
+            });
+            let hiding = self.back.clone();
+            let dressed = block2::RcBlock::new(move |_| hiding.setHidden(!back));
+            UIView::animateWithDuration_delay_options_animations_completion(
+                0.24,
+                0.0,
+                UIViewAnimationOptions::CurveEaseOut,
+                &dressing,
+                Some(&dressed),
+                marker,
+            );
+        }
+
+        fn lay_out(&self, wanted: Slots) {
             Self::place(
                 &self.strip,
                 &self.capsule,
+                &self.back,
                 &self.circle,
                 &self.browse,
                 wanted,
@@ -540,36 +726,42 @@ mod platform {
         fn place(
             strip: &UIVisualEffectView,
             capsule: &UIVisualEffectView,
+            back: &UIVisualEffectView,
             circle: &UIVisualEffectView,
             browse: &UIVisualEffectView,
-            wanted: (bool, bool),
+            wanted: Slots,
         ) {
             let width = strip.bounds().size.width;
             let square = CGSize {
                 width: TAB_BAR_HEIGHT,
                 height: TAB_BAR_HEIGHT,
             };
-            let mut edge = TAB_BAR_EDGE;
-            for (pane, shown) in [(circle, wanted.0), (browse, wanted.1)] {
+            let mut right = TAB_BAR_EDGE;
+            for (pane, shown) in [(circle, wanted.centre), (browse, wanted.browse)] {
                 if !shown {
                     continue;
                 }
                 pane.setFrame(CGRect {
                     origin: CGPoint {
-                        x: width - edge - TAB_BAR_HEIGHT,
+                        x: width - right - TAB_BAR_HEIGHT,
                         y: 0.0,
                     },
                     size: square,
                 });
-                edge += TAB_BAR_HEIGHT + TAB_BAR_GAP;
+                right += TAB_BAR_HEIGHT + TAB_BAR_GAP;
+            }
+            let mut left = TAB_BAR_EDGE;
+            if wanted.back {
+                back.setFrame(CGRect {
+                    origin: CGPoint { x: left, y: 0.0 },
+                    size: square,
+                });
+                left += TAB_BAR_HEIGHT + TAB_BAR_GAP;
             }
             capsule.setFrame(CGRect {
-                origin: CGPoint {
-                    x: TAB_BAR_EDGE,
-                    y: 0.0,
-                },
+                origin: CGPoint { x: left, y: 0.0 },
                 size: CGSize {
-                    width: width - TAB_BAR_EDGE - edge,
+                    width: width - left - right,
                     height: TAB_BAR_HEIGHT,
                 },
             });
@@ -622,6 +814,16 @@ mod platform {
             };
             parent.bringSubviewToFront(&self.strip);
         }
+
+        fn name(&self, text: &str) {
+            let Some(showing) = self.row.arrangedSubviews().iter().next() else {
+                return;
+            };
+            let Ok(button) = showing.downcast::<UIButton>() else {
+                return;
+            };
+            button.setTitle_forState(Some(&NSString::from_str(text)), UIControlState::Normal);
+        }
     }
 
     pub struct NativeStack {
@@ -638,6 +840,7 @@ mod platform {
         seated: Option<String>,
         dragging: Option<Drag>,
         tabs: Tabs,
+        indicator: Indicator,
         delegate: Retained<NavDelegate>,
         dismissal: Retained<Dismissal>,
         overviewing: bool,
@@ -1163,7 +1366,7 @@ mod platform {
 
             let mut held = Vec::new();
             for level in levels {
-                let Some(drawn) = Held::draw(level, &pager, backdrop, &delegate, marker) else {
+                let Some(drawn) = Held::draw(level, &pager, backdrop, marker) else {
                     continue;
                 };
                 held.push(drawn);
@@ -1218,6 +1421,7 @@ mod platform {
                     return;
                 };
                 navigation.pushViewController_animated(&top, true);
+                Self::chrome();
                 Self::front();
             });
         }
@@ -1234,6 +1438,7 @@ mod platform {
                 return;
             };
             let _ = navigation.popViewControllerAnimated(true);
+            Self::chrome();
         }
 
         pub fn present(level: Level) {
@@ -1242,7 +1447,7 @@ mod platform {
 
         fn present_all(mut levels: Vec<Level>, entry: Entry) {
             if levels.is_empty() {
-                Self::label();
+                Self::chrome();
                 match entry {
                     Entry::Rising => Parallax::arrive(),
                     Entry::Seated => Parallax::unghost(),
@@ -1274,33 +1479,75 @@ mod platform {
             });
         }
 
-        fn label() {
+        fn chrome() {
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
                     return;
                 };
-                let Some(marker) = MainThreadMarker::new() else {
-                    return;
+                stack.tabs.reveal(Self::retreats(stack));
+                if let Some(showing) = Self::showing(stack) {
+                    stack.tabs.name(showing);
+                }
+                let sheets = stack.sheets.len();
+                let lines = match sheets > 1 {
+                    true => sheets,
+                    false => stack.tabs.ids.len(),
                 };
-                let many = stack.sheets.len() > 1;
-                for column in &stack.sheets {
-                    let Some(held) = column.levels.first() else {
-                        continue;
-                    };
-                    let item = held.controller.navigationItem();
-                    if many {
-                        let turn = [
-                            Bar::button(super::ROTATE_BACK, &stack.delegate, marker),
-                            Bar::button(super::ROTATE, &stack.delegate, marker),
-                        ];
-                        item.setLeftBarButtonItems(Some(
-                            &objc2_foundation::NSArray::from_retained_slice(&turn),
-                        ));
-                    } else {
-                        item.setLeftBarButtonItems(None);
-                    }
+                match sheets > 1 {
+                    true => stack.indicator.show(sheets, sheets - 1),
+                    false => stack.indicator.show(lines, stack.tabs.at),
+                }
+                let clearance = match lines > 1 {
+                    true => MARK_CLEARANCE,
+                    false => 0.0,
+                };
+                for column in stack.stacks.values().chain(stack.sheets.iter()) {
+                    column.clear(clearance);
                 }
             });
+        }
+
+        fn showing(stack: &NativeStack) -> Option<&str> {
+            let column = match stack.sheets.last() {
+                Some(sheet) => sheet,
+                None => stack.stacks.get(stack.seated.as_ref()?)?,
+            };
+            Some(column.levels.last()?.title.as_str())
+        }
+
+        fn retreats(stack: &NativeStack) -> bool {
+            if !stack.sheets.is_empty() {
+                return true;
+            }
+            let Some(seated) = stack.seated.as_ref() else {
+                return false;
+            };
+            stack
+                .stacks
+                .get(seated)
+                .is_some_and(|column| column.levels.len() > 1)
+        }
+
+        fn retreat() {
+            let leaving = STACK.with_borrow(|stack| {
+                let stack = stack.as_ref()?;
+                if !stack.sheets.is_empty() {
+                    return Some(Retreat::Close);
+                }
+                let seated = stack.seated.as_ref()?;
+                let column = stack.stacks.get(seated)?;
+                match column.levels.len() > 1 {
+                    true => Some(Retreat::Pop(column.navigation.clone())),
+                    false => None,
+                }
+            });
+            match leaving {
+                Some(Retreat::Close) => CLOSED.set(true),
+                Some(Retreat::Pop(navigation)) => {
+                    let _ = navigation.popViewControllerAnimated(true);
+                }
+                None => {}
+            }
         }
 
         fn mount(
@@ -1368,6 +1615,7 @@ mod platform {
                 entry == Entry::Fresh,
                 Some(&raised),
             );
+            NativeStack::ride(&sheet);
             Parallax::atop();
             NativeStack::front();
             next_turn(|| {
@@ -1396,7 +1644,7 @@ mod platform {
             departing
                 .navigation
                 .dismissViewControllerAnimated_completion(true, None);
-            Self::label();
+            Self::chrome();
             Self::front();
         }
 
@@ -1439,12 +1687,14 @@ mod platform {
                 let delegate = stack.delegate.clone();
                 stack.tabs.show(entries, centre, &delegate, marker);
                 stack.tabs.front();
+                stack.indicator.front();
                 if !stack.overviewing {
                     return None;
                 }
                 Overview::deal(stack);
                 Some((Overview::plan(stack, 0.0), marker))
             });
+            Self::chrome();
             let Some((places, marker)) = settling else {
                 return;
             };
@@ -1503,26 +1753,51 @@ mod platform {
             stack.stacks.get(seated)?.navigation.view()
         }
 
+        fn ride(sheet: &UINavigationController) {
+            let Some(coordinator) = sheet.transitionCoordinator() else {
+                return;
+            };
+            let raising = RcBlock::new(
+                move |_: std::ptr::NonNull<
+                    objc2::runtime::ProtocolObject<
+                        dyn UIViewControllerTransitionCoordinatorContext,
+                    >,
+                >| {
+                    NativeStack::front();
+                },
+            );
+            let raised = RcBlock::new(
+                move |_: std::ptr::NonNull<
+                    objc2::runtime::ProtocolObject<
+                        dyn UIViewControllerTransitionCoordinatorContext,
+                    >,
+                >| {
+                    NativeStack::front();
+                },
+            );
+            coordinator.animateAlongsideTransition_completion(Some(&raising), Some(&raised));
+        }
+
         fn front() {
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
                     return;
                 };
                 stack.tabs.front();
+                stack.indicator.front();
             });
         }
 
         fn draw(level: Level) -> Option<Held> {
-            let (pager, backdrop, delegate, marker) = STACK.with_borrow(|stack| {
+            let (pager, backdrop, marker) = STACK.with_borrow(|stack| {
                 let stack = stack.as_ref()?;
                 Some((
                     stack.pager.clone(),
                     stack.backdrop,
-                    stack.delegate.clone(),
                     MainThreadMarker::new()?,
                 ))
             })?;
-            Held::draw(level, &pager, backdrop, &delegate, marker)
+            Held::draw(level, &pager, backdrop, marker)
         }
 
         fn detents(
@@ -2228,17 +2503,40 @@ mod platform {
         struct NavDelegate;
 
         impl NavDelegate {
-            #[unsafe(method(barTapped:))]
-            fn bar_tapped(&self, sender: &UIBarButtonItem) {
-                let Some(action) = Bar::recall(sender.tag()) else {
-                    return;
-                };
-                TAPPED.with_borrow_mut(|queued| queued.push(action));
+            #[unsafe(method(backTapped:))]
+            fn back_tapped(&self, _sender: &UIButton) {
+                NativeStack::retreat();
             }
 
-            #[unsafe(method(closeTapped:))]
-            fn close_tapped(&self, _sender: &UIBarButtonItem) {
-                CLOSED.set(true);
+            #[unsafe(method(linesTapped:))]
+            fn lines_tapped(&self, sender: &UITapGestureRecognizer) {
+                STACK.with_borrow(|stack| {
+                    let Some(stack) = stack.as_ref() else {
+                        return;
+                    };
+                    let sheets = stack.sheets.len();
+                    if sheets > 1 {
+                        let Some(wanted) = stack.indicator.reached(sender, sheets) else {
+                            return;
+                        };
+                        TAPPED.with_borrow_mut(|queued| {
+                            for _ in 0..sheets - 1 - wanted {
+                                queued.push(super::ROTATE);
+                            }
+                        });
+                        return;
+                    }
+                    let Some(wanted) = stack.indicator.reached(sender, stack.tabs.ids.len()) else {
+                        return;
+                    };
+                    let Some(id) = stack.tabs.ids.get(wanted) else {
+                        return;
+                    };
+                    if wanted == stack.tabs.at {
+                        return;
+                    }
+                    PICKED.with_borrow_mut(|slot| *slot = Some(id.clone()));
+                });
             }
 
             #[unsafe(method(centreTapped:))]
@@ -2337,9 +2635,10 @@ mod platform {
                         let dropped = column.levels.len() - shown;
                         column.levels.truncate(shown);
                         POPPED.set(POPPED.get() + dropped);
-                        return;
+                        break;
                     }
                 });
+                NativeStack::chrome();
             }
         }
 
@@ -2356,7 +2655,7 @@ mod platform {
                     return;
                 };
                 Parallax::recede(&presenter, true);
-                NativeStack::label();
+                NativeStack::chrome();
             }
         }
 
@@ -2399,8 +2698,9 @@ mod platform {
         root_view.addSubview(&pager);
 
         let delegate = NavDelegate::new(marker);
-        let tabs = Tabs::under(&root_view, marker);
+        let tabs = Tabs::under(&root_view, &delegate, marker);
         tabs.swipeable(&delegate, marker);
+        let indicator = Indicator::over(&root_view, &delegate, marker);
         let leave = unsafe {
             UITapGestureRecognizer::initWithTarget_action(
                 UITapGestureRecognizer::alloc(marker),
@@ -2433,6 +2733,7 @@ mod platform {
             seated: None,
             dragging: None,
             tabs,
+            indicator,
             delegate,
             dismissal: Dismissal::new(marker),
             overviewing: false,
