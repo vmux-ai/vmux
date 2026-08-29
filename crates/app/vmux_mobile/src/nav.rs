@@ -12,6 +12,10 @@ pub trait Route: Clone + PartialEq + Send + Sync + 'static {
 
     fn title(&self) -> String;
 
+    fn blank(_at: usize) -> Option<Self> {
+        None
+    }
+
     fn is(&self, other: &Self) -> bool {
         self == other
     }
@@ -123,6 +127,8 @@ impl<S: Route> Screens<S> {
 
 #[derive(Resource)]
 pub struct Centre(pub &'static str);
+
+const NEW_TAB: &str = "+";
 
 type Listed<'w, 's, S> = Query<
     'w,
@@ -370,7 +376,11 @@ impl Nav {
             return;
         }
         painted.tabs = entries.clone();
-        NativeStack::tabs(entries, centre.map(|centre| centre.0));
+        let centre = match S::blank(1) {
+            Some(_) => Some(NEW_TAB),
+            None => centre.map(|centre| centre.0),
+        };
+        NativeStack::tabs(entries, centre);
     }
 
     fn declare<S: Route>(mut asked: MessageReader<Declare<S>>, mut screens: ResMut<Screens<S>>) {
@@ -563,10 +573,27 @@ impl Nav {
 
     fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
+        mut tapped: MessageReader<Tapped>,
+        known: Query<&Tab>,
         mut opened: ResMut<Opened>,
         mut commands: Commands,
     ) {
+        let mut wanted = Vec::new();
         for OpenBlank(screen) in asked.read() {
+            wanted.push(screen.clone());
+        }
+        let mut at = known.iter().count();
+        for Tapped(action) in tapped.read() {
+            if *action != NEW_TAB {
+                continue;
+            }
+            at += 1;
+            let Some(screen) = S::blank(at) else {
+                continue;
+            };
+            wanted.push(screen);
+        }
+        for screen in &wanted {
             let ordinal = opened.0;
             opened.0 = ordinal.wrapping_add(1);
             let id = format!("local:{ordinal}");
