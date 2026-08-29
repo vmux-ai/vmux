@@ -24,7 +24,7 @@ const FULL_HUE: usize = 255;
 
 fn main() {
     bevy_app::App::new()
-        .add_plugins(MobilePlugin::showing(&APP).serving(|world| {
+        .add_plugins(MobilePlugin::default().rooted(&APP).serving(|world| {
             world
                 .add_plugins(NavPlugin::<Page>::default())
                 .add_systems(Startup, setup)
