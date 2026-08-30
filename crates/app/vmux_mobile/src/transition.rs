@@ -53,21 +53,22 @@ mod platform {
     };
     use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
     use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
-    use objc2_quartz_core::{CATransform3D, kCACornerCurveContinuous};
+    use objc2_quartz_core::{CALayer, CATransform3D, kCACornerCurveContinuous};
     use objc2_ui_kit::{
         NSTextAlignment, UIAction, UIAdaptivePresentationControllerDelegate, UIButton,
         UIButtonType, UIColor, UIContextMenuConfiguration, UIContextMenuInteraction,
         UIContextMenuInteractionDelegate, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
         UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
-        UIGlassContainerEffect, UIGlassEffect, UIImage, UILabel, UILayoutConstraintAxis, UIMenu,
-        UIMenuElement, UIMenuElementAttributes, UIModalPresentationStyle, UINavigationController,
-        UINavigationControllerDelegate, UIPanGestureRecognizer, UIPresentationController,
-        UISheetPresentationController, UISheetPresentationControllerDelegate,
-        UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
-        UIStackView, UIStackViewDistribution, UITapGestureRecognizer, UITouch,
-        UIUserInterfaceStyle, UIView, UIViewAnimationOptions, UIViewAutoresizing, UIViewController,
-        UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
-        UIViewKeyframeAnimationOptions, UIVisualEffectView,
+        UIGlassContainerEffect, UIGlassEffect, UIImage, UIImageView, UILabel,
+        UILayoutConstraintAxis, UIMenu, UIMenuElement, UIMenuElementAttributes,
+        UIModalPresentationStyle, UINavigationController, UINavigationControllerDelegate,
+        UIPanGestureRecognizer, UIPresentationController, UISheetPresentationController,
+        UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent,
+        UISheetPresentationControllerDetentResolutionContext, UIStackView, UIStackViewDistribution,
+        UITapGestureRecognizer, UITouch, UIUserInterfaceStyle, UIView, UIViewAnimationOptions,
+        UIViewAutoresizing, UIViewController, UIViewControllerTransitionCoordinator,
+        UIViewControllerTransitionCoordinatorContext, UIViewKeyframeAnimationOptions,
+        UIVisualEffectView,
     };
     use vmux_native::WebView;
 
@@ -244,6 +245,20 @@ mod platform {
                 );
             }
             button
+        }
+
+        fn mark(name: &str, host: &UIView, marker: MainThreadMarker) {
+            let view = UIImageView::initWithImage(
+                UIImageView::alloc(marker),
+                UIImage::systemImageNamed(&NSString::from_str(name)).as_deref(),
+            );
+            unsafe { view.setTintColor(Some(&UIColor::labelColor())) };
+            view.setContentMode(objc2_ui_kit::UIViewContentMode::Center);
+            view.setFrame(host.bounds());
+            view.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            host.addSubview(&view);
         }
 
         fn fill(button: &UIButton, host: &UIView) {
@@ -1146,7 +1161,7 @@ mod platform {
                 view.setHidden(false);
                 view.setUserInteractionEnabled(false);
                 Self::round(&view, true);
-                let Some(shut) = Self::shutter(stack, at, &view) else {
+                let Some(shut) = Self::shutter(&view) else {
                     continue;
                 };
                 fresh.push(Card {
@@ -1171,7 +1186,7 @@ mod platform {
             stack.row = fresh;
         }
 
-        fn shutter(stack: &NativeStack, at: usize, onto: &UIView) -> Option<Retained<UIView>> {
+        fn shutter(onto: &UIView) -> Option<Retained<UIView>> {
             let marker = MainThreadMarker::new()?;
             let bounds = onto.bounds();
             let cross = Pane::tinted(OVERVIEW_SHUT, marker);
@@ -1188,11 +1203,31 @@ mod platform {
             cross.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleLeftMargin | UIViewAutoresizing::FlexibleBottomMargin,
             );
-            let button = Pane::glyph("xmark", &stack.delegate, sel!(shutTapped:), marker);
-            button.setTag(at as isize);
-            Pane::fill(&button, &cross);
+            Pane::mark("xmark", &cross, marker);
             onto.addSubview(&cross);
             Some(cross)
+        }
+
+        fn shutting(stack: &NativeStack, at: CGPoint) -> Option<String> {
+            let hit = stack.pager.layer().hitTest(at)?;
+            for card in &stack.row {
+                if !Self::within(&hit, &card.shut.layer()) {
+                    continue;
+                }
+                return stack.tabs.ids.get(card.at).cloned();
+            }
+            None
+        }
+
+        fn within(layer: &CALayer, host: &CALayer) -> bool {
+            let mut seen = Some(layer.retain());
+            while let Some(at) = seen {
+                if std::ptr::eq(&*at, host) {
+                    return true;
+                }
+                seen = at.superlayer();
+            }
+            false
         }
 
         fn round(view: &UIView, on: bool) {
@@ -2894,22 +2929,18 @@ mod platform {
                 Overview::toggle();
             }
 
-            #[unsafe(method(shutTapped:))]
-            fn shut_tapped(&self, sender: &UIButton) {
-                STACK.with_borrow(|stack| {
-                    let Some(stack) = stack.as_ref() else {
-                        return;
-                    };
-                    let Some(id) = stack.tabs.ids.get(sender.tag() as usize) else {
-                        return;
-                    };
-                    CLOSING.with_borrow_mut(|queued| queued.push(id.clone()));
-                });
-            }
-
             #[unsafe(method(pagerTapped:))]
-            fn pager_tapped(&self, _sender: &UITapGestureRecognizer) {
-                Overview::toggle();
+            fn pager_tapped(&self, sender: &UITapGestureRecognizer) {
+                let shutting = STACK.with_borrow(|stack| {
+                    let stack = stack.as_ref()?;
+                    let host = stack.pager.superview()?;
+                    Overview::shutting(stack, sender.locationInView(Some(&host)))
+                });
+                let Some(id) = shutting else {
+                    Overview::toggle();
+                    return;
+                };
+                CLOSING.with_borrow_mut(|queued| queued.push(id));
             }
 
             #[unsafe(method(panned:))]
