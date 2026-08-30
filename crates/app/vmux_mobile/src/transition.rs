@@ -104,6 +104,8 @@ mod platform {
     const OVERVIEW_GLIDE: f64 = 0.35;
     const OVERVIEW_RESIST: f64 = 0.3;
     const OVERVIEW_SHUT: f64 = 60.0;
+    const PANE_TINT: f64 = 0.22;
+    const PANE_TINT_ALPHA: f64 = 0.86;
 
     thread_local! {
         static STACK: RefCell<Option<NativeStack>> = const { RefCell::new(None) };
@@ -211,6 +213,18 @@ mod platform {
             pane
         }
 
+        fn tinted(height: f64, marker: MainThreadMarker) -> Retained<UIView> {
+            let pane = UIView::initWithFrame(UIView::alloc(marker), CGRect::default());
+            pane.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(
+                PANE_TINT,
+                PANE_TINT_ALPHA,
+            )));
+            let layer = pane.layer();
+            layer.setCornerRadius(height / 2.0);
+            layer.setMasksToBounds(true);
+            pane
+        }
+
         fn glyph(
             name: &str,
             delegate: &NavDelegate,
@@ -232,12 +246,12 @@ mod platform {
             button
         }
 
-        fn fill(button: &UIButton, host: &UIVisualEffectView) {
+        fn fill(button: &UIButton, host: &UIView) {
             button.setFrame(host.bounds());
             button.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
             );
-            host.contentView().addSubview(button);
+            host.addSubview(button);
         }
     }
 
@@ -585,7 +599,7 @@ mod platform {
             back.setHidden(true);
             Pane::fill(
                 &Pane::glyph("chevron.left", delegate, sel!(backTapped:), marker),
-                &back,
+                &back.contentView(),
             );
 
             let browse = Pane::glass(TAB_BAR_HEIGHT, marker);
@@ -1162,7 +1176,7 @@ mod platform {
             let bounds = stack.pager.bounds();
             let over = UIView::initWithFrame(UIView::alloc(marker), bounds);
             over.setBackgroundColor(None);
-            let cross = Pane::glass(OVERVIEW_SHUT, marker);
+            let cross = Pane::tinted(OVERVIEW_SHUT, marker);
             cross.setFrame(CGRect {
                 origin: CGPoint {
                     x: bounds.size.width - OVERVIEW_SHUT - TAB_BAR_EDGE,
