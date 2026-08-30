@@ -37,11 +37,20 @@ pub struct Tab {
     pub id: String,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Local(pub u64);
+
+impl Local {
+    fn id(&self) -> String {
+        format!("local:{}", self.0)
+    }
+}
 
 #[derive(Component)]
 pub struct Selected;
+
+#[derive(Component)]
+pub struct Pending;
 
 #[derive(Component)]
 pub struct Presented;
@@ -87,15 +96,6 @@ pub struct Select(pub String);
 
 #[derive(Message)]
 pub struct OpenBlank<S: Route>(pub S);
-
-#[derive(Message)]
-pub struct Sprout;
-
-#[derive(Clone, Copy, PartialEq)]
-enum Landing {
-    Seated,
-    Waiting,
-}
 
 #[derive(Message)]
 pub struct Close(pub String);
@@ -175,6 +175,7 @@ type Listed<'w, 's, S> = Query<
         Option<&'static Local>,
         Option<&'static Selected>,
     ),
+    Without<Pending>,
 >;
 
 pub static CHANGED: crate::feed::Pulse = crate::feed::Pulse::new();
@@ -187,6 +188,7 @@ pub struct Shown<S: Route>(pub NavigationState<S>);
 #[derive(Resource, Default)]
 struct Painted {
     tabs: Vec<TabItem>,
+    waiting: Option<String>,
     seated: Option<String>,
     beside: Vec<String>,
     turn: u64,
@@ -197,6 +199,14 @@ struct Turns(u64);
 
 #[derive(Resource)]
 struct Opened(u64);
+
+impl Opened {
+    fn mint(&mut self) -> Local {
+        let ordinal = self.0;
+        self.0 = ordinal.wrapping_add(1);
+        Local(ordinal)
+    }
+}
 
 pub struct NavPlugin<S: Route>(std::marker::PhantomData<S>);
 
@@ -219,7 +229,6 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Report<S>>()
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
-            .add_message::<Sprout>()
             .add_message::<Close>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
@@ -236,6 +245,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::select,
                     Nav::close,
                     Nav::open_blank::<S>,
+                    Nav::sprout::<S>,
                     Nav::stack::<S>,
                     Nav::unstack,
                     Nav::rotate,
@@ -287,8 +297,13 @@ pub struct Nav;
 impl Nav {
     pub fn state<S: Route>(world: &mut World) -> NavigationState<S> {
         let mut state = NavigationState::default();
-        let mut tabs =
-            world.query::<(Entity, &Tab, &Shows<S>, Option<&Local>, Option<&Selected>)>();
+        let mut tabs = world.query_filtered::<(
+            Entity,
+            &Tab,
+            &Shows<S>,
+            Option<&Local>,
+            Option<&Selected>,
+        ), Without<Pending>>();
         let mut held = Vec::new();
         for (entity, tab, shows, local, selected) in tabs.iter(world) {
             held.push((
@@ -355,7 +370,6 @@ impl Nav {
         mut picked: MessageWriter<Select>,
         mut closed: MessageWriter<Dismiss>,
         mut closing: MessageWriter<Close>,
-        mut sprouting: MessageWriter<Sprout>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -372,9 +386,6 @@ impl Nav {
         }
         for id in crate::transition::take_closing() {
             closing.write(Close(id));
-        }
-        if crate::transition::take_sprouting() {
-            sprouting.write(Sprout);
         }
     }
 
@@ -502,6 +513,7 @@ impl Nav {
 
     fn paint<S: Route>(
         known: Listed<S>,
+        waiting: Query<&Tab, With<Pending>>,
         screens: Res<Screens<S>>,
         turns: Res<Turns>,
         mut painted: ResMut<Painted>,
@@ -529,6 +541,7 @@ impl Nav {
 
         let mut entries = Vec::new();
         let mut beside = Vec::new();
+        let last = listed.len();
         for (at, (id, screen, _)) in listed.into_iter().enumerate() {
             let here = Some(&id) == selected.as_ref();
             if !here && at.abs_diff(at_selected) <= 1 {
@@ -539,6 +552,14 @@ impl Nav {
                 name: screen.title(),
                 here,
             });
+        }
+
+        let mut asleep = None;
+        if let Some(tab) = waiting.iter().next() {
+            asleep = Some(tab.id.clone());
+            if selected.is_some() && at_selected + 1 == last {
+                beside.push(tab.id.clone());
+            }
         }
 
         if ready
@@ -559,11 +580,12 @@ impl Nav {
                 });
             }
         }
-        if painted.tabs == entries {
+        if painted.tabs == entries && painted.waiting == asleep {
             return;
         }
         painted.tabs = entries.clone();
-        NativeStack::tabs(entries);
+        painted.waiting = asleep.clone();
+        NativeStack::tabs(entries, asleep);
     }
 
     fn declare<S: Route>(mut asked: MessageReader<Declare<S>>, mut screens: ResMut<Screens<S>>) {
@@ -754,33 +776,37 @@ impl Nav {
 
     fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
-        mut sprouting: MessageReader<Sprout>,
-        known: Query<&Tab>,
         mut opened: ResMut<Opened>,
         mut commands: Commands,
     ) {
-        let mut wanted = Vec::new();
         for OpenBlank(screen) in asked.read() {
-            wanted.push((screen.clone(), Landing::Seated));
-        }
-        let mut at = known.iter().count();
-        for Sprout in sprouting.read() {
-            at += 1;
-            let Some(screen) = S::blank(at) else {
-                continue;
-            };
-            wanted.push((screen, Landing::Waiting));
-        }
-        for (screen, landing) in wanted {
-            let ordinal = opened.0;
-            opened.0 = ordinal.wrapping_add(1);
-            let id = format!("local:{ordinal}");
-            commands.spawn((Tab { id: id.clone() }, Local(ordinal), Shows(screen)));
-            if landing == Landing::Waiting {
-                continue;
-            }
+            let local = opened.mint();
+            let id = local.id();
+            commands.spawn((Tab { id: id.clone() }, local, Shows(screen.clone())));
             commands.queue(move |world: &mut World| Nav::mark(world, &id));
         }
+    }
+
+    fn sprout<S: Route>(
+        claimed: Query<Entity, (With<Pending>, With<Selected>)>,
+        waiting: Query<(), With<Pending>>,
+        known: Query<(), With<Tab>>,
+        mut opened: ResMut<Opened>,
+        mut commands: Commands,
+    ) {
+        let mut held = !waiting.is_empty();
+        for entity in claimed.iter() {
+            commands.entity(entity).remove::<Pending>();
+            held = false;
+        }
+        if held {
+            return;
+        }
+        let Some(screen) = S::blank(known.iter().count() + 1) else {
+            return;
+        };
+        let local = opened.mint();
+        commands.spawn((Tab { id: local.id() }, local, Shows(screen), Pending));
     }
 
     fn stack<S: Route>(
@@ -1099,7 +1125,7 @@ mod tests {
             &[("tab:1", Page::Home), ("tab:2", Page::Note("Second"))],
             Some("tab:2"),
         );
-        assert_eq!(phone.tabs(), vec!["tab:1", "tab:2"]);
+        assert_eq!(phone.listed(), vec!["tab:1", "tab:2"]);
         assert_eq!(phone.selected().as_deref(), Some("tab:2"));
     }
 
@@ -1115,7 +1141,7 @@ mod tests {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home), ("tab:2", Page::Home)], None);
         phone.reports(&[("tab:1", Page::Home)], None);
-        assert_eq!(phone.tabs(), vec!["tab:1"]);
+        assert_eq!(phone.listed(), vec!["tab:1"]);
     }
 
     #[test]
@@ -1126,7 +1152,10 @@ mod tests {
         assert_eq!(phone.depth(), 1);
 
         phone.reports(&[("tab:2", Page::Home)], None);
-        let mut shown = phone.0.world_mut().query::<&Shows<Page>>();
+        let mut shown = phone
+            .0
+            .world_mut()
+            .query_filtered::<&Shows<Page>, Without<Pending>>();
         let left: Vec<Page> = shown
             .iter(phone.0.world())
             .map(|shows| shows.0.clone())
@@ -1147,7 +1176,7 @@ mod tests {
         phone.sends(GoBack);
         phone.sends(GoBack);
         assert_eq!(phone.depth(), 0);
-        assert_eq!(phone.tabs(), vec!["tab:1"], "the tab itself survives");
+        assert_eq!(phone.listed(), vec!["tab:1"], "the tab itself survives");
     }
 
     #[test]
@@ -1194,38 +1223,41 @@ mod tests {
     fn a_local_tab_gives_way_once_the_same_screen_is_reported() {
         let mut phone = Phone::new();
         phone.sends(OpenBlank(Page::Unsaved));
-        assert_eq!(phone.tabs(), vec!["local:0"]);
+        assert_eq!(phone.listed(), vec!["local:0"]);
 
         phone.reports(&[("tab:1", Page::Note("Saved"))], None);
-        assert_eq!(phone.tabs(), vec!["tab:1"]);
+        assert_eq!(phone.listed(), vec!["tab:1"]);
     }
 
     #[test]
     fn local_tabs_are_listed_in_the_order_they_were_opened() {
         let mut phone = Phone::new();
         let mut wanted = Vec::new();
-        for at in 0..11 {
+        for _ in 0..11 {
             phone.sends(OpenBlank(Page::Unsaved));
-            wanted.push(format!("local:{at}"));
+            wanted.push(phone.selected().expect("the new tab seats itself"));
         }
         assert_eq!(phone.listed(), wanted);
     }
 
     #[test]
-    fn a_sprouted_tab_arrives_unselected_where_a_new_tab_seats_itself() {
+    fn a_tab_waits_warm_and_unlisted_until_the_drag_lands_on_it() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], Some("tab:1"));
-
-        phone.sends(Sprout);
+        assert_eq!(phone.tabs(), vec!["local:0", "tab:1"]);
         assert_eq!(
-            Nav::state::<Page>(phone.0.world_mut()).selected,
-            Some("tab:1".to_string())
+            phone.listed(),
+            vec!["tab:1"],
+            "the waiting tab is spawned but stays out of the strip"
         );
 
-        phone.sends(OpenBlank(Page::Unsaved));
-        let state = Nav::state::<Page>(phone.0.world_mut());
-        assert_eq!(state.selected, Some("local:1".to_string()));
-        assert_eq!(state.tabs.len(), 3);
+        phone.sends(Select("local:0".to_string()));
+        assert_eq!(phone.listed(), vec!["tab:1", "local:0"]);
+        assert_eq!(
+            phone.tabs(),
+            vec!["local:0", "local:1", "tab:1"],
+            "landing on the waiting tab leaves another waiting behind it"
+        );
     }
 
     #[test]
@@ -1233,6 +1265,6 @@ mod tests {
         let mut phone = Phone::new();
         phone.sends(OpenBlank(Page::Home));
         phone.reports(&[("tab:1", Page::Note("Unrelated"))], None);
-        assert_eq!(phone.tabs(), vec!["local:0", "tab:1"]);
+        assert_eq!(phone.listed(), vec!["tab:1", "local:0"]);
     }
 }
