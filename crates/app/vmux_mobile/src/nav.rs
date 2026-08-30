@@ -694,7 +694,9 @@ impl Nav {
     }
 
     fn shut(world: &mut World, id: &str) {
-        let mut query = world.query::<(Entity, &Tab, Option<&Local>, Option<&Selected>)>();
+        let mut query = world
+            .query_filtered::<(Entity, &Tab, Option<&Local>, Option<&Selected>), Without<Pending>>(
+            );
         let mut held = Vec::new();
         let mut found = None;
         for (entity, tab, local, selected) in query.iter(world) {
@@ -1261,6 +1263,18 @@ mod tests {
             wanted.push(phone.selected().expect("the new tab seats itself"));
         }
         assert_eq!(phone.listed(), wanted);
+    }
+
+    #[test]
+    fn closing_a_tab_lands_on_a_real_neighbour_rather_than_claiming_a_spare() {
+        let mut phone = Phone::new();
+        phone.reports(
+            &[("tab:1", Page::Home), ("tab:2", Page::Home)],
+            Some("tab:2"),
+        );
+        phone.sends(Close("tab:2".to_string()));
+        assert_eq!(phone.selected().as_deref(), Some("tab:1"));
+        assert_eq!(phone.listed(), vec!["tab:1"]);
     }
 
     #[test]

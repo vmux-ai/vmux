@@ -126,6 +126,7 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "UIFont",
     "UIGlassEffect",
     "UIImage",
+    "UIImageView",
     "UIInteraction",
     "UILabel",
     "UIGeometry",
