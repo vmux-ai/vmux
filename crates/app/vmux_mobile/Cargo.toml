@@ -50,7 +50,7 @@ futures-util = "0.3"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 url = { workspace = true }
 quinn = { workspace = true }
 vmux_remote = { path = "../../host/vmux_remote" }

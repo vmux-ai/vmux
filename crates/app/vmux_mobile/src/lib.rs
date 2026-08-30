@@ -2,6 +2,7 @@
 
 mod credentials;
 mod deep_link;
+mod feed;
 mod logs;
 pub mod nav;
 pub mod navigator;
@@ -27,7 +28,6 @@ use crate::session::{AuthState, use_session};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
-use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use bevy_a11y::AccessibilityPlugin;
@@ -42,7 +42,7 @@ use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, Start
 use vmux_ui::i18n::translate;
 use vmux_wire::room::{RemoteAgent, RemoteSession};
 
-static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static OPENED_URLS: feed::Feed<String> = feed::Feed::new();
 
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -114,10 +114,7 @@ impl Plugin for MobilePlugin {
 
 #[cfg(target_os = "ios")]
 pub(crate) fn offer_opened_url(url: String) {
-    OPENED_URLS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .push(url);
+    OPENED_URLS.offer(url);
 }
 
 pub(crate) fn mark_resumed() {
@@ -235,30 +232,25 @@ pub fn App() -> Element {
 
     use_future(move || async move {
         loop {
-            if let Some(opened) = take_opened_url() {
-                deep_link_received.set(true);
-                pair_url.set(opened.clone());
-                pending_pair_url.set(Some(opened));
-                error.set(String::new());
-                auth.set(AuthState::Unpaired);
-            }
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            let opened = OPENED_URLS.next().await;
+            deep_link_received.set(true);
+            pair_url.set(opened.clone());
+            pending_pair_url.set(Some(opened));
+            error.set(String::new());
+            auth.set(AuthState::Unpaired);
         }
     });
 
     use_future(move || async move {
         loop {
-            if let Some(result) = qr_scanner::take_result() {
-                match result {
-                    Ok(scanned) => {
-                        pair_url.set(scanned.clone());
-                        error.set(String::new());
-                        pending_pair_url.set(Some(scanned));
-                    }
-                    Err(message) => error.set(message),
+            match qr_scanner::next_result().await {
+                Ok(scanned) => {
+                    pair_url.set(scanned.clone());
+                    error.set(String::new());
+                    pending_pair_url.set(Some(scanned));
                 }
+                Err(message) => error.set(message),
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
 
@@ -490,8 +482,5 @@ fn PairScreen(
 }
 
 fn take_opened_url() -> Option<String> {
-    OPENED_URLS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .pop()
+    OPENED_URLS.take()
 }
