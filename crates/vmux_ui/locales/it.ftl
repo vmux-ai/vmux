@@ -256,6 +256,7 @@ layout-unpin-page = Sblocca questa pagina
 layout-manage-extensions = Gestisci estensioni
 layout-new-stack = Nuovo stack
 layout-close-tab = Chiudi scheda
+layout-close-other-tabs = Chiudi le altre schede
 layout-bookmark = Segnalibro
 layout-pin = Fissa
 layout-new-tab = Nuova scheda

@@ -256,6 +256,7 @@ layout-unpin-page = Deze pagina losmaken
 layout-manage-extensions = Extensies beheren
 layout-new-stack = Nieuwe stack
 layout-close-tab = Tabblad sluiten
+layout-close-other-tabs = Andere tabbladen sluiten
 layout-bookmark = Bladwijzer
 layout-pin = Vastzetten
 layout-new-tab = Nieuw tabblad

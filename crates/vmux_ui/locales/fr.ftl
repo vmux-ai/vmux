@@ -256,6 +256,7 @@ layout-unpin-page = Détacher cette page
 layout-manage-extensions = Gérer les extensions
 layout-new-stack = Nouvelle pile
 layout-close-tab = Fermer l’onglet
+layout-close-other-tabs = Fermer les autres onglets
 layout-bookmark = Favori
 layout-pin = Épingler
 layout-new-tab = Nouvel onglet

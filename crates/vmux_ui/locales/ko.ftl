@@ -256,6 +256,7 @@ layout-unpin-page = 이 페이지 고정 해제
 layout-manage-extensions = 확장 프로그램 관리
 layout-new-stack = 새 스택
 layout-close-tab = 탭 닫기
+layout-close-other-tabs = 다른 탭 닫기
 layout-bookmark = 북마크
 layout-pin = 고정
 layout-new-tab = 새 탭

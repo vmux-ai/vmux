@@ -349,7 +349,7 @@ impl Nav {
         if crate::transition::take_closed() {
             closed.write(Dismiss);
         }
-        if let Some(id) = crate::transition::take_closing() {
+        for id in crate::transition::take_closing() {
             closing.write(Close(id));
         }
     }

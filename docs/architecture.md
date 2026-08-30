@@ -443,9 +443,13 @@ Only the seated tab and its neighbours keep a column: the cost of this design is
 process per screen.
 
 The tab bar hangs off the **window**. A sheet is presented above the root controller, so a bar
-inside it would be buried.
+inside it would be buried. It still needs an owning controller: a context menu presents from the
+view controller of the interaction's view, and a bare window subview has none, so both
+`UIButton.menu` and `UIContextMenuInteraction` go quiet there rather than fail. The bar therefore
+sits in a child controller's own view — which has to reach the window *before*
+`addChildViewController:`, because the other order throws.
 
-Three UIKit rules, each learned by crashing:
+Five UIKit rules, each learned by crashing:
 
 - `setViewControllers:` and `dismissViewController:` call the navigation delegate back
   **synchronously**, into the same `RefCell` the caller holds. Decide inside the borrow, call
@@ -454,6 +458,10 @@ Three UIKit rules, each learned by crashing:
   `nextResponder` cycle. `removeFromSuperview` first.
 - `UIModalPresentationFullScreen` detaches the presenting view — which is winit's — and the event
   loop stops. `fullScreenModal` presents *over* full screen instead.
+- `setView:` on a controller that has never loaded throws. Take the view UIKit made and put the
+  chrome inside it.
+- Adding a view to a window throws once its controller is already someone's child. Add first,
+  parent second.
 
 ### The overview is snapshots
 

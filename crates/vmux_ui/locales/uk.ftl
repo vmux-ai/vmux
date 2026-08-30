@@ -256,6 +256,7 @@ layout-unpin-page = Відкріпити сторінку
 layout-manage-extensions = Керувати розширеннями
 layout-new-stack = Новий стек
 layout-close-tab = Закрити вкладку
+layout-close-other-tabs = Закрити інші вкладки
 layout-bookmark = Закладка
 layout-pin = Закріпити
 layout-new-tab = Нова вкладка

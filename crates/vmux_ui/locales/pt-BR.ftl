@@ -256,6 +256,7 @@ layout-unpin-page = Desafixar esta página
 layout-manage-extensions = Gerenciar extensões
 layout-new-stack = Nova pilha
 layout-close-tab = Fechar aba
+layout-close-other-tabs = Fechar outras abas
 layout-bookmark = Favorito
 layout-pin = Fixar
 layout-new-tab = Nova aba

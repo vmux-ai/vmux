@@ -256,6 +256,7 @@ layout-unpin-page = Diese Seite lösen
 layout-manage-extensions = Erweiterungen verwalten
 layout-new-stack = Neuer Stack
 layout-close-tab = Tab schließen
+layout-close-other-tabs = Andere Tabs schließen
 layout-bookmark = Lesezeichen
 layout-pin = Anheften
 layout-new-tab = Neuer Tab
