@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::nav::{
-    Declare, Dismiss, GoBack, Nav, NavigationState, Present, Push, Route, ScreenName, ScreenPage,
-    Screens, Seat, Select,
+    Declare, Dismiss, GoBack, Nav, NavigationState, Prefetch, Present, Push, Route, ScreenName,
+    ScreenPage, Screens, Seat, Select,
 };
 use crate::runtime::World;
 
@@ -58,8 +58,13 @@ impl<R: Route> Router<R> {
         at
     }
 
+    fn tracking(&self) -> Option<R> {
+        self.state.read();
+        self.here.read().clone()
+    }
+
     pub fn attached<C: bevy_ecs::prelude::Component + Clone>(&self) -> Option<C> {
-        let here = self.here.read().clone()?;
+        let here = self.tracking()?;
         World::with(|world| {
             world.read(|world| {
                 let mut screens = world.query::<(&crate::nav::Shows<R>, &C)>();
@@ -96,6 +101,10 @@ impl<R: Route> Router<R> {
                 world.send(Present(route));
             }
         });
+    }
+
+    pub fn warm(&self, route: R) {
+        World::with(|world| world.send(Prefetch(route)));
     }
 
     pub fn back(&self) {

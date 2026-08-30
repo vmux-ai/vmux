@@ -49,6 +49,12 @@ pub struct Presented;
 #[derive(Component)]
 pub struct Depth(pub usize);
 
+#[derive(Component)]
+pub struct Warming(u8);
+
+#[derive(Resource, Default)]
+pub struct Warm(Vec<Entity>);
+
 #[derive(Resource, Default)]
 pub struct Trail(pub Vec<Entity>);
 
@@ -90,6 +96,9 @@ pub struct Push<S: Route>(pub S);
 
 #[derive(Message)]
 pub struct Present<S: Route>(pub S);
+
+#[derive(Message)]
+pub struct Prefetch<S: Route>(pub S);
 
 #[derive(Message)]
 pub struct GoBack;
@@ -149,6 +158,8 @@ impl<S: Route> Screens<S> {
 pub struct Centre(pub &'static str);
 
 const NEW_TAB: &str = "+";
+const WARM_SETTLE: u8 = 2;
+const WARM_MOST: usize = 6;
 
 type Listed<'w, 's, S> = Query<
     'w,
@@ -189,6 +200,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .init_resource::<Painted>()
             .init_resource::<Turns>()
             .init_resource::<Trail>()
+            .init_resource::<Warm>()
             .add_message::<Tapped>()
             .add_message::<Declare<S>>()
             .add_message::<Report<S>>()
@@ -197,6 +209,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Close>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
+            .add_message::<Prefetch<S>>()
             .add_message::<GoBack>()
             .add_message::<Dismiss>()
             .add_message::<Dropped>()
@@ -213,6 +226,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::unstack,
                     Nav::rotate,
                     Nav::measure,
+                    Nav::warm::<S>,
                     Nav::paint::<S>,
                 )
                     .chain(),
@@ -343,7 +357,7 @@ impl Nav {
     fn measure(
         selected: Query<Entity, (With<Tab>, With<Selected>)>,
         children: Query<&Children>,
-        measured: Query<Entity, With<Depth>>,
+        measured: Query<Entity, (With<Depth>, Without<Warming>)>,
         mut trail: ResMut<Trail>,
         mut commands: Commands,
     ) {
@@ -369,6 +383,75 @@ impl Nav {
         }
         if trail.0 != chain {
             trail.0 = chain;
+        }
+    }
+
+    fn warmed<S: Route>(
+        screen: &S,
+        warming: &Query<(Entity, &Shows<S>), With<Warming>>,
+    ) -> Option<Entity> {
+        for (entity, shows) in warming.iter() {
+            if shows.0.is(screen) {
+                return Some(entity);
+            }
+        }
+        None
+    }
+
+    fn warm<S: Route>(
+        mut asked: MessageReader<Prefetch<S>>,
+        mut warming: Query<(&Shows<S>, &mut Warming)>,
+        known: Query<&Shows<S>>,
+        screens: Res<Screens<S>>,
+        trail: Res<Trail>,
+        mut warm: ResMut<Warm>,
+        mut commands: Commands,
+    ) {
+        warm.0.retain(|entity| warming.contains(*entity));
+        while warm.0.len() > WARM_MOST {
+            let oldest = warm.0.remove(0);
+            commands.entity(oldest).despawn();
+        }
+
+        for (shows, mut settling) in warming.iter_mut() {
+            if settling.0 >= WARM_SETTLE {
+                continue;
+            }
+            settling.0 += 1;
+            if settling.0 < WARM_SETTLE {
+                continue;
+            }
+            let Some(options) = screens.of(shows.0.name()) else {
+                continue;
+            };
+            NativeStack::stow(Level {
+                key: shows.0.key(),
+                page: options.component,
+                title: shows.0.title(),
+                presentation: options.presentation,
+                detents: options.detents,
+                seat: Seat::taken(&shows.0),
+            });
+        }
+
+        for Prefetch(screen) in asked.read() {
+            if screens.of(screen.name()).is_none() {
+                continue;
+            }
+            let mut standing = false;
+            for shows in known.iter() {
+                if shows.0.is(screen) {
+                    standing = true;
+                    break;
+                }
+            }
+            if standing {
+                continue;
+            }
+            let fresh = commands
+                .spawn((Shows(screen.clone()), Warming(0), Depth(trail.0.len())))
+                .id();
+            warm.0.push(fresh);
         }
     }
 
@@ -663,6 +746,7 @@ impl Nav {
         screens: Res<Screens<S>>,
         selected: Query<Entity, With<Selected>>,
         children: Query<&Children>,
+        warming: Query<(Entity, &Shows<S>), With<Warming>>,
         mut commands: Commands,
     ) {
         let Some(tab) = selected.iter().next() else {
@@ -670,7 +754,17 @@ impl Nav {
         };
         for Push(screen) in pushes.read() {
             let onto = Self::top(tab, &children);
-            commands.spawn((Shows(screen.clone()), ChildOf(onto)));
+            match Self::warmed(screen, &warming) {
+                Some(warm) => {
+                    commands
+                        .entity(warm)
+                        .remove::<Warming>()
+                        .insert(ChildOf(onto));
+                }
+                None => {
+                    commands.spawn((Shows(screen.clone()), ChildOf(onto)));
+                }
+            }
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };
@@ -685,7 +779,17 @@ impl Nav {
         }
         for Present(screen) in presents.read() {
             let onto = Self::top(tab, &children);
-            commands.spawn((Shows(screen.clone()), Presented, ChildOf(onto)));
+            match Self::warmed(screen, &warming) {
+                Some(warm) => {
+                    commands
+                        .entity(warm)
+                        .remove::<Warming>()
+                        .insert((Presented, ChildOf(onto)));
+                }
+                None => {
+                    commands.spawn((Shows(screen.clone()), Presented, ChildOf(onto)));
+                }
+            }
             let Some(options) = screens.of(screen.name()) else {
                 continue;
             };

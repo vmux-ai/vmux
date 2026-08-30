@@ -299,6 +299,15 @@ fn FullScreenModal() -> Element {
 #[component]
 fn Body() -> Element {
     let (router, shown) = use_shown();
+    use_effect(move || {
+        let ahead: Ahead = router.attached().unwrap_or_default();
+        if ahead.modal.is_empty() {
+            return;
+        }
+        router.warm(Page::Modal(ahead.modal));
+        router.warm(Page::FormSheet(ahead.sheet));
+        router.warm(Page::FullScreenModal(ahead.full));
+    });
     let (hue, kind) = (shown.look.hue, shown.look.kind);
     let (title, trail) = (shown.look.title, shown.crumbs);
     let rungs = shown.rungs;
