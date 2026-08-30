@@ -542,6 +542,15 @@ graph LR
 Cards are snapshots because only three tabs have a column. Each is taken while its tab is still
 on screen: UIKit snapshots a hidden view to an empty one.
 
+It pages one card per gesture, and one number decides that. `Overview::step` is the distance
+between neighbouring cards, `width * OVERVIEW_SPREAD`, and it is the same number in the layout, in
+the finger tracking and in the landing — a carousel where those three disagree is one where the
+cards lag the hand and the release lands somewhere the drag never visited. `follow` bounds the
+reach to the neighbour and rubber-bands past it, so a long drag cannot promise a card it will not
+land on, and `release` only asks which side of half a step the throw ended on. Projecting a coast
+from the release velocity, as a free-scrolling list would, is what made a single swipe skip a tab:
+at the speed a deliberate drag ends, the projection is worth another whole card.
+
 ### The navigator's names are Expo Router's
 
 `Stack`, `Tabs`, `Screen`, `presentation`, `use_router`, `use_route`. Most people meet this
