@@ -114,6 +114,7 @@ mod platform {
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static SPROUTING: Cell<bool> = const { Cell::new(false) };
         static SLIDING: RefCell<Option<Slide>> = const { RefCell::new(None) };
     }
 
@@ -1067,6 +1068,7 @@ mod platform {
         arriving: Option<Parallax>,
         seated: Option<String>,
         dragging: Option<Drag>,
+        sprouted: Option<usize>,
         tabs: Tabs,
         indicator: Indicator,
         delegate: Retained<NavDelegate>,
@@ -2237,12 +2239,16 @@ mod platform {
                     return;
                 }
                 let started = Self::begin(shifted);
+                let barren = started.is_none();
                 STACK.with_borrow_mut(|stack| {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
                     stack.dragging = started;
                 });
+                if barren && shifted > 0.0 {
+                    Self::ask_for_one();
+                }
             }
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
@@ -2282,6 +2288,45 @@ mod platform {
                         travelled.abs() / drag.across,
                     );
                 }
+            });
+        }
+
+        fn ask_for_one() {
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                if stack.sprouted.is_some() || stack.tabs.at + 1 != stack.tabs.ids.len() {
+                    return;
+                }
+                stack.sprouted = Some(stack.tabs.ids.len());
+                SPROUTING.set(true);
+            });
+        }
+
+        fn shed_unclaimed(commit: bool) {
+            STACK.with_borrow_mut(|stack| {
+                let Some(stack) = stack.as_mut() else {
+                    return;
+                };
+                let Some(before) = stack.sprouted.take() else {
+                    return;
+                };
+                if stack.tabs.ids.len() <= before {
+                    return;
+                }
+                let Some(fresh) = stack.tabs.ids.last() else {
+                    return;
+                };
+                let claimed = commit
+                    && stack
+                        .dragging
+                        .as_ref()
+                        .is_some_and(|drag| &drag.to == fresh);
+                if claimed {
+                    return;
+                }
+                CLOSING.with_borrow_mut(|queued| queued.push(fresh.clone()));
             });
         }
 
@@ -2353,8 +2398,10 @@ mod platform {
                 ))
             });
             let Some((leaving, arriving, landing, entering, commit, from, sheet)) = plan else {
+                Self::shed_unclaimed(false);
                 return;
             };
+            Self::shed_unclaimed(commit);
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
@@ -3190,6 +3237,7 @@ mod platform {
             arriving: None,
             seated: None,
             dragging: None,
+            sprouted: None,
             tabs,
             indicator,
             delegate,
@@ -3230,6 +3278,10 @@ mod platform {
 
     pub fn take_closing() -> Vec<String> {
         CLOSING.with_borrow_mut(std::mem::take)
+    }
+
+    pub fn take_sprouting() -> bool {
+        SPROUTING.replace(false)
     }
 
     fn size_to_parent(view: &UIView, parent: &UIView) {
@@ -3295,6 +3347,10 @@ mod platform {
         Vec::new()
     }
 
+    pub fn take_sprouting() -> bool {
+        false
+    }
+
     pub fn take_closed() -> bool {
         false
     }
@@ -3323,5 +3379,6 @@ mod platform {
 #[cfg(target_os = "ios")]
 pub use platform::install;
 pub use platform::{
-    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped, take_tapped,
+    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped,
+    take_sprouting, take_tapped,
 };

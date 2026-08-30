@@ -470,6 +470,14 @@ Five UIKit rules, each learned by crashing:
 - Adding a view to a window throws once its controller is already someone's child. Add first,
   parent second.
 
+Dragging past the last tab sprouts a blank one, and it arrives **unselected** — seating it would
+move the pager under the finger, so the drag has to reach it the same way it reaches any
+neighbour. Two things follow. A tab is warmed when it becomes a *neighbour*, not only when the
+selection moves, or the sprout would have chrome and no column to slide in. And every tab root
+carries a depth whether or not it is on the trail, because a page that first paints unmeasured
+paints its defaults and nothing re-renders it: the screen state a page reads only changes when
+the navigation state does.
+
 ### The overview is snapshots
 
 `tabs` zooms the pager out into one card per tab, flicked through and tapped to enter.
