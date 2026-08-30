@@ -469,6 +469,11 @@ Five UIKit rules, each learned by crashing:
   chrome inside it.
 - Adding a view to a window throws once its controller is already someone's child. Add first,
   parent second.
+- Liquid Glass samples its backdrop in screen space, so a `UIVisualEffectView` inside a
+  3D-transformed layer draws unrotated while everything around it shears — the overview's close
+  button sat on a tilting card and refused to tilt with it, though both layers had the same
+  bounds, position and anchor. Glass is for chrome that floats over the content in screen space.
+  Anything painted onto a card that tilts is a tinted view instead.
 
 Dragging past the last tab reaches a blank one that is **already there**. A route with a `#[blank]`
 variant keeps two spare tab entities, topped back up the moment one is claimed, and both are warmed
