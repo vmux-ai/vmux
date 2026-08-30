@@ -181,7 +181,12 @@ type Listed<'w, 's, S> = Query<
     ),
 >;
 
+pub static CHANGED: crate::feed::Pulse = crate::feed::Pulse::new();
+
 type Pushed<'w, 's> = Query<'w, 's, Entity, (With<Depth>, Without<Warming>, Without<Tab>)>;
+
+#[derive(Resource)]
+pub struct Shown<S: Route>(pub NavigationState<S>);
 
 #[derive(Resource, Default)]
 struct Painted {
@@ -241,6 +246,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
                     Nav::measure,
                     Nav::warm::<S>,
                     Nav::paint::<S>,
+                    Nav::publish::<S>,
                 )
                     .chain(),
             );
@@ -374,6 +380,23 @@ impl Nav {
         if crate::transition::take_sprouting() {
             sprouting.write(Sprout);
         }
+    }
+
+    pub fn shown<S: Route>() -> Option<NavigationState<S>> {
+        crate::runtime::World::with(|world| {
+            world.read(|world| Some(world.get_resource::<Shown<S>>()?.0.clone()))
+        })?
+    }
+
+    fn publish<S: Route>(world: &mut World) {
+        let seen = Self::state::<S>(world);
+        if let Some(shown) = world.get_resource::<Shown<S>>()
+            && shown.0 == seen
+        {
+            return;
+        }
+        world.insert_resource(Shown(seen));
+        CHANGED.fire();
     }
 
     fn measure(
