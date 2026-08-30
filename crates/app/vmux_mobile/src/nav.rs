@@ -89,6 +89,9 @@ pub struct Select(pub String);
 pub struct OpenBlank<S: Route>(pub S);
 
 #[derive(Message)]
+pub struct Sprout;
+
+#[derive(Message)]
 pub struct Close(pub String);
 
 #[derive(Message)]
@@ -185,6 +188,11 @@ struct Turns(u64);
 #[derive(Resource)]
 struct Opened(u64);
 
+enum Landing {
+    Seated,
+    Beside,
+}
+
 pub struct NavPlugin<S: Route>(std::marker::PhantomData<S>);
 
 impl<S: Route> Default for NavPlugin<S> {
@@ -206,6 +214,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Report<S>>()
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
+            .add_message::<Sprout>()
             .add_message::<Close>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
@@ -340,6 +349,7 @@ impl Nav {
         mut picked: MessageWriter<Select>,
         mut closed: MessageWriter<Dismiss>,
         mut closing: MessageWriter<Close>,
+        mut sprouting: MessageWriter<Sprout>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -356,6 +366,9 @@ impl Nav {
         }
         for id in crate::transition::take_closing() {
             closing.write(Close(id));
+        }
+        if crate::transition::take_sprouting() {
+            sprouting.write(Sprout);
         }
     }
 
@@ -717,13 +730,14 @@ impl Nav {
     fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
         mut tapped: MessageReader<Tapped>,
+        mut sprouting: MessageReader<Sprout>,
         known: Query<&Tab>,
         mut opened: ResMut<Opened>,
         mut commands: Commands,
     ) {
         let mut wanted = Vec::new();
         for OpenBlank(screen) in asked.read() {
-            wanted.push(screen.clone());
+            wanted.push((screen.clone(), Landing::Seated));
         }
         let mut at = known.iter().count();
         for Tapped(action) in tapped.read() {
@@ -734,18 +748,23 @@ impl Nav {
             let Some(screen) = S::blank(at) else {
                 continue;
             };
-            wanted.push(screen);
+            wanted.push((screen, Landing::Seated));
         }
-        for screen in &wanted {
+        for Sprout in sprouting.read() {
+            at += 1;
+            let Some(screen) = S::blank(at) else {
+                continue;
+            };
+            wanted.push((screen, Landing::Beside));
+        }
+        for (screen, landing) in wanted {
             let ordinal = opened.0;
             opened.0 = ordinal.wrapping_add(1);
             let id = format!("local:{ordinal}");
-            commands.spawn((
-                Tab { id: id.clone() },
-                Local(ordinal),
-                Shows(screen.clone()),
-            ));
-            commands.queue(move |world: &mut World| Nav::mark(world, &id));
+            commands.spawn((Tab { id: id.clone() }, Local(ordinal), Shows(screen)));
+            if let Landing::Seated = landing {
+                commands.queue(move |world: &mut World| Nav::mark(world, &id));
+            }
         }
     }
 

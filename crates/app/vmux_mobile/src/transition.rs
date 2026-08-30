@@ -115,6 +115,7 @@ mod platform {
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         static SLIDING: RefCell<Option<Slide>> = const { RefCell::new(None) };
+        static SPROUTING: Cell<bool> = const { Cell::new(false) };
     }
 
     struct Held {
@@ -3232,6 +3233,10 @@ mod platform {
         CLOSING.with_borrow_mut(std::mem::take)
     }
 
+    pub fn take_sprouting() -> bool {
+        SPROUTING.replace(false)
+    }
+
     fn size_to_parent(view: &UIView, parent: &UIView) {
         view.setFrame(parent.bounds());
         view.setAutoresizingMask(
@@ -3295,6 +3300,10 @@ mod platform {
         Vec::new()
     }
 
+    pub fn take_sprouting() -> bool {
+        false
+    }
+
     pub fn take_closed() -> bool {
         false
     }
@@ -3323,5 +3332,6 @@ mod platform {
 #[cfg(target_os = "ios")]
 pub use platform::install;
 pub use platform::{
-    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped, take_tapped,
+    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped,
+    take_sprouting, take_tapped,
 };
