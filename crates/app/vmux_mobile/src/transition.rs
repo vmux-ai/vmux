@@ -1907,6 +1907,10 @@ mod platform {
             }
             column.navigation.willMoveToParentViewController(None);
             column.navigation.removeFromParentViewController();
+            Self::hold(stack, column);
+        }
+
+        fn hold(stack: &mut NativeStack, column: Column) {
             while stack.kept.len() >= KEPT_MOST {
                 let Some(oldest) = stack.kept.keys().next().copied() else {
                     break;
@@ -1914,6 +1918,48 @@ mod platform {
                 stack.kept.remove(&oldest);
             }
             stack.kept.insert(column.key, column);
+        }
+
+        pub fn stow(level: Level) {
+            let key = level.key;
+            let known = STACK.with_borrow(|stack| {
+                stack
+                    .as_ref()
+                    .is_some_and(|stack| stack.kept.contains_key(&key))
+            });
+            if known {
+                return;
+            }
+            let drawn = Self::draw(level);
+            after_paint(move || {
+                let Some(drawn) = drawn else {
+                    return;
+                };
+                let built = STACK.with_borrow(|stack| {
+                    let stack = stack.as_ref()?;
+                    let marker = MainThreadMarker::new()?;
+                    let column = Column::over(key, drawn, &stack.delegate, marker);
+                    let view = column.navigation.view()?;
+                    view.setFrame(stack.pager.bounds());
+                    view.setAlpha(0.0);
+                    stack.pager.insertSubview_atIndex(&view, 0);
+                    Some(column)
+                });
+                let Some(column) = built else {
+                    return;
+                };
+                after_paint(move || {
+                    STACK.with_borrow_mut(|stack| {
+                        let Some(stack) = stack.as_mut() else {
+                            return;
+                        };
+                        if stack.kept.contains_key(&key) {
+                            return;
+                        }
+                        Self::park(stack, column);
+                    });
+                });
+            });
         }
 
         fn shed(then: impl FnOnce() + 'static) {
@@ -3194,6 +3240,8 @@ mod platform {
         pub fn tabs(_entries: Vec<TabItem>, _centre: Option<&'static str>) {}
 
         pub fn warm(_wanted: Vec<(String, Vec<Level>)>) {}
+
+        pub fn stow(_level: Level) {}
 
         pub fn render() {}
     }
