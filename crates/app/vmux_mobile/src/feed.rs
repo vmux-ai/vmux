@@ -1,7 +1,23 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
+
+pub struct Pulse(LazyLock<watch::Sender<u64>>);
+
+impl Pulse {
+    pub const fn new() -> Self {
+        Self(LazyLock::new(|| watch::channel(0).0))
+    }
+
+    pub fn fire(&self) {
+        self.0.send_modify(|beat| *beat = beat.wrapping_add(1));
+    }
+
+    pub fn watching(&self) -> watch::Receiver<u64> {
+        self.0.subscribe()
+    }
+}
 
 pub struct Feed<T> {
     queued: Mutex<VecDeque<T>>,

@@ -133,16 +133,17 @@ impl<R: Route> Router<R> {
 }
 
 pub fn use_router<R: Route>() -> Router<R> {
-    let mut state =
-        use_signal(|| World::with(|world| world.read(Nav::state::<R>)).unwrap_or_default());
+    let mut state = use_signal(|| Nav::shown::<R>().unwrap_or_default());
     use_future(move || async move {
+        let mut beats = crate::nav::CHANGED.watching();
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            let Some(seen) = World::with(|world| world.read(Nav::state::<R>)) else {
-                continue;
-            };
-            if *state.peek() != seen {
+            if let Some(seen) = Nav::shown::<R>()
+                && *state.peek() != seen
+            {
                 state.set(seen);
+            }
+            if beats.changed().await.is_err() {
+                return;
             }
         }
     });
