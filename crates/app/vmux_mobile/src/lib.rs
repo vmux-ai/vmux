@@ -49,24 +49,30 @@ static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 type Pages = Box<dyn Fn(&mut bevy_app::App) + Send + Sync>;
 
 pub struct MobilePlugin {
-    root: &'static vmux_native::NativePage,
+    root: vmux_native::PageComponent,
+    backdrop: Option<(u8, u8, u8, u8)>,
     pages: Pages,
 }
 
 impl Default for MobilePlugin {
     fn default() -> Self {
+        Self::new(App)
+    }
+}
+
+impl MobilePlugin {
+    pub fn new(root: vmux_native::PageComponent) -> Self {
         Self {
-            root: &root::APP_PAGE,
+            root,
+            backdrop: None,
             pages: Box::new(|world| {
                 world.add_plugins(PagePlugins);
             }),
         }
     }
-}
 
-impl MobilePlugin {
-    pub fn rooted(mut self, root: &'static vmux_native::NativePage) -> Self {
-        self.root = root;
+    pub fn painted(mut self, colour: (u8, u8, u8, u8)) -> Self {
+        self.backdrop = Some(colour);
         self
     }
 
@@ -108,7 +114,7 @@ impl Plugin for MobilePlugin {
             },
             unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(root::RootPlugin(self.root));
+        .add_plugins(root::RootPlugin::around(self.root, self.backdrop));
     }
 }
 
