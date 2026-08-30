@@ -101,7 +101,6 @@ mod platform {
     const OVERVIEW_TIGHT: f64 = 0.22;
     const OVERVIEW_DEPTH: f64 = 190.0;
     const OVERVIEW_EYE: f64 = -1.0 / 900.0;
-    const OVERVIEW_GAP: f64 = 14.0;
     const OVERVIEW_GLIDE: f64 = 0.35;
     const OVERVIEW_RESIST: f64 = 0.3;
     const OVERVIEW_RISE: f64 = 0.6;
@@ -1315,13 +1314,17 @@ mod platform {
             furthest
         }
 
+        fn step(stack: &NativeStack) -> f64 {
+            stack.pager.bounds().size.width * OVERVIEW_SPREAD
+        }
+
         fn plan_from(
             stack: &NativeStack,
             at: usize,
             shifted: f64,
         ) -> Vec<(Retained<UIView>, CATransform3D)> {
             let width = stack.pager.bounds().size.width;
-            let step = width + OVERVIEW_GAP / OVERVIEW_SCALE;
+            let step = Self::step(stack);
             let mut places = Vec::new();
             for card in &stack.row {
                 let delta = card.at as f64 - at as f64 + shifted / step;
@@ -1401,18 +1404,19 @@ mod platform {
                 let Some(stack) = stack.as_ref() else {
                     return;
                 };
-                let step = stack.pager.bounds().size.width + OVERVIEW_GAP / OVERVIEW_SCALE;
-                let travelled = -shifted / OVERVIEW_SCALE;
-                let last = Self::furthest(stack) as f64;
-                let reached = stack.tabs.at as f64 - travelled / step;
-                let held = if reached < 0.0 {
-                    reached * OVERVIEW_RESIST
-                } else if reached > last {
-                    last + (reached - last) * OVERVIEW_RESIST
+                let step = Self::step(stack);
+                let at = stack.tabs.at as f64;
+                let reached = at + shifted / (OVERVIEW_SCALE * step);
+                let low = (at - 1.0).max(0.0);
+                let high = (at + 1.0).min(Self::furthest(stack) as f64);
+                let held = if reached < low {
+                    low + (reached - low) * OVERVIEW_RESIST
+                } else if reached > high {
+                    high + (reached - high) * OVERVIEW_RESIST
                 } else {
                     reached
                 };
-                let eased = (stack.tabs.at as f64 - held) * step;
+                let eased = (at - held) * step;
                 for (view, shape) in Self::plan(stack, eased) {
                     view.layer().setTransform(shape);
                 }
@@ -1422,13 +1426,14 @@ mod platform {
         fn release(shifted: f64, speed: f64) {
             let plan = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
-                let step = stack.pager.bounds().size.width + OVERVIEW_GAP / OVERVIEW_SCALE;
-                let travelled = -shifted / OVERVIEW_SCALE;
-                let coasted = travelled - speed * OVERVIEW_GLIDE / OVERVIEW_SCALE;
-                let mut hops = -(coasted / step).round() as isize;
-                let flicked = speed.abs() > 80.0 && travelled.abs() > 3.0;
-                if hops == 0 && (travelled.abs() > step / 16.0 || flicked) {
-                    hops = if coasted < 0.0 { 1 } else { -1 };
+                let reach = Self::step(stack) * OVERVIEW_SCALE / 2.0;
+                let carried = shifted + speed * OVERVIEW_GLIDE;
+                let mut hops = 0isize;
+                if carried > reach {
+                    hops = 1;
+                }
+                if carried < -reach {
+                    hops = -1;
                 }
                 let last = Self::furthest(stack) as isize;
                 let landing = (stack.tabs.at as isize + hops).clamp(0, last) as usize;
@@ -1439,9 +1444,9 @@ mod platform {
                     PICKED.with_borrow_mut(|slot| *slot = Some(id));
                     return None;
                 }
-                Some((Self::plan(stack, 0.0), 0usize))
+                Some(Self::plan(stack, 0.0))
             });
-            let Some((places, moved)) = plan else {
+            let Some(places) = plan else {
                 return;
             };
             let Some(marker) = MainThreadMarker::new() else {
@@ -1452,9 +1457,8 @@ mod platform {
                     view.layer().setTransform(*shape);
                 }
             });
-            let gliding = (0.42 + 0.11 * moved as f64).min(1.4);
             UIView::animateWithDuration_delay_options_animations_completion(
-                gliding,
+                0.42,
                 0.0,
                 UIViewAnimationOptions::CurveEaseOut,
                 &settling,
