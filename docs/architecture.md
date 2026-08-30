@@ -471,10 +471,18 @@ Five UIKit rules, each learned by crashing:
   parent second.
 
 Dragging past the last tab reaches a blank one that is **already there**. A route with a `#[blank]`
-variant always keeps one spare tab entity, spawned the moment the previous spare is claimed, and
-it is warmed like any other neighbour — so the column exists and has painted before the finger
-moves. Asking for it at the start of the gesture, as Safari does not, would spend a frame in the
-ECS and another in WebKit while the pager is already sliding, which is how a tab arrives blank.
+variant keeps two spare tab entities, topped back up the moment one is claimed, and both are warmed
+like any other neighbour — so the column exists and has painted before the finger moves. Asking for
+it at the start of the gesture, as Safari does not, would spend a frame in the ECS and another in
+WebKit while the pager is already sliding, which is how a tab arrives blank.
+
+Two, not one, because of where the time goes. Measured on the simulator, a spare's own cost is 9 ms
+— `Dom::mount` and `build_as_child` — and the first Dioxus rebuild is under a millisecond. Then
+**350 ms passes before WebKit asks for the document at all**: on iOS the WebContent process launches
+when the `WKWebView` is constructed, so creating the spare early *is* the prewarm, and there is
+nothing left in our load path to shorten. What remains is lead time. One spare is created when the
+previous one is claimed, so it gets a single swipe's grace; two means a spare has been standing
+since the swipe before last, which is longer than a person can outrun.
 
 The spare carries `Pending`, and that is the whole of its difference: `Nav::state` and the tab
 strip both skip it, so the pill, the indicator and the overview count only tabs the user has. The
