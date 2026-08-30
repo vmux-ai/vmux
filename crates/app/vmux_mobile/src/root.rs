@@ -1,18 +1,28 @@
 use std::cell::RefCell;
+use std::sync::OnceLock;
 
 use bevy_app::{App, Last, Plugin};
 use bevy_ecs::prelude::*;
 use bevy_window::{AppLifecycle, PrimaryWindow};
 use bevy_winit::{EventLoopProxyWrapper, WINIT_WINDOWS};
-use vmux_native::{Instance, NativePage, WebView};
+use vmux_native::{Instance, NativePage, PageComponent, WebView};
 
 use crate::runtime::World as PageWorld;
 use crate::surface::{PageWaker, Surfaces, embedding};
 
-pub static APP_PAGE: NativePage = NativePage::pane("vmux://app/", crate::App)
-    .heading(
-        r#"<base href="/"/>
-<title>Vmux</title>
+thread_local! {
+    static MOUNTED: RefCell<Option<WebView>> = const { RefCell::new(None) };
+}
+
+pub(crate) struct RootPlugin(&'static NativePage);
+
+impl RootPlugin {
+    pub(crate) fn around(root: PageComponent, backdrop: Option<(u8, u8, u8, u8)>) -> Self {
+        static SHELL: OnceLock<NativePage> = OnceLock::new();
+        Self(SHELL.get_or_init(|| {
+            let page = NativePage::pane("vmux://app/", root)
+                .heading(
+                    r#"<base href="/"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <meta name="color-scheme" content="light dark"/>
 <style>
@@ -21,19 +31,20 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    )
-    .dressed(
-        r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-        "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
-         text-foreground antialiased",
-    )
-    .see_through();
-
-thread_local! {
-    static MOUNTED: RefCell<Option<WebView>> = const { RefCell::new(None) };
+                )
+                .dressed(
+                    r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+                    "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+                     text-foreground antialiased",
+                )
+                .see_through();
+            match backdrop {
+                Some(colour) => page.background(colour),
+                None => page,
+            }
+        }))
+    }
 }
-
-pub(crate) struct RootPlugin(pub &'static NativePage);
 
 #[derive(Resource)]
 struct Showing(&'static NativePage);
