@@ -24,12 +24,16 @@ const FULL_HUE: usize = 255;
 
 fn main() {
     bevy_app::App::new()
-        .add_plugins(MobilePlugin::new(App).painted(BACKDROP).serving(|world| {
-            world
-                .add_plugins(NavPlugin::<Page>::default())
-                .add_systems(Startup, setup)
-                .add_systems(Update, (sketch, describe, tally, trace).chain());
-        }))
+        .add_plugins(
+            MobilePlugin::new(App)
+                .background(BACKDROP)
+                .serving(|world| {
+                    world
+                        .add_plugins(NavPlugin::<Page>::default())
+                        .add_systems(Startup, setup)
+                        .add_systems(Update, (sketch, describe, tally, trace).chain());
+                }),
+        )
         .run();
 }
 

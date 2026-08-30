@@ -426,7 +426,7 @@ the host a surface would install, or a page mounts and stays empty.
 the `SCREAMING_CASE` const `#[screen]` invents, which made every app spell back a name it did
 not choose. The shell's document is the plugin's: a root webview renders the navigator and
 therefore paints nothing, so its head and its transparent body are fixed and the only thing an
-app picks is `painted`, the colour behind the native chrome. `Default` is `new` around this
+app picks is `background`, the colour behind the native chrome. `Default` is `new` around this
 crate's own `App`, so vmux and an example reach the phone through the same constructor.
 
 One page, one document, one `UIViewController`. A tab owns its own `UINavigationController`, and

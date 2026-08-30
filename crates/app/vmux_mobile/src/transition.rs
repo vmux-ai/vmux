@@ -111,7 +111,6 @@ mod platform {
         static DISMISSED: Cell<usize> = const { Cell::new(0) };
         static TAPPED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
-        static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         static SPROUTING: Cell<bool> = const { Cell::new(false) };
@@ -148,26 +147,6 @@ mod platform {
                 web: Some(web),
                 title: level.title,
             })
-        }
-    }
-
-    struct Bar;
-
-    impl Bar {
-        fn remember(action: &'static str) -> isize {
-            ACTIONS.with_borrow_mut(|known| {
-                for (at, seen) in known.iter().enumerate() {
-                    if *seen == action {
-                        return at as isize;
-                    }
-                }
-                known.push(action);
-                (known.len() - 1) as isize
-            })
-        }
-
-        fn recall(tag: isize) -> Option<&'static str> {
-            ACTIONS.with_borrow(|known| known.get(tag as usize).copied())
         }
     }
 
@@ -546,7 +525,6 @@ mod platform {
 
     #[derive(Clone, Copy, PartialEq)]
     struct Slots {
-        centre: bool,
         browse: bool,
         back: bool,
     }
@@ -557,7 +535,6 @@ mod platform {
         back: Retained<UIVisualEffectView>,
         capsule: Retained<UIVisualEffectView>,
         row: Retained<UIStackView>,
-        circle: Retained<UIVisualEffectView>,
         browse: Retained<UIVisualEffectView>,
         ids: Vec<String>,
         at: usize,
@@ -611,19 +588,6 @@ mod platform {
                 &back,
             );
 
-            let circle = Pane::glass(TAB_BAR_HEIGHT, marker);
-            circle.setFrame(CGRect {
-                origin: CGPoint {
-                    x: width - TAB_BAR_EDGE - TAB_BAR_HEIGHT,
-                    y: 0.0,
-                },
-                size: CGSize {
-                    width: TAB_BAR_HEIGHT,
-                    height: TAB_BAR_HEIGHT,
-                },
-            });
-            circle.setAutoresizingMask(UIViewAutoresizing::FlexibleLeftMargin);
-
             let browse = Pane::glass(TAB_BAR_HEIGHT, marker);
             browse.setFrame(CGRect {
                 origin: CGPoint {
@@ -675,7 +639,6 @@ mod platform {
             strip.contentView().addSubview(&capsule);
             strip.contentView().addSubview(&back);
             strip.contentView().addSubview(&browse);
-            strip.contentView().addSubview(&circle);
             let host = UIViewController::new(marker);
             let band = host
                 .view()
@@ -700,7 +663,6 @@ mod platform {
                 back,
                 capsule,
                 row,
-                circle,
                 browse,
                 ids: Vec::new(),
                 at: 0,
@@ -748,7 +710,6 @@ mod platform {
         fn show(
             &mut self,
             entries: Vec<TabItem>,
-            centre: Option<&'static str>,
             delegate: &NavDelegate,
             marker: MainThreadMarker,
         ) {
@@ -782,21 +743,6 @@ mod platform {
                 self.row.addArrangedSubview(&button);
             }
 
-            for spent in self.circle.contentView().subviews().iter() {
-                spent.removeFromSuperview();
-            }
-            match centre {
-                Some(centre) => {
-                    let adder = Self::adder(centre, delegate, marker);
-                    adder.setFrame(self.circle.bounds());
-                    adder.setAutoresizingMask(
-                        UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
-                    );
-                    self.circle.contentView().addSubview(&adder);
-                    self.circle.setHidden(false);
-                }
-                None => self.circle.setHidden(true),
-            }
             for spent in self.browse.contentView().subviews().iter() {
                 spent.removeFromSuperview();
             }
@@ -823,10 +769,9 @@ mod platform {
             );
             self.browse.contentView().addSubview(&counter);
             self.capsule.setHidden(self.ids.is_empty());
-            self.band.setHidden(self.ids.is_empty() && centre.is_none());
+            self.band.setHidden(self.ids.is_empty());
 
             let wanted = Slots {
-                centre: centre.is_some(),
                 browse: self.ids.len() >= 2,
                 back: !self.back.isHidden(),
             };
@@ -834,24 +779,21 @@ mod platform {
                 self.lay_out(wanted);
                 return;
             }
-            for (pane, shown) in [(&self.circle, wanted.centre), (&self.browse, wanted.browse)] {
+            for (pane, shown) in [(&self.browse, wanted.browse)] {
                 if shown && pane.isHidden() {
                     pane.setAlpha(0.0);
                     pane.setHidden(false);
                 }
             }
 
-            let (back, circle, browse) =
-                (self.back.clone(), self.circle.clone(), self.browse.clone());
+            let (back, browse) = (self.back.clone(), self.browse.clone());
             let (capsule, strip) = (self.capsule.clone(), self.strip.clone());
             let dressing = block2::RcBlock::new(move || {
-                circle.setAlpha(if wanted.centre { 1.0 } else { 0.0 });
                 browse.setAlpha(if wanted.browse { 1.0 } else { 0.0 });
-                Tabs::place(&strip, &capsule, &back, &circle, &browse, wanted);
+                Tabs::place(&strip, &capsule, &back, &browse, wanted);
             });
-            let (circle, browse) = (self.circle.clone(), self.browse.clone());
+            let browse = self.browse.clone();
             let dressed = block2::RcBlock::new(move |_| {
-                circle.setHidden(!wanted.centre);
                 browse.setHidden(!wanted.browse);
             });
             UIView::animateWithDuration_delay_options_animations_completion(
@@ -866,7 +808,6 @@ mod platform {
 
         fn slots(&self) -> Slots {
             Slots {
-                centre: !self.circle.isHidden(),
                 browse: !self.browse.isHidden(),
                 back: !self.back.isHidden(),
             }
@@ -887,11 +828,10 @@ mod platform {
             };
             let showing = self.back.clone();
             let (capsule, strip) = (self.capsule.clone(), self.strip.clone());
-            let (back_pane, circle, browse) =
-                (self.back.clone(), self.circle.clone(), self.browse.clone());
+            let (back_pane, browse) = (self.back.clone(), self.browse.clone());
             let dressing = block2::RcBlock::new(move || {
                 showing.setAlpha(if back { 1.0 } else { 0.0 });
-                Tabs::place(&strip, &capsule, &back_pane, &circle, &browse, wanted);
+                Tabs::place(&strip, &capsule, &back_pane, &browse, wanted);
             });
             let hiding = self.back.clone();
             let dressed = block2::RcBlock::new(move |_| hiding.setHidden(!back));
@@ -906,21 +846,13 @@ mod platform {
         }
 
         fn lay_out(&self, wanted: Slots) {
-            Self::place(
-                &self.strip,
-                &self.capsule,
-                &self.back,
-                &self.circle,
-                &self.browse,
-                wanted,
-            );
+            Self::place(&self.strip, &self.capsule, &self.back, &self.browse, wanted);
         }
 
         fn place(
             strip: &UIVisualEffectView,
             capsule: &UIVisualEffectView,
             back: &UIVisualEffectView,
-            circle: &UIVisualEffectView,
             browse: &UIVisualEffectView,
             wanted: Slots,
         ) {
@@ -930,7 +862,7 @@ mod platform {
                 height: TAB_BAR_HEIGHT,
             };
             let mut right = TAB_BAR_EDGE;
-            for (pane, shown) in [(circle, wanted.centre), (browse, wanted.browse)] {
+            for (pane, shown) in [(browse, wanted.browse)] {
                 if !shown {
                     continue;
                 }
@@ -1013,28 +945,6 @@ mod platform {
             };
             action.setAttributes(UIMenuElementAttributes::Destructive);
             action
-        }
-
-        fn adder(
-            centre: &'static str,
-            delegate: &NavDelegate,
-            marker: MainThreadMarker,
-        ) -> Retained<UIButton> {
-            let button = UIButton::buttonWithType(UIButtonType::System, marker);
-            button.setTitle_forState(Some(&NSString::from_str(centre)), UIControlState::Normal);
-            if let Some(label) = button.titleLabel() {
-                unsafe { label.setFont(Some(&UIFont::systemFontOfSize(28.0))) };
-            }
-            button.setTitleColor_forState(Some(&UIColor::labelColor()), UIControlState::Normal);
-            button.setTag(Bar::remember(centre));
-            unsafe {
-                button.addTarget_action_forControlEvents(
-                    Some(delegate),
-                    sel!(centreTapped:),
-                    UIControlEvents::TouchUpInside,
-                );
-            }
-            button
         }
 
         fn front(&self) {
@@ -2053,12 +1963,12 @@ mod platform {
             base.dismissViewControllerAnimated_completion(false, Some(&shed));
         }
 
-        pub fn tabs(entries: Vec<TabItem>, centre: Option<&'static str>) {
+        pub fn tabs(entries: Vec<TabItem>) {
             let settling = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
                 let marker = MainThreadMarker::new()?;
                 let delegate = stack.delegate.clone();
-                stack.tabs.show(entries, centre, &delegate, marker);
+                stack.tabs.show(entries, &delegate, marker);
                 stack.tabs.front();
                 stack.indicator.front();
                 if !stack.overviewing {
@@ -3002,14 +2912,6 @@ mod platform {
                 });
             }
 
-            #[unsafe(method(centreTapped:))]
-            fn centre_tapped(&self, sender: &UIButton) {
-                let Some(action) = Bar::recall(sender.tag()) else {
-                    return;
-                };
-                TAPPED.with_borrow_mut(|queued| queued.push(action));
-            }
-
             #[unsafe(method(tabsTapped:))]
             fn tabs_tapped(&self, _sender: &UIButton) {
                 Overview::toggle();
@@ -3366,7 +3268,7 @@ mod platform {
 
         pub fn seat(_tab: String, _levels: Vec<Level>) {}
 
-        pub fn tabs(_entries: Vec<TabItem>, _centre: Option<&'static str>) {}
+        pub fn tabs(_entries: Vec<TabItem>) {}
 
         pub fn warm(_wanted: Vec<(String, Vec<Level>)>) {}
 

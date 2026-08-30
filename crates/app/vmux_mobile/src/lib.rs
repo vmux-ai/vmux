@@ -71,7 +71,7 @@ impl MobilePlugin {
         }
     }
 
-    pub fn painted(mut self, colour: (u8, u8, u8, u8)) -> Self {
+    pub fn background(mut self, colour: (u8, u8, u8, u8)) -> Self {
         self.backdrop = Some(colour);
         self
     }
