@@ -714,10 +714,27 @@ mod platform {
             if towards <= 0.0 {
                 return self.ids.get(self.at.checked_sub(1)?).cloned();
             }
-            match self.ids.get(self.at + 1) {
-                Some(id) => Some(id.clone()),
-                None => self.waiting.clone(),
+            self.id(self.at + 1)
+        }
+
+        fn id(&self, at: usize) -> Option<String> {
+            if let Some(id) = self.ids.get(at) {
+                return Some(id.clone());
             }
+            if at != self.ids.len() {
+                return None;
+            }
+            self.waiting.clone()
+        }
+
+        fn laid(&self) -> Vec<String> {
+            let mut laid = self.ids.clone();
+            if self.at + 1 == laid.len()
+                && let Some(waiting) = self.waiting.clone()
+            {
+                laid.push(waiting);
+            }
+            laid
         }
 
         fn rung(&self, id: &str) -> Option<(usize, usize)> {
@@ -1029,12 +1046,13 @@ mod platform {
         sweep: Retained<UIPanGestureRecognizer>,
         snaps: HashMap<String, Retained<UIView>>,
         row: Vec<Card>,
+        centred: Option<usize>,
     }
 
     struct Card {
         at: usize,
         view: Retained<UIView>,
-        shut: Retained<UIView>,
+        shut: Option<Retained<UIView>>,
         snapshot: bool,
     }
 
@@ -1134,7 +1152,8 @@ mod platform {
 
         fn deal(stack: &mut NativeStack) {
             let mut fresh = Vec::new();
-            for (at, id) in stack.tabs.ids.iter().enumerate() {
+            for (at, id) in stack.tabs.laid().iter().enumerate() {
+                let spare = at == stack.tabs.ids.len();
                 let live = stack
                     .stacks
                     .get(id)
@@ -1161,8 +1180,9 @@ mod platform {
                 view.setHidden(false);
                 view.setUserInteractionEnabled(false);
                 Self::round(&view, true);
-                let Some(shut) = Self::shutter(&view) else {
-                    continue;
+                let shut = match spare {
+                    true => None,
+                    false => Self::shutter(&view),
                 };
                 fresh.push(Card {
                     at,
@@ -1172,7 +1192,9 @@ mod platform {
                 });
             }
             for card in stack.row.drain(..) {
-                card.shut.removeFromSuperview();
+                if let Some(shut) = card.shut {
+                    shut.removeFromSuperview();
+                }
                 if !card.snapshot {
                     continue;
                 }
@@ -1211,7 +1233,10 @@ mod platform {
         fn shutting(stack: &NativeStack, at: CGPoint) -> Option<String> {
             let hit = stack.pager.layer().hitTest(at)?;
             for card in &stack.row {
-                if !Self::within(&hit, &card.shut.layer()) {
+                let Some(shut) = card.shut.as_ref() else {
+                    continue;
+                };
+                if !Self::within(&hit, &shut.layer()) {
                     continue;
                 }
                 return stack.tabs.ids.get(card.at).cloned();
@@ -1246,7 +1271,9 @@ mod platform {
                     return;
                 };
                 for card in stack.row.drain(..) {
-                    card.shut.removeFromSuperview();
+                    if let Some(shut) = card.shut {
+                        shut.removeFromSuperview();
+                    }
                     card.view.setUserInteractionEnabled(true);
                     card.view.layer().setTransform(Self::flat());
                     Self::round(&card.view, false);
@@ -1269,6 +1296,14 @@ mod platform {
 
         fn plan(stack: &NativeStack, shifted: f64) -> Vec<(Retained<UIView>, CATransform3D)> {
             Self::plan_from(stack, stack.tabs.at, shifted)
+        }
+
+        fn furthest(stack: &NativeStack) -> usize {
+            let mut furthest = 0;
+            for card in &stack.row {
+                furthest = furthest.max(card.at);
+            }
+            furthest
         }
 
         fn plan_from(
@@ -1341,7 +1376,7 @@ mod platform {
                 };
                 let step = stack.pager.bounds().size.width + OVERVIEW_GAP / OVERVIEW_SCALE;
                 let travelled = -shifted / OVERVIEW_SCALE;
-                let last = stack.tabs.ids.len().saturating_sub(1) as f64;
+                let last = Self::furthest(stack) as f64;
                 let reached = stack.tabs.at as f64 - travelled / step;
                 let held = if reached < 0.0 {
                     reached * OVERVIEW_RESIST
@@ -1368,10 +1403,12 @@ mod platform {
                 if hops == 0 && (travelled.abs() > step / 16.0 || flicked) {
                     hops = if coasted < 0.0 { 1 } else { -1 };
                 }
-                let last = stack.tabs.ids.len() as isize - 1;
-                let landing = (stack.tabs.at as isize + hops).clamp(0, last);
-                if landing as usize != stack.tabs.at {
-                    let id = stack.tabs.ids[landing as usize].clone();
+                let last = Self::furthest(stack) as isize;
+                let landing = (stack.tabs.at as isize + hops).clamp(0, last) as usize;
+                if landing != stack.tabs.at
+                    && let Some(id) = stack.tabs.id(landing)
+                {
+                    stack.centred = Some(landing);
                     PICKED.with_borrow_mut(|slot| *slot = Some(id));
                     return None;
                 }
@@ -1564,7 +1601,10 @@ mod platform {
                 }
                 let marker = MainThreadMarker::new()?;
                 let before = stack.row.len();
-                let entered = stack.tabs.at.saturating_sub(1);
+                let entered = match stack.centred.take() {
+                    Some(centred) => centred,
+                    None => stack.tabs.at.saturating_sub(1),
+                };
                 Overview::deal(stack);
                 if stack.row.len() == before {
                     for (view, shape) in Overview::plan(stack, 0.0) {
@@ -3151,6 +3191,7 @@ mod platform {
             sweep,
             snaps: HashMap::new(),
             row: Vec::new(),
+            centred: None,
         }));
     }
 
