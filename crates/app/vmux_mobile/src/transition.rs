@@ -47,7 +47,7 @@ mod platform {
     use block2::RcBlock;
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::Retained;
-    use objc2::runtime::NSObject;
+    use objc2::runtime::{NSObject, ProtocolObject};
     use objc2::{
         ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
     };
@@ -56,7 +56,8 @@ mod platform {
     use objc2_quartz_core::{CATransform3D, kCACornerCurveContinuous};
     use objc2_ui_kit::{
         NSTextAlignment, UIAction, UIAdaptivePresentationControllerDelegate, UIButton,
-        UIButtonType, UIColor, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
+        UIButtonType, UIColor, UIContextMenuConfiguration, UIContextMenuInteraction,
+        UIContextMenuInteractionDelegate, UIControlEvents, UIControlState, UIEdgeInsets, UIFont,
         UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
         UIGlassContainerEffect, UIGlassEffect, UIImage, UILabel, UILayoutConstraintAxis, UIMenu,
         UIMenuElement, UIMenuElementAttributes, UIModalPresentationStyle, UINavigationController,
@@ -112,7 +113,7 @@ mod platform {
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
         static ACTIONS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
-        static CLOSING: RefCell<Option<String>> = const { RefCell::new(None) };
+        static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         static SLIDING: RefCell<Option<Slide>> = const { RefCell::new(None) };
     }
 
@@ -550,6 +551,7 @@ mod platform {
     }
 
     struct Tabs {
+        band: Retained<UIView>,
         strip: Retained<UIVisualEffectView>,
         back: Retained<UIVisualEffectView>,
         capsule: Retained<UIVisualEffectView>,
@@ -561,7 +563,12 @@ mod platform {
     }
 
     impl Tabs {
-        fn under(root_view: &UIView, delegate: &NavDelegate, marker: MainThreadMarker) -> Self {
+        fn under(
+            root_controller: &UIViewController,
+            root_view: &UIView,
+            delegate: &NavDelegate,
+            marker: MainThreadMarker,
+        ) -> Self {
             let bounds = root_view.bounds();
             let below = root_view.safeAreaInsets().bottom;
             let (width, height) = (bounds.size.width, bounds.size.height);
@@ -642,7 +649,6 @@ mod platform {
                 },
             });
             capsule.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth);
-
             let row = UIStackView::initWithFrame(
                 UIStackView::alloc(marker),
                 CGRect {
@@ -658,17 +664,37 @@ mod platform {
             row.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
             );
+            let menus = UIContextMenuInteraction::initWithDelegate(
+                UIContextMenuInteraction::alloc(marker),
+                ProtocolObject::from_ref(delegate),
+            );
+            row.addInteraction(ProtocolObject::from_ref(&*menus));
             capsule.contentView().addSubview(&row);
 
             strip.contentView().addSubview(&capsule);
             strip.contentView().addSubview(&back);
             strip.contentView().addSubview(&browse);
             strip.contentView().addSubview(&circle);
+            let host = UIViewController::new(marker);
+            let band = host
+                .view()
+                .unwrap_or_else(|| UIView::initWithFrame(UIView::alloc(marker), strip.frame()));
+            band.setFrame(strip.frame());
+            band.setAutoresizingMask(strip.autoresizingMask());
+            band.setBackgroundColor(None);
+            strip.setFrame(band.bounds());
+            strip.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            band.addSubview(&strip);
             match root_view.window() {
-                Some(window) => window.addSubview(&strip),
-                None => root_view.addSubview(&strip),
+                Some(window) => window.addSubview(&band),
+                None => root_view.addSubview(&band),
             }
+            root_controller.addChildViewController(&host);
+            host.didMoveToParentViewController(Some(root_controller));
             Self {
+                band,
                 strip,
                 back,
                 capsule,
@@ -730,7 +756,6 @@ mod platform {
                 spent.removeFromSuperview();
             }
             self.ids.clear();
-            let closable = entries.len() > 1;
             let mut showing = None;
             for entry in entries {
                 if entry.here {
@@ -739,7 +764,7 @@ mod platform {
                 }
                 self.ids.push(entry.id);
             }
-            if let Some((name, id)) = showing {
+            if let Some((name, _)) = showing {
                 let button = UIButton::buttonWithType(UIButtonType::System, marker);
                 button.setTitle_forState(Some(&NSString::from_str(&name)), UIControlState::Normal);
                 if let Some(label) = button.titleLabel() {
@@ -752,9 +777,6 @@ mod platform {
                         sel!(tabsTapped:),
                         UIControlEvents::TouchUpInside,
                     );
-                }
-                if closable {
-                    button.setMenu(Some(&Self::menu(&id, marker)));
                 }
                 self.row.addArrangedSubview(&button);
             }
@@ -800,8 +822,7 @@ mod platform {
             );
             self.browse.contentView().addSubview(&counter);
             self.capsule.setHidden(self.ids.is_empty());
-            self.strip
-                .setHidden(self.ids.is_empty() && centre.is_none());
+            self.band.setHidden(self.ids.is_empty() && centre.is_none());
 
             let wanted = Slots {
                 centre: centre.is_some(),
@@ -938,23 +959,59 @@ mod platform {
             });
         }
 
-        fn menu(id: &str, marker: MainThreadMarker) -> Retained<UIMenu> {
-            let id = id.to_string();
+        fn offer(&self, marker: MainThreadMarker) -> Option<Retained<UIContextMenuConfiguration>> {
+            let menu = self.menu(marker)?;
+            let offer = RcBlock::new(move |_: std::ptr::NonNull<NSArray<UIMenuElement>>| {
+                Retained::autorelease_return(menu.clone())
+            });
+            Some(unsafe {
+                UIContextMenuConfiguration::configurationWithIdentifier_previewProvider_actionProvider(
+                    None,
+                    std::ptr::null_mut(),
+                    RcBlock::as_ptr(&offer),
+                    marker,
+                )
+            })
+        }
+
+        fn menu(&self, marker: MainThreadMarker) -> Option<Retained<UIMenu>> {
+            if self.ids.len() < 2 {
+                return None;
+            }
+            let here = self.ids.get(self.at)?.clone();
+            let others = {
+                let mut others = self.ids.clone();
+                others.remove(self.at.min(others.len() - 1));
+                others
+            };
+            let shut = Self::closer("layout-close-tab", vec![here], marker);
+            let rest = Self::closer("layout-close-other-tabs", others, marker);
+            let children = NSArray::from_slice(&[
+                shut.as_super() as &UIMenuElement,
+                rest.as_super() as &UIMenuElement,
+            ]);
+            Some(UIMenu::menuWithTitle_children(
+                &NSString::from_str(""),
+                &children,
+                marker,
+            ))
+        }
+
+        fn closer(phrase: &str, ids: Vec<String>, marker: MainThreadMarker) -> Retained<UIAction> {
             let shut = RcBlock::new(move |_: std::ptr::NonNull<UIAction>| {
-                CLOSING.with_borrow_mut(|slot| *slot = Some(id.clone()));
+                CLOSING.with_borrow_mut(|queued| queued.extend(ids.iter().cloned()));
             });
             let action = unsafe {
                 UIAction::actionWithTitle_image_identifier_handler(
-                    &NSString::from_str(&vmux_ui::i18n::translate("layout-close-tab")),
-                    None,
+                    &NSString::from_str(&vmux_ui::i18n::translate(phrase)),
+                    UIImage::systemImageNamed(&NSString::from_str("xmark")).as_deref(),
                     None,
                     RcBlock::as_ptr(&shut),
                     marker,
                 )
             };
             action.setAttributes(UIMenuElementAttributes::Destructive);
-            let children = NSArray::from_slice(&[action.as_super() as &UIMenuElement]);
-            UIMenu::menuWithTitle_children(&NSString::from_str(""), &children, marker)
+            action
         }
 
         fn adder(
@@ -980,10 +1037,10 @@ mod platform {
         }
 
         fn front(&self) {
-            let Some(parent) = self.strip.superview() else {
+            let Some(parent) = self.band.superview() else {
                 return;
             };
-            parent.bringSubviewToFront(&self.strip);
+            parent.bringSubviewToFront(&self.band);
         }
 
         fn name(&self, text: &str) {
@@ -2925,7 +2982,7 @@ mod platform {
                     let Some(id) = stack.tabs.ids.get(sender.tag() as usize) else {
                         return;
                     };
-                    CLOSING.with_borrow_mut(|slot| *slot = Some(id.clone()));
+                    CLOSING.with_borrow_mut(|queued| queued.push(id.clone()));
                 });
             }
 
@@ -2961,6 +3018,22 @@ mod platform {
         }
 
         unsafe impl NSObjectProtocol for NavDelegate {}
+
+        unsafe impl UIContextMenuInteractionDelegate for NavDelegate {
+            #[unsafe(method_id(contextMenuInteraction:configurationForMenuAtLocation:))]
+            fn menu_wanted(
+                &self,
+                _interaction: &UIContextMenuInteraction,
+                _at: CGPoint,
+            ) -> Option<Retained<UIContextMenuConfiguration>> {
+                match MainThreadMarker::new() {
+                    Some(marker) => {
+                        STACK.with_borrow(|stack| stack.as_ref()?.tabs.offer(marker))
+                    }
+                    None => None,
+                }
+            }
+        }
 
         unsafe impl UIGestureRecognizerDelegate for NavDelegate {
             #[unsafe(method(gestureRecognizer:shouldReceiveTouch:))]
@@ -3082,7 +3155,7 @@ mod platform {
         root_view.addSubview(&pager);
 
         let delegate = NavDelegate::new(marker);
-        let tabs = Tabs::under(&root_view, &delegate, marker);
+        let tabs = Tabs::under(&root_controller, &root_view, &delegate, marker);
         tabs.swipeable(&delegate, marker);
         let indicator = Indicator::over(&root_view, &delegate, marker);
         let leave = unsafe {
@@ -3155,8 +3228,8 @@ mod platform {
         PICKED.with_borrow_mut(Option::take)
     }
 
-    pub fn take_closing() -> Option<String> {
-        CLOSING.with_borrow_mut(Option::take)
+    pub fn take_closing() -> Vec<String> {
+        CLOSING.with_borrow_mut(std::mem::take)
     }
 
     fn size_to_parent(view: &UIView, parent: &UIView) {
@@ -3218,8 +3291,8 @@ mod platform {
         None
     }
 
-    pub fn take_closing() -> Option<String> {
-        None
+    pub fn take_closing() -> Vec<String> {
+        Vec::new()
     }
 
     pub fn take_closed() -> bool {

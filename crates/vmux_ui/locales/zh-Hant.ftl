@@ -297,6 +297,7 @@ layout-unpin-page = 取消釘選此頁
 layout-manage-extensions = 管理擴充功能
 layout-new-stack = 新增 Stack
 layout-close-tab = 關閉分頁
+layout-close-other-tabs = 關閉其他分頁
 layout-bookmark = 書籤
 layout-pin = 釘選
 layout-unpin = 取消釘選

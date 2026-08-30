@@ -324,6 +324,7 @@ layout-unpin-page = Unpin this page
 layout-manage-extensions = Manage extensions
 layout-new-stack = New Stack
 layout-close-tab = Close tab
+layout-close-other-tabs = Close other tabs
 layout-bookmark = Bookmark
 layout-pin = Pin
 layout-unpin = Unpin
