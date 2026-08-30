@@ -89,6 +89,15 @@ pub struct Select(pub String);
 pub struct OpenBlank<S: Route>(pub S);
 
 #[derive(Message)]
+pub struct Sprout;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Landing {
+    Seated,
+    Waiting,
+}
+
+#[derive(Message)]
 pub struct Close(pub String);
 
 #[derive(Message)]
@@ -172,10 +181,13 @@ type Listed<'w, 's, S> = Query<
     ),
 >;
 
+type Pushed<'w, 's> = Query<'w, 's, Entity, (With<Depth>, Without<Warming>, Without<Tab>)>;
+
 #[derive(Resource, Default)]
 struct Painted {
     tabs: Vec<TabItem>,
     seated: Option<String>,
+    beside: Vec<String>,
     turn: u64,
 }
 
@@ -206,6 +218,7 @@ impl<S: Route> Plugin for NavPlugin<S> {
             .add_message::<Report<S>>()
             .add_message::<Select>()
             .add_message::<OpenBlank<S>>()
+            .add_message::<Sprout>()
             .add_message::<Close>()
             .add_message::<Push<S>>()
             .add_message::<Present<S>>()
@@ -340,6 +353,7 @@ impl Nav {
         mut picked: MessageWriter<Select>,
         mut closed: MessageWriter<Dismiss>,
         mut closing: MessageWriter<Close>,
+        mut sprouting: MessageWriter<Sprout>,
     ) {
         let count = crate::transition::take_popped() + crate::transition::take_dismissed();
         if count > 0 {
@@ -357,12 +371,16 @@ impl Nav {
         for id in crate::transition::take_closing() {
             closing.write(Close(id));
         }
+        if crate::transition::take_sprouting() {
+            sprouting.write(Sprout);
+        }
     }
 
     fn measure(
         selected: Query<Entity, (With<Tab>, With<Selected>)>,
+        unmeasured: Query<Entity, (With<Tab>, Without<Depth>)>,
         children: Query<&Children>,
-        measured: Query<Entity, (With<Depth>, Without<Warming>)>,
+        measured: Pushed,
         mut trail: ResMut<Trail>,
         mut commands: Commands,
     ) {
@@ -382,6 +400,9 @@ impl Nav {
             if !chain.contains(&entity) {
                 commands.entity(entity).remove::<Depth>();
             }
+        }
+        for entity in unmeasured.iter() {
+            commands.entity(entity).insert(Depth(0));
         }
         for (at, entity) in chain.iter().copied().enumerate() {
             commands.entity(entity).insert(Depth(at));
@@ -502,8 +523,11 @@ impl Nav {
             });
         }
 
-        if ready && (painted.seated != selected || painted.turn != turns.0) {
+        if ready
+            && (painted.seated != selected || painted.turn != turns.0 || painted.beside != beside)
+        {
             painted.seated = selected.clone();
+            painted.beside = beside.clone();
             painted.turn = turns.0;
             if let Some(id) = selected.clone() {
                 commands.queue(move |world: &mut World| {
@@ -717,13 +741,14 @@ impl Nav {
     fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
         mut tapped: MessageReader<Tapped>,
+        mut sprouting: MessageReader<Sprout>,
         known: Query<&Tab>,
         mut opened: ResMut<Opened>,
         mut commands: Commands,
     ) {
         let mut wanted = Vec::new();
         for OpenBlank(screen) in asked.read() {
-            wanted.push(screen.clone());
+            wanted.push((screen.clone(), Landing::Seated));
         }
         let mut at = known.iter().count();
         for Tapped(action) in tapped.read() {
@@ -734,13 +759,23 @@ impl Nav {
             let Some(screen) = S::blank(at) else {
                 continue;
             };
-            wanted.push(screen);
+            wanted.push((screen, Landing::Seated));
         }
-        for screen in wanted {
+        for Sprout in sprouting.read() {
+            at += 1;
+            let Some(screen) = S::blank(at) else {
+                continue;
+            };
+            wanted.push((screen, Landing::Waiting));
+        }
+        for (screen, landing) in wanted {
             let ordinal = opened.0;
             opened.0 = ordinal.wrapping_add(1);
             let id = format!("local:{ordinal}");
             commands.spawn((Tab { id: id.clone() }, Local(ordinal), Shows(screen)));
+            if landing == Landing::Waiting {
+                continue;
+            }
             commands.queue(move |world: &mut World| Nav::mark(world, &id));
         }
     }
@@ -966,6 +1001,10 @@ mod tests {
             }
         }
 
+        fn blank(_at: usize) -> Option<Self> {
+            Some(Self::Unsaved)
+        }
+
         fn is(&self, other: &Self) -> bool {
             matches!((self, other), (Self::Unsaved, Self::Note(_)))
         }
@@ -1167,6 +1206,23 @@ mod tests {
             wanted.push(format!("local:{at}"));
         }
         assert_eq!(phone.listed(), wanted);
+    }
+
+    #[test]
+    fn a_sprouted_tab_arrives_unselected_where_a_new_tab_seats_itself() {
+        let mut phone = Phone::new();
+        phone.reports(&[("tab:1", Page::Home)], Some("tab:1"));
+
+        phone.sends(Sprout);
+        assert_eq!(
+            Nav::state::<Page>(phone.0.world_mut()).selected,
+            Some("tab:1".to_string())
+        );
+
+        phone.sends(OpenBlank(Page::Unsaved));
+        let state = Nav::state::<Page>(phone.0.world_mut());
+        assert_eq!(state.selected, Some("local:1".to_string()));
+        assert_eq!(state.tabs.len(), 3);
     }
 
     #[test]
