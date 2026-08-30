@@ -505,6 +505,18 @@ when the drag runs off the end. Landing on it drops `Pending`; the next frame sp
 replacement, so the swipe is repeatable without ever spawning a tab mid-gesture, and abandoning
 the drag leaves nothing to clean up.
 
+The overview reaches it the same way, and only from the last tab. `Tabs::laid` appends the spare's
+id to the cards the carousel deals when the seated tab is last, which is exactly the condition
+under which `Nav::paint` warms it — deal it any earlier and there is no column behind it, only a
+blank plate. It is the one card with no ✕: closing a spare would ask the ECS to drop a tab that
+`Nav::shut` deliberately cannot see, so the affordance is absent rather than dead.
+
+Claiming from the overview needs one piece of state, because two things that both move the
+selection are indistinguishable afterwards. A `+`-shaped growth leaves the cards a step behind the
+new tab and they have to slide up to it; a drag-claim has already carried them there with the
+finger, and sliding again snaps them backwards first. `Overview::release` therefore records the
+index it landed on in `centred`, and the re-deal consumes it instead of guessing `at - 1`.
+
 Two supporting rules. A tab is warmed when it becomes a *neighbour*, not only when the selection
 moves, or the spare would have chrome and no column to slide in. And every tab root carries a
 depth whether or not it is on the trail, because a page that first paints unmeasured paints its
