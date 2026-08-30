@@ -165,6 +165,7 @@ impl<S: Route> Screens<S> {
 
 const WARM_SETTLE: u8 = 2;
 const WARM_MOST: usize = 6;
+const SPARES: usize = 2;
 
 type Listed<'w, 's, S> = Query<
     'w,
@@ -513,7 +514,7 @@ impl Nav {
 
     fn paint<S: Route>(
         known: Listed<S>,
-        waiting: Query<&Tab, With<Pending>>,
+        waiting: Query<(&Tab, &Local), With<Pending>>,
         screens: Res<Screens<S>>,
         turns: Res<Turns>,
         mut painted: ResMut<Painted>,
@@ -554,11 +555,15 @@ impl Nav {
             });
         }
 
-        let mut asleep = None;
-        if let Some(tab) = waiting.iter().next() {
-            asleep = Some(tab.id.clone());
-            if selected.is_some() && at_selected + 1 == last {
-                beside.push(tab.id.clone());
+        let mut spares = Vec::new();
+        for (tab, local) in waiting.iter() {
+            spares.push((local.0, tab.id.clone()));
+        }
+        spares.sort();
+        let asleep = spares.first().map(|(_, id)| id.clone());
+        if selected.is_some() && at_selected + 1 == last {
+            for (_, id) in &spares {
+                beside.push(id.clone());
             }
         }
 
@@ -794,19 +799,20 @@ impl Nav {
         mut opened: ResMut<Opened>,
         mut commands: Commands,
     ) {
-        let mut held = !waiting.is_empty();
+        let mut held = waiting.iter().count();
         for entity in claimed.iter() {
             commands.entity(entity).remove::<Pending>();
-            held = false;
+            held = held.saturating_sub(1);
         }
-        if held {
-            return;
+        let mut at = known.iter().count() - held;
+        for _ in held..SPARES {
+            at += 1;
+            let Some(screen) = S::blank(at) else {
+                return;
+            };
+            let local = opened.mint();
+            commands.spawn((Tab { id: local.id() }, local, Shows(screen), Pending));
         }
-        let Some(screen) = S::blank(known.iter().count() + 1) else {
-            return;
-        };
-        let local = opened.mint();
-        commands.spawn((Tab { id: local.id() }, local, Shows(screen), Pending));
     }
 
     fn stack<S: Route>(
@@ -1244,19 +1250,19 @@ mod tests {
     fn a_tab_waits_warm_and_unlisted_until_the_drag_lands_on_it() {
         let mut phone = Phone::new();
         phone.reports(&[("tab:1", Page::Home)], Some("tab:1"));
-        assert_eq!(phone.tabs(), vec!["local:0", "tab:1"]);
+        assert_eq!(phone.tabs(), vec!["local:0", "local:1", "tab:1"]);
         assert_eq!(
             phone.listed(),
             vec!["tab:1"],
-            "the waiting tab is spawned but stays out of the strip"
+            "the waiting tabs are spawned but stay out of the strip"
         );
 
         phone.sends(Select("local:0".to_string()));
         assert_eq!(phone.listed(), vec!["tab:1", "local:0"]);
         assert_eq!(
             phone.tabs(),
-            vec!["local:0", "local:1", "tab:1"],
-            "landing on the waiting tab leaves another waiting behind it"
+            vec!["local:0", "local:1", "local:2", "tab:1"],
+            "claiming one tops the spares back up, so the next drag has a warm target"
         );
     }
 
