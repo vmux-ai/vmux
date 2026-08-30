@@ -143,7 +143,131 @@ pub struct CommandBarOpenEvent {
     pub agent_models: Vec<AgentModels>,
     pub target: Option<crate::open_target::OpenTarget>,
     #[serde(default)]
-    pub space_switch: bool,
+    pub picker: Option<CommandBarPicker>,
+    #[serde(default)]
+    pub picks: Vec<CommandBarPickRow>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum CommandBarPicker {
+    Space,
+    GotoLine,
+    Indent,
+    LineEnding,
+    Encoding,
+    EncodingReopen,
+    EncodingSave,
+}
+
+impl CommandBarPicker {
+    pub const fn is_space(self) -> bool {
+        matches!(self, Self::Space)
+    }
+
+    pub const fn takes_typed_value(self) -> bool {
+        matches!(self, Self::GotoLine)
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Space => "",
+            Self::GotoLine => "editor-status-goto-title",
+            Self::Indent => "editor-status-indent-title",
+            Self::LineEnding => "editor-status-eol-title",
+            Self::Encoding => "editor-status-encoding-title",
+            Self::EncodingReopen => "editor-status-encoding-reopen",
+            Self::EncodingSave => "editor-status-encoding-save",
+        }
+    }
+
+    pub const fn placeholder(self) -> &'static str {
+        match self {
+            Self::Space => "command-switch-space",
+            Self::GotoLine => "editor-status-goto-placeholder",
+            Self::Indent
+            | Self::LineEnding
+            | Self::Encoding
+            | Self::EncodingReopen
+            | Self::EncodingSave => "editor-status-pick-placeholder",
+        }
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum CommandBarPick {
+    Picker(CommandBarPicker),
+    GotoLine { line: u32 },
+    Indent { spaces: bool, width: u16 },
+    LineEnding { crlf: bool },
+    Encoding { label: String, save: bool },
+}
+
+impl CommandBarPick {
+    pub fn labelled(self, label: impl Into<String>) -> CommandBarPickRow {
+        CommandBarPickRow {
+            label: label.into(),
+            pick: self,
+        }
+    }
+
+    pub fn goto_line(input: &str) -> Option<Self> {
+        let trimmed = input.trim();
+        let digits = match trimmed.split_once(':') {
+            Some((line, _)) => line.trim(),
+            None => trimmed,
+        };
+        let line = digits.parse::<u32>().ok()?;
+        Some(Self::GotoLine {
+            line: line.saturating_sub(1),
+        })
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarPickRow {
+    pub label: String,
+    pub pick: CommandBarPick,
+}
+
+impl CommandBarPickRow {
+    pub fn matches(&self, query: &str) -> bool {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return true;
+        }
+        self.label.to_lowercase().contains(&needle)
+    }
 }
 
 #[derive(
@@ -320,6 +444,9 @@ pub enum CommandBarActionEvent {
     },
     Ex {
         line: String,
+    },
+    Pick {
+        pick: CommandBarPick,
     },
     Dismiss,
 }
@@ -1030,6 +1157,44 @@ mod tests {
             rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(recovered.pages.len(), 1);
         assert_eq!(recovered.pages[0].title, "Settings");
+    }
+
+    #[test]
+    fn a_typed_line_number_is_one_based_and_anything_else_is_refused() {
+        assert_eq!(
+            CommandBarPick::goto_line("42"),
+            Some(CommandBarPick::GotoLine { line: 41 })
+        );
+        assert_eq!(
+            CommandBarPick::goto_line("  7  "),
+            Some(CommandBarPick::GotoLine { line: 6 })
+        );
+        assert_eq!(
+            CommandBarPick::goto_line("12:5"),
+            Some(CommandBarPick::GotoLine { line: 11 }),
+            "a pasted line:column lands on the line"
+        );
+        assert_eq!(
+            CommandBarPick::goto_line("0"),
+            Some(CommandBarPick::GotoLine { line: 0 })
+        );
+        for refused in ["", "abc", "-3", "3.5"] {
+            assert_eq!(CommandBarPick::goto_line(refused), None, "{refused}");
+        }
+    }
+
+    #[test]
+    fn an_asserted_picker_survives_the_wire() {
+        let event = CommandBarOpenEvent {
+            picker: Some(CommandBarPicker::EncodingReopen),
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+
+        assert_eq!(recovered.picker, Some(CommandBarPicker::EncodingReopen));
+        assert_eq!(CommandBarOpenEvent::default().picker, None);
     }
 
     #[test]

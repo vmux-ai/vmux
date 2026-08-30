@@ -368,6 +368,54 @@ pub enum BrowserBarCommand {
     OpenHistory,
     #[menu(id = "browser_open_ex_bar", label = "Vim Command Line")]
     OpenExBar,
+    #[menu(id = "browser_open_goto_line", label = "Go to Line")]
+    OpenGotoLine,
+    #[menu(id = "browser_open_indentation", label = "Select Indentation")]
+    OpenIndentation,
+    #[menu(id = "browser_open_line_ending", label = "Select End of Line Sequence")]
+    OpenLineEnding,
+    #[menu(id = "browser_open_encoding", label = "Select Encoding")]
+    OpenEncoding,
+    #[menu(
+        id = "browser_open_reopen_with_encoding",
+        label = "Reopen with Encoding"
+    )]
+    OpenReopenWithEncoding,
+    #[menu(id = "browser_open_save_with_encoding", label = "Save with Encoding")]
+    OpenSaveWithEncoding,
+}
+
+impl BrowserBarCommand {
+    pub const fn picker(self) -> Option<vmux_wire::command_bar::CommandBarPicker> {
+        use vmux_wire::command_bar::CommandBarPicker;
+        match self {
+            Self::OpenGotoLine => Some(CommandBarPicker::GotoLine),
+            Self::OpenIndentation => Some(CommandBarPicker::Indent),
+            Self::OpenLineEnding => Some(CommandBarPicker::LineEnding),
+            Self::OpenEncoding => Some(CommandBarPicker::Encoding),
+            Self::OpenReopenWithEncoding => Some(CommandBarPicker::EncodingReopen),
+            Self::OpenSaveWithEncoding => Some(CommandBarPicker::EncodingSave),
+            Self::OpenCommandBar
+            | Self::OpenPageInCommandBar
+            | Self::OpenPathBar
+            | Self::OpenCommands
+            | Self::OpenHistory
+            | Self::OpenExBar => None,
+        }
+    }
+
+    pub const fn opening(picker: vmux_wire::command_bar::CommandBarPicker) -> Option<Self> {
+        use vmux_wire::command_bar::CommandBarPicker;
+        match picker {
+            CommandBarPicker::GotoLine => Some(Self::OpenGotoLine),
+            CommandBarPicker::Indent => Some(Self::OpenIndentation),
+            CommandBarPicker::LineEnding => Some(Self::OpenLineEnding),
+            CommandBarPicker::Encoding => Some(Self::OpenEncoding),
+            CommandBarPicker::EncodingReopen => Some(Self::OpenReopenWithEncoding),
+            CommandBarPicker::EncodingSave => Some(Self::OpenSaveWithEncoding),
+            CommandBarPicker::Space => None,
+        }
+    }
 }
 
 #[allow(dead_code)]

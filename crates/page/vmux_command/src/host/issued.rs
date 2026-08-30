@@ -14,6 +14,12 @@ pub struct ExLineSubmitted {
     pub line: String,
 }
 
+#[derive(Message, Clone)]
+pub struct FileStatusPicked {
+    pub stack: Option<Entity>,
+    pub pick: vmux_wire::command_bar::CommandBarPick,
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommandIssuer<'w> {
     pub app: MessageWriter<'w, AppCommand>,

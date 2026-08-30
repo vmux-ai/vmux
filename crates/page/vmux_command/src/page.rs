@@ -23,6 +23,7 @@ use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlaceme
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
+use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
     PaletteGlyph, PaletteRows, PaletteState, PaletteSurface, Submission,
 };
@@ -53,6 +54,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut media = use_prompt_media();
     let search = use_host_search();
     let menu = use_composer_menu();
+    let ime = use_ime_guard();
 
     let keys = use_key_claim(Unclaimed::Types, move || match surface {
         PaletteSurface::Modal => vec!["command-bar".to_string()],
@@ -288,6 +290,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let modal_keydown = {
         let palette = palette.clone();
         move |e: KeyboardEvent| {
+            if ime.swallows(&e) {
+                return;
+            }
             if Readline::chord(&e, signals.query, &palette.ghost, COMMAND_BAR_INPUT_ID) {
                 return;
             }
@@ -363,7 +368,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             }
                         }
                         PaletteModeChip { label: palette.mode.label() }
-                        PaletteGlyphIcon { glyph: palette.glyph }
+                        if let Some(glyph) = palette.glyph {
+                            PaletteGlyphIcon { glyph }
+                        }
                         div { class: command_bar_input_wrap_class(),
                             if !ghost_text.is_empty() {
                                 div {
@@ -381,6 +388,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 value: "{palette.display_text}",
                                 autofocus: true,
                                 oninput: move |event| signals.retype(event.value()),
+                                oncompositionstart: move |_| ime.start(),
+                                oncompositionend: move |_| ime.commit(),
                                 onkeydown: modal_keydown,
                             }
                         }

@@ -9,7 +9,7 @@ use crate::explorer::{ExplorerPanel, SidebarView};
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    CellMetrics, ColumnRuler, GotoLine, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
+    CellMetrics, ColumnRuler, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
     centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started, gutter_width,
     heading_class, image_mime, line_severity, note_cursor_activation, note_inline_nodes,
     note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
@@ -30,10 +30,12 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::ime::{ImeGuard, use_ime_guard};
 use vmux_ui::media::MediaElement;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
+use vmux_wire::command_bar::CommandBarPicker;
 
 #[component]
 pub fn Page() -> Element {
@@ -1161,7 +1163,7 @@ pub fn Page() -> Element {
                             class: "flex max-w-xl flex-col items-center gap-3 rounded-md border border-ansi-1 bg-background px-4 py-3 text-sm text-ansi-1",
                             span { class: "break-all text-center", "{msg}" }
                             if error_undecodable() {
-                                EncodingRecovery { encoding: encoding() }
+                                EncodingRecovery {}
                             }
                         }
                     }
@@ -2443,10 +2445,6 @@ fn FileStatusInfo(
     encoding: vmux_core::event::FileEncoding,
     language: String,
 ) -> Element {
-    let menus = StatusMenus {
-        open: use_signal(|| None::<StatusMenu>),
-        goto: use_signal(String::new),
-    };
     let position = translate_with(
         "editor-status-position",
         &[
@@ -2464,8 +2462,7 @@ fn FileStatusInfo(
                 label: position,
                 title: translate("editor-status-goto-title"),
                 extra: "tabular-nums",
-                kind: StatusMenuKind::Goto,
-                menus,
+                picker: CommandBarPicker::GotoLine,
             }
         }
         if scope.shows_indent() {
@@ -2473,46 +2470,23 @@ fn FileStatusInfo(
                 label: IndentChoice::of(indent).label(),
                 title: translate("editor-status-indent-title"),
                 extra: "",
-                kind: StatusMenuKind::Indent,
-                menus,
+                picker: CommandBarPicker::Indent,
             }
         }
         StatusItemButton {
             label: encoding.label().to_string(),
             title: translate("editor-status-encoding-title"),
             extra: "",
-            kind: StatusMenuKind::Encoding,
-            menus,
+            picker: CommandBarPicker::Encoding,
         }
         StatusItemButton {
             label: eol.to_string(),
             title: translate("editor-status-eol-title"),
             extra: "",
-            kind: StatusMenuKind::LineEnding,
-            menus,
+            picker: CommandBarPicker::LineEnding,
         }
         if !language.is_empty() {
             span { class: "shrink-0", "{language}" }
-        }
-
-        if let Some(current) = menus.current() {
-            div {
-                class: "fixed inset-0 z-[1]",
-                onclick: move |_| menus.hide(),
-                oncontextmenu: move |event: Event<MouseData>| {
-                    event.prevent_default();
-                    menus.hide();
-                },
-            }
-            StatusMenuList {
-                menu: current,
-                indent,
-                line_ending,
-                encoding,
-                menus,
-                goto: menus.goto,
-                on_close: EventHandler::new(move |()| menus.hide()),
-            }
         }
     }
 }
@@ -2522,20 +2496,14 @@ fn StatusItemButton(
     label: String,
     title: String,
     extra: String,
-    kind: StatusMenuKind,
-    menus: StatusMenus,
+    picker: CommandBarPicker,
 ) -> Element {
     rsx! {
         button {
             class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
             title,
-            onclick: move |event: Event<MouseData>| {
-                let at = event.client_coordinates();
-                menus.show(StatusMenu {
-                    x: at.x,
-                    y: at.y,
-                    kind,
-                });
+            onclick: move |_| {
+                let _ = send(&FileStatusPickerOpen::of(picker));
             },
             "{label}"
         }
@@ -2543,213 +2511,17 @@ fn StatusItemButton(
 }
 
 #[component]
-fn StatusMenuList(
-    menu: StatusMenu,
-    indent: vmux_core::event::FileIndent,
-    line_ending: vmux_core::event::FileLineEnding,
-    encoding: vmux_core::event::FileEncoding,
-    menus: StatusMenus,
-    goto: Signal<String>,
-    on_close: EventHandler<()>,
-) -> Element {
-    let x = menu.x;
-    let y = menu.y;
+fn EncodingRecovery() -> Element {
     rsx! {
-        div {
-            class: "fixed z-[2] max-h-[60dvh] min-w-[180px] max-w-[320px] overflow-y-auto rounded-lg bg-background p-1 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28),inset_0_0_0_1px_var(--border)]",
-            style: "left:clamp(8px, {x}px - 60px, 100dvw - 330px);bottom:clamp(8px, 100dvh - {y}px + 12px, 100dvh - 60px);",
-            onclick: move |event: Event<MouseData>| event.stop_propagation(),
-            match menu.kind {
-                StatusMenuKind::Goto => rsx! {
-                    GotoLineField { goto, on_close }
-                },
-                StatusMenuKind::Indent => rsx! {
-                    for choice in IndentChoice::ALL {
-                        {
-                            let active = choice == IndentChoice::of(indent);
-                            rsx! {
-                                button {
-                                    key: "{choice.spaces}-{choice.width}",
-                                    class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
-                                    onclick: move |_| {
-                                        let _ = send(&FileShapeSet {
-                                            indent: choice.indent(),
-                                            line_ending,
-                                        });
-                                        on_close.call(());
-                                    },
-                                    span { class: "truncate", {choice.label()} }
-                                }
-                            }
-                        }
-                    }
-                },
-                StatusMenuKind::Encoding => rsx! {
-                    EncodingActionList { x, y, menus }
-                },
-                StatusMenuKind::EncodingChoice(action) => rsx! {
-                    EncodingChoiceList { action, encoding, on_close }
-                },
-                StatusMenuKind::LineEnding => rsx! {
-                    for choice in [vmux_core::event::FileLineEnding::Lf, vmux_core::event::FileLineEnding::Crlf] {
-                        {
-                            let active = choice == line_ending;
-                            let label = match choice {
-                                vmux_core::event::FileLineEnding::Crlf => "CRLF",
-                                vmux_core::event::FileLineEnding::Lf => "LF",
-                            };
-                            rsx! {
-                                button {
-                                    key: "{label}",
-                                    class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
-                                    onclick: move |_| {
-                                        let _ = send(&FileShapeSet {
-                                            indent,
-                                            line_ending: choice,
-                                        });
-                                        on_close.call(());
-                                    },
-                                    span { class: "truncate", "{label}" }
-                                }
-                            }
-                        }
-                    }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn EncodingActionList(x: f64, y: f64, menus: StatusMenus) -> Element {
-    rsx! {
-        for action in [FileEncodingAction::Reopen, FileEncodingAction::Save] {
-            {
-                let id = match action {
-                    FileEncodingAction::Reopen => "editor-status-encoding-reopen",
-                    FileEncodingAction::Save => "editor-status-encoding-save",
-                };
-                rsx! {
-                    button {
-                        key: "{id}",
-                        class: STATUS_MENU_ITEM_CLASS,
-                        onclick: move |_| {
-                            menus
-                                .show(StatusMenu {
-                                    x,
-                                    y,
-                                    kind: StatusMenuKind::EncodingChoice(action),
-                                });
-                        },
-                        span { class: "truncate", {translate(id)} }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn EncodingRecovery(encoding: vmux_core::event::FileEncoding) -> Element {
-    let mut choosing = use_signal(|| false);
-    if !choosing() {
-        return rsx! {
-            button {
-                class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
-                onclick: move |_| choosing.set(true),
-                {translate("editor-status-encoding-reopen")}
-            }
-        };
-    }
-    rsx! {
-        div {
-            class: "max-h-[50dvh] w-56 overflow-y-auto rounded-lg bg-background p-1 font-sans text-xs text-foreground shadow-[inset_0_0_0_1px_var(--border)]",
-            EncodingChoiceList {
-                action: FileEncodingAction::Reopen,
-                encoding,
-                on_close: EventHandler::new(move |()| choosing.set(false)),
-            }
-        }
-    }
-}
-
-#[component]
-fn EncodingChoiceList(
-    action: FileEncodingAction,
-    encoding: vmux_core::event::FileEncoding,
-    on_close: EventHandler<()>,
-) -> Element {
-    rsx! {
-        for choice in vmux_core::event::FileEncoding::ALL {
-            {
-                let active = choice == encoding;
-                rsx! {
-                    button {
-                        key: "{choice.label()}",
-                        class: if active { STATUS_MENU_ITEM_ACTIVE_CLASS } else { STATUS_MENU_ITEM_CLASS },
-                        onclick: move |_| {
-                            let _ = send(&FileEncodingSet {
-                                encoding: choice,
-                                action,
-                            });
-                            on_close.call(());
-                        },
-                        span { class: "truncate", "{choice.label()}" }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn GotoLineField(goto: Signal<String>, on_close: EventHandler<()>) -> Element {
-    let mut draft = goto;
-    let ime = use_ime_guard();
-    rsx! {
-        input {
-            r#type: "text",
-            class: "w-full rounded-md bg-foreground/[0.06] px-2 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 focus:ring-cyan-400/40",
-            placeholder: translate("editor-status-goto-placeholder"),
-            value: "{draft}",
-            onmounted: move |event: Event<MountedData>| {
-                let data = event.data();
-                spawn(async move {
-                    let _ = data.set_focus(true).await;
-                });
+        button {
+            class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
+            onclick: move |_| {
+                let _ = send(&FileStatusPickerOpen::of(CommandBarPicker::EncodingReopen));
             },
-            oninput: move |event: Event<FormData>| draft.set(event.value()),
-            oncompositionstart: move |_| ime.start(),
-            oncompositionend: move |_| ime.commit(),
-            onkeydown: move |event: Event<KeyboardData>| {
-                event.stop_propagation();
-                if ime.swallows(&event) {
-                    return;
-                }
-                match event.key() {
-                    Key::Escape => {
-                        draft.set(String::new());
-                        on_close.call(());
-                    }
-                    Key::Enter => {
-                        if let Some(line) = GotoLine::parse(&draft()) {
-                            let _ = send(&ExplorerGoto {
-                                path: String::new(),
-                                line,
-                            });
-                        }
-                        draft.set(String::new());
-                        on_close.call(());
-                    }
-                    _ => {}
-                }
-            },
+            {translate("editor-status-encoding-reopen")}
         }
     }
 }
-
-const STATUS_MENU_ITEM_CLASS: &str = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
-const STATUS_MENU_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md bg-cyan-400/12 px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileStatusScope {
@@ -2782,96 +2554,16 @@ impl FileStatusScope {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-struct StatusMenus {
-    open: Signal<Option<StatusMenu>>,
-    goto: Signal<String>,
-}
-
-impl StatusMenus {
-    fn show(mut self, next: StatusMenu) {
-        let same = self
-            .open
-            .peek()
-            .as_ref()
-            .is_some_and(|open| open.kind == next.kind);
-        if same {
-            self.open.set(None);
-            return;
-        }
-        self.goto.set(String::new());
-        self.open.set(Some(next));
-    }
-
-    fn hide(mut self) {
-        self.open.set(None);
-    }
-
-    fn current(self) -> Option<StatusMenu> {
-        (self.open)()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct StatusMenu {
-    x: f64,
-    y: f64,
-    kind: StatusMenuKind,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum StatusMenuKind {
-    Goto,
-    Indent,
-    Encoding,
-    EncodingChoice(FileEncodingAction),
-    LineEnding,
-}
-
-#[derive(Clone, Copy, PartialEq)]
 struct IndentChoice {
     spaces: bool,
     width: u16,
 }
 
 impl IndentChoice {
-    const ALL: [Self; 6] = [
-        Self {
-            spaces: true,
-            width: 2,
-        },
-        Self {
-            spaces: true,
-            width: 4,
-        },
-        Self {
-            spaces: true,
-            width: 8,
-        },
-        Self {
-            spaces: false,
-            width: 2,
-        },
-        Self {
-            spaces: false,
-            width: 4,
-        },
-        Self {
-            spaces: false,
-            width: 8,
-        },
-    ];
-
     fn of(indent: vmux_core::event::FileIndent) -> Self {
         Self {
             spaces: indent.spaces,
             width: indent.width,
-        }
-    }
-
-    fn indent(self) -> vmux_core::event::FileIndent {
-        vmux_core::event::FileIndent {
-            spaces: self.spaces,
-            width: self.width,
         }
     }
 
@@ -5164,52 +4856,6 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
     true
 }
 
-pub(crate) fn use_ime_guard() -> ImeGuard {
-    ImeGuard {
-        composition: use_signal(Composition::default),
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) struct ImeGuard {
-    composition: Signal<Composition>,
-}
-
-impl ImeGuard {
-    fn active(self) -> bool {
-        (self.composition)().active
-    }
-
-    pub(crate) fn start(mut self) {
-        let started = self.composition.peek().started();
-        self.composition.set(started);
-    }
-
-    pub(crate) fn commit(mut self) {
-        let committed = self.composition.peek().committed(now_millis());
-        self.composition.set(committed);
-    }
-
-    pub(crate) fn swallows(mut self, event: &Event<KeyboardData>) -> bool {
-        let data = event.data();
-        let (next, verdict) =
-            self.composition
-                .peek()
-                .saw_key(&data.key(), data.is_composing(), now_millis());
-        if *self.composition.peek() != next {
-            self.composition.set(next);
-        }
-        match verdict {
-            ImeVerdict::Editor => false,
-            ImeVerdict::Composing => true,
-            ImeVerdict::Committed => {
-                event.prevent_default();
-                true
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct PreeditField(bool);
 
@@ -5234,78 +4880,6 @@ impl PreeditField {
 
     fn owns_caret(self) -> bool {
         self.0
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ImeVerdict {
-    Editor,
-    Composing,
-    Committed,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-struct Composition {
-    active: bool,
-    committed_at: Option<i64>,
-}
-
-impl Composition {
-    const COMMIT_GRACE_MS: i64 = 60;
-
-    fn started(self) -> Self {
-        Self {
-            active: true,
-            committed_at: None,
-        }
-    }
-
-    fn committed(self, at: i64) -> Self {
-        Self {
-            active: false,
-            committed_at: Some(at),
-        }
-    }
-
-    fn saw_key(self, key: &Key, composing: bool, at: i64) -> (Self, ImeVerdict) {
-        if composing {
-            return (self.started(), ImeVerdict::Composing);
-        }
-        let candidate = Self::candidate_window_key(key);
-        if self.active {
-            let verdict = match candidate {
-                true => ImeVerdict::Committed,
-                false => ImeVerdict::Editor,
-            };
-            return (Self::default(), verdict);
-        }
-        let Some(committed_at) = self.committed_at else {
-            return (self, ImeVerdict::Editor);
-        };
-        if candidate && at.saturating_sub(committed_at) <= Self::COMMIT_GRACE_MS {
-            return (Self::default(), ImeVerdict::Committed);
-        }
-        (Self::default(), ImeVerdict::Editor)
-    }
-
-    fn candidate_window_key(key: &Key) -> bool {
-        if let Key::Character(text) = key {
-            return text == " ";
-        }
-        matches!(
-            key,
-            Key::Enter
-                | Key::Escape
-                | Key::Tab
-                | Key::ArrowUp
-                | Key::ArrowDown
-                | Key::ArrowLeft
-                | Key::ArrowRight
-                | Key::Accept
-                | Key::Convert
-                | Key::NonConvert
-                | Key::Process
-        )
     }
 }
 
@@ -5453,114 +5027,6 @@ mod menu_tests {
             opens, 3,
             "modification, clipboard and the palette; navigation is first so it opens nothing"
         );
-    }
-}
-
-#[cfg(test)]
-mod composition_tests {
-    use super::*;
-
-    fn after_commit(at: i64) -> Composition {
-        Composition::default().started().committed(at)
-    }
-
-    #[test]
-    fn the_enter_that_confirms_a_conversion_never_reaches_the_editor() {
-        let composed = after_commit(1_000);
-
-        assert_eq!(
-            composed.saw_key(&Key::Enter, false, 1_010).1,
-            ImeVerdict::Committed,
-            "macOS reports compositionend before the Enter that caused it, so the key arrives \
-             claiming no composition is in flight and would otherwise break the line"
-        );
-        assert_eq!(
-            Composition::default()
-                .started()
-                .saw_key(&Key::Enter, true, 1_000)
-                .1,
-            ImeVerdict::Composing
-        );
-    }
-
-    #[test]
-    fn one_commit_absorbs_one_key_and_no_more() {
-        let (next, verdict) = after_commit(1_000).saw_key(&Key::Enter, false, 1_005);
-
-        assert_eq!(verdict, ImeVerdict::Committed);
-        assert_eq!(
-            next.saw_key(&Key::Enter, false, 1_006).1,
-            ImeVerdict::Editor,
-            "a reader who commits a conversion and then wants a new line presses Enter twice"
-        );
-    }
-
-    #[test]
-    fn a_key_the_candidate_window_never_took_goes_straight_through() {
-        let composed = after_commit(1_000);
-
-        assert_eq!(
-            composed
-                .saw_key(&Key::Character("a".to_string()), false, 1_005)
-                .1,
-            ImeVerdict::Editor
-        );
-        assert_eq!(
-            composed.saw_key(&Key::Backspace, false, 1_005).1,
-            ImeVerdict::Editor
-        );
-        assert_eq!(
-            composed
-                .saw_key(&Key::Character(" ".to_string()), false, 1_005)
-                .1,
-            ImeVerdict::Committed,
-            "space walks the candidate list on every Japanese IME"
-        );
-    }
-
-    #[test]
-    fn a_key_arriving_after_the_grace_window_is_the_readers_own() {
-        assert_eq!(
-            after_commit(1_000)
-                .saw_key(&Key::Enter, false, 1_000 + Composition::COMMIT_GRACE_MS + 1)
-                .1,
-            ImeVerdict::Editor
-        );
-    }
-
-    #[test]
-    fn a_composition_that_never_ends_clears_on_the_next_ordinary_key() {
-        let stuck = Composition::default().started();
-        let (next, verdict) = stuck.saw_key(&Key::Character("a".to_string()), false, 1_000);
-
-        assert_eq!(
-            verdict,
-            ImeVerdict::Editor,
-            "a missed compositionend must not swallow ordinary typing forever"
-        );
-        assert_eq!(next, Composition::default());
-        assert_eq!(
-            next.saw_key(&Key::Enter, false, 1_001).1,
-            ImeVerdict::Editor
-        );
-    }
-
-    #[test]
-    fn a_key_seen_while_composing_repairs_a_missed_start() {
-        let (next, verdict) = Composition::default().saw_key(&Key::ArrowDown, true, 1_000);
-
-        assert_eq!(verdict, ImeVerdict::Composing);
-        assert!(next.active);
-    }
-
-    #[test]
-    fn a_fresh_page_routes_every_key_to_the_editor() {
-        for key in [Key::Enter, Key::Escape, Key::Tab, Key::ArrowUp] {
-            assert_eq!(
-                Composition::default().saw_key(&key, false, 1_000).1,
-                ImeVerdict::Editor
-            );
-        }
     }
 }
 

@@ -1,12 +1,42 @@
 use crate::i18n::translate;
 use vmux_wire::PageIcon;
 use vmux_wire::command_bar::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarRecentFile, CommandBarSpace, CommandBarTab,
-    CommandBarWorkDir, HistoryEntry, SearchEngine,
+    CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
+    CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
+    SearchEngine,
 };
+
+pub struct PickerRows;
+
+impl PickerRows {
+    pub fn of(
+        picker: CommandBarPicker,
+        picks: &[CommandBarPickRow],
+        query: &str,
+    ) -> Vec<CommandBarResultItem> {
+        if picker.takes_typed_value() {
+            return Vec::new();
+        }
+        let mut rows = Vec::with_capacity(picks.len());
+        for row in picks {
+            if !row.matches(query) {
+                continue;
+            }
+            rows.push(CommandBarResultItem::Pick {
+                label: row.label.clone(),
+                pick: row.pick.clone(),
+            });
+        }
+        rows
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
+    Pick {
+        label: String,
+        pick: CommandBarPick,
+    },
     Terminal {
         path: String,
     },

@@ -147,6 +147,21 @@ enum BrowserBarCommand {
     OpenHistory,
     #[menu(id = "browser_open_ex_bar", label = "Vim Command Line")]
     OpenExBar,
+    #[menu(id = "browser_open_goto_line", label = "Go to Line")]
+    OpenGotoLine,
+    #[menu(id = "browser_open_indentation", label = "Select Indentation")]
+    OpenIndentation,
+    #[menu(id = "browser_open_line_ending", label = "Select End of Line Sequence")]
+    OpenLineEnding,
+    #[menu(id = "browser_open_encoding", label = "Select Encoding")]
+    OpenEncoding,
+    #[menu(
+        id = "browser_open_reopen_with_encoding",
+        label = "Reopen with Encoding"
+    )]
+    OpenReopenWithEncoding,
+    #[menu(id = "browser_open_save_with_encoding", label = "Save with Encoding")]
+    OpenSaveWithEncoding,
 }
 
 #[derive(Debug, McpTool)]

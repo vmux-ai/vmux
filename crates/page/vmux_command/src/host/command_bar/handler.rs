@@ -1,11 +1,13 @@
 use crate::CommandBar;
 use crate::build_command_bar_open_payload;
+use crate::host::payload::CommandBarPicks;
 use std::time::{Duration, Instant};
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
     StackInPaneChosen,
 };
+use vmux_wire::command_bar::{CommandBarPick, CommandBarPicker};
 
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::project_files::{ProjectCompletions, RankBias};
@@ -401,7 +403,7 @@ struct CommandBarOpenRequest {
     should_dismiss_nav: bool,
     replace_active_stack: bool,
     url_override: Option<String>,
-    space_switch: bool,
+    picker: Option<CommandBarPicker>,
 }
 
 fn command_bar_open_request(
@@ -432,7 +434,15 @@ fn command_bar_open_request(
             }
             AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
-                request.space_switch = true;
+                request.picker = Some(CommandBarPicker::Space);
+                request.url_override = Some(String::new());
+            }
+            AppCommand::Browser(BrowserCommand::Bar(bar)) => {
+                let Some(picker) = bar.picker() else {
+                    continue;
+                };
+                request.should_toggle = true;
+                request.picker = Some(picker);
                 request.url_override = Some(String::new());
             }
             AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
@@ -455,8 +465,8 @@ fn command_bar_open_request(
     request
 }
 
-fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
-    !is_open || space_switch
+fn command_bar_toggle_should_open(is_open: bool, picker: Option<CommandBarPicker>) -> bool {
+    !is_open || picker.is_some()
 }
 
 fn handle_open_command_bar(
@@ -495,9 +505,9 @@ fn handle_open_command_bar(
     let should_dismiss_nav = request.should_dismiss_nav;
     let replace_active_stack = request.replace_active_stack;
     let url_override = request.url_override;
-    let space_switch = request.space_switch;
+    let picker = request.picker;
 
-    let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, space_switch);
+    let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, picker);
 
     if (should_dismiss || toggle_closes) && is_open {
         close_command_bar_panel(layout_e, &mut commands);
@@ -548,7 +558,10 @@ fn handle_open_command_bar(
         bar_tabs,
         target,
     );
-    payload.space_switch = space_switch;
+    payload.picker = picker;
+    if let Some(picker) = picker {
+        payload.picks = CommandBarPicks::of(picker, &locale);
+    }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         layout_e,
         LAYOUT_COMMAND_BAR_OPEN_EVENT,
@@ -685,6 +698,7 @@ fn on_command_bar_action(
     mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
+    mut picked: MessageWriter<crate::host::FileStatusPicked>,
     mut issued: MessageWriter<crate::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -916,6 +930,23 @@ fn on_command_bar_action(
                 stack: queries.focused_stack(),
                 line: line.clone(),
             });
+        }
+        CommandBarActionEvent::Pick { pick } => {
+            if let CommandBarPick::Picker(next) = pick {
+                if let Some(bar) = BrowserBarCommand::opening(*next) {
+                    let cmd = AppCommand::Browser(BrowserCommand::Bar(bar));
+                    issued.write(crate::CommandIssued {
+                        caller,
+                        command: cmd.clone(),
+                    });
+                    writer_params.p0().write(cmd);
+                }
+            } else {
+                picked.write(crate::host::FileStatusPicked {
+                    stack: queries.focused_stack(),
+                    pick: pick.clone(),
+                });
+            }
         }
         CommandBarActionEvent::Dismiss => {}
     }
@@ -1760,16 +1791,68 @@ mod tests {
         ))]);
 
         assert!(request.should_toggle);
-        assert!(request.space_switch);
+        assert_eq!(request.picker, Some(CommandBarPicker::Space));
         assert_eq!(request.url_override, Some(String::new()));
     }
 
     #[test]
+    fn every_status_bar_command_asserts_its_own_picker() {
+        for (bar, expected) in [
+            (BrowserBarCommand::OpenGotoLine, CommandBarPicker::GotoLine),
+            (BrowserBarCommand::OpenIndentation, CommandBarPicker::Indent),
+            (
+                BrowserBarCommand::OpenLineEnding,
+                CommandBarPicker::LineEnding,
+            ),
+            (BrowserBarCommand::OpenEncoding, CommandBarPicker::Encoding),
+            (
+                BrowserBarCommand::OpenReopenWithEncoding,
+                CommandBarPicker::EncodingReopen,
+            ),
+            (
+                BrowserBarCommand::OpenSaveWithEncoding,
+                CommandBarPicker::EncodingSave,
+            ),
+        ] {
+            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+
+            assert!(request.should_toggle, "{bar:?}");
+            assert_eq!(request.picker, Some(expected), "{bar:?}");
+            assert_eq!(
+                BrowserBarCommand::opening(expected),
+                Some(bar),
+                "the round trip is what lets a sub-list re-open the bar"
+            );
+        }
+    }
+
+    #[test]
+    fn the_generic_bar_commands_assert_no_picker() {
+        for bar in [
+            BrowserBarCommand::OpenCommandBar,
+            BrowserBarCommand::OpenPathBar,
+            BrowserBarCommand::OpenCommands,
+            BrowserBarCommand::OpenExBar,
+        ] {
+            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+
+            assert_eq!(request.picker, None, "{bar:?}");
+            assert!(request.should_toggle, "{bar:?}");
+        }
+    }
+
+    #[test]
     fn duplicate_open_is_ignored_while_command_bar_is_visible() {
-        assert!(command_bar_toggle_should_open(false, false));
-        assert!(!command_bar_toggle_should_open(true, false));
-        assert!(command_bar_toggle_should_open(true, true));
-        assert!(command_bar_toggle_should_open(false, true));
+        assert!(command_bar_toggle_should_open(false, None));
+        assert!(!command_bar_toggle_should_open(true, None));
+        assert!(command_bar_toggle_should_open(
+            true,
+            Some(CommandBarPicker::Space)
+        ));
+        assert!(command_bar_toggle_should_open(
+            false,
+            Some(CommandBarPicker::Space)
+        ));
     }
 
     #[test]
@@ -1958,7 +2041,7 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
         );
-        assert!(open_payload(&app).space_switch);
+        assert_eq!(open_payload(&app).picker, Some(CommandBarPicker::Space));
     }
 
     #[test]

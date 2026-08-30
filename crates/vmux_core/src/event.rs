@@ -256,6 +256,12 @@ impl FileEncoding {
         Self::Iso8859_1,
     ];
 
+    pub fn of_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Utf8 => "UTF-8",
@@ -2214,6 +2220,28 @@ pub enum FileEncodingAction {
 pub struct FileEncodingSet {
     pub encoding: FileEncoding,
     pub action: FileEncodingAction,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileStatusPickerOpen {
+    pub picker: vmux_wire::command_bar::CommandBarPicker,
+}
+
+impl FileStatusPickerOpen {
+    pub const fn of(picker: vmux_wire::command_bar::CommandBarPicker) -> Self {
+        Self { picker }
+    }
 }
 
 #[derive(

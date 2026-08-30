@@ -35,6 +35,12 @@ pub fn ResultRow(
             onclick: move |_| on_activate.call(()),
             onmouseenter: move |_| on_hover.call(()),
             match &item {
+                            ResultItem::Pick { label, .. } => rsx! {
+                                div { class: result_content_row_class(),
+                                    span { class: result_primary_text_class(), "{label}" }
+                                }
+                                span { class: result_trailing_slot_class(), "\u{21b5}" }
+                            },
                             ResultItem::Terminal { path } => rsx! {
                                 div { class: result_content_row_class(),
                                     span { class: "shrink-0 text-sm text-muted-foreground", ">_" }

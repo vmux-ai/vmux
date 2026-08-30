@@ -5,20 +5,6 @@ use vmux_core::event::{
     DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
 };
 
-pub struct GotoLine;
-
-impl GotoLine {
-    pub fn parse(input: &str) -> Option<u32> {
-        let trimmed = input.trim();
-        let digits = match trimmed.split_once(':') {
-            Some((line, _)) => line.trim(),
-            None => trimmed,
-        };
-        let line = digits.parse::<u32>().ok()?;
-        Some(line.saturating_sub(1))
-    }
-}
-
 pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
     let dx = f64::from(current.0) - f64::from(origin.0);
     let dy = f64::from(current.1) - f64::from(origin.1);
@@ -771,27 +757,6 @@ mod dir_browser_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn goto_line_reads_a_one_based_number_as_a_zero_based_line() {
-        assert_eq!(GotoLine::parse("1"), Some(0));
-        assert_eq!(GotoLine::parse("42"), Some(41));
-        assert_eq!(GotoLine::parse("  7  "), Some(6));
-        assert_eq!(GotoLine::parse("12:5"), Some(11));
-    }
-
-    #[test]
-    fn goto_line_rejects_input_that_is_not_a_line_number() {
-        assert_eq!(GotoLine::parse(""), None);
-        assert_eq!(GotoLine::parse("abc"), None);
-        assert_eq!(GotoLine::parse("-3"), None);
-        assert_eq!(GotoLine::parse("3.5"), None);
-    }
-
-    #[test]
-    fn goto_line_clamps_the_zeroth_line_to_the_first() {
-        assert_eq!(GotoLine::parse("0"), Some(0));
-    }
 
     fn append_live_text(
         source: &[char],

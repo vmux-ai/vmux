@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
 
-use crate::page::use_ime_guard;
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -15,6 +14,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 

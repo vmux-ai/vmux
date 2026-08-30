@@ -1,7 +1,7 @@
 use vmux_wire::agent::supports_inline_agent_transition;
 use vmux_wire::command_bar::{
-    AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPromptContext,
-    CommandBarQuery, ExCommandName, HistoryEntry, PathEntry, is_data_uri,
+    AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
+    CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry, PathEntry, is_data_uri,
 };
 use vmux_wire::open_target::OpenTarget;
 use vmux_wire::prompt_media::ChatAttachment;
@@ -11,7 +11,7 @@ use vmux_wire::space::ProjectRow;
 use crate::components::agent_menu::ComposerAgentOption;
 use crate::i18n::translate;
 use crate::launcher::results::{
-    CommandBarResultItem, active_space_index, filter_results, open_session_results,
+    CommandBarResultItem, PickerRows, active_space_index, filter_results, open_session_results,
     prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
     space_switch_results, start_page_results, terminal_matches_query,
 };
@@ -37,13 +37,13 @@ pub enum PaletteMode {
     Ex,
     Path,
     Url,
-    Space,
+    Picking(CommandBarPicker),
 }
 
 impl PaletteMode {
-    pub fn of(query: &str, space_switch: bool) -> Self {
-        if space_switch {
-            return Self::Space;
+    pub fn of(query: &str, asserted: Option<CommandBarPicker>) -> Self {
+        if let Some(picker) = asserted {
+            return Self::Picking(picker);
         }
         if ExLine::claims(query) {
             return Self::Ex;
@@ -62,7 +62,7 @@ impl PaletteMode {
     }
 
     pub fn opened(state: &CommandBarOpenEvent) -> Self {
-        Self::of(&state.url, state.space_switch)
+        Self::of(&state.url, state.picker)
     }
 
     pub const fn is_ex(self) -> bool {
@@ -70,7 +70,14 @@ impl PaletteMode {
     }
 
     pub const fn is_space(self) -> bool {
-        matches!(self, Self::Space)
+        matches!(self, Self::Picking(CommandBarPicker::Space))
+    }
+
+    pub const fn picking(self) -> Option<CommandBarPicker> {
+        match self {
+            Self::Picking(picker) => Some(picker),
+            _ => None,
+        }
     }
 
     pub const fn prefix(self) -> &'static str {
@@ -78,7 +85,7 @@ impl PaletteMode {
             Self::Ex => ":",
             Self::Command => ">",
             Self::Path => "/",
-            Self::Search | Self::Url | Self::Space => "",
+            Self::Search | Self::Url | Self::Picking(_) => "",
         }
     }
 
@@ -92,7 +99,15 @@ impl PaletteMode {
             Self::Ex => translate("palette-mode-ex"),
             Self::Command => translate("palette-mode-command"),
             Self::Path => translate("palette-mode-path"),
-            Self::Search | Self::Url | Self::Space => String::new(),
+            Self::Picking(picker) => {
+                let id = picker.label();
+                if id.is_empty() {
+                    String::new()
+                } else {
+                    translate(id)
+                }
+            }
+            Self::Search | Self::Url => String::new(),
         }
     }
 }
@@ -165,7 +180,7 @@ impl PaletteRows {
     pub fn of(state: &CommandBarOpenEvent, draft: &PaletteDraft, surface: PaletteSurface) -> Self {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
-        let mode = PaletteMode::of(query, state.space_switch);
+        let mode = PaletteMode::of(query, state.picker);
         let prompt_targets = if is_start {
             prompt_target_results(&state.pages, "")
         } else {
@@ -213,14 +228,17 @@ impl PaletteRows {
     ) -> Vec<CommandBarResultItem> {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
+        if let Some(picker) = mode.picking() {
+            if picker.is_space() {
+                return space_switch_results(&state.spaces, &state.pages, query);
+            }
+            return PickerRows::of(picker, &state.picks, query);
+        }
         if mode.is_ex() {
             if is_start {
                 return Vec::new();
             }
             return ExLine::suggestions(query);
-        }
-        if mode.is_space() {
-            return space_switch_results(&state.spaces, &state.pages, query);
         }
         if is_start && query.trim().is_empty() {
             return open_session_results(&state.tabs, &state.pages);
@@ -309,12 +327,19 @@ pub enum PaletteGlyph {
 }
 
 impl PaletteGlyph {
-    fn of(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Self {
+    fn of(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Option<Self> {
+        if let PaletteMode::Picking(picker) = mode
+            && !picker.is_space()
+        {
+            return None;
+        }
         let Some(item) = navigating else {
             return Self::in_mode(mode);
         };
-        match item {
-            CommandBarResultItem::Command { .. } | CommandBarResultItem::Ex { .. } => Self::Command,
+        let glyph = match item {
+            CommandBarResultItem::Command { .. }
+            | CommandBarResultItem::Ex { .. }
+            | CommandBarResultItem::Pick { .. } => Self::Command,
             CommandBarResultItem::Terminal { path } if path.is_empty() => Self::Command,
             CommandBarResultItem::Terminal { .. }
             | CommandBarResultItem::Editor { .. }
@@ -331,15 +356,19 @@ impl PaletteGlyph {
             CommandBarResultItem::Space { .. }
             | CommandBarResultItem::Page { .. }
             | CommandBarResultItem::Search { .. } => Self::Search,
-        }
+        };
+        Some(glyph)
     }
 
-    const fn in_mode(mode: PaletteMode) -> Self {
+    const fn in_mode(mode: PaletteMode) -> Option<Self> {
         match mode {
-            PaletteMode::Command | PaletteMode::Ex => Self::Command,
-            PaletteMode::Path => Self::Path,
-            PaletteMode::Url => Self::Url,
-            PaletteMode::Search | PaletteMode::Space => Self::Search,
+            PaletteMode::Command | PaletteMode::Ex => Some(Self::Command),
+            PaletteMode::Path => Some(Self::Path),
+            PaletteMode::Url => Some(Self::Url),
+            PaletteMode::Picking(CommandBarPicker::Space) | PaletteMode::Search => {
+                Some(Self::Search)
+            }
+            PaletteMode::Picking(_) => None,
         }
     }
 }
@@ -508,7 +537,7 @@ pub struct PaletteState {
     pub ghost: String,
     pub display_text: String,
     pub placeholder: String,
-    pub glyph: PaletteGlyph,
+    pub glyph: Option<PaletteGlyph>,
     pub mode: PaletteMode,
     pub start_prompt_mode: bool,
     pub space_switch: bool,
@@ -572,7 +601,7 @@ impl PaletteState {
             glyph: PaletteGlyph::of(navigating, rows.mode),
             mode: rows.mode,
             start_prompt_mode: rows.start_prompt_mode,
-            space_switch: state.space_switch,
+            space_switch: rows.mode.is_space(),
             nav_mode: draft.nav_mode,
             open_target: state.target,
             space_name: state.space_name.clone(),
@@ -677,6 +706,9 @@ impl PaletteState {
             CommandBarResultItem::Ex { name, .. } => {
                 Some(CommandBarActionEvent::Ex { line: name.clone() })
             }
+            CommandBarResultItem::Pick { pick, .. } => {
+                Some(CommandBarActionEvent::Pick { pick: pick.clone() })
+            }
             CommandBarResultItem::Space { id, .. } => {
                 Some(CommandBarActionEvent::Space { id: id.clone() })
             }
@@ -697,6 +729,9 @@ impl PaletteState {
     }
 
     pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
+        if let Some(picker) = self.mode.picking() {
+            return self.submit_picked(picker, attachments);
+        }
         if self.mode.is_ex() {
             if self.nav_mode
                 && let Some(item) = self.row(self.selected)
@@ -708,13 +743,24 @@ impl PaletteState {
             };
             return Submission::closing(CommandBarActionEvent::Ex { line });
         }
-        if self.space_switch {
-            let Some(item) = self.row(self.selected) else {
+        self.submit_typed(attachments)
+    }
+
+    fn submit_picked(
+        &self,
+        picker: CommandBarPicker,
+        attachments: &[ChatAttachment],
+    ) -> Submission {
+        if picker.takes_typed_value() {
+            let Some(pick) = CommandBarPick::goto_line(&self.query) else {
                 return Submission::default();
             };
-            return self.activate(item, attachments);
+            return Submission::closing(CommandBarActionEvent::Pick { pick });
         }
-        self.submit_typed(attachments)
+        let Some(item) = self.row(self.selected) else {
+            return Submission::default();
+        };
+        self.activate(item, attachments)
     }
 
     pub fn submit_start(&self, attachments: &[ChatAttachment]) -> Submission {
@@ -770,13 +816,7 @@ impl PaletteState {
     }
 
     fn submit_typed(&self, attachments: &[ChatAttachment]) -> Submission {
-        let trimmed = self.query.trim();
-        let prefer_page = matches!(
-            self.row(self.selected),
-            Some(CommandBarResultItem::Page { url, .. })
-                if trimmed.starts_with("vmux://") && url.starts_with(trimmed)
-        );
-        if !prefer_page
+        if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
             && CommandBarQuery(&self.query)
                 .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
@@ -792,7 +832,7 @@ impl PaletteState {
     }
 
     pub fn opening_selection(state: &CommandBarOpenEvent) -> usize {
-        if state.space_switch {
+        if state.picker == Some(CommandBarPicker::Space) {
             active_space_index(&state.spaces)
         } else {
             0
@@ -800,12 +840,42 @@ impl PaletteState {
     }
 }
 
+struct TypedRow;
+
+impl TypedRow {
+    fn beats_a_guessed_url(row: Option<&CommandBarResultItem>, query: &str) -> bool {
+        let query = query.trim();
+        let Some(row) = row else {
+            return false;
+        };
+        match row {
+            CommandBarResultItem::Page { url, .. } => {
+                query.starts_with("vmux://") && url.starts_with(query)
+            }
+            CommandBarResultItem::File { path, is_dir, .. } => {
+                !is_dir && Self::is_named(path, query)
+            }
+            CommandBarResultItem::Editor { path } => Self::is_named(path, query),
+            CommandBarResultItem::RecentFile { title, .. } => Self::is_called(title, query),
+            _ => false,
+        }
+    }
+
+    fn is_named(path: &str, query: &str) -> bool {
+        Self::is_called(path.rsplit('/').next().unwrap_or(path), query)
+    }
+
+    fn is_called(name: &str, query: &str) -> bool {
+        !query.contains("://") && name.eq_ignore_ascii_case(query)
+    }
+}
+
 struct Placeholder;
 
 impl Placeholder {
     fn of(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
-        if mode.is_space() {
-            return translate("command-switch-space");
+        if let Some(picker) = mode.picking() {
+            return translate(picker.placeholder());
         }
         if mode.is_ex() {
             return translate("command-ex-placeholder");
@@ -830,6 +900,7 @@ impl DisplayText {
         match item {
             Some(CommandBarResultItem::Command { name, .. }) => format!("> {name}"),
             Some(CommandBarResultItem::Ex { name, .. }) => format!(":{name}"),
+            Some(CommandBarResultItem::Pick { label, .. }) => label.clone(),
             Some(CommandBarResultItem::Navigate { url }) => url.clone(),
             Some(CommandBarResultItem::Search { query, .. }) => query.clone(),
             Some(CommandBarResultItem::Stack { url, .. }) => url.clone(),
@@ -1189,7 +1260,7 @@ mod tests {
 
         fn switching_spaces() -> CommandBarOpenEvent {
             CommandBarOpenEvent {
-                space_switch: true,
+                picker: Some(CommandBarPicker::Space),
                 spaces: vec![
                     CommandBarSpace {
                         id: "space-1".into(),
@@ -1206,6 +1277,36 @@ mod tests {
                         tab_count: 3,
                     },
                 ],
+                ..Self::state()
+            }
+        }
+
+        fn picking(picker: CommandBarPicker) -> CommandBarOpenEvent {
+            let picks = match picker {
+                CommandBarPicker::Encoding => vec![
+                    CommandBarPick::Picker(CommandBarPicker::EncodingReopen)
+                        .labelled("Reopen with Encoding"),
+                    CommandBarPick::Picker(CommandBarPicker::EncodingSave)
+                        .labelled("Save with Encoding"),
+                ],
+                CommandBarPicker::EncodingReopen => {
+                    let mut rows = Vec::new();
+                    for label in ["UTF-8", "Shift_JIS", "EUC-JP"] {
+                        rows.push(
+                            CommandBarPick::Encoding {
+                                label: label.to_string(),
+                                save: false,
+                            }
+                            .labelled(label),
+                        );
+                    }
+                    rows
+                }
+                _ => Vec::new(),
+            };
+            CommandBarOpenEvent {
+                picker: Some(picker),
+                picks,
                 ..Self::state()
             }
         }
@@ -1502,19 +1603,19 @@ mod tests {
 
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("> close")).glyph,
-            PaletteGlyph::Command
+            Some(PaletteGlyph::Command)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("~/src")).glyph,
-            PaletteGlyph::Path
+            Some(PaletteGlyph::Path)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("example.com")).glyph,
-            PaletteGlyph::Url
+            Some(PaletteGlyph::Url)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("how do i")).glyph,
-            PaletteGlyph::Search
+            Some(PaletteGlyph::Search)
         );
 
         let navigated =
@@ -1524,6 +1625,66 @@ mod tests {
             PaletteGlyph::of(navigated.row(0), navigated.mode),
             "navigating reads the row, not the text"
         );
+    }
+
+    #[test]
+    fn a_picker_shows_no_input_glyph_because_its_chip_already_names_it() {
+        assert_eq!(
+            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
+            None
+        );
+        assert_eq!(
+            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Space)),
+            Some(PaletteGlyph::Search),
+            "the space switcher is a picker but reads as a search"
+        );
+    }
+
+    #[test]
+    fn a_highlighted_file_wins_over_reading_its_name_as_a_hostname() {
+        let row = CommandBarResultItem::File {
+            path: "/repo/ts/packages/csp/src/index.ts".into(),
+            is_dir: false,
+            project: "dashboard".into(),
+            relative: "ts/packages/csp/src".into(),
+        };
+
+        assert!(TypedRow::beats_a_guessed_url(Some(&row), "index.ts"));
+        assert!(TypedRow::beats_a_guessed_url(Some(&row), " Index.TS "));
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&row), "csp"),
+            "a partial match is still a search, not an open"
+        );
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&row), "https://index.ts"),
+            "an explicit scheme means the user typed a URL"
+        );
+    }
+
+    #[test]
+    fn a_highlighted_file_never_hijacks_a_real_domain() {
+        let row = CommandBarResultItem::File {
+            path: "/repo/docs/google.com".into(),
+            is_dir: false,
+            project: "dashboard".into(),
+            relative: "docs".into(),
+        };
+        let directory = CommandBarResultItem::File {
+            path: "/repo/example.com".into(),
+            is_dir: true,
+            project: "dashboard".into(),
+            relative: "".into(),
+        };
+
+        assert!(
+            TypedRow::beats_a_guessed_url(Some(&row), "google.com"),
+            "a file that really is named google.com is still the highlighted row"
+        );
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&directory), "example.com"),
+            "a directory is not something Enter opens over a URL"
+        );
+        assert!(!TypedRow::beats_a_guessed_url(None, "google.com"));
     }
 
     #[test]
@@ -1569,16 +1730,84 @@ mod tests {
     }
 
     #[test]
+    fn an_asserted_picker_outranks_every_shape_the_typed_text_could_take() {
+        let asserted = CommandBarPicker::EncodingReopen;
+        for typed in [">", ":", "~/etc", "example.com", "how do i", ""] {
+            assert_eq!(
+                PaletteMode::of(typed, Some(asserted)),
+                PaletteMode::Picking(asserted),
+                "`{typed}` must not steal the picker the caller asked for"
+            );
+        }
+
+        assert_eq!(PaletteMode::of("> close", None), PaletteMode::Command);
+        assert_eq!(PaletteMode::of(":w", None), PaletteMode::Ex);
+        assert_eq!(PaletteMode::of("~/src", None), PaletteMode::Path);
+        assert_eq!(PaletteMode::of("example.com", None), PaletteMode::Url);
+        assert_eq!(PaletteMode::of("how do i", None), PaletteMode::Search);
+    }
+
+    #[test]
+    fn a_picker_narrows_its_host_built_rows_and_submits_the_highlighted_one() {
+        let state = Launcher::picking(CommandBarPicker::EncodingReopen);
+
+        let offered = PaletteState::modal(&state, PaletteDraft::default());
+        assert_eq!(offered.rows.len(), 3, "{:?}", offered.rows);
+
+        let narrowed = PaletteState::modal(&state, PaletteDraft::typed("shift"));
+        assert_eq!(narrowed.rows.len(), 1, "{:?}", narrowed.rows);
+        assert_eq!(
+            narrowed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::Encoding {
+                    label: "Shift_JIS".to_string(),
+                    save: false,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_sub_list_row_asks_for_another_picker_rather_than_applying_anything() {
+        let state = Launcher::picking(CommandBarPicker::Encoding);
+        let palette = PaletteState::modal(&state, PaletteDraft::default());
+
+        assert_eq!(
+            palette.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
+            })
+        );
+    }
+
+    #[test]
+    fn the_line_picker_reads_the_typed_number_instead_of_a_row() {
+        let state = Launcher::picking(CommandBarPicker::GotoLine);
+
+        let typed = PaletteState::modal(&state, PaletteDraft::typed("42"));
+        assert!(typed.rows.is_empty(), "{:?}", typed.rows);
+        assert_eq!(
+            typed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::GotoLine { line: 41 },
+            })
+        );
+
+        let refused = PaletteState::modal(&state, PaletteDraft::typed("abc"));
+        assert_eq!(refused.submit_modal(&[]), Submission::default());
+    }
+
+    #[test]
     fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
         for seed in [":", ">", "/"] {
             assert!(
-                PaletteMode::of(seed, false).opens_at_end(seed),
+                PaletteMode::of(seed, None).opens_at_end(seed),
                 "`{seed}` opens a mode, so the next keystroke must append to it"
             );
         }
         for seed in ["https://example.com", "", ":w"] {
             assert!(
-                !PaletteMode::of(seed, false).opens_at_end(seed),
+                !PaletteMode::of(seed, None).opens_at_end(seed),
                 "`{seed}` is a value, so the next keystroke must replace it"
             );
         }
