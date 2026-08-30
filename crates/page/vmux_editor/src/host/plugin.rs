@@ -4902,7 +4902,7 @@ fn on_explorer_panel_set_visible(
             emit_explorer_focus(
                 entity,
                 &fv.path,
-                ExplorerReveal::Requested,
+                ExplorerReveal::Followed,
                 &browsers,
                 &mut commands,
             );
@@ -5926,6 +5926,49 @@ mod explorer_tests {
             "dropping the root makes the next reveal look like a tree change and re-scroll"
         );
         assert!(app.world().get::<ExplorerTreeDirty>(e).is_some());
+    }
+
+    #[test]
+    fn showing_the_panel_reveals_without_taking_the_caret() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ExplorerTrees>()
+            .insert_resource(ExplorerChrome {
+                default_visible: false,
+                width: 240,
+            })
+            .add_observer(on_explorer_panel_set_visible);
+        let stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/a.rs"),
+                },
+                ExplorerState::default(),
+                ChildOf(stack),
+            ))
+            .id();
+        SentReveals::watch(&mut app, view);
+
+        app.world_mut().trigger(BinReceive {
+            webview: view,
+            payload: ExplorerPanelSetVisible {
+                visible: true,
+                client_id: 1,
+                request_id: 1,
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            SentReveals::drain(&mut app),
+            vec![ExplorerReveal::Followed],
+            "opening the panel shows where you are; it does not move the keyboard there"
+        );
     }
 
     #[test]
