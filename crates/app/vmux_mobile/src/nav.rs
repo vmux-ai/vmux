@@ -804,7 +804,7 @@ impl Nav {
             commands.entity(entity).remove::<Pending>();
             held = held.saturating_sub(1);
         }
-        let mut at = known.iter().count() - held;
+        let mut at = known.iter().count();
         for _ in held..SPARES {
             at += 1;
             let Some(screen) = S::blank(at) else {
@@ -1010,7 +1010,7 @@ mod tests {
     enum Page {
         Home,
         Note(&'static str),
-        Unsaved,
+        Unsaved(usize),
     }
 
     impl ScreenName for PageName {
@@ -1024,7 +1024,7 @@ mod tests {
             match self {
                 Self::Home => PageName::Home,
                 Self::Note(_) => PageName::Note,
-                Self::Unsaved => PageName::Unsaved,
+                Self::Unsaved(_) => PageName::Unsaved,
             }
         }
 
@@ -1032,16 +1032,16 @@ mod tests {
             match self {
                 Self::Home => "Home".to_string(),
                 Self::Note(name) => (*name).to_string(),
-                Self::Unsaved => "Unsaved".to_string(),
+                Self::Unsaved(at) => format!("Unsaved {at}"),
             }
         }
 
-        fn blank(_at: usize) -> Option<Self> {
-            Some(Self::Unsaved)
+        fn blank(at: usize) -> Option<Self> {
+            Some(Self::Unsaved(at))
         }
 
         fn is(&self, other: &Self) -> bool {
-            matches!((self, other), (Self::Unsaved, Self::Note(_)))
+            matches!((self, other), (Self::Unsaved(_), Self::Note(_)))
         }
     }
 
@@ -1092,6 +1092,23 @@ mod tests {
                 ids.push(tab.id);
             }
             ids
+        }
+
+        fn waiting(&mut self) -> Vec<String> {
+            let mut query = self
+                .0
+                .world_mut()
+                .query_filtered::<(&Shows<Page>, &Local), With<Pending>>();
+            let mut held = Vec::new();
+            for (shows, local) in query.iter(self.0.world()) {
+                held.push((local.0, shows.0.title()));
+            }
+            held.sort();
+            let mut titles = Vec::new();
+            for (_, title) in held {
+                titles.push(title);
+            }
+            titles
         }
 
         fn selected(&mut self) -> Option<String> {
@@ -1228,7 +1245,7 @@ mod tests {
     #[test]
     fn a_local_tab_gives_way_once_the_same_screen_is_reported() {
         let mut phone = Phone::new();
-        phone.sends(OpenBlank(Page::Unsaved));
+        phone.sends(OpenBlank(Page::Unsaved(0)));
         assert_eq!(phone.listed(), vec!["local:0"]);
 
         phone.reports(&[("tab:1", Page::Note("Saved"))], None);
@@ -1240,10 +1257,24 @@ mod tests {
         let mut phone = Phone::new();
         let mut wanted = Vec::new();
         for _ in 0..11 {
-            phone.sends(OpenBlank(Page::Unsaved));
+            phone.sends(OpenBlank(Page::Unsaved(0)));
             wanted.push(phone.selected().expect("the new tab seats itself"));
         }
         assert_eq!(phone.listed(), wanted);
+    }
+
+    #[test]
+    fn each_spare_is_numbered_past_every_tab_that_already_exists() {
+        let mut phone = Phone::new();
+        phone.reports(&[("tab:1", Page::Home)], Some("tab:1"));
+        assert_eq!(phone.waiting(), vec!["Unsaved 2", "Unsaved 3"]);
+
+        phone.sends(Select("local:0".to_string()));
+        assert_eq!(
+            phone.waiting(),
+            vec!["Unsaved 3", "Unsaved 4"],
+            "the spare that replaces a claimed one counts past the spare still waiting"
+        );
     }
 
     #[test]
