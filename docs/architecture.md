@@ -517,6 +517,13 @@ new tab and they have to slide up to it; a drag-claim has already carried them t
 finger, and sliding again snaps them backwards first. `Overview::release` therefore records the
 index it landed on in `centred`, and the re-deal consumes it instead of guessing `at - 1`.
 
+Its replacement then rises into the gap rather than appearing in it. A card the deal did not have
+before starts at `OVERVIEW_RISE` of its size and transparent, and the same 0.22 s that settles the
+row brings it up. Because the shrink pushes it back in z and the cards carry perspective, a smaller
+card at the same world x draws nearer the vanishing point — so it emerges from behind the centred
+card and swings out to its tilt, which is the motion Safari uses and one no separate slide has to
+describe.
+
 Two supporting rules. A tab is warmed when it becomes a *neighbour*, not only when the selection
 moves, or the spare would have chrome and no column to slide in. And every tab root carries a
 depth whether or not it is on the trail, because a page that first paints unmeasured paints its

@@ -104,6 +104,7 @@ mod platform {
     const OVERVIEW_GAP: f64 = 14.0;
     const OVERVIEW_GLIDE: f64 = 0.35;
     const OVERVIEW_RESIST: f64 = 0.3;
+    const OVERVIEW_RISE: f64 = 0.6;
     const OVERVIEW_SHUT: f64 = 60.0;
     const PANE_TINT: f64 = 0.22;
     const PANE_TINT_ALPHA: f64 = 0.86;
@@ -1054,6 +1055,7 @@ mod platform {
         view: Retained<UIView>,
         shut: Option<Retained<UIView>>,
         snapshot: bool,
+        rising: bool,
     }
 
     struct Overview;
@@ -1184,11 +1186,18 @@ mod platform {
                     true => None,
                     false => Self::shutter(&view),
                 };
+                let mut rising = true;
+                for card in &stack.row {
+                    if std::ptr::eq(&*card.view, &*view) {
+                        rising = false;
+                    }
+                }
                 fresh.push(Card {
                     at,
                     view,
                     shut,
                     snapshot,
+                    rising,
                 });
             }
             for card in stack.row.drain(..) {
@@ -1322,12 +1331,30 @@ mod platform {
             places
         }
 
+        fn sink(stack: &NativeStack) {
+            let width = stack.pager.bounds().size.width;
+            for card in &stack.row {
+                if !card.rising {
+                    continue;
+                }
+                let delta = card.at as f64 - stack.tabs.at as f64;
+                card.view.setAlpha(0.0);
+                card.view
+                    .layer()
+                    .setTransform(Self::shaped(delta, width, OVERVIEW_RISE));
+            }
+        }
+
         fn tilt(delta: f64, width: f64) -> CATransform3D {
+            Self::shaped(delta, width, 1.0)
+        }
+
+        fn shaped(delta: f64, width: f64, rise: f64) -> CATransform3D {
             let near = delta.clamp(-1.0, 1.0);
             let (sin, cos) = (-near * OVERVIEW_TILT).sin_cos();
-            let scale = 1.0 - 0.18 * near.abs();
+            let scale = (1.0 - 0.18 * near.abs()) * rise;
             let x = near * width * OVERVIEW_SPREAD + (delta - near) * width * OVERVIEW_TIGHT;
-            let z = -OVERVIEW_DEPTH * near.abs();
+            let z = -OVERVIEW_DEPTH * near.abs() - OVERVIEW_DEPTH * (1.0 - rise);
             CATransform3D {
                 m11: cos * scale,
                 m12: 0.0,
@@ -1615,6 +1642,7 @@ mod platform {
                 for (view, shape) in Overview::plan_from(stack, entered, 0.0) {
                     view.layer().setTransform(shape);
                 }
+                Overview::sink(stack);
                 Some((Overview::plan(stack, 0.0), marker))
             });
             let Some((places, marker)) = settling else {
@@ -1622,6 +1650,7 @@ mod platform {
             };
             let sliding = block2::RcBlock::new(move || {
                 for (view, shape) in &places {
+                    view.setAlpha(1.0);
                     view.layer().setTransform(*shape);
                 }
             });
