@@ -470,13 +470,24 @@ Five UIKit rules, each learned by crashing:
 - Adding a view to a window throws once its controller is already someone's child. Add first,
   parent second.
 
-Dragging past the last tab sprouts a blank one, and it arrives **unselected** — seating it would
-move the pager under the finger, so the drag has to reach it the same way it reaches any
-neighbour. Two things follow. A tab is warmed when it becomes a *neighbour*, not only when the
-selection moves, or the sprout would have chrome and no column to slide in. And every tab root
-carries a depth whether or not it is on the trail, because a page that first paints unmeasured
-paints its defaults and nothing re-renders it: the screen state a page reads only changes when
-the navigation state does.
+Dragging past the last tab reaches a blank one that is **already there**. A route with a `#[blank]`
+variant always keeps one spare tab entity, spawned the moment the previous spare is claimed, and
+it is warmed like any other neighbour — so the column exists and has painted before the finger
+moves. Asking for it at the start of the gesture, as Safari does not, would spend a frame in the
+ECS and another in WebKit while the pager is already sliding, which is how a tab arrives blank.
+
+The spare carries `Pending`, and that is the whole of its difference: `Nav::state` and the tab
+strip both skip it, so the pill, the indicator and the overview count only tabs the user has. The
+pager does not skip it — `Tabs` holds its id beside the visible list, and `neighbour` hands it back
+when the drag runs off the end. Landing on it drops `Pending`; the next frame spawns its
+replacement, so the swipe is repeatable without ever spawning a tab mid-gesture, and abandoning
+the drag leaves nothing to clean up.
+
+Two supporting rules. A tab is warmed when it becomes a *neighbour*, not only when the selection
+moves, or the spare would have chrome and no column to slide in. And every tab root carries a
+depth whether or not it is on the trail, because a page that first paints unmeasured paints its
+defaults and nothing re-renders it: the screen state a page reads only changes when the navigation
+state does.
 
 ### The overview is snapshots
 

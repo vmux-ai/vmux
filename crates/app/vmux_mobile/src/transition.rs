@@ -113,7 +113,6 @@ mod platform {
         static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
         static CLOSED: Cell<bool> = const { Cell::new(false) };
         static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-        static SPROUTING: Cell<bool> = const { Cell::new(false) };
         static SLIDING: RefCell<Option<Slide>> = const { RefCell::new(None) };
     }
 
@@ -537,6 +536,7 @@ mod platform {
         row: Retained<UIStackView>,
         browse: Retained<UIVisualEffectView>,
         ids: Vec<String>,
+        waiting: Option<String>,
         at: usize,
     }
 
@@ -665,6 +665,7 @@ mod platform {
                 row,
                 browse,
                 ids: Vec::new(),
+                waiting: None,
                 at: 0,
             }
         }
@@ -681,15 +682,25 @@ mod platform {
         }
 
         fn neighbour(&self, towards: f64) -> Option<String> {
-            if self.ids.len() < 2 {
+            if towards <= 0.0 {
+                return self.ids.get(self.at.checked_sub(1)?).cloned();
+            }
+            match self.ids.get(self.at + 1) {
+                Some(id) => Some(id.clone()),
+                None => self.waiting.clone(),
+            }
+        }
+
+        fn rung(&self, id: &str) -> Option<(usize, usize)> {
+            for (at, held) in self.ids.iter().enumerate() {
+                if held == id {
+                    return Some((self.ids.len(), at));
+                }
+            }
+            if self.waiting.as_deref() != Some(id) {
                 return None;
             }
-            let next = if towards > 0.0 {
-                self.at + 1
-            } else {
-                self.at.checked_sub(1)?
-            };
-            self.ids.get(next).cloned()
+            Some((self.ids.len() + 1, self.ids.len()))
         }
 
         fn after(&self, from: &str, to: &str) -> bool {
@@ -710,6 +721,7 @@ mod platform {
         fn show(
             &mut self,
             entries: Vec<TabItem>,
+            waiting: Option<String>,
             delegate: &NavDelegate,
             marker: MainThreadMarker,
         ) {
@@ -718,6 +730,7 @@ mod platform {
                 spent.removeFromSuperview();
             }
             self.ids.clear();
+            self.waiting = waiting;
             let mut showing = None;
             for entry in entries {
                 if entry.here {
@@ -978,7 +991,6 @@ mod platform {
         arriving: Option<Parallax>,
         seated: Option<String>,
         dragging: Option<Drag>,
-        sprouted: Option<usize>,
         tabs: Tabs,
         indicator: Indicator,
         delegate: Retained<NavDelegate>,
@@ -1963,12 +1975,12 @@ mod platform {
             base.dismissViewControllerAnimated_completion(false, Some(&shed));
         }
 
-        pub fn tabs(entries: Vec<TabItem>) {
+        pub fn tabs(entries: Vec<TabItem>, waiting: Option<String>) {
             let settling = STACK.with_borrow_mut(|stack| {
                 let stack = stack.as_mut()?;
                 let marker = MainThreadMarker::new()?;
                 let delegate = stack.delegate.clone();
-                stack.tabs.show(entries, &delegate, marker);
+                stack.tabs.show(entries, waiting, &delegate, marker);
                 stack.tabs.front();
                 stack.indicator.front();
                 if !stack.overviewing {
@@ -2149,16 +2161,12 @@ mod platform {
                     return;
                 }
                 let started = Self::begin(shifted);
-                let barren = started.is_none();
                 STACK.with_borrow_mut(|stack| {
                     let Some(stack) = stack.as_mut() else {
                         return;
                     };
                     stack.dragging = started;
                 });
-                if barren && shifted > 0.0 {
-                    Self::ask_for_one();
-                }
             }
             STACK.with_borrow(|stack| {
                 let Some(stack) = stack.as_ref() else {
@@ -2184,59 +2192,14 @@ mod platform {
                 if let Some(rising) = drag.rising.as_ref() {
                     rising.follow(1.0 - travelled.abs() / drag.across);
                 }
-                let mut landing = None;
-                for (index, id) in stack.tabs.ids.iter().enumerate() {
-                    if *id == drag.to {
-                        landing = Some(index);
-                    }
-                }
-                if let Some(landing) = landing {
+                if let Some((rungs, landing)) = stack.tabs.rung(&drag.to) {
                     stack.indicator.track(
-                        stack.tabs.ids.len(),
+                        rungs,
                         stack.tabs.at,
                         landing,
                         travelled.abs() / drag.across,
                     );
                 }
-            });
-        }
-
-        fn ask_for_one() {
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
-                };
-                if stack.sprouted.is_some() || stack.tabs.at + 1 != stack.tabs.ids.len() {
-                    return;
-                }
-                stack.sprouted = Some(stack.tabs.ids.len());
-                SPROUTING.set(true);
-            });
-        }
-
-        fn shed_unclaimed(commit: bool) {
-            STACK.with_borrow_mut(|stack| {
-                let Some(stack) = stack.as_mut() else {
-                    return;
-                };
-                let Some(before) = stack.sprouted.take() else {
-                    return;
-                };
-                if stack.tabs.ids.len() <= before {
-                    return;
-                }
-                let Some(fresh) = stack.tabs.ids.last() else {
-                    return;
-                };
-                let claimed = commit
-                    && stack
-                        .dragging
-                        .as_ref()
-                        .is_some_and(|drag| &drag.to == fresh);
-                if claimed {
-                    return;
-                }
-                CLOSING.with_borrow_mut(|queued| queued.push(fresh.clone()));
             });
         }
 
@@ -2308,10 +2271,8 @@ mod platform {
                 ))
             });
             let Some((leaving, arriving, landing, entering, commit, from, sheet)) = plan else {
-                Self::shed_unclaimed(false);
                 return;
             };
-            Self::shed_unclaimed(commit);
             let Some(marker) = MainThreadMarker::new() else {
                 return;
             };
@@ -3139,7 +3100,6 @@ mod platform {
             arriving: None,
             seated: None,
             dragging: None,
-            sprouted: None,
             tabs,
             indicator,
             delegate,
@@ -3180,10 +3140,6 @@ mod platform {
 
     pub fn take_closing() -> Vec<String> {
         CLOSING.with_borrow_mut(std::mem::take)
-    }
-
-    pub fn take_sprouting() -> bool {
-        SPROUTING.replace(false)
     }
 
     fn size_to_parent(view: &UIView, parent: &UIView) {
@@ -3249,10 +3205,6 @@ mod platform {
         Vec::new()
     }
 
-    pub fn take_sprouting() -> bool {
-        false
-    }
-
     pub fn take_closed() -> bool {
         false
     }
@@ -3268,7 +3220,7 @@ mod platform {
 
         pub fn seat(_tab: String, _levels: Vec<Level>) {}
 
-        pub fn tabs(_entries: Vec<TabItem>) {}
+        pub fn tabs(_entries: Vec<TabItem>, _waiting: Option<String>) {}
 
         pub fn warm(_wanted: Vec<(String, Vec<Level>)>) {}
 
@@ -3281,6 +3233,5 @@ mod platform {
 #[cfg(target_os = "ios")]
 pub use platform::install;
 pub use platform::{
-    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped,
-    take_sprouting, take_tapped,
+    NativeStack, take_closed, take_closing, take_dismissed, take_picked, take_popped, take_tapped,
 };
