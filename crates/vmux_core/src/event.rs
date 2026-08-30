@@ -1447,7 +1447,6 @@ pub struct ExplorerGoto {
     rkyv::Deserialize,
 )]
 pub struct ExplorerSearchMatch {
-    pub path: String,
     pub line: u32,
     pub col: u32,
     pub end_col: u32,
@@ -1465,10 +1464,29 @@ pub struct ExplorerSearchMatch {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+pub struct ExplorerSearchFile {
+    pub path: String,
+    pub matches: Vec<ExplorerSearchMatch>,
+    pub capped: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ExplorerSearchEvent {
     pub root: String,
     pub query: String,
-    pub matches: Vec<ExplorerSearchMatch>,
+    pub files: Vec<ExplorerSearchFile>,
+    pub capped: bool,
 }
 
 #[derive(
@@ -1505,6 +1523,7 @@ pub struct ExplorerSearchRequest {
     pub query: String,
     pub regex: bool,
     pub case_sensitive: bool,
+    pub whole_word: bool,
 }
 
 #[cfg(test)]

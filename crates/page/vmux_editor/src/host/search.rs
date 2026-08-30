@@ -5,7 +5,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
-use vmux_core::event::{ExplorerSearchMatch, ExplorerSearchRequest};
+use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
 
 use crate::dir::project_root;
 use crate::{FileView, GlobalSearchRequest};
@@ -57,7 +57,8 @@ fn finish_project_search(
             target_path: view.path.clone(),
             root: outcome.root.to_string_lossy().into_owned(),
             query: outcome.query,
-            matches: outcome.matches,
+            files: outcome.files,
+            capped: outcome.capped,
         });
     }
 }
@@ -68,7 +69,8 @@ struct RunningSearch(Task<SearchOutcome>);
 struct SearchOutcome {
     root: PathBuf,
     query: String,
-    matches: Vec<ExplorerSearchMatch>,
+    files: Vec<ExplorerSearchFile>,
+    capped: bool,
 }
 
 struct ProjectSearch {
@@ -88,8 +90,10 @@ impl ProjectSearch {
     }
 
     fn run(self) -> SearchOutcome {
-        let mut matches = Vec::new();
+        let mut files = Vec::new();
+        let mut found = 0usize;
         let mut scanned = 0usize;
+        let mut capped = false;
         let walk = WalkBuilder::new(&self.root)
             .hidden(true)
             .parents(true)
@@ -100,7 +104,8 @@ impl ProjectSearch {
             .max_filesize(Some(MAX_FILE_BYTES))
             .build();
         for entry in walk {
-            if matches.len() >= MAX_MATCHES || scanned >= MAX_FILES_SCANNED {
+            if found >= MAX_MATCHES || scanned >= MAX_FILES_SCANNED {
+                capped = true;
                 break;
             }
             let Ok(entry) = entry else {
@@ -113,37 +118,48 @@ impl ProjectSearch {
                 continue;
             }
             scanned += 1;
-            self.scan(entry.path(), &mut matches);
+            let Some(file) = self.scan(entry.path(), MAX_MATCHES - found) else {
+                continue;
+            };
+            found += file.matches.len();
+            files.push(file);
         }
         SearchOutcome {
             root: self.root,
             query: self.query,
-            matches,
+            files,
+            capped,
         }
     }
 
-    fn scan(&self, path: &Path, out: &mut Vec<ExplorerSearchMatch>) {
-        let Some(text) = FileText::read(path) else {
-            return;
-        };
-        let display = path.to_string_lossy().into_owned();
-        let mut in_file = 0usize;
+    fn scan(&self, path: &Path, budget: usize) -> Option<ExplorerSearchFile> {
+        let text = FileText::read(path)?;
+        let limit = budget.min(MAX_MATCHES_PER_FILE);
+        let mut matches = Vec::new();
+        let mut capped = false;
         for (index, line) in text.lines().enumerate() {
-            if in_file >= MAX_MATCHES_PER_FILE || out.len() >= MAX_MATCHES {
-                return;
-            }
             let Some(found) = self.pattern.find(line) else {
                 continue;
             };
-            out.push(ExplorerSearchMatch {
-                path: display.clone(),
+            if matches.len() >= limit {
+                capped = true;
+                break;
+            }
+            matches.push(ExplorerSearchMatch {
                 line: index as u32 + 1,
                 col: Utf16Col::at(line, found.start()),
                 end_col: Utf16Col::at(line, found.end()),
                 preview: LinePreview::of(line),
             });
-            in_file += 1;
         }
+        if matches.is_empty() {
+            return None;
+        }
+        Some(ExplorerSearchFile {
+            path: path.to_string_lossy().into_owned(),
+            matches,
+            capped,
+        })
     }
 }
 
@@ -154,15 +170,51 @@ impl SearchPattern {
         if request.query.trim().is_empty() {
             return None;
         }
-        let source = match request.regex {
+        let mut source = match request.regex {
             true => crate::edit::search::translate(&request.query),
             false => regex::escape(&request.query),
         };
+        if request.whole_word {
+            let literal = match request.regex {
+                true => None,
+                false => Some(request.query.as_str()),
+            };
+            source = WholeWord::around(&source, literal);
+        }
         RegexBuilder::new(&source)
             .case_insensitive(!request.case_sensitive)
             .size_limit(1 << 20)
             .build()
             .ok()
+    }
+}
+
+struct WholeWord;
+
+impl WholeWord {
+    fn around(source: &str, literal: Option<&str>) -> String {
+        let (lead, trail) = match literal {
+            None => (true, true),
+            Some(query) => (
+                Self::is_word(query.chars().next()),
+                Self::is_word(query.chars().next_back()),
+            ),
+        };
+        let mut pattern = String::with_capacity(source.len() + 8);
+        if lead {
+            pattern.push_str("\\b");
+        }
+        pattern.push_str("(?:");
+        pattern.push_str(source);
+        pattern.push(')');
+        if trail {
+            pattern.push_str("\\b");
+        }
+        pattern
+    }
+
+    fn is_word(edge: Option<char>) -> bool {
+        matches!(edge, Some(c) if c.is_alphanumeric() || c == '_')
     }
 }
 
@@ -219,31 +271,43 @@ mod tests {
             self
         }
 
-        fn search(&self, request: ExplorerSearchRequest) -> Vec<ExplorerSearchMatch> {
+        fn search(&self, request: ExplorerSearchRequest) -> SearchOutcome {
             let anchor = self.dir.path().join("anchor.rs");
             std::fs::write(&anchor, "").expect("anchor");
-            ProjectSearch::of(&anchor, &request)
-                .expect("pattern")
-                .run()
-                .matches
+            ProjectSearch::of(&anchor, &request).expect("pattern").run()
         }
 
-        fn hits(&self, query: &str) -> Vec<String> {
-            let found = self.search(ExplorerSearchRequest {
-                query: query.to_string(),
-                regex: false,
-                case_sensitive: false,
-            });
+        fn named(&self, request: ExplorerSearchRequest) -> Vec<String> {
             let mut named = Vec::new();
-            for hit in found {
-                let relative = Path::new(&hit.path)
+            for file in self.search(request).files {
+                let relative = Path::new(&file.path)
                     .strip_prefix(self.dir.path())
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or(hit.path);
-                named.push(format!("{relative}:{}", hit.line));
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or(file.path);
+                for hit in file.matches {
+                    named.push(format!("{relative}:{}", hit.line));
+                }
             }
             named.sort();
             named
+        }
+
+        fn hits(&self, query: &str) -> Vec<String> {
+            self.named(ExplorerSearchRequest {
+                query: query.to_string(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: false,
+            })
+        }
+
+        fn words(&self, query: &str, regex: bool) -> Vec<String> {
+            self.named(ExplorerSearchRequest {
+                query: query.to_string(),
+                regex,
+                case_sensitive: false,
+                whole_word: true,
+            })
         }
     }
 
@@ -277,13 +341,16 @@ mod tests {
             query: "needle".to_string(),
             regex: false,
             case_sensitive: true,
+            whole_word: false,
         });
 
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].line, 2);
-        assert_eq!(found[0].col, 10);
-        assert_eq!(found[0].end_col, 16);
-        assert_eq!(found[0].preview, "let \u{1F600} = \"needle\";");
+        assert_eq!(found.files.len(), 1);
+        let hits = &found.files[0].matches;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 2);
+        assert_eq!(hits[0].col, 10);
+        assert_eq!(hits[0].end_col, 16);
+        assert_eq!(hits[0].preview, "let \u{1F600} = \"needle\";");
     }
 
     #[test]
@@ -295,8 +362,9 @@ mod tests {
             query: "needle".to_string(),
             regex: false,
             case_sensitive: true,
+            whole_word: false,
         });
-        assert!(sensitive.is_empty());
+        assert!(sensitive.files.is_empty());
         assert_eq!(project.hits("needle"), vec!["src/lib.rs:1".to_string()]);
     }
 
@@ -317,9 +385,10 @@ mod tests {
             query: "a.c".to_string(),
             regex: true,
             case_sensitive: false,
+            whole_word: false,
         });
 
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.files.len(), 2);
     }
 
     #[test]
@@ -335,6 +404,7 @@ mod tests {
                     query: "   ".to_string(),
                     regex: false,
                     case_sensitive: false,
+                    whole_word: false,
                 },
             )
             .is_none()
@@ -354,6 +424,7 @@ mod tests {
                     query: "[unclosed".to_string(),
                     regex: true,
                     case_sensitive: false,
+                    whole_word: false,
                 },
             )
             .is_none()
@@ -375,15 +446,98 @@ mod tests {
             query: "needle".to_string(),
             regex: false,
             case_sensitive: false,
+            whole_word: false,
         });
 
-        let mut from_noisy = 0;
-        for hit in &found {
-            if hit.path.ends_with("noisy.txt") {
-                from_noisy += 1;
+        let mut noisy = None;
+        let mut quiet = None;
+        for file in &found.files {
+            if file.path.ends_with("noisy.txt") {
+                noisy = Some(file);
+            }
+            if file.path.ends_with("quiet.txt") {
+                quiet = Some(file);
             }
         }
-        assert_eq!(from_noisy, MAX_MATCHES_PER_FILE);
-        assert!(found.iter().any(|hit| hit.path.ends_with("quiet.txt")));
+        let noisy = noisy.expect("noisy file");
+        assert_eq!(noisy.matches.len(), MAX_MATCHES_PER_FILE);
+        assert!(noisy.capped);
+        let quiet = quiet.expect("quiet file");
+        assert_eq!(quiet.matches.len(), 1);
+        assert!(!quiet.capped);
+        assert!(!found.capped);
+    }
+
+    #[test]
+    fn a_file_reports_every_hit_it_holds_under_one_entry() {
+        let project = Project::new();
+        project
+            .write("src/lib.rs", "needle\nquiet\nneedle\n")
+            .write("src/other.rs", "needle\n");
+
+        let found = project.search(ExplorerSearchRequest {
+            query: "needle".to_string(),
+            regex: false,
+            case_sensitive: false,
+            whole_word: false,
+        });
+
+        assert_eq!(found.files.len(), 2);
+        for file in &found.files {
+            let expected = if file.path.ends_with("lib.rs") { 2 } else { 1 };
+            assert_eq!(file.matches.len(), expected);
+            assert!(!file.capped);
+        }
+    }
+
+    #[test]
+    fn a_whole_word_literal_rejects_the_hits_buried_inside_longer_words() {
+        let project = Project::new();
+        project
+            .write("bare.txt", "let value = 1")
+            .write("prefixed.txt", "let revalue = 1")
+            .write("suffixed.txt", "let valuegram = 1")
+            .write("punctuated.txt", "let (value) = 1");
+
+        assert_eq!(
+            project.words("value", false),
+            vec!["bare.txt:1".to_string(), "punctuated.txt:1".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_whole_word_literal_with_no_word_edge_still_matches() {
+        let project = Project::new();
+        project
+            .write("arrow.rs", "fn f() -> T")
+            .write("plain.rs", "let a - b = 1");
+
+        assert_eq!(project.words("->", false), vec!["arrow.rs:1".to_string()]);
+    }
+
+    #[test]
+    fn a_whole_word_literal_bounds_only_the_end_that_is_a_word() {
+        let project = Project::new();
+        project
+            .write("bare.txt", "call .value here")
+            .write("glued.txt", "call .valuegram here");
+
+        assert_eq!(
+            project.words(".value", false),
+            vec!["bare.txt:1".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_whole_word_regex_bounds_the_whole_alternation() {
+        let project = Project::new();
+        project
+            .write("bare.txt", "one two")
+            .write("glued.txt", "oneself twofold");
+
+        assert_eq!(
+            project.words("one\\|two", true),
+            vec!["bare.txt:1".to_string()]
+        );
     }
 }

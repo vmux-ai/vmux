@@ -1,4 +1,5 @@
-use crate::page::{ExplorerPane, FindScope, Mode, focus_file_input};
+use crate::explorer::{SEARCH_INPUT_ID, SidebarView};
+use crate::page::{ExplorerPane, Mode, focus_file_input};
 use dioxus::prelude::*;
 use vmux_core::event::{
     CompletionItem, FILE_KEY_EVENT, FileCompletionCommit, FileGotoRequest, FileKey, FileLine,
@@ -168,7 +169,7 @@ pub struct FilePage {
     pub references: Signal<Vec<RefItem>>,
     pub find_open: Signal<bool>,
     pub find_forward: Signal<bool>,
-    pub find_scope: Signal<FindScope>,
+    pub sidebar_view: Signal<SidebarView>,
 }
 
 impl FilePage {
@@ -194,6 +195,8 @@ impl FilePage {
     }
 
     fn reveal_in_explorer(&self) {
+        let mut view = self.sidebar_view;
+        view.set(SidebarView::Explorer);
         self.explorer.reveal_current(self.mode);
     }
 
@@ -203,25 +206,23 @@ impl FilePage {
     }
 
     fn open_find(&self, forward: bool) {
-        let mut scope = self.find_scope;
-        scope.set(FindScope::Buffer);
-        self.raise_find(forward);
-    }
-
-    fn open_find_in_files(&self) {
-        let mut scope = self.find_scope;
-        scope.set(FindScope::Project);
-        self.raise_find(true);
-    }
-
-    fn raise_find(&self, forward: bool) {
         let mut open = self.find_open;
         let mut direction = self.find_forward;
         direction.set(forward);
         open.set(true);
         spawn(async move {
             sleep_ms(0).await;
-            FocusClaim::new(crate::page::FIND_INPUT_ID).request();
+            crate::page::focus_find_input();
+        });
+    }
+
+    fn open_find_in_files(&self) {
+        let mut view = self.sidebar_view;
+        view.set(SidebarView::Search);
+        self.explorer.show(self.mode);
+        spawn(async move {
+            sleep_ms(0).await;
+            FocusClaim::new(SEARCH_INPUT_ID).request();
         });
     }
 }

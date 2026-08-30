@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::columns::{DirColumns, DirWindow};
-use crate::explorer::ExplorerPanel;
+use crate::explorer::{ExplorerPanel, SidebarView};
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
@@ -120,7 +120,7 @@ pub fn Page() -> Element {
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
     let find_forward = use_signal(|| true);
-    let find_scope = use_signal(FindScope::default);
+    let sidebar_view = use_signal(SidebarView::default);
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
@@ -185,7 +185,7 @@ pub fn Page() -> Element {
         references: refs,
         find_open,
         find_forward,
-        find_scope,
+        sidebar_view,
     };
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
@@ -760,7 +760,7 @@ pub fn Page() -> Element {
         }
         div {
             id: PAGE_ID,
-            class: "relative flex h-full w-full flex-row overflow-hidden bg-background",
+            class: "relative flex h-full w-full flex-col overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
                     let x = e.client_coordinates().x as i32;
@@ -780,10 +780,15 @@ pub fn Page() -> Element {
 
             PaneWidth { width: page_width }
 
+        div {
+            class: "flex min-h-0 flex-1 flex-row overflow-hidden",
+
             ExplorerSidebar {
                 visible: explorer_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
+                caret_line: breadcrumb_caret_line,
+                view: sidebar_view,
             }
 
         div {
@@ -993,7 +998,6 @@ pub fn Page() -> Element {
                         query: find_query,
                         open: find_open,
                         forward: find_forward,
-                        scope: find_scope,
                         vim: keymap() == vmux_core::KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
@@ -1897,7 +1901,7 @@ pub fn Page() -> Element {
             {
                 hover_diag().map(|d| rsx! {
                     div {
-                        class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        class: "pointer-events-none absolute right-4 bottom-5 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         div { class: "flex items-center gap-2",
                             span { class: "{severity_color_class(d.severity)}", "●" }
                             span { class: "whitespace-pre-wrap", "{d.message}" }
@@ -1950,7 +1954,7 @@ pub fn Page() -> Element {
                         div {
                             id: "refs-panel",
                             tabindex: "0",
-                            class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                            class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
                                 e.stop_propagation();
                                 if keys.offer(&e) {
@@ -2005,6 +2009,8 @@ pub fn Page() -> Element {
                     }
                 })
             }
+        }
+        }
 
             GitFooter {
                 path: git_path,
@@ -2068,7 +2074,6 @@ pub fn Page() -> Element {
                     }
                 }
             }
-        }
         }
     }
 }
@@ -3461,6 +3466,8 @@ fn ExplorerSidebar(
     visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
+    caret_line: u32,
+    view: Signal<SidebarView>,
 ) -> Element {
     let keys = use_context::<FileKeys>();
     let open = visible();
@@ -3487,7 +3494,7 @@ fn ExplorerSidebar(
             onkeydown: move |event| {
                 keys.offer(&event);
             },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible, caret_line, view } }
         }
         div {
             class: if open {
@@ -3516,57 +3523,19 @@ fn VimStatus(label: String) -> Element {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub enum FindScope {
-    #[default]
-    Buffer,
-    Project,
-}
-
-impl FindScope {
-    fn is_project(self) -> bool {
-        self == Self::Project
-    }
-
-    fn toggled(self) -> Self {
-        match self {
-            Self::Buffer => Self::Project,
-            Self::Project => Self::Buffer,
-        }
-    }
-
-    fn placeholder(self) -> String {
-        match self {
-            Self::Buffer => translate("editor-find-placeholder"),
-            Self::Project => translate("editor-find-in-files-placeholder"),
-        }
-    }
-
-    fn hint(self) -> String {
-        match self {
-            Self::Buffer => translate("editor-find-in-files"),
-            Self::Project => translate("editor-find-in-file"),
-        }
-    }
-}
-
 #[component]
 fn FindBar(
     query: Signal<String>,
     open: Signal<bool>,
     forward: Signal<bool>,
-    scope: Signal<FindScope>,
     vim: bool,
     total: u32,
     index: u32,
 ) -> Element {
     let mut query = query;
     let mut open = open;
-    let mut scope = scope;
     let mut regex = use_signal(|| vim);
-    let mut case_sensitive = use_signal(|| false);
     let ime = use_ime_guard();
-    let project = scope().is_project();
     let mut close = move || {
         open.set(false);
         query.set(String::new());
@@ -3586,18 +3555,9 @@ fn FindBar(
             forward: forward(),
         });
     };
-    let sweep = move || {
-        let _ = send(&ExplorerSearchRequest {
-            query: query.peek().clone(),
-            regex: regex(),
-            case_sensitive: case_sensitive(),
-        });
-    };
     let mut retype = move |text: String| {
         query.set(text.clone());
-        if !scope.peek().is_project() {
-            ask(text);
-        }
+        ask(text);
     };
     let step = move |reverse: bool| {
         let _ = send(&FileFindRequest {
@@ -3610,10 +3570,6 @@ fn FindBar(
         });
     };
     let confirm = move |reverse: bool| {
-        if scope.peek().is_project() {
-            sweep();
-            return;
-        }
         step(reverse);
         if vim {
             focus_file_input();
@@ -3628,26 +3584,11 @@ fn FindBar(
     rsx! {
         div {
             class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-1 pr-1 ring-1 ring-inset ring-foreground/10",
-            button {
-                r#type: "button",
-                class: if project {
-                    "shrink-0 rounded bg-foreground/15 px-1 text-[10px] text-foreground"
-                } else {
-                    "shrink-0 rounded px-1 text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
-                },
-                title: scope().hint(),
-                onclick: move |_| {
-                    let next = scope.peek().toggled();
-                    scope.set(next);
-                    focus_find_input();
-                },
-                "\u{2637}"
-            }
             input {
                 id: FIND_INPUT_ID,
                 r#type: "text",
                 class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
-                placeholder: scope().placeholder(),
+                placeholder: translate("editor-find-placeholder"),
                 value: "{query}",
                 oninput: move |event| retype(event.value()),
                 oncompositionstart: move |_| ime.start(),
@@ -3680,55 +3621,31 @@ fn FindBar(
                 title: translate("editor-find-regex"),
                 onclick: move |_| {
                     regex.toggle();
-                    if project {
-                        return;
-                    }
                     ask(query.peek().clone());
                 },
                 ".*"
             }
-            if project {
-                button {
-                    r#type: "button",
-                    class: if case_sensitive() {
-                        "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
-                    } else {
-                        "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
-                    },
-                    title: translate("editor-find-case"),
-                    onclick: move |_| case_sensitive.toggle(),
-                    "Aa"
-                }
-                button {
-                    r#type: "button",
-                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
-                    title: translate("editor-find-run"),
-                    onclick: move |_| sweep(),
-                    "\u{23CE}"
-                }
-            } else {
-                span {
-                    class: if total == 0 && !query().is_empty() {
-                        "shrink-0 tabular-nums text-[10px] text-destructive"
-                    } else {
-                        "shrink-0 tabular-nums text-[10px] text-muted-foreground"
-                    },
-                    "{count}"
-                }
-                button {
-                    r#type: "button",
-                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
-                    title: translate("editor-find-previous"),
-                    onclick: move |_| step(true),
-                    "‹"
-                }
-                button {
-                    r#type: "button",
-                    class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
-                    title: translate("editor-find-next"),
-                    onclick: move |_| step(false),
-                    "›"
-                }
+            span {
+                class: if total == 0 && !query().is_empty() {
+                    "shrink-0 tabular-nums text-[10px] text-destructive"
+                } else {
+                    "shrink-0 tabular-nums text-[10px] text-muted-foreground"
+                },
+                "{count}"
+            }
+            button {
+                r#type: "button",
+                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                title: translate("editor-find-previous"),
+                onclick: move |_| step(true),
+                "‹"
+            }
+            button {
+                r#type: "button",
+                class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                title: translate("editor-find-next"),
+                onclick: move |_| step(false),
+                "›"
             }
             button {
                 r#type: "button",
@@ -4770,6 +4687,14 @@ impl ExplorerPane {
     pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
         self.user_chose.set(true);
         self.set_visible(!(self.visible)(), mode);
+    }
+
+    pub(crate) fn show(mut self, mode: Signal<Mode>) {
+        if (self.visible)() {
+            return;
+        }
+        self.user_chose.set(true);
+        self.set_visible(true, mode);
     }
 
     pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {

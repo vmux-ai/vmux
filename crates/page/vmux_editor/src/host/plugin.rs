@@ -541,7 +541,8 @@ pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
     pub root: String,
     pub query: String,
-    pub matches: Vec<ExplorerSearchMatch>,
+    pub files: Vec<ExplorerSearchFile>,
+    pub capped: bool,
 }
 
 #[derive(Component, Clone)]
@@ -4959,7 +4960,8 @@ fn apply_global_search_requests(
             GlobalSearchState(ExplorerSearchEvent {
                 root: request.root,
                 query: request.query,
-                matches: request.matches,
+                files: request.files,
+                capped: request.capped,
             }),
             GlobalSearchDirty,
         ));
@@ -5815,7 +5817,8 @@ mod explorer_tests {
                 target_path: target,
                 root: "/project".to_string(),
                 query: "needle".to_string(),
-                matches: Vec::new(),
+                files: Vec::new(),
+                capped: false,
             });
         app.update();
 

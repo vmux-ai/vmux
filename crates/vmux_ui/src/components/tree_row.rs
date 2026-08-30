@@ -8,7 +8,12 @@ pub const SIDEBAR_TREE_ROW_GROUP: &str =
 
 pub const SIDEBAR_TREE_ROW: &str = "flex h-[22px] w-full min-w-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-1 text-left text-muted-foreground group-hover/row:text-foreground";
 
-pub const SIDEBAR_TREE_ROW_FOCUS: &str = "ring-1 ring-inset ring-cyan-400/70";
+pub const SIDEBAR_TREE_LIST_GROUP: &str = "group/list";
+
+pub const SIDEBAR_TREE_ROW_BASE: &str = "relative flex h-[22px] items-center gap-1 px-1 cursor-default outline-none transition-colors duration-100";
+
+pub const SIDEBAR_STICKY_SURFACE: &str =
+    "border-b border-foreground/10 bg-background/95 backdrop-blur";
 
 pub const SIDEBAR_TREE_SCROLLER: &str = "overflow-x-hidden";
 
@@ -30,6 +35,38 @@ pub const SIDEBAR_TREE_CHILDREN_OPEN: &str = "grid grid-rows-[1fr] opacity-100 t
 
 pub const SIDEBAR_TREE_CHILDREN_CLOSED: &str =
     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TreeRowAccent {
+    Plain,
+    Active,
+    Focus,
+    ActiveFocus,
+}
+
+impl TreeRowAccent {
+    pub fn of(active: bool, focus: bool) -> Self {
+        match (active, focus) {
+            (false, false) => Self::Plain,
+            (true, false) => Self::Active,
+            (false, true) => Self::Focus,
+            (true, true) => Self::ActiveFocus,
+        }
+    }
+
+    pub fn classes(self) -> &'static str {
+        match self {
+            Self::Plain => "text-foreground/80 hover:bg-foreground/[0.08]",
+            Self::Active => "bg-cyan-400/12 text-foreground",
+            Self::Focus => {
+                "text-foreground/80 ring-1 ring-inset ring-foreground/40 group-focus-within/list:bg-foreground/[0.16] group-focus-within/list:text-foreground group-focus-within/list:ring-0"
+            }
+            Self::ActiveFocus => {
+                "bg-cyan-400/12 text-foreground ring-1 ring-inset ring-foreground/40 group-focus-within/list:bg-cyan-400/25 group-focus-within/list:ring-0"
+            }
+        }
+    }
+}
 
 #[component]
 pub fn SidebarTreeRowGroup(children: Element) -> Element {
