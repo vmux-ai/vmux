@@ -38,7 +38,7 @@ pub struct Tab {
 }
 
 #[derive(Component)]
-pub struct Local;
+pub struct Local(pub u64);
 
 #[derive(Component)]
 pub struct Selected;
@@ -276,7 +276,12 @@ impl Nav {
             world.query::<(Entity, &Tab, &Shows<S>, Option<&Local>, Option<&Selected>)>();
         let mut held = Vec::new();
         for (entity, tab, shows, local, selected) in tabs.iter(world) {
-            held.push((entity, tab.id.clone(), shows.0.clone(), local.is_some()));
+            held.push((
+                entity,
+                tab.id.clone(),
+                shows.0.clone(),
+                local.map(|it| it.0),
+            ));
             if selected.is_some() {
                 state.selected = Some(tab.id.clone());
             }
@@ -294,7 +299,7 @@ impl Nav {
                 name: screen.title(),
                 id,
                 screen,
-                local,
+                local: local.is_some(),
             });
         }
 
@@ -467,7 +472,7 @@ impl Nav {
         let mut selected = None;
         let mut ready = false;
         for (tab, shows, local, chosen) in known.iter() {
-            listed.push((tab.id.clone(), shows.0.clone(), local.is_some()));
+            listed.push((tab.id.clone(), shows.0.clone(), local.map(|it| it.0)));
             if chosen.is_none() {
                 continue;
             }
@@ -628,7 +633,7 @@ impl Nav {
         let mut held = Vec::new();
         let mut found = None;
         for (entity, tab, local, selected) in query.iter(world) {
-            held.push((local.is_some(), tab.id.clone()));
+            held.push((local.map(|it| it.0), tab.id.clone()));
             if tab.id == id {
                 found = Some((entity, selected.is_some()));
             }
@@ -735,7 +740,11 @@ impl Nav {
             let ordinal = opened.0;
             opened.0 = ordinal.wrapping_add(1);
             let id = format!("local:{ordinal}");
-            commands.spawn((Tab { id: id.clone() }, Local, Shows(screen.clone())));
+            commands.spawn((
+                Tab { id: id.clone() },
+                Local(ordinal),
+                Shows(screen.clone()),
+            ));
             commands.queue(move |world: &mut World| Nav::mark(world, &id));
         }
     }
@@ -1007,6 +1016,14 @@ mod tests {
             ids
         }
 
+        fn listed(&mut self) -> Vec<String> {
+            let mut ids = Vec::new();
+            for tab in Nav::state::<Page>(self.0.world_mut()).tabs {
+                ids.push(tab.id);
+            }
+            ids
+        }
+
         fn selected(&mut self) -> Option<String> {
             let mut query = self.0.world_mut().query_filtered::<&Tab, With<Selected>>();
             query.iter(self.0.world()).next().map(|tab| tab.id.clone())
@@ -1143,6 +1160,17 @@ mod tests {
 
         phone.reports(&[("tab:1", Page::Note("Saved"))], None);
         assert_eq!(phone.tabs(), vec!["tab:1"]);
+    }
+
+    #[test]
+    fn local_tabs_are_listed_in_the_order_they_were_opened() {
+        let mut phone = Phone::new();
+        let mut wanted = Vec::new();
+        for at in 0..11 {
+            phone.sends(OpenBlank(Page::Unsaved));
+            wanted.push(format!("local:{at}"));
+        }
+        assert_eq!(phone.listed(), wanted);
     }
 
     #[test]
