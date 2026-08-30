@@ -163,10 +163,6 @@ impl<S: Route> Screens<S> {
     }
 }
 
-#[derive(Resource)]
-pub struct Centre(pub &'static str);
-
-const NEW_TAB: &str = "+";
 const WARM_SETTLE: u8 = 2;
 const WARM_MOST: usize = 6;
 
@@ -507,7 +503,6 @@ impl Nav {
     fn paint<S: Route>(
         known: Listed<S>,
         screens: Res<Screens<S>>,
-        centre: Option<Res<Centre>>,
         turns: Res<Turns>,
         mut painted: ResMut<Painted>,
         mut commands: Commands,
@@ -568,11 +563,7 @@ impl Nav {
             return;
         }
         painted.tabs = entries.clone();
-        let centre = match S::blank(1) {
-            Some(_) => Some(NEW_TAB),
-            None => centre.map(|centre| centre.0),
-        };
-        NativeStack::tabs(entries, centre);
+        NativeStack::tabs(entries);
     }
 
     fn declare<S: Route>(mut asked: MessageReader<Declare<S>>, mut screens: ResMut<Screens<S>>) {
@@ -763,7 +754,6 @@ impl Nav {
 
     fn open_blank<S: Route>(
         mut asked: MessageReader<OpenBlank<S>>,
-        mut tapped: MessageReader<Tapped>,
         mut sprouting: MessageReader<Sprout>,
         known: Query<&Tab>,
         mut opened: ResMut<Opened>,
@@ -774,16 +764,6 @@ impl Nav {
             wanted.push((screen.clone(), Landing::Seated));
         }
         let mut at = known.iter().count();
-        for Tapped(action) in tapped.read() {
-            if *action != NEW_TAB {
-                continue;
-            }
-            at += 1;
-            let Some(screen) = S::blank(at) else {
-                continue;
-            };
-            wanted.push((screen, Landing::Seated));
-        }
         for Sprout in sprouting.read() {
             at += 1;
             let Some(screen) = S::blank(at) else {
