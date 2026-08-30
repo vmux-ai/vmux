@@ -470,10 +470,19 @@ Five UIKit rules, each learned by crashing:
 - Adding a view to a window throws once its controller is already someone's child. Add first,
   parent second.
 - Liquid Glass samples its backdrop in screen space, so a `UIVisualEffectView` inside a
-  3D-transformed layer draws unrotated while everything around it shears — the overview's close
-  button sat on a tilting card and refused to tilt with it, though both layers had the same
-  bounds, position and anchor. Glass is for chrome that floats over the content in screen space.
-  Anything painted onto a card that tilts is a tinted view instead.
+  3D-transformed layer draws unrotated while everything around it shears. Glass is for chrome
+  that floats over the content in screen space; anything painted onto a card that tilts is a
+  tinted view instead.
+
+Two layers handed the same matrix every frame are not one layer. The overview's close button
+began as a sibling overlay that `Overview::plan_from` transformed alongside its card, and it
+drifted, then jumped — the two had identical bounds, position and anchor, so the fault was never
+geometry. It was that `deal` rebuilds the shutters while the cards persist, so any frame that
+rebuilt one and not the other showed a button somewhere its card was not. The button is a *child*
+of the card now, and `plan_from` transforms the card alone: one matrix, inherited, with nothing to
+keep in step. Whatever the cards do — tilt, spread, parallax — the button comes along by
+construction. Hit testing does not follow it there, because UIKit converts through a
+`CGAffineTransform` and every card carries perspective; the overview answers taps itself.
 
 Dragging past the last tab reaches a blank one that is **already there**. A route with a `#[blank]`
 variant keeps two spare tab entities, topped back up the moment one is claimed, and both are warmed

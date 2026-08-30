@@ -1146,7 +1146,7 @@ mod platform {
                 view.setHidden(false);
                 view.setUserInteractionEnabled(false);
                 Self::round(&view, true);
-                let Some(shut) = Self::shutter(stack, at) else {
+                let Some(shut) = Self::shutter(stack, at, &view) else {
                     continue;
                 };
                 fresh.push(Card {
@@ -1171,11 +1171,9 @@ mod platform {
             stack.row = fresh;
         }
 
-        fn shutter(stack: &NativeStack, at: usize) -> Option<Retained<UIView>> {
+        fn shutter(stack: &NativeStack, at: usize, onto: &UIView) -> Option<Retained<UIView>> {
             let marker = MainThreadMarker::new()?;
-            let bounds = stack.pager.bounds();
-            let over = UIView::initWithFrame(UIView::alloc(marker), bounds);
-            over.setBackgroundColor(None);
+            let bounds = onto.bounds();
             let cross = Pane::tinted(OVERVIEW_SHUT, marker);
             cross.setFrame(CGRect {
                 origin: CGPoint {
@@ -1187,12 +1185,14 @@ mod platform {
                     height: OVERVIEW_SHUT,
                 },
             });
+            cross.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleLeftMargin | UIViewAutoresizing::FlexibleBottomMargin,
+            );
             let button = Pane::glyph("xmark", &stack.delegate, sel!(shutTapped:), marker);
             button.setTag(at as isize);
             Pane::fill(&button, &cross);
-            over.addSubview(&cross);
-            stack.pager.addSubview(&over);
-            Some(over)
+            onto.addSubview(&cross);
+            Some(cross)
         }
 
         fn round(view: &UIView, on: bool) {
@@ -1247,10 +1247,7 @@ mod platform {
             for card in &stack.row {
                 let delta = card.at as f64 - at as f64 + shifted / step;
                 card.view.layer().setZPosition(-delta.abs());
-                card.shut.layer().setZPosition(-delta.abs());
-                let shape = Self::tilt(delta, width);
-                places.push((card.view.clone(), shape));
-                places.push((card.shut.clone(), shape));
+                places.push((card.view.clone(), Self::tilt(delta, width)));
             }
             places
         }
