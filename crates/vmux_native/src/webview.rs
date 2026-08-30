@@ -13,7 +13,7 @@ mod report;
 mod route;
 mod shim;
 
-pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
+pub use embed::{AssetReply, Assets, Embedding, HostLayer, Outbox, Wake};
 
 use tracing::error;
 
@@ -52,7 +52,11 @@ impl WebView {
         let dom = Dom::mount(page.component, instance, &embed);
         let message = PageMessage::new(page, embed.outbox, dom.reads(), embed.waker);
         let routes = PageRoutes::new(page, dom.clone(), embed.assets);
-        let webview = wry::WebViewBuilder::new()
+        let mut builder = wry::WebViewBuilder::new();
+        if let Some(colour) = page.background {
+            builder = builder.with_background_color(colour);
+        }
+        let webview = builder
             .with_transparent(page.transparent)
             .with_initialization_script(WRY_HOST_SHIM)
             .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
@@ -77,6 +81,12 @@ impl WebView {
             error!("vmux_native: zoom failed: {error}");
         }
     }
+    pub fn paint(&self, colour: (u8, u8, u8, u8)) {
+        if let Err(error) = self.webview.set_background_color(colour) {
+            error!("vmux_native: set_background_color failed: {error}");
+        }
+    }
+
     pub fn set_visible(&self, visible: bool) {
         if let Err(error) = self.webview.set_visible(visible) {
             error!("vmux_native: set_visible failed: {error}");

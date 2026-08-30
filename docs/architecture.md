@@ -413,7 +413,160 @@ and subscriptions are still polled. `ListAgents` and `ListTeam` are brokered int
 client's ECS rather than read from the server, so they answer `NoDesktop` until a window is
 there to ask.
 
+### Who owns the phone's event loop
+
+`bevy_winit`, exactly as on the desktop. Dioxus is demoted to what diffs a tree. Two things this
+needs that the desktop does not: an `UIApplicationDelegate`, because winit deliberately installs
+none and a cold-start url arrives before any delegate exists; and an embedder layered in front of
+the host a surface would install, or a page mounts and stays empty.
+
+### A screen is a webview
+
+`MobilePlugin::new(App)` takes the root component itself, the way `dioxus::launch` does — not
+the `SCREAMING_CASE` const `#[screen]` invents, which made every app spell back a name it did
+not choose. The shell's document is the plugin's: a root webview renders the navigator and
+therefore paints nothing, so its head and its transparent body are fixed and the only thing an
+app picks is `background`, the colour behind the native chrome. `Default` is `new` around this
+crate's own `App`, so vmux and an example reach the phone through the same constructor.
+
+One page, one document, one `UIViewController`. A tab owns its own `UINavigationController`, and
+those sit side by side in a plain `UIView` this code owns.
+
+```mermaid
+graph TB
+    W[UIWindow] --> P[pager]
+    W --> B["tab bar — UIGlassEffect"]
+    B --> C["capsule — current tab"]
+    B --> T["tabs"]
+    B --> A["+"]
+    P --> N1["tab 1 — UINavigationController"]
+    P --> N2["tab 2 — UINavigationController"]
+    N1 --> L1[root webview]
+    N1 --> L2[pushed webview]
+    N2 --> L3[root webview]
+```
+
+Only the seated tab and its neighbours keep a column: the cost of this design is a WebKit
+process per screen.
+
+The tab bar hangs off the **window**. A sheet is presented above the root controller, so a bar
+inside it would be buried. It still needs an owning controller: a context menu presents from the
+view controller of the interaction's view, and a bare window subview has none, so both
+`UIButton.menu` and `UIContextMenuInteraction` go quiet there rather than fail. The bar therefore
+sits in a child controller's own view — which has to reach the window *before*
+`addChildViewController:`, because the other order throws.
+
+Five UIKit rules, each learned by crashing:
+
+- `setViewControllers:` and `dismissViewController:` call the navigation delegate back
+  **synchronously**, into the same `RefCell` the caller holds. Decide inside the borrow, call
+  UIKit after it.
+- A webview left in the window hierarchy while also serving as a controller's view makes
+  `nextResponder` cycle. `removeFromSuperview` first.
+- `UIModalPresentationFullScreen` detaches the presenting view — which is winit's — and the event
+  loop stops. `fullScreenModal` presents *over* full screen instead.
+- `setView:` on a controller that has never loaded throws. Take the view UIKit made and put the
+  chrome inside it.
+- Adding a view to a window throws once its controller is already someone's child. Add first,
+  parent second.
+- Liquid Glass samples its backdrop in screen space, so a `UIVisualEffectView` inside a
+  3D-transformed layer draws unrotated while everything around it shears. Glass is for chrome
+  that floats over the content in screen space; anything painted onto a card that tilts is a
+  tinted view instead.
+
+Two layers handed the same matrix every frame are not one layer. The overview's close button
+began as a sibling overlay that `Overview::plan_from` transformed alongside its card, and it
+drifted, then jumped — the two had identical bounds, position and anchor, so the fault was never
+geometry. It was that `deal` rebuilds the shutters while the cards persist, so any frame that
+rebuilt one and not the other showed a button somewhere its card was not. The button is a *child*
+of the card now, and `plan_from` transforms the card alone: one matrix, inherited, with nothing to
+keep in step. Whatever the cards do — tilt, spread, parallax — the button comes along by
+construction. Hit testing does not follow it there, because UIKit converts through a
+`CGAffineTransform` and every card carries perspective; the overview answers taps itself.
+
+Dragging past the last tab reaches a blank one that is **already there**. A route with a `#[blank]`
+variant keeps two spare tab entities, topped back up the moment one is claimed, and both are warmed
+like any other neighbour — so the column exists and has painted before the finger moves. Asking for
+it at the start of the gesture, as Safari does not, would spend a frame in the ECS and another in
+WebKit while the pager is already sliding, which is how a tab arrives blank.
+
+Two, not one, because of where the time goes. Measured on the simulator, a spare's own cost is 9 ms
+— `Dom::mount` and `build_as_child` — and the first Dioxus rebuild is under a millisecond. Then
+**350 ms passes before WebKit asks for the document at all**: on iOS the WebContent process launches
+when the `WKWebView` is constructed, so creating the spare early *is* the prewarm, and there is
+nothing left in our load path to shorten. What remains is lead time. One spare is created when the
+previous one is claimed, so it gets a single swipe's grace; two means a spare has been standing
+since the swipe before last, which is longer than a person can outrun.
+
+The spare carries `Pending`, and that is the whole of its difference: `Nav::state` and the tab
+strip both skip it, so the pill, the indicator and the overview count only tabs the user has. The
+pager does not skip it — `Tabs` holds its id beside the visible list, and `neighbour` hands it back
+when the drag runs off the end. Landing on it drops `Pending`; the next frame spawns its
+replacement, so the swipe is repeatable without ever spawning a tab mid-gesture, and abandoning
+the drag leaves nothing to clean up.
+
+The overview reaches it the same way, and only from the last tab. `Tabs::laid` appends the spare's
+id to the cards the carousel deals when the seated tab is last, which is exactly the condition
+under which `Nav::paint` warms it — deal it any earlier and there is no column behind it, only a
+blank plate. It is the one card with no ✕: closing a spare would ask the ECS to drop a tab that
+`Nav::shut` deliberately cannot see, so the affordance is absent rather than dead.
+
+Claiming from the overview needs one piece of state, because two things that both move the
+selection are indistinguishable afterwards. A `+`-shaped growth leaves the cards a step behind the
+new tab and they have to slide up to it; a drag-claim has already carried them there with the
+finger, and sliding again snaps them backwards first. `Overview::release` therefore records the
+index it landed on in `centred`, and the re-deal consumes it instead of guessing `at - 1`.
+
+Its replacement then rises into the gap rather than appearing in it. A card the deal did not have
+before starts at `OVERVIEW_RISE` of its size and transparent, and the same 0.22 s that settles the
+row brings it up. Because the shrink pushes it back in z and the cards carry perspective, a smaller
+card at the same world x draws nearer the vanishing point — so it emerges from behind the centred
+card and swings out to its tilt, which is the motion Safari uses and one no separate slide has to
+describe.
+
+Two supporting rules. A tab is warmed when it becomes a *neighbour*, not only when the selection
+moves, or the spare would have chrome and no column to slide in. And every tab root carries a
+depth whether or not it is on the trail, because a page that first paints unmeasured paints its
+defaults and nothing re-renders it: the screen state a page reads only changes when the navigation
+state does.
+
+### The overview is snapshots
+
+`tabs` zooms the pager out into one card per tab, flicked through and tapped to enter.
+
+```mermaid
+graph LR
+    S1["tab 1<br/>snapshot"] --- S2["tab 2<br/>snapshot"] --- L["tab 3<br/>live"] --- S4["tab 4<br/>snapshot"]
+```
+
+Cards are snapshots because only three tabs have a column. Each is taken while its tab is still
+on screen: UIKit snapshots a hidden view to an empty one.
+
+It pages one card per gesture, and one number decides that. `Overview::step` is the distance
+between neighbouring cards, `width * OVERVIEW_SPREAD`, and it is the same number in the layout, in
+the finger tracking and in the landing — a carousel where those three disagree is one where the
+cards lag the hand and the release lands somewhere the drag never visited. `follow` bounds the
+reach to the neighbour and rubber-bands past it, so a long drag cannot promise a card it will not
+land on, and `release` only asks which side of half a step the throw ended on. Projecting a coast
+from the release velocity, as a free-scrolling list would, is what made a single swipe skip a tab:
+at the speed a deliberate drag ends, the projection is worth another whole card.
+
+### The navigator's names are Expo Router's
+
+`Stack`, `Tabs`, `Screen`, `presentation`, `use_router`, `use_route`. Most people meet this
+shape in Expo first. How a route arrives is an option on its screen, so a caller only ever says
+`push(route)`.
+
+File-based routing is deliberately not borrowed: `_layout.tsx` works because a bundler globs a
+directory, and here the nesting is the rsx, which the compiler checks.
+
+`use_route` gives a screen the route **it** was opened for, not whatever is on top — so a pushed
+level keeps its title under a sheet, and a tab sliding in draws itself. `use_router` reads that
+seat too, which is why `position` can say where a screen sits in the trail: one ECS world serves
+every webview, so the world alone cannot know.
+
 ---
+
 
 ## Agents
 
@@ -442,14 +595,6 @@ React-style, in one atomic transaction.
 | Windows | host | not started |
 | iOS | remote client | linked in CI, packaged and shipped via `dx` |
 | Android | remote client | configured, no platform code yet |
-
-A remote client is strictly a client — the server half of `vmux_service` is compiled out.
-
-Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
-iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the
-desktop app and the daemon. Write `#[cfg(host)]` rather than a negation of target
-predicates. Cargo's own `[target.'cfg(...)'.dependencies]` still has to spell the targets
-out, because dependency resolution happens before any build script runs.
 
 ---
 
@@ -492,12 +637,3 @@ crates/
 ├── vmux_ui
 └── vmux_wire
 ```
-
-Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
-which sits above `page/` and below `app/` — a `page/` crate must never depend on it, and
-nothing but `app/vmux_desktop` may.
-
-Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
-`host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
-And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
-staying flat.

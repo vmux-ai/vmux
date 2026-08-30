@@ -1,11 +1,17 @@
 use std::rc::Rc;
 
 use vmux_ui::hooks::EventListenerError;
+use vmux_ui::hooks::transport::PageHost;
 
 pub struct Embedding {
     pub outbox: Rc<dyn Outbox>,
     pub assets: Rc<dyn Assets>,
     pub waker: Rc<dyn Wake>,
+    pub layer: Option<Rc<dyn HostLayer>>,
+}
+
+pub trait HostLayer {
+    fn wrap(&self, inner: Rc<dyn PageHost>) -> Rc<dyn PageHost>;
 }
 
 pub trait Wake {

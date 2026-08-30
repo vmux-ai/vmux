@@ -70,13 +70,10 @@ impl NativePagePlugin {
 }
 
 #[cfg(target_os = "macos")]
-pub static LAYOUT_PAGE: NativePage = NativePage {
-    url: vmux_layout::event::LAYOUT_PAGE_URL,
-    document_url: None,
-    component: vmux_layout::page::Page,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+pub static LAYOUT_PAGE: NativePage =
+    NativePage::pane(vmux_layout::event::LAYOUT_PAGE_URL, vmux_layout::page::Page)
+        .heading(
+            r#"<base href="/"/>
 <title>vmux</title>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
@@ -84,21 +81,18 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
-                 text-foreground antialiased",
-    transparent: true,
-    owns_subtree: false,
-};
+        )
+        .dressed(
+            r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+            "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+             text-foreground antialiased",
+        )
+        .see_through();
 
 #[cfg(target_os = "macos")]
-pub static START_PAGE: NativePage = NativePage {
-    url: vmux_start::START_PAGE_URL,
-    document_url: None,
-    component: vmux_start::page::StartPage,
-    root_id: "main",
-    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-    head: r#"<base href="/"/>
+pub static START_PAGE: NativePage =
+    NativePage::pane(vmux_start::START_PAGE_URL, vmux_start::page::StartPage).heading(
+        r#"<base href="/"/>
 <title>Start</title>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
@@ -106,11 +100,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 </style>
 <link rel="stylesheet" href="./assets/index.css"/>
 <link rel="stylesheet" href="./assets/theme.css"/>"#,
-    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
-    transparent: false,
-    owns_subtree: false,
-};
+    );
 
 #[cfg(target_os = "macos")]
 pub static HISTORY_PAGE: NativePage =
@@ -217,14 +207,14 @@ mod tests {
             assert!(
                 page.document_url().starts_with("vmux://"),
                 "{} loads from {}, which no protocol handler serves",
-                page.url,
+                page.url(),
                 page.document_url()
             );
         }
     }
     #[test]
     fn the_editor_still_answers_for_file_urls() {
-        assert_eq!(FILES_PAGE.url, "file://");
+        assert_eq!(FILES_PAGE.url(), "file://");
         assert!(FILES_PAGE.answers_for("file:///Users/me/a.rs"));
         assert_eq!(FILES_PAGE.document_url(), "vmux://files/");
     }

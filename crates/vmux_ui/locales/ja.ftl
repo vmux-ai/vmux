@@ -244,6 +244,7 @@ layout-unpin-page = ピン留めを解除
 layout-manage-extensions = 拡張機能を管理
 layout-new-stack = 新しいスタック
 layout-close-tab = タブを閉じる
+layout-close-other-tabs = 他のタブを閉じる
 layout-bookmark = ブックマーク
 layout-pin = ピン留め
 layout-new-tab = 新しいタブ

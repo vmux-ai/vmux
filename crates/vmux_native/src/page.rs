@@ -1,17 +1,42 @@
 pub struct NativePage {
-    pub url: &'static str,
-    pub document_url: Option<&'static str>,
-    pub component: crate::PageComponent,
-    pub root_id: &'static str,
-    pub root_class: &'static str,
-    pub head: &'static str,
-    pub html_attributes: &'static str,
-    pub body_class: &'static str,
-    pub transparent: bool,
-    pub owns_subtree: bool,
+    pub(crate) url: &'static str,
+    pub(crate) document_url: Option<&'static str>,
+    #[cfg_attr(not(ui), allow(dead_code))]
+    pub(crate) component: crate::PageComponent,
+    pub(crate) root_id: &'static str,
+    pub(crate) root_class: &'static str,
+    pub(crate) head: &'static str,
+    pub(crate) html_attributes: &'static str,
+    pub(crate) body_class: &'static str,
+    pub(crate) transparent: bool,
+    pub(crate) background: Option<(u8, u8, u8, u8)>,
+    pub(crate) owns_subtree: bool,
+}
+
+impl PartialEq for NativePage {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
 }
 
 impl NativePage {
+    pub fn url(&self) -> &'static str {
+        self.url
+    }
+
+    pub fn background_or(&self, fallback: (u8, u8, u8, u8)) -> (u8, u8, u8, u8) {
+        match self.background {
+            Some(colour) => colour,
+            None => fallback,
+        }
+    }
+
+    pub fn prefers_dark(&self) -> Option<bool> {
+        let (red, green, blue, _) = self.background?;
+        let luminance = 0.299 * f64::from(red) + 0.587 * f64::from(green) + 0.114 * f64::from(blue);
+        Some(luminance < 128.0)
+    }
+
     pub fn answers_for(&self, url: &str) -> bool {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))
     }
@@ -22,10 +47,37 @@ impl NativePage {
             None => self.url,
         }
     }
+    pub const fn heading(mut self, head: &'static str) -> Self {
+        self.head = head;
+        self
+    }
+
+    pub const fn rooted(mut self, id: &'static str, class: &'static str) -> Self {
+        self.root_id = id;
+        self.root_class = class;
+        self
+    }
+
+    pub const fn dressed(mut self, html: &'static str, body: &'static str) -> Self {
+        self.html_attributes = html;
+        self.body_class = body;
+        self
+    }
+
+    pub const fn see_through(mut self) -> Self {
+        self.transparent = true;
+        self
+    }
+
     pub const fn served_from(mut self, url: &'static str) -> Self {
         self.document_url = Some(url);
         self
     }
+    pub const fn background(mut self, colour: (u8, u8, u8, u8)) -> Self {
+        self.background = Some(colour);
+        self
+    }
+
     pub const fn owning_subtree(mut self) -> Self {
         self.owns_subtree = true;
         self
@@ -38,6 +90,7 @@ impl NativePage {
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             head: r#"<base href="/"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
 <style>
 html, body { height: 100%; margin: 0; min-height: 0; }
 body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -47,6 +100,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
+            background: None,
             owns_subtree: false,
             document_url: None,
         }

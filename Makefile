@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: example dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -55,12 +55,34 @@ build: ensure-mac-deps
 
 ios: mobile-ios-run
 
+ifneq (,$(filter example,$(MAKECMDGOALS)))
+EXAMPLE := $(firstword $(filter-out example,$(MAKECMDGOALS)))
+EXAMPLE_DIR := examples/$(subst -,/,$(EXAMPLE))
+EXAMPLE_CRATE := vmux_$(subst -,_,$(EXAMPLE))_example
+
+example: ensure-mobile-ios-deps ensure-booted-simulator
+	@set -e; \
+	if [ -z "$(EXAMPLE)" ]; then \
+		echo "usage: make example <platform>-<name>, e.g. make example mobile-navigation"; \
+		ls -d examples/*/* | sed 's|examples/||; s|/|-|' | sed 's/^/  /'; \
+		exit 1; \
+	fi; \
+	"$(DX_BIN)" build --ios -p $(EXAMPLE_CRATE); \
+	. ./scripts/cargo-target-paths.sh; \
+	bundle="$$(ls -d "$$(vmux_cargo_target_dir .)/dx/$(EXAMPLE_CRATE)/debug/ios/"*.app | head -1)"; \
+	xcrun simctl install booted "$$bundle"; \
+	xcrun simctl launch booted "$$(awk -F'"' '/^identifier/ { print $$2; exit }' $(EXAMPLE_DIR)/Dioxus.toml)"
+
+$(EXAMPLE):
+	@:
+endif
+
 android: mobile-android-run
 
 # `inject-ios-resources.sh` reads VMUX_IOS_PROFILE to decide which bundle to write into, so the
 # build has to be told the same thing or the script looks for a bundle dx never produced.
 mobile-ios: ensure-mobile-ios-deps
-	"$(DX_BIN)" build --ios -p vmux_mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
+	"$(DX_BIN)" build --ios -p vmux_mobile --features mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh
 	./scripts/test-ios-bundle-layout.sh
 
@@ -102,7 +124,7 @@ ensure-booted-simulator:
 	open -a Simulator --args -CurrentDeviceUDID "$$udid"
 
 mobile-ios-run: ensure-mobile-ios-deps ensure-booted-simulator
-	"$(DX_BIN)" serve --ios -p vmux_mobile
+	"$(DX_BIN)" serve --ios -p vmux_mobile --features mobile
 
 mobile-android-run: ensure-mobile-android-deps
 	"$(DX_BIN)" serve --android -p vmux_mobile
@@ -159,6 +181,7 @@ lint-fix:
 
 test:
 	$(CARGO_WITH_CEF_CACHE) test --workspace --exclude bevy_cef_core
+
 
 # Reset vmux *dev* storage for a clean test. Removes the layout store, session,
 # logs, the saved profile display name, and stale dev service sockets (all

@@ -1,0 +1,25 @@
+[package]
+name = "vmux_mobile_navigation_example"
+version.workspace = true
+edition.workspace = true
+description = "The phone's navigation, driven by hand instead of by a Mac"
+publish = false
+
+[[bin]]
+name = "vmux_mobile_navigation_example"
+path = "src/main.rs"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+vmux_mobile = { path = "../../../crates/app/vmux_mobile", features = ["mobile"] }
+vmux_native = { path = "../../../crates/vmux_native" }
+
+[lints]
+workspace = true

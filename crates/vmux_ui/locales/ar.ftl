@@ -256,6 +256,7 @@ layout-unpin-page = إلغاء تثبيت هذه الصفحة
 layout-manage-extensions = إدارة الإضافات
 layout-new-stack = طبقة جديدة
 layout-close-tab = إغلاق التبويب
+layout-close-other-tabs = إغلاق التبويبات الأخرى
 layout-bookmark = إضافة إلى المفضلة
 layout-pin = تثبيت
 layout-new-tab = تبويب جديد
