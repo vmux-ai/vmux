@@ -735,6 +735,7 @@ editor-lsp-not-installed = { $server } — not installed
 editor-explorer = Explorer
 editor-explorer-empty = No files
 editor-open-editors = Open Editors
+editor-close-editor = Close editor
 editor-outline = Outline
 editor-breadcrumb = Breadcrumbs
 editor-breadcrumb-hidden = Show hidden folders

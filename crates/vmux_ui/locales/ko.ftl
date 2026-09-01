@@ -705,6 +705,7 @@ editor-lsp-not-installed = { $server } — 설치되지 않음
 editor-explorer = 탐색기
 editor-explorer-empty = 파일 없음
 editor-open-editors = 열린 편집기
+editor-close-editor = 편집기 닫기
 editor-outline = 개요
 editor-breadcrumb = 탐색 경로
 editor-breadcrumb-hidden = 숨겨진 폴더 표시

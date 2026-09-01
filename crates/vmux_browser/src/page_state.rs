@@ -255,7 +255,15 @@ fn push_pane_tree_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&PageIdentity>), With<Browser>>,
+    browser_meta: Query<
+        (
+            &PageMetadata,
+            Has<Loading>,
+            Option<&PageIdentity>,
+            Option<&vmux_git::GitDiffSource>,
+        ),
+        With<Browser>,
+    >,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -282,7 +290,6 @@ fn push_pane_tree_emit(
         let is_active = active_pane == Some(pane_entity);
         let active_stack = active_stack_in_pane(pane_entity, &pane_children, &stack_ts);
         let mut stacks: Vec<StackNode> = Vec::new();
-        let mut stack_index: usize = 0;
         if let Ok(children) = pane_children.get(pane_entity) {
             for child in children.iter() {
                 if !stack_q.contains(child) {
@@ -292,9 +299,10 @@ fn push_pane_tree_emit(
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
-                        if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading, osc, diff)) = browser_meta.get(browser_e) {
                             let is_new_stack = false;
                             stacks.push(StackNode {
+                                id: child.to_bits(),
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
@@ -311,8 +319,8 @@ fn push_pane_tree_emit(
                                     meta.icon.clone()
                                 },
                                 is_active: stack_is_active,
-                                stack_index: stack_index as u32,
                                 is_loading: loading,
+                                is_dirty: diff.is_some_and(|source| source.dirty),
                                 bg_color: meta.bg_color.clone(),
                             });
                             found_browser = true;
@@ -321,16 +329,16 @@ fn push_pane_tree_emit(
                 }
                 if !found_browser {
                     stacks.push(StackNode {
+                        id: child.to_bits(),
                         title: "New Stack".to_string(),
                         url: String::new(),
                         icon: vmux_core::PageIcon::None,
                         is_active: stack_is_active,
-                        stack_index: stack_index as u32,
                         is_loading: false,
+                        is_dirty: false,
                         bg_color: None,
                     });
                 }
-                stack_index += 1;
             }
         }
         panes.push(PaneNode {

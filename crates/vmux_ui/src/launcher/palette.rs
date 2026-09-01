@@ -535,7 +535,7 @@ pub struct PaletteState {
     pub rows: Vec<CommandBarResultItem>,
     pub selected: usize,
     pub ghost: String,
-    pub display_text: String,
+    pub row_text: Option<String>,
     pub placeholder: String,
     pub glyph: Option<PaletteGlyph>,
     pub mode: PaletteMode,
@@ -584,10 +584,10 @@ impl PaletteState {
             rows.default_target.as_ref()
         })
         .or_else(|| AgentSegment::of(rows.default_target.as_ref()));
-        let display_text = if draft.nav_mode && !rows.start_prompt_mode {
-            DisplayText::of(active, &draft.query)
+        let row_text = if rows.start_prompt_mode {
+            None
         } else {
-            draft.query.clone()
+            RowText::over(navigating, &draft.query)
         };
 
         Self {
@@ -596,7 +596,7 @@ impl PaletteState {
             rows: rows.items.clone(),
             selected,
             ghost: rows.ghost.clone(),
-            display_text,
+            row_text,
             placeholder: Placeholder::of(rows.mode, state, surface),
             glyph: PaletteGlyph::of(navigating, rows.mode),
             mode: rows.mode,
@@ -893,31 +893,39 @@ impl Placeholder {
     }
 }
 
-struct DisplayText;
+struct RowText;
 
-impl DisplayText {
-    fn of(item: Option<&CommandBarResultItem>, query: &str) -> String {
+impl RowText {
+    fn over(item: Option<&CommandBarResultItem>, query: &str) -> Option<String> {
+        let text = Self::of(item?, query);
+        if text == query {
+            return None;
+        }
+        Some(text)
+    }
+
+    fn of(item: &CommandBarResultItem, query: &str) -> String {
         match item {
-            Some(CommandBarResultItem::Command { name, .. }) => format!("> {name}"),
-            Some(CommandBarResultItem::Ex { name, .. }) => format!(":{name}"),
-            Some(CommandBarResultItem::Pick { label, .. }) => label.clone(),
-            Some(CommandBarResultItem::Navigate { url }) => url.clone(),
-            Some(CommandBarResultItem::Search { query, .. }) => query.clone(),
-            Some(CommandBarResultItem::Stack { url, .. }) => url.clone(),
-            Some(CommandBarResultItem::Space { name, .. }) => name.clone(),
-            Some(CommandBarResultItem::Page { title, .. }) => title.clone(),
-            Some(CommandBarResultItem::Terminal { path }) if path.is_empty() => {
+            CommandBarResultItem::Command { name, .. } => format!("> {name}"),
+            CommandBarResultItem::Ex { name, .. } => format!(":{name}"),
+            CommandBarResultItem::Pick { label, .. } => label.clone(),
+            CommandBarResultItem::Navigate { url } => url.clone(),
+            CommandBarResultItem::Search { query, .. } => query.clone(),
+            CommandBarResultItem::Stack { url, .. } => url.clone(),
+            CommandBarResultItem::Space { name, .. } => name.clone(),
+            CommandBarResultItem::Page { title, .. } => title.clone(),
+            CommandBarResultItem::Terminal { path } if path.is_empty() => {
                 translate("command-terminal")
             }
-            Some(CommandBarResultItem::Terminal { path }) => path.clone(),
-            Some(CommandBarResultItem::Editor { path }) => path.clone(),
-            Some(CommandBarResultItem::History { title, url, .. }) => Self::titled(title, url),
-            Some(CommandBarResultItem::File { path, .. }) => path.clone(),
-            Some(CommandBarResultItem::WorkDir { path, .. }) => path.clone(),
-            Some(CommandBarResultItem::RecentFile { title, url }) => Self::titled(title, url),
-            Some(CommandBarResultItem::PartialIndex)
-            | Some(CommandBarResultItem::MoreMatches { .. })
-            | None => query.to_string(),
+            CommandBarResultItem::Terminal { path } => path.clone(),
+            CommandBarResultItem::Editor { path } => path.clone(),
+            CommandBarResultItem::History { title, url, .. } => Self::titled(title, url),
+            CommandBarResultItem::File { path, .. } => path.clone(),
+            CommandBarResultItem::WorkDir { path, .. } => path.clone(),
+            CommandBarResultItem::RecentFile { title, url } => Self::titled(title, url),
+            CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => {
+                query.to_string()
+            }
         }
     }
 
@@ -1462,8 +1470,8 @@ mod tests {
         let submission = palette.activate(&palette.rows[at], &[]);
         assert_eq!(submission.action, None);
         assert_eq!(
-            DisplayText::of(Some(&CommandBarResultItem::PartialIndex), "settings"),
-            "settings"
+            RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
+            None
         );
     }
 
@@ -1581,12 +1589,13 @@ mod tests {
     }
 
     #[test]
-    fn navigation_shows_the_highlighted_row_but_prose_keeps_the_prompt() {
+    fn navigation_overlays_the_highlighted_row_and_still_edits_the_typed_text() {
         let state = Launcher::state();
 
         let navigated =
             PaletteState::modal(&state, PaletteDraft::typed("setti").at(0).navigating());
-        assert_eq!(navigated.display_text, "Settings");
+        assert_eq!(navigated.row_text.as_deref(), Some("Settings"));
+        assert_eq!(navigated.query, "setti");
 
         let prompting = PaletteState::start(
             &state,
@@ -1594,7 +1603,8 @@ mod tests {
                 .at(0)
                 .navigating(),
         );
-        assert_eq!(prompting.display_text, "fix the failing test");
+        assert_eq!(prompting.row_text, None);
+        assert_eq!(prompting.query, "fix the failing test");
     }
 
     #[test]

@@ -239,6 +239,59 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         break;
     }
   };
+  // A field bound to a signal is echoed back on every keystroke, and the echo is a round trip
+  // behind: the event reaches the host synchronously, the batch it produces returns over
+  // `/__edits` only after the previous one was acknowledged. Type faster than that gap and the
+  // batch carries a string the field has already moved past. The interpreter compares it against
+  // the live value, finds a genuine difference, and assigns — and assigning `.value` collapses the
+  // selection to the end, so the rest of the sentence lands there.
+  //
+  // Restoring the selection around the batch does not fix it; the offset saved before the batch is
+  // stale for the same reason the value is, and typing during the round trip transposes characters.
+  // The write itself has to be refused, which means telling an echo from a real change. An echo is
+  // always a string this field held a moment ago. A real change — a completion accepted, a query
+  // normalised, text cleared — is a string it has never held. So the field remembers what it has
+  // been while it is focused, and a write matching that history is dropped; the host converges on
+  // the newer value in the next batch either way.
+  const HELD = 16;
+  const shadowValue = (el) => {
+    if (el.__vmuxHeld) return;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement;
+    const own = Object.getOwnPropertyDescriptor(proto.prototype, 'value');
+    if (!own || !own.set || !own.get) return;
+    const held = [own.get.call(el)];
+    el.__vmuxHeld = held;
+    const remember = (text) => {
+      if (held[held.length - 1] === text) return;
+      held.push(text);
+      if (held.length > HELD) held.shift();
+    };
+    el.addEventListener('input', () => remember(own.get.call(el)));
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get() {
+        return own.get.call(this);
+      },
+      set(text) {
+        const live = own.get.call(this);
+        // An echo of something already superseded. Dropping it keeps the caret and the characters
+        // typed since; the equality case is what the interpreter would have skipped anyway.
+        if (text !== live && held.includes(text)) return;
+        own.set.call(this, text);
+        remember(text);
+      },
+    });
+  };
+  const unshadowValue = (el) => {
+    if (!el || !el.__vmuxHeld) return;
+    delete el.value;
+    delete el.__vmuxHeld;
+  };
+  document.addEventListener('focusin', (event) => {
+    const el = event.target;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) shadowValue(el);
+  }, true);
+  document.addEventListener('focusout', (event) => unshadowValue(event.target), true);
   // The page asks for its own frames rather than having them evaluated into it. The host holds the
   // request until a render produces one, so this loop costs one idle connection and no polling.
   //

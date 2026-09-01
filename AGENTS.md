@@ -10,6 +10,10 @@ CI runs fmt, clippy, and tests for PRs.
 
 Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks; the pre-push hook remains the required final fmt, clippy, and test gate.
 
+**Install that hook in every new worktree — `./scripts/setup-hooks.sh`.** Hooks live under `.git/`, which a fresh worktree does not inherit, so the gate this file leans on is simply absent until you run it. Nothing announces that; the first sign is a push that should have been stopped and wasn't. The reverse failure is worse and quieter: believing there is no gate, you hand-run `clippy --workspace` and `test --workspace` on every change, which costs half an hour each and — because cargo takes one lock per target directory — starves anything else building beside you.
+
+Never run two cargo invocations against the same target directory at once. The second does not fail, it queues, so both take far longer than either alone and neither reports why; worse, tests that spawn subprocesses start failing on timeouts that have nothing to do with the code. A workspace test racing a release build is enough to do it.
+
 If a change affects an excluded patched CEF crate, run the appropriate package checks too.
 
 If any check fails, fix the issue before committing. Do not push broken code.

@@ -705,6 +705,7 @@ editor-lsp-not-installed = { $server } — 尚未安裝
 editor-explorer = 檔案總管
 editor-explorer-empty = 無檔案
 editor-open-editors = 開啟的編輯器
+editor-close-editor = 關閉編輯器
 editor-outline = 大綱
 editor-breadcrumb = 導覽路徑
 editor-breadcrumb-hidden = 顯示隱藏的資料夾

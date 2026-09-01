@@ -5,11 +5,11 @@ use std::rc::Rc;
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::columns::{DirColumns, DirWindow};
-use crate::explorer::{ExplorerPanel, SidebarView};
+use crate::explorer::{EditorTabCommand, ExplorerPanel, SidebarView};
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    CellMetrics, ColumnRuler, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
+    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
     centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started, gutter_width,
     heading_class, image_mime, line_severity, note_cursor_activation, note_inline_nodes,
     note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
@@ -132,7 +132,7 @@ pub fn Page() -> Element {
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
-    let mut dirty = use_signal(|| false);
+    let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let ime = use_ime_guard();
     let rename_ime = use_ime_guard();
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
@@ -367,8 +367,12 @@ pub fn Page() -> Element {
         viewport.scroll_by(event.lines, line_height);
     });
 
-    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
-        dirty.set(d.dirty);
+    let _open_editors =
+        use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |event| {
+            open_editors.set(event.items);
+        });
+
+    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
@@ -723,12 +727,7 @@ pub fn Page() -> Element {
     });
 
     let gw = gutter_width(total_lines());
-    let cur_basename = path()
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_string();
+    let editor_tabs = EditorTabItem::all(&open_editors.read());
     let breadcrumb_path = match error().is_empty() {
         true => git_path(),
         false => String::new(),
@@ -989,12 +988,7 @@ pub fn Page() -> Element {
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
                 ExplorerToggleButton { pane: explorer, mode }
-                {rsx! { TypeIcon { path: cur_basename.clone(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
-                span { class: "truncate text-foreground/90", "{cur_basename}" }
-                if dirty() {
-                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
-                }
-                div { class: "flex-1" }
+                EditorTabStrip { tabs: editor_tabs }
                 if find_open() {
                     FindBar {
                         query: find_query,
@@ -3369,6 +3363,80 @@ fn ExplorerToggleButton(pane: ExplorerPane, mode: Signal<Mode>) -> Element {
                 stroke_linejoin: "round",
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
                 line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorTabStrip(tabs: Vec<EditorTabItem>) -> Element {
+    let active_id = match tabs.iter().find(|tab| tab.active) {
+        Some(tab) => tab.element_id(),
+        None => String::new(),
+    };
+
+    use_effect(use_reactive!(|active_id| {
+        if active_id.is_empty() {
+            return;
+        }
+        ScrollIntoView::nearest(&active_id);
+    }));
+
+    rsx! {
+        div {
+            class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden py-1",
+            for tab in tabs {
+                EditorTab { key: "{tab.path}", tab }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorTab(tab: EditorTabItem) -> Element {
+    let command = EditorTabCommand {
+        path: tab.path.clone(),
+    };
+    let close_command = command.clone();
+    let class = match tab.active {
+        true => {
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.10] px-2.5 text-ui text-foreground"
+        }
+        false => {
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2.5 text-ui text-foreground/60 hover:bg-foreground/[0.05] hover:text-foreground/90"
+        }
+    };
+    let close_title = match tab.dirty {
+        true => translate("editor-unsaved"),
+        false => translate("editor-close-editor"),
+    };
+
+    rsx! {
+        div {
+            id: tab.element_id(),
+            class,
+            title: "{tab.path}",
+            onclick: move |_| command.open(),
+            TypeIcon { path: tab.path.clone(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" }
+            span { class: "truncate", "{tab.name}" }
+            if !tab.context.is_empty() {
+                span { class: "shrink-0 truncate text-[10px] text-muted-foreground/70", "{tab.context}" }
+            }
+            button {
+                r#type: "button",
+                class: "flex h-4 w-4 shrink-0 cursor-default items-center justify-center rounded-sm text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                aria_label: translate("editor-close-editor"),
+                title: close_title,
+                onclick: move |event: Event<MouseData>| {
+                    event.stop_propagation();
+                    close_command.close();
+                },
+                if tab.dirty {
+                    span { class: "h-1.5 w-1.5 rounded-full bg-cyan-300 group-hover:hidden" }
+                    span { class: "hidden leading-none group-hover:block", "\u{00D7}" }
+                } else {
+                    span { class: "leading-none", "\u{00D7}" }
+                }
             }
         }
     }

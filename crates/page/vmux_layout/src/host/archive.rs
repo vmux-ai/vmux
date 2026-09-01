@@ -21,7 +21,10 @@ use crate::pane::{
 };
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
-use crate::stack::{ActiveTabParam, FocusedStack, Stack, StackCommandSet, stack_bundle};
+use crate::stack::{
+    ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
+    stack_bundle,
+};
 use crate::tab::{
     CloseTabRequest, LastTabCloseAt, Tab, active_tab_siblings, pick_after_close, tab_bundle,
 };
@@ -37,7 +40,9 @@ impl Plugin for ArchivePlugin {
             .add_systems(
                 Update,
                 (
-                    archive_on_stack_close.before(StackCommandSet),
+                    archive_on_stack_close
+                        .after(StackCommandSet)
+                        .before(CloseStackSet),
                     handle_reopen_closed_page,
                 )
                     .in_set(ReadAppCommands),
@@ -50,8 +55,7 @@ const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 #[allow(clippy::too_many_arguments)]
 fn archive_on_stack_close(
-    mut reader: MessageReader<AppCommand>,
-    focused: Res<FocusedStack>,
+    mut reader: MessageReader<CloseStackRequest>,
     stack_pages: Query<(&PageMetadata, Option<&TerminalLaunch>), With<Stack>>,
     child_of: Query<&ChildOf>,
     children_q: Query<&Children>,
@@ -65,55 +69,46 @@ fn archive_on_stack_close(
     panes: Query<(), With<Pane>>,
     mut writer: MessageWriter<PageArchiveRequest>,
 ) {
-    let mut closing = false;
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close))
-        ) {
-            closing = true;
+    for request in reader.read() {
+        if request.reason != CloseStackReason::ByUser {
+            continue;
         }
-    }
-    if !closing {
-        return;
-    }
-    let Some(stack) = focused.stack else {
-        return;
-    };
-    let Ok((meta, launch)) = stack_pages.get(stack) else {
-        return;
-    };
-    if meta.url.is_empty() {
-        return;
-    }
-    let space = space_of(stack, &child_of, &spaces);
-    let space_id = space
-        .and_then(|s| space_ids.get(s).ok())
-        .map(|id| id.0.clone())
+        let stack = request.stack;
+        let Ok((meta, launch)) = stack_pages.get(stack) else {
+            continue;
+        };
+        if meta.url.is_empty() {
+            continue;
+        }
+        let space = space_of(stack, &child_of, &spaces);
+        let space_id = space
+            .and_then(|s| space_ids.get(s).ok())
+            .map(|id| id.0.clone())
+            .unwrap_or_default();
+        let tab_index = space.and_then(|s| tab_index_of(stack, s, &child_of, &children_q, &tabs));
+        let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
+            stack,
+            &child_of,
+            &children_q,
+            &pane_ids,
+            &splits,
+            &pane_sizes,
+            &panes,
+            &stacks,
+            &tabs,
+        )
         .unwrap_or_default();
-    let tab_index = space.and_then(|s| tab_index_of(stack, s, &child_of, &children_q, &tabs));
-    let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
-        stack,
-        &child_of,
-        &children_q,
-        &pane_ids,
-        &splits,
-        &pane_sizes,
-        &panes,
-        &stacks,
-        &tabs,
-    )
-    .unwrap_or_default();
-    writer.write(PageArchiveRequest {
-        url: meta.url.clone(),
-        title: meta.title.clone(),
-        space_id,
-        launch: launch.cloned(),
-        tab_index,
-        leaf_pane_id,
-        stack_index,
-        pane_path,
-    });
+        writer.write(PageArchiveRequest {
+            url: meta.url.clone(),
+            title: meta.title.clone(),
+            space_id,
+            launch: launch.cloned(),
+            tab_index,
+            leaf_pane_id,
+            stack_index,
+            pane_path,
+        });
+    }
 }
 
 fn tab_index_of(
@@ -1278,13 +1273,28 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn close_command_archives_focused_stack() {
+    fn archive_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<PageArchiveRequest>()
-            .init_resource::<FocusedStack>()
-            .add_systems(Update, super::archive_on_stack_close);
+        app.add_plugins(ArchivePlugin)
+            .add_message::<AppCommand>()
+            .add_message::<CloseStackRequest>()
+            .init_resource::<crate::space::ActiveSpaceEntity>()
+            .init_resource::<LayoutSettings>();
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        app
+    }
+
+    fn request_close(app: &mut App, stack: Entity) {
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::by_user(stack));
+        app.update();
+    }
+
+    #[test]
+    fn close_request_archives_the_named_stack() {
+        let mut app = archive_app();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1301,13 +1311,7 @@ mod tests {
                 ChildOf(space),
             ))
             .id();
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
-        app.update();
+        request_close(&mut app, stack);
         let reqs = drain_archive_reqs(&mut app);
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].url, "https://gone.example");
@@ -1315,33 +1319,44 @@ mod tests {
     }
 
     #[test]
-    fn close_command_skips_empty_url_stack() {
-        let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<PageArchiveRequest>()
-            .init_resource::<FocusedStack>()
-            .add_systems(Update, super::archive_on_stack_close);
+    fn tidying_a_stack_never_reaches_the_reopen_list() {
+        let mut app = archive_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), PageMetadata::default()))
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://tidied.example".to_string(),
+                    ..default()
+                },
+                ChildOf(space),
+            ))
             .id();
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::tidying(stack));
         app.update();
         assert!(drain_archive_reqs(&mut app).is_empty());
     }
 
     #[test]
+    fn close_request_skips_empty_url_stack() {
+        let mut app = archive_app();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), PageMetadata::default()))
+            .id();
+        request_close(&mut app, stack);
+        assert!(drain_archive_reqs(&mut app).is_empty());
+    }
+
+    #[test]
     fn close_records_tab_index_of_closing_stack() {
-        let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<PageArchiveRequest>()
-            .init_resource::<FocusedStack>()
-            .add_systems(Update, super::archive_on_stack_close);
+        let mut app = archive_app();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1360,13 +1375,7 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
-        app.update();
+        request_close(&mut app, stack);
         let reqs = drain_archive_reqs(&mut app);
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].tab_index, Some(1));
@@ -1375,11 +1384,7 @@ mod tests {
     #[test]
     fn close_records_pane_path_and_leaf() {
         use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
-        let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<PageArchiveRequest>()
-            .init_resource::<FocusedStack>()
-            .add_systems(Update, super::archive_on_stack_close);
+        let mut app = archive_app();
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
@@ -1427,13 +1432,7 @@ mod tests {
                 ChildOf(leaf1),
             ))
             .id();
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
-        app.update();
+        request_close(&mut app, stack);
         let reqs = drain_archive_reqs(&mut app);
         assert_eq!(reqs.len(), 1);
         let req = &reqs[0];
@@ -1444,6 +1443,116 @@ mod tests {
         assert_eq!(req.pane_path[0].child_index, 1);
         assert_eq!(req.pane_path[0].flex_weights, vec![1.0, 3.0]);
         assert!(matches!(req.pane_path[0].axis, SplitAxis::Row));
+    }
+
+    fn close_pipeline_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::stack::StackPlugin, ArchivePlugin))
+            .add_message::<AppCommand>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<crate::pane::PendingCursorWarp>()
+            .init_resource::<crate::space::ActiveSpaceEntity>()
+            .init_resource::<LayoutSettings>();
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        app
+    }
+
+    fn spawn_inactive_and_active_stacks(app: &mut App) -> (Entity, Entity) {
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_history::LastActivatedAt(1),
+                ChildOf(space),
+            ))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("leaf".to_string()),
+                vmux_history::LastActivatedAt(1),
+                ChildOf(tab),
+            ))
+            .id();
+        let inactive = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://inactive.example".to_string(),
+                    ..default()
+                },
+                vmux_history::LastActivatedAt(1),
+                ChildOf(pane),
+            ))
+            .id();
+        let active = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://active.example".to_string(),
+                    ..default()
+                },
+                vmux_history::LastActivatedAt(2),
+                ChildOf(pane),
+            ))
+            .id();
+        (inactive, active)
+    }
+
+    fn archived_urls(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&ArchivedPage>()
+            .iter(app.world())
+            .map(|page| page.url.clone())
+            .collect()
+    }
+
+    #[test]
+    fn closing_an_inactive_stack_archives_it_and_not_the_active_one() {
+        let mut app = close_pipeline_app();
+        let (inactive, active) = spawn_inactive_and_active_stacks(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::by_user(inactive));
+        app.update();
+        app.update();
+
+        assert!(app.world().get_entity(inactive).is_err());
+        assert!(app.world().get_entity(active).is_ok());
+        assert_eq!(
+            archived_urls(&mut app),
+            vec!["https://inactive.example".to_string()]
+        );
+    }
+
+    #[test]
+    fn close_command_archives_the_active_stack_before_it_is_despawned() {
+        let mut app = close_pipeline_app();
+        let (_inactive, active) = spawn_inactive_and_active_stacks(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+        app.update();
+        app.update();
+
+        assert!(app.world().get_entity(active).is_err());
+        assert_eq!(
+            archived_urls(&mut app),
+            vec!["https://active.example".to_string()]
+        );
     }
 
     #[test]

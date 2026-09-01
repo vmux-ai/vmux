@@ -495,7 +495,7 @@ fn tidy_follow_pane(
     }
     if settings.agent.tidy_files_auto {
         for stack in closable {
-            close.write(vmux_layout::CloseStackRequest { stack });
+            close.write(vmux_layout::CloseStackRequest::tidying(stack));
         }
         return;
     }
@@ -644,12 +644,12 @@ pub(crate) fn on_tidy_action(
             settings.agent.tidy_files_auto = true;
             save.write(vmux_setting::SettingsSaveRequest);
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest { stack });
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
             }
         }
         vmux_core::event::TidyChoice::Tidy => {
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest { stack });
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
             }
         }
     }

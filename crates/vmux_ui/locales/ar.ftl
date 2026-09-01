@@ -705,6 +705,7 @@ editor-lsp-not-installed = { $server } — غير مثبّت
 editor-explorer = المستكشف
 editor-explorer-empty = لا توجد ملفات
 editor-open-editors = المحررات المفتوحة
+editor-close-editor = إغلاق المحرر
 editor-outline = المخطط
 editor-breadcrumb = مسار التنقل
 editor-breadcrumb-hidden = إظهار المجلدات المخفية

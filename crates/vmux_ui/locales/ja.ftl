@@ -690,6 +690,7 @@ editor-lsp-not-installed = { $server } — 未インストール
 editor-explorer = エクスプローラー
 editor-explorer-empty = ファイルなし
 editor-open-editors = 開いているエディタ
+editor-close-editor = エディタを閉じる
 editor-outline = アウトライン
 editor-breadcrumb = パンくずリスト
 editor-breadcrumb-hidden = 非表示のフォルダーを表示

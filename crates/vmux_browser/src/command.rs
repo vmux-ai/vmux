@@ -7,7 +7,7 @@ use bevy_cef::prelude::*;
 use std::path::Path;
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
+    ReadAppCommands, open::OpenCommand,
 };
 use vmux_core::{
     HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
@@ -24,7 +24,7 @@ use vmux_layout::{
         SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
         SideSheetWidth,
     },
-    stack::{ActiveTabParam, Stack, focused_stack},
+    stack::{ActiveTabParam, CloseStackRequest, Stack, focused_stack},
 };
 
 use vmux_terminal::{RestartPty, Terminal};
@@ -283,13 +283,14 @@ fn on_side_sheet_command_emit(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut last_activated: Query<&mut LastActivatedAt>,
+    mut activation: StackActivation,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
+    mut close_stack_requests: MessageWriter<CloseStackRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -304,24 +305,16 @@ fn on_side_sheet_command_emit(
     let Ok(children) = pane_children.get(target_pane) else {
         return;
     };
-    let stack_entities: Vec<Entity> = children.iter().filter(|&e| stack_q.contains(e)).collect();
+    let named_stack = children
+        .iter()
+        .find(|&e| stack_q.contains(e) && e.to_bits() == evt.stack_id);
 
     match evt.command.as_str() {
         "activate_stack" => {
-            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
+            let Some(target_stack) = named_stack else {
                 return;
             };
-            let activated_at = LastActivatedAt::now();
-            if let Ok(mut value) = last_activated.get_mut(target_pane) {
-                *value = activated_at;
-            } else {
-                commands.entity(target_pane).insert(activated_at);
-            }
-            if let Ok(mut value) = last_activated.get_mut(target_stack) {
-                *value = activated_at;
-            } else {
-                commands.entity(target_stack).insert(activated_at);
-            }
+            activation.activate(target_pane, target_stack, &mut commands);
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
@@ -330,17 +323,10 @@ fn on_side_sheet_command_emit(
             }
         }
         "close_stack" => {
-            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
+            let Some(target_stack) = named_stack else {
                 return;
             };
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            commands.entity(target_stack).insert(LastActivatedAt::now());
-            let cmd = AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            messages.write(cmd);
+            close_stack_requests.write(CloseStackRequest::by_user(target_stack));
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
@@ -411,8 +397,8 @@ fn on_side_sheet_command_emit(
             ) else {
                 return;
             };
-            if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {
-                url.push_str(&format!("#L{}", evt.stack_index));
+            if evt.line > 0 && !Path::new(&evt.path).is_dir() {
+                url.push_str(&format!("#L{}", evt.line));
             }
             open_beside.write(vmux_layout::OpenBesideRequest {
                 pane: target_pane,
@@ -445,6 +431,27 @@ fn on_side_sheet_command_emit(
             messages.write(cmd);
         }
         _ => {}
+    }
+}
+
+#[derive(SystemParam)]
+struct StackActivation<'w, 's> {
+    last_activated: Query<'w, 's, &'static mut LastActivatedAt>,
+}
+
+impl StackActivation<'_, '_> {
+    fn activate(&mut self, pane: Entity, stack: Entity, commands: &mut Commands) {
+        let at = LastActivatedAt::now();
+        self.stamp(pane, at, commands);
+        self.stamp(stack, at, commands);
+    }
+
+    fn stamp(&mut self, entity: Entity, at: LastActivatedAt, commands: &mut Commands) {
+        if let Ok(mut value) = self.last_activated.get_mut(entity) {
+            *value = at;
+            return;
+        }
+        commands.entity(entity).insert(at);
     }
 }
 
@@ -559,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn side_sheet_close_routes_through_the_stack_command() {
+    fn the_side_sheet_close_button_names_the_stack_it_sits_on() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<AppCommand>()
@@ -568,7 +575,18 @@ mod tests {
             .add_observer(on_side_sheet_command_emit);
 
         let pane = app.world_mut().spawn(Pane).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let middle = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let active = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+        let mut cursor = app
+            .world()
+            .resource::<Messages<CloseStackRequest>>()
+            .get_cursor();
 
         app.world_mut()
             .trigger(BinReceive::<SideSheetCommandEvent> {
@@ -576,22 +594,25 @@ mod tests {
                 payload: SideSheetCommandEvent {
                     command: "close_stack".to_string(),
                     pane_id: pane.to_bits().to_string(),
-                    stack_index: 0,
+                    stack_id: middle.to_bits(),
+                    line: 0,
                     path: String::new(),
                 },
             });
         app.world_mut().flush();
 
-        let commands = app.world().resource::<Messages<AppCommand>>();
-        let mut cursor = commands.get_cursor();
-        let sent: Vec<&AppCommand> = cursor.read(commands).collect();
+        let requests = app.world().resource::<Messages<CloseStackRequest>>();
+        let closed: Vec<Entity> = cursor.read(requests).map(|request| request.stack).collect();
         assert_eq!(
-            sent,
-            vec![&AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close
-            ))],
+            closed,
+            vec![middle],
+            "the button closes its own stack, not whichever one is active"
         );
-        assert!(app.world().get::<LastActivatedAt>(stack).is_some());
+        assert_eq!(
+            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            2,
+            "closing an inactive stack must not disturb activation"
+        );
     }
 
     struct SideSheetSpaces {
@@ -644,7 +665,8 @@ mod tests {
                     payload: SideSheetCommandEvent {
                         command: "expand_section".to_string(),
                         pane_id: self.pane_in_first_tab.to_bits().to_string(),
-                        stack_index: 0,
+                        stack_id: 0,
+                        line: 0,
                         path: section.to_string(),
                     },
                 });

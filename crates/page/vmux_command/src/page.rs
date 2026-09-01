@@ -30,7 +30,7 @@ use vmux_ui::launcher::palette::{
 use vmux_ui::launcher::row::ResultRow;
 use vmux_ui::launcher::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_list_class,
+    command_bar_row_overlay_class, result_list_class,
 };
 use vmux_ui::scroll::ScrollIntoView;
 
@@ -330,7 +330,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if is_start {
                 {start_menus}
                 PromptComposer {
-                    value: palette.display_text.clone(),
+                    value: q.clone(),
+                    overlay: palette.row_text.clone().unwrap_or_default(),
                     completion: ghost_text.clone(),
                     attachments: start_prompt_attachments,
                     show_examples: q.is_empty() && ghost_text.is_empty(),
@@ -372,9 +373,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             PaletteGlyphIcon { glyph }
                         }
                         div { class: command_bar_input_wrap_class(),
-                            if !ghost_text.is_empty() {
-                                div {
-                                    class: "pointer-events-none absolute inset-0 flex items-center",
+                            if let Some(row_text) = palette.row_text.clone() {
+                                div { class: command_bar_row_overlay_class(),
+                                    span { class: "truncate text-base text-foreground", "{row_text}" }
+                                }
+                            } else if !ghost_text.is_empty() {
+                                div { class: command_bar_row_overlay_class(),
                                     span { class: "invisible text-base", "{q}" }
                                     span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
@@ -383,9 +387,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: command_bar_input_class(),
-                                placeholder: palette.placeholder.clone(),
-                                value: "{palette.display_text}",
+                                class: command_bar_input_class(palette.row_text.is_some()),
+                                placeholder: if palette.row_text.is_some() { String::new() } else { palette.placeholder.clone() },
+                                value: "{q}",
                                 autofocus: true,
                                 oninput: move |event| signals.retype(event.value()),
                                 oncompositionstart: move |_| ime.start(),

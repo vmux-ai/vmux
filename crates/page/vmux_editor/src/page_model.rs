@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use unicode_width::UnicodeWidthChar;
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
+    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, OpenEditorItem,
+    StyledSpan, TreeRow,
 };
 
 pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
@@ -705,6 +706,87 @@ pub fn squiggle_style(left: f64, width: f64, color_rgb: &str) -> String {
         width = width.max(1.0),
         color = color_rgb,
     )
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct EditorTabItem {
+    pub name: String,
+    pub context: String,
+    pub path: String,
+    pub active: bool,
+    pub dirty: bool,
+}
+
+impl EditorTabItem {
+    pub fn all(items: &[OpenEditorItem]) -> Vec<EditorTabItem> {
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for item in items {
+            *seen.entry(item.name.as_str()).or_insert(0) += 1;
+        }
+        let mut tabs = Vec::with_capacity(items.len());
+        for item in items {
+            let shared = seen.get(item.name.as_str()).copied().unwrap_or(0) > 1;
+            let context = match shared {
+                true => Self::parent_of(&item.path),
+                false => String::new(),
+            };
+            tabs.push(EditorTabItem {
+                name: item.name.clone(),
+                context,
+                path: item.path.clone(),
+                active: item.active,
+                dirty: item.dirty,
+            });
+        }
+        tabs
+    }
+
+    pub fn element_id(&self) -> String {
+        format!("editor-tab-{}", self.path)
+    }
+
+    fn parent_of(path: &str) -> String {
+        let Some((parent, _)) = path.trim_end_matches('/').rsplit_once('/') else {
+            return String::new();
+        };
+        match parent.rsplit('/').next() {
+            Some("") | None => "/".to_string(),
+            Some(name) => name.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod editor_tab_tests {
+    use super::*;
+
+    fn open(name: &str, path: &str) -> OpenEditorItem {
+        OpenEditorItem {
+            name: name.to_string(),
+            path: path.to_string(),
+            active: false,
+            dirty: false,
+        }
+    }
+
+    #[test]
+    fn only_a_shared_basename_carries_its_directory() {
+        let tabs = EditorTabItem::all(&[
+            open("mod.rs", "/w/alpha/mod.rs"),
+            open("page.rs", "/w/beta/page.rs"),
+            open("mod.rs", "/w/beta/mod.rs"),
+        ]);
+        assert_eq!(tabs[0].context, "alpha");
+        assert_eq!(tabs[1].context, "");
+        assert_eq!(tabs[2].context, "beta");
+    }
+
+    #[test]
+    fn a_shared_basename_at_the_root_names_the_root() {
+        let tabs = EditorTabItem::all(&[open("a.rs", "/a.rs"), open("a.rs", "/w/a.rs")]);
+        assert_eq!(tabs[0].context, "/");
+        assert_eq!(tabs[1].context, "w");
+    }
 }
 
 #[cfg(test)]

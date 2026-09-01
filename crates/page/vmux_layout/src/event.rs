@@ -608,6 +608,7 @@ pub struct PaneNode {
     rkyv::Deserialize,
 )]
 pub struct StackNode {
+    pub id: u64,
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -615,9 +616,9 @@ pub struct StackNode {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
-    pub stack_index: u32,
-    #[serde(default)]
     pub is_loading: bool,
+    #[serde(default)]
+    pub is_dirty: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
 }
@@ -636,7 +637,9 @@ pub struct SideSheetCommandEvent {
     #[serde(default)]
     pub pane_id: String,
     #[serde(default)]
-    pub stack_index: u32,
+    pub stack_id: u64,
+    #[serde(default)]
+    pub line: u32,
     #[serde(default)]
     pub path: String,
 }

@@ -226,6 +226,61 @@ pub struct FileView {
     pub path: PathBuf,
 }
 
+impl FileView {
+    fn in_stack(
+        stack: Entity,
+        children_q: &Query<&Children>,
+        views: &Query<NavigableFileView>,
+    ) -> Option<Entity> {
+        let Ok(children) = children_q.get(stack) else {
+            return None;
+        };
+        children.iter().find(|&child| views.contains(child))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn navigate(
+        &mut self,
+        entity: Entity,
+        path: PathBuf,
+        top_line: u32,
+        viewport: &mut FileViewport,
+        metadata: &mut PageMetadata,
+        manager: &mut crate::lsp::manager::LspManager,
+        commands: &mut Commands,
+    ) {
+        let previous = std::mem::replace(&mut self.path, path);
+        manager.close(&previous);
+        let url = url::Url::from_file_path(&self.path)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()));
+        metadata.title = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.path.to_string_lossy().to_string());
+        metadata.url = url;
+        viewport.top_row = top_line;
+        commands.queue(move |world: &mut World| {
+            let Ok(mut entity) = world.get_entity_mut(entity) else {
+                return;
+            };
+            ParkedEdits::park(&mut entity, previous);
+        });
+        commands
+            .entity(entity)
+            .remove::<FileDir>()
+            .remove::<FileBuffer>()
+            .remove::<FileMedia>()
+            .remove::<EditorKeymap>()
+            .remove::<NoteSent>()
+            .remove::<LspEditDirty>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LspOpened>()
+            .remove::<crate::lsp::manager::LintRan>();
+    }
+}
+
 #[derive(Component, Clone, Debug)]
 pub struct FileBuffer {
     pub language: String,
@@ -756,6 +811,11 @@ type ChromeUnsentReady = (
     Without<ExplorerChromeSent>,
     With<vmux_core::page::PageReady>,
 );
+type NavigableFileView = (
+    &'static mut FileView,
+    &'static mut FileViewport,
+    &'static mut PageMetadata,
+);
 
 fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = path
@@ -819,6 +879,8 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 pub fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
+    mut views: Query<NavigableFileView>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
@@ -845,10 +907,30 @@ pub fn handle_file_page_open(
             });
         }
         let pending = parse_goto_fragment(&task.url);
-        clear_stack_children(task.stack, &children_q, &mut commands);
-        let view = commands
-            .spawn((new_file_view_bundle(&clean_url, path), ChildOf(task.stack)))
-            .id();
+        let view = match FileView::in_stack(task.stack, &children_q, &views) {
+            Some(view) => {
+                if let Ok((mut fv, mut viewport, mut metadata)) = views.get_mut(view)
+                    && fv.path != path
+                {
+                    fv.navigate(
+                        view,
+                        path,
+                        0,
+                        &mut viewport,
+                        &mut metadata,
+                        &mut manager,
+                        &mut commands,
+                    );
+                }
+                view
+            }
+            None => {
+                clear_stack_children(task.stack, &children_q, &mut commands);
+                commands
+                    .spawn((new_file_view_bundle(&clean_url, path), ChildOf(task.stack)))
+                    .id()
+            }
+        };
         if let Some(pg) = pending {
             commands.entity(view).insert(pg);
         }
@@ -2298,7 +2380,7 @@ impl Plugin for EditorHistoryPlugin {
 
 fn show_traversed_file_view(
     mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<NavigableFileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -2311,11 +2393,10 @@ fn show_traversed_file_view(
         else {
             continue;
         };
-        navigate_file_view(
+        view.navigate(
             event.webview,
             path,
             event.entry.top_line,
-            &mut view,
             &mut viewport,
             &mut metadata,
             &mut manager,
@@ -2342,51 +2423,9 @@ fn record_file_view_visit(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn navigate_file_view(
-    entity: Entity,
-    path: PathBuf,
-    top_line: u32,
-    fv: &mut FileView,
-    vp: &mut FileViewport,
-    meta: &mut PageMetadata,
-    manager: &mut crate::lsp::manager::LspManager,
-    commands: &mut Commands,
-) {
-    let previous = std::mem::replace(&mut fv.path, path);
-    manager.close(&previous);
-    let url = url::Url::from_file_path(&fv.path)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{}", fv.path.to_string_lossy()));
-    meta.title = fv
-        .path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| fv.path.to_string_lossy().to_string());
-    meta.url = url;
-    vp.top_row = top_line;
-    commands.queue(move |world: &mut World| {
-        let Ok(mut entity) = world.get_entity_mut(entity) else {
-            return;
-        };
-        ParkedEdits::park(&mut entity, previous);
-    });
-    commands
-        .entity(entity)
-        .remove::<FileDir>()
-        .remove::<FileBuffer>()
-        .remove::<FileMedia>()
-        .remove::<EditorKeymap>()
-        .remove::<NoteSent>()
-        .remove::<LspEditDirty>()
-        .remove::<FileInitialMetaSent>()
-        .remove::<crate::lsp::manager::LspOpened>()
-        .remove::<crate::lsp::manager::LintRan>();
-}
-
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<NavigableFileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -2395,11 +2434,10 @@ fn on_file_open(
     let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
-    navigate_file_view(
+    fv.navigate(
         entity,
         path,
         0,
-        &mut fv,
         &mut vp,
         &mut meta,
         &mut manager,
@@ -5131,7 +5169,7 @@ fn emit_global_search(
 
 fn on_explorer_search_open(
     trigger: On<BinReceive<ExplorerSearchOpen>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<NavigableFileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -5140,11 +5178,10 @@ fn on_explorer_search_open(
     let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
         return;
     };
-    navigate_file_view(
+    view.navigate(
         entity,
         PathBuf::from(&request.path),
         request.line.saturating_sub(1),
-        &mut view,
         &mut viewport,
         &mut metadata,
         &mut manager,
@@ -6269,8 +6306,82 @@ mod page_open_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_systems(Update, handle_file_page_open);
+            .insert_resource(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspOutbox::default(),
+                crate::lsp::server_request::ServerEvents::default().sender(),
+            ))
+            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain());
         app
+    }
+
+    struct EditorStack {
+        app: App,
+        stack: Entity,
+    }
+
+    impl EditorStack {
+        fn empty() -> Self {
+            let mut app = app();
+            let stack = app.world_mut().spawn_empty().id();
+            Self { app, stack }
+        }
+
+        fn showing(url: &str) -> Self {
+            let mut stack = Self::empty();
+            stack.open(url);
+            stack
+        }
+
+        fn open(&mut self, url: &str) {
+            let stack = self.stack;
+            self.app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            });
+            self.app.update();
+            self.app.update();
+        }
+
+        fn pages(&mut self) -> Vec<Entity> {
+            let stack = self.stack;
+            let mut q = self
+                .app
+                .world_mut()
+                .query::<(Entity, &ChildOf, &FileView)>();
+            let mut found = Vec::new();
+            for (entity, child_of, _) in q.iter(self.app.world()) {
+                if child_of.0 == stack {
+                    found.push(entity);
+                }
+            }
+            found
+        }
+
+        fn page(&mut self) -> Entity {
+            let pages = self.pages();
+            assert_eq!(pages.len(), 1);
+            pages[0]
+        }
+
+        fn path(&self, page: Entity) -> PathBuf {
+            self.app.world().get::<FileView>(page).unwrap().path.clone()
+        }
+
+        fn goto_line(&self, page: Entity) -> Option<u32> {
+            let goto = self.app.world().get::<PendingGoto>(page)?;
+            Some(goto.line)
+        }
+
+        fn open_editors(&self, page: Entity) -> Vec<PathBuf> {
+            self.app
+                .world()
+                .get::<ExplorerState>(page)
+                .unwrap()
+                .open_editors
+                .clone()
+        }
     }
 
     #[test]
@@ -6334,6 +6445,48 @@ mod page_open_tests {
             .id();
         app.update();
         assert!(app.world().get::<PageOpenHandled>(task).is_none());
+    }
+
+    #[test]
+    fn opening_another_file_navigates_the_editor_already_in_the_stack() {
+        let mut stack = EditorStack::showing("file:///etc/hostname");
+        let page = stack.page();
+        stack.open("file:///etc/hosts#L12");
+        assert_eq!(stack.pages(), vec![page]);
+        assert_eq!(stack.path(page), PathBuf::from("/etc/hosts"));
+        assert_eq!(stack.goto_line(page), Some(11));
+        assert_eq!(
+            stack.open_editors(page),
+            vec![PathBuf::from("/etc/hostname"), PathBuf::from("/etc/hosts")]
+        );
+    }
+
+    #[test]
+    fn reopening_the_file_already_shown_keeps_the_page_loaded_and_adds_no_tab() {
+        let mut stack = EditorStack::showing("file:///etc/hostname");
+        let page = stack.page();
+        stack.app.world_mut().entity_mut(page).insert(FileDir {
+            entries: Vec::new(),
+        });
+        stack.open("file:///etc/hostname#L7");
+        assert_eq!(stack.pages(), vec![page]);
+        assert!(stack.app.world().get::<FileDir>(page).is_some());
+        assert_eq!(stack.goto_line(page), Some(6));
+        assert_eq!(
+            stack.open_editors(page),
+            vec![PathBuf::from("/etc/hostname")]
+        );
+    }
+
+    #[test]
+    fn a_stack_holding_no_editor_page_gets_a_fresh_one() {
+        let mut stack = EditorStack::empty();
+        let target = stack.stack;
+        let occupant = stack.app.world_mut().spawn(ChildOf(target)).id();
+        stack.open("file:///etc/hostname");
+        assert!(stack.app.world().get_entity(occupant).is_err());
+        let page = stack.page();
+        assert_eq!(stack.path(page), PathBuf::from("/etc/hostname"));
     }
 
     #[test]

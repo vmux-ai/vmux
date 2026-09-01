@@ -80,8 +80,23 @@ fn collapse_all_dirs() {
     let _ = send(&ExplorerCollapseAll);
 }
 
-fn close_editor(path: String) {
-    let _ = send(&ExplorerCloseEditor { path });
+#[derive(Clone, PartialEq)]
+pub struct EditorTabCommand {
+    pub path: String,
+}
+
+impl EditorTabCommand {
+    pub fn open(&self) {
+        let _ = send(&FileOpenEvent {
+            path: self.path.clone(),
+        });
+    }
+
+    pub fn close(&self) {
+        let _ = send(&ExplorerCloseEditor {
+            path: self.path.clone(),
+        });
+    }
 }
 
 fn goto_line(line: u32) {
@@ -1473,8 +1488,8 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
                             {
-                                let p_open = it.path.clone();
-                                let p_close = it.path.clone();
+                                let command = EditorTabCommand { path: it.path.clone() };
+                                let close_command = command.clone();
                                 let active = it.active;
                                 let dirty = it.dirty;
                                 rsx! {
@@ -1486,12 +1501,12 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                             "group flex items-center gap-1 px-2 py-0.5 cursor-default text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
                                         },
                                         style: "padding-left:20px;",
-                                        onclick: move |_| open_file(p_open.clone()),
+                                        onclick: move |_| command.open(),
                                         span {
                                             class: "inline-block w-3 shrink-0 cursor-default text-center text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground",
                                             onclick: move |e: Event<MouseData>| {
                                                 e.stop_propagation();
-                                                close_editor(p_close.clone());
+                                                close_command.close();
                                             },
                                             "\u{00D7}"
                                         }

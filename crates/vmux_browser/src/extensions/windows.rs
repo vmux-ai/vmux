@@ -165,7 +165,7 @@ pub fn route_close_extension_windows(
             targets.insert(entity);
         }
         for stack in targets {
-            close_requests.write(CloseStackRequest { stack });
+            close_requests.write(CloseStackRequest::tidying(stack));
         }
     }
 }
