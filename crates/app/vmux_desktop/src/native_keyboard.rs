@@ -281,11 +281,7 @@ fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
 fn process_monitored_keys(
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
-    mut lifecycle: MessageWriter<crate::runtime::LifecycleEvent>,
 ) {
-    if take_quit_request() {
-        lifecycle.write(crate::runtime::LifecycleEvent::HideAllWindows);
-    }
     let drained = {
         let mut queue = PENDING_COMMANDS.lock();
         if queue.is_empty() {
