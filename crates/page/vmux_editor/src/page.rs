@@ -796,7 +796,7 @@ pub fn Page() -> Element {
             id: CONTAINER_ID,
             tabindex: "0",
             class: "relative flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
-            style: "min-width:{EDITOR_MIN_WIDTH_PX}px;outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{cell_dims().vars()}{theme_style}",
+            style: "min-width:{EDITOR_MIN_WIDTH_PX}px;outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);--iw:{indent().width};{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
                 match mode() {
@@ -2018,11 +2018,8 @@ pub fn Page() -> Element {
                 always_visible: mode() == Mode::Text
                     && keymap() == vmux_core::KeymapKind::Vim,
                 leading: rsx! {
-                    {
-                        (mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim)
-                            .then(|| rsx! {
-                                VimStatus { label: ed_label() }
-                            })
+                    if mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim {
+                        VimStatus { label: ed_label() }
                     }
                 },
                 {
@@ -2640,7 +2637,7 @@ fn IndentGuides(levels: u16) -> Element {
             div {
                 key: "{level}",
                 class: "pointer-events-none absolute inset-y-0 w-px bg-foreground/[0.09]",
-                style: "left:calc(var(--cw, 1ch) * {u32::from(level) * 4});",
+                style: "left:calc(var(--cw, 1ch) * var(--iw, 4) * {level});",
             }
         }
     }

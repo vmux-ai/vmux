@@ -281,13 +281,15 @@ fn indent_width(line: &str) -> Option<usize> {
 
 pub struct IndentGuides<'a> {
     rope: &'a Rope,
+    columns: usize,
 }
 
 impl<'a> IndentGuides<'a> {
-    const COLUMNS: usize = 4;
-
-    pub fn of(rope: &'a Rope) -> Self {
-        Self { rope }
+    pub fn of(rope: &'a Rope, columns: u16) -> Self {
+        Self {
+            rope,
+            columns: usize::from(columns).max(1),
+        }
     }
 
     pub fn levels(&self, line: usize) -> u16 {
@@ -295,7 +297,7 @@ impl<'a> IndentGuides<'a> {
         let mut probe = line;
         while probe < total {
             if let Some(width) = self.width(probe) {
-                return (width / Self::COLUMNS) as u16;
+                return u16::try_from(width / self.columns).unwrap_or(u16::MAX);
             }
             probe += 1;
         }
@@ -428,7 +430,7 @@ mod tests {
     #[test]
     fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {
         let rope = Rope::from_str("fn a() {\n    let x = 1;\n\n        deep();\n}\n");
-        let guides = IndentGuides::of(&rope);
+        let guides = IndentGuides::of(&rope, 4);
 
         assert_eq!(guides.levels(0), 0);
         assert_eq!(guides.levels(1), 1);
@@ -443,10 +445,31 @@ mod tests {
     #[test]
     fn trailing_blank_lines_have_no_guide_to_carry() {
         let rope = Rope::from_str("fn a() {\n    x;\n}\n\n\n");
-        let guides = IndentGuides::of(&rope);
+        let guides = IndentGuides::of(&rope, 4);
 
         assert_eq!(guides.levels(3), 0);
         assert_eq!(guides.levels(4), 0);
+    }
+
+    #[test]
+    fn a_guide_counts_one_level_per_detected_indent_not_per_four_columns() {
+        let rope = Rope::from_str("a\n  b\n    c\n");
+        let two = IndentGuides::of(&rope, 2);
+
+        assert_eq!(
+            two.levels(1),
+            1,
+            "a two-space file still guides its first indent"
+        );
+        assert_eq!(two.levels(2), 2);
+
+        let eight = IndentGuides::of(&rope, 8);
+
+        assert_eq!(
+            eight.levels(2),
+            0,
+            "four columns is not yet one eight-wide indent"
+        );
     }
 
     fn state() -> FoldState {

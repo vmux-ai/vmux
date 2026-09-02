@@ -377,6 +377,7 @@ pub struct EditState {
     pub core: EditCore,
     pub hl: HighlightCache,
     pub folds: crate::fold::FoldState,
+    indent_width: u16,
     parsed_note: Option<crate::markdown::ParsedNote>,
     wrap_generation: u64,
     wrap_cache: Option<CachedWrapView>,
@@ -386,10 +387,14 @@ impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
+        let indent_width = crate::shape::BufferShape::of(&core.buffer.rope)
+            .indent
+            .width;
         Self {
             core,
             hl,
             folds,
+            indent_width,
             parsed_note,
             wrap_generation: 0,
             wrap_cache: None,
@@ -1557,7 +1562,7 @@ impl EditorWindow {
                 first_line as usize,
                 last_line as usize + 1,
             );
-            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
             for layout in &layouts {
                 let index = (layout.line_no - first_line) as usize;
                 let Some(line) = window.get_mut(index) else {
@@ -1571,7 +1576,7 @@ impl EditorWindow {
         }
         let mut sticky = Vec::new();
         if let Some(top) = visible_top {
-            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope);
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
             for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
                 let at = header as usize;
                 let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
@@ -1961,10 +1966,11 @@ fn on_file_shape_set(
         &browsers,
         &mut commands,
     );
+    let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
+    edit.indent_width = shape.indent.width;
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_SHAPE_EVENT,

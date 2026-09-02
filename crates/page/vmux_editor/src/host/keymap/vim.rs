@@ -1070,8 +1070,13 @@ impl VimKeymap {
         let mut cmds = self.dispatch_inner(k);
         if armed && self.mode == EditMode::Normal && self.is_idle() && !cmds.is_empty() {
             self.insert_after_next = false;
-            self.mode = EditMode::Insert;
-            cmds.push(EditCommand::SetMode(EditMode::Insert));
+            let opens_find = cmds
+                .iter()
+                .any(|cmd| matches!(cmd, EditCommand::OpenFind { .. }));
+            if !opens_find {
+                self.mode = EditMode::Insert;
+                cmds.push(EditCommand::SetMode(EditMode::Insert));
+            }
         }
         cmds
     }
@@ -1712,6 +1717,21 @@ mod tests {
             ]
         );
         assert_eq!(km.mode(), EditMode::Insert);
+    }
+
+    #[test]
+    fn ctrl_o_then_a_search_key_leaves_the_find_bar_owning_the_keys() {
+        for (key, forward) in [("/", true), ("?", false)] {
+            let mut km = VimKeymap::default();
+            run(&mut km, &["i"]);
+            km.handle(&chord("o", ctrl()));
+            assert_eq!(
+                run(&mut km, &[key]),
+                vec![EditCommand::OpenFind { forward }],
+                "{key} must not also hand the editor back to insert mode"
+            );
+            assert_eq!(km.mode(), EditMode::Normal);
+        }
     }
 
     #[test]

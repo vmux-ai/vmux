@@ -251,6 +251,7 @@ fn emit_knowledge_tree(
     layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     expansion: KnowledgeExpansion,
     mut last_revision: Local<u64>,
+    mut pending: Local<bool>,
     mut commands: Commands,
 ) {
     if !state.loaded {
@@ -259,7 +260,10 @@ fn emit_knowledge_tree(
     let Ok((entity, page_ready)) = layout.single() else {
         return;
     };
-    if state.revision == *last_revision && !page_ready.is_changed() && !expansion.just_moved() {
+    if state.revision != *last_revision || page_ready.is_changed() || expansion.just_moved() {
+        *pending = true;
+    }
+    if !*pending {
         return;
     }
     if !browsers.can_emit_to(&entity) {
@@ -272,6 +276,7 @@ fn emit_knowledge_tree(
         KNOWLEDGE_TREE_EVENT,
         &tree,
     ));
+    *pending = false;
     *last_revision = state.revision;
 }
 
