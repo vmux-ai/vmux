@@ -1,12 +1,164 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PKG_ARGS=()
-while IFS= read -r package; do
-  PKG_ARGS+=("-p" "$package")
-done < <(cargo metadata --no-deps --format-version 1 \
-  | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
 
-cargo fmt "${PKG_ARGS[@]}" -- --check
-./scripts/cargo-with-cef-cache.sh clippy "${PKG_ARGS[@]}" --all-targets -- -D warnings
-./scripts/cargo-with-cef-cache.sh test --workspace --exclude bevy_cef_core --exclude bevy_cef
+ZERO="0000000000000000000000000000000000000000"
+PHONE_PAGES="vmux_agent vmux_chat vmux_command vmux_editor vmux_history vmux_layout vmux_setting vmux_space vmux_start vmux_team vmux_terminal vmux_ui"
+
+meta="$(cargo metadata --no-deps --format-version 1)"
+
+holds() {
+  printf '%s\n' "$1" | grep -qxF "$2"
+}
+
+all_packages() {
+  printf '%s' "$meta" | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name'
+}
+
+run_gate() {
+  local packages="$1"
+  local args=()
+  local phone=()
+  local package
+  for package in $packages; do
+    args+=("-p" "$package")
+    case " $PHONE_PAGES " in
+      *" $package "*) phone+=("-p" "$package") ;;
+    esac
+  done
+
+  if [ "${VMUX_GATE_DRY_RUN:-}" = "1" ]; then
+    echo "would check: ${args[*]}"
+    echo "would check on ios: ${phone[*]:-none}"
+    return 0
+  fi
+
+  cargo fmt "${args[@]}" -- --check
+  ./scripts/cargo-with-cef-cache.sh clippy "${args[@]}" --all-targets -- -D warnings
+  ./scripts/cargo-with-cef-cache.sh test "${args[@]}"
+
+  # The phone takes several crates only under cfg(not(target_os = "ios")), so a
+  # page that names one compiles everywhere except the target that ships it.
+  if [ ${#phone[@]} -gt 0 ]; then
+    cargo check --locked --target aarch64-apple-ios "${phone[@]}"
+  fi
+}
+
+full_gate() {
+  echo "pre-push: checking the whole workspace ($1)"
+  run_gate "$(all_packages | tr '\n' ' ')"
+  exit 0
+}
+
+if [ "${VMUX_FULL_GATE:-}" = "1" ]; then
+  full_gate "VMUX_FULL_GATE=1"
+fi
+
+# What this push adds, per ref. A branch the remote has not seen yet is
+# measured from where it left main rather than from its first commit.
+changed=""
+saw_ref=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  if [ "$local_sha" = "$ZERO" ]; then
+    continue
+  fi
+  saw_ref="yes"
+  if [ "$remote_sha" = "$ZERO" ]; then
+    base="$(git merge-base "$local_sha" origin/main 2>/dev/null || true)"
+  else
+    base="$remote_sha"
+  fi
+  if [ -z "$base" ]; then
+    full_gate "no base to compare against"
+  fi
+  changed="$changed$(git diff --name-only "$base" "$local_sha")
+"
+done
+
+if [ -z "$saw_ref" ]; then
+  exit 0
+fi
+
+changed="$(printf '%s' "$changed" | sort -u | sed '/^$/d')"
+if [ -z "$changed" ]; then
+  echo "pre-push: nothing to check"
+  exit 0
+fi
+
+owners="$(printf '%s' "$meta" | jq -r --arg root "$root/" '
+  .packages[]
+  | "\(.name) \(.manifest_path | ltrimstr($root) | rtrimstr("/Cargo.toml"))"
+')"
+
+# Longest matching manifest directory owns the file.
+affected=""
+while IFS= read -r file; do
+  case "$file" in
+    docs/*|*.md|.github/*) continue ;;
+    patches/*) full_gate "patches/ changed" ;;
+  esac
+  owner=""
+  longest=0
+  while read -r name dir; do
+    case "$file" in
+      "$dir"/*)
+        if [ "${#dir}" -gt "$longest" ]; then
+          longest="${#dir}"
+          owner="$name"
+        fi
+        ;;
+    esac
+  done <<< "$owners"
+  if [ -z "$owner" ]; then
+    full_gate "$file belongs to no crate"
+  fi
+  if ! holds "$affected" "$owner"; then
+    affected="$affected$owner
+"
+  fi
+done <<< "$changed"
+
+if [ -z "$affected" ]; then
+  echo "pre-push: nothing to check"
+  exit 0
+fi
+
+# A crate is affected when it is changed or depends, however deeply, on one
+# that is. Checking only what changed would miss every caller it breaks.
+edges="$(printf '%s' "$meta" | jq -r '
+  [.packages[].name] as $members
+  | .packages[]
+  | .name as $dependent
+  | .dependencies[].name
+  | select(. as $name | $members | index($name) != null)
+  | "\($dependent) \(.)"
+')"
+
+grew="yes"
+while [ -n "$grew" ]; do
+  grew=""
+  while read -r dependent dependency; do
+    if holds "$affected" "$dependency" && ! holds "$affected" "$dependent"; then
+      affected="$affected$dependent
+"
+      grew="yes"
+    fi
+  done <<< "$edges"
+done
+
+gated=""
+while IFS= read -r package; do
+  if holds "$affected" "$package"; then
+    gated="$gated$package "
+  fi
+done < <(all_packages)
+
+if [ -z "$gated" ]; then
+  echo "pre-push: nothing to check"
+  exit 0
+fi
+
+echo "pre-push: $(printf '%s' "$gated" | wc -w | tr -d ' ') affected crates: $gated"
+run_gate "$gated"
