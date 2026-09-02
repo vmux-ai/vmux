@@ -18,6 +18,7 @@ use crate::page_model::{
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use vmux_core::event::CommandBarPicker;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 use vmux_core::media::MediaKind;
@@ -35,7 +36,6 @@ use vmux_ui::media::MediaElement;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
-use vmux_wire::command_bar::CommandBarPicker;
 
 #[component]
 pub fn Page() -> Element {

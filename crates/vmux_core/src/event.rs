@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use vmux_wire::{
     CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
     FLAG_UNDERLINE, LinkRange, TermColor, TermCursor, TermLine, TermSelectionRange, TermSpan,
+    command_bar::CommandBarPicker,
 };
 
 pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
@@ -2235,11 +2236,11 @@ pub struct FileEncodingSet {
     rkyv::Deserialize,
 )]
 pub struct FileStatusPickerOpen {
-    pub picker: vmux_wire::command_bar::CommandBarPicker,
+    pub picker: CommandBarPicker,
 }
 
 impl FileStatusPickerOpen {
-    pub const fn of(picker: vmux_wire::command_bar::CommandBarPicker) -> Self {
+    pub const fn of(picker: CommandBarPicker) -> Self {
         Self { picker }
     }
 }
