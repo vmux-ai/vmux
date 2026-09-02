@@ -14,10 +14,14 @@ const INDEX_TTL: Duration = Duration::from_secs(60);
 const ACTIVE_PROJECT_LIFT: i32 = 40;
 const RECENT_FILE_LIFT: i32 = 16;
 
+const MAX_PENDING_ASKS: usize = 8;
+
 #[derive(Clone)]
 pub struct Asked {
     pub webview: Entity,
     pub query: String,
+    roots: Vec<PathBuf>,
+    answered_with: u64,
 }
 
 pub struct ProjectCompletions {
@@ -47,9 +51,8 @@ impl ProjectCompletions {
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
-    asked: Option<Asked>,
+    asked: Vec<Asked>,
     generation: u64,
-    answered_with: u64,
 }
 
 impl ProjectIndex {
@@ -60,53 +63,79 @@ impl ProjectIndex {
         query: &str,
         webview: Entity,
     ) -> Option<ProjectCompletions> {
+        self.remember(webview, query, roots);
         self.sync(roots);
-        self.asked = Some(Asked {
+        self.rank(roots, query, bias)
+    }
+
+    fn remember(&mut self, webview: Entity, query: &str, roots: &[PathBuf]) {
+        let asked = Asked {
             webview,
             query: query.to_string(),
-        });
-        self.answered_with = self.generation;
-        self.rank(query, bias)
+            roots: roots.to_vec(),
+            answered_with: self.generation,
+        };
+        for held in &mut self.asked {
+            if held.webview == webview {
+                *held = asked;
+                return;
+            }
+        }
+        if self.asked.len() == MAX_PENDING_ASKS {
+            self.asked.remove(0);
+        }
+        self.asked.push(asked);
     }
 
     pub fn warm(&mut self, roots: &[PathBuf]) {
         self.sync(roots);
     }
 
-    pub fn settled(&mut self, roots: &[PathBuf], bias: &RankBias) -> Option<ProjectCompletions> {
-        let query = self.asked.as_ref()?.query.clone();
+    pub fn pending(&self) -> Vec<Asked> {
+        self.asked.clone()
+    }
+
+    pub fn settled_for(
+        &mut self,
+        webview: Entity,
+        roots: &[PathBuf],
+        bias: &RankBias,
+    ) -> Option<ProjectCompletions> {
+        let at = self.asked.iter().position(|ask| ask.webview == webview)?;
+        let query = self.asked[at].query.clone();
         self.sync(roots);
-        if self.generation == self.answered_with {
-            self.forget_once_complete();
+        if self.asked[at].answered_with == self.generation {
+            self.forget_once_complete(webview);
             return None;
         }
-        self.answered_with = self.generation;
-        let ranked = self.rank(&query, bias);
-        self.forget_once_complete();
+        self.asked[at].answered_with = self.generation;
+        let ranked = self.rank(roots, &query, bias);
+        self.forget_once_complete(webview);
         ranked
     }
 
-    fn forget_once_complete(&mut self) {
+    fn forget_once_complete(&mut self, webview: Entity) {
         for index in &self.roots {
             if index.walking() {
                 return;
             }
         }
-        self.forget();
+        self.forget(webview);
     }
 
-    pub fn forget(&mut self) {
-        self.asked = None;
+    pub fn forget(&mut self, webview: Entity) {
+        self.asked.retain(|ask| ask.webview != webview);
     }
 
-    pub fn asked(&self) -> Option<Asked> {
-        self.asked.clone()
-    }
-
-    fn rank(&self, query: &str, bias: &RankBias) -> Option<ProjectCompletions> {
+    // The index now outlives the ask that built it, so the roots the caller
+    // asked about are what bound the answer rather than everything held.
+    fn rank(&self, roots: &[PathBuf], query: &str, bias: &RankBias) -> Option<ProjectCompletions> {
         let mut ready = Vec::new();
         let mut partial = false;
         for index in &self.roots {
+            if !roots.contains(&index.root) {
+                continue;
+            }
             let Some(walk) = index.walked() else {
                 continue;
             };
@@ -124,7 +153,23 @@ impl ProjectIndex {
         })
     }
 
+    // Every root some surface is still waiting on, not just this caller's. One
+    // command bar asking about its project must not evict the half-built index
+    // another is waiting for.
+    fn wanted(&self, roots: &[PathBuf]) -> Vec<PathBuf> {
+        let mut wanted = roots.to_vec();
+        for ask in &self.asked {
+            for root in &ask.roots {
+                if !wanted.contains(root) {
+                    wanted.push(root.clone());
+                }
+            }
+        }
+        wanted
+    }
+
     fn sync(&mut self, roots: &[PathBuf]) {
+        let roots = &self.wanted(roots);
         let held = self.roots.len();
         self.roots.retain(|index| roots.contains(&index.root));
         if self.roots.len() != held {
@@ -994,5 +1039,60 @@ mod tests {
         walk.push("apps/mobile/late.ts".to_string(), false);
         assert!(walk.partial);
         assert_eq!(walk.paths.len(), 2);
+    }
+
+    impl ProjectIndex {
+        fn answer(&mut self, webview: Entity, roots: &[PathBuf]) -> ProjectCompletions {
+            let bias = RankBias::after_visiting(&[]);
+            for _ in 0..500 {
+                if let Some(answered) = self.settled_for(webview, roots, &bias) {
+                    return answered;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("the index never settled for {webview}");
+        }
+    }
+
+    #[test]
+    fn two_surfaces_waiting_on_a_cold_index_are_each_answered_from_their_own_project() {
+        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let one = Project::new();
+        one.write("alpha/marker_one.rs", "");
+        let two = Project::new();
+        two.write("beta/marker_two.rs", "");
+        let roots_one = vec![one.dir.path().to_path_buf()];
+        let roots_two = vec![two.dir.path().to_path_buf()];
+
+        let mut world = bevy::prelude::World::new();
+        let first = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+
+        let mut index = ProjectIndex::default();
+        let bias = RankBias::after_visiting(&[]);
+        index.matches(&roots_one, &bias, "marker", first);
+        index.matches(&roots_two, &bias, "marker", second);
+
+        let answered_one = index.answer(first, &roots_one);
+        let answered_two = index.answer(second, &roots_two);
+
+        let named = |completions: &ProjectCompletions| {
+            let mut names = Vec::new();
+            for entry in &completions.entries {
+                names.push(entry.name.clone());
+            }
+            names.sort();
+            names
+        };
+        assert_eq!(
+            named(&answered_one),
+            vec!["alpha/marker_one.rs".to_string()],
+            "the first surface must still be answered after a second one asked"
+        );
+        assert_eq!(
+            named(&answered_two),
+            vec!["beta/marker_two.rs".to_string()],
+            "neither surface may see the other project"
+        );
     }
 }

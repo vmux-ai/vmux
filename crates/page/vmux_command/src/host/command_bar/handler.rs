@@ -1123,7 +1123,7 @@ fn on_path_complete_request(
     let mut completions = None;
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
-        index.forget();
+        index.forget(asking);
     } else {
         let bias = RankBias::of(
             ProjectQuery::favoured(
@@ -1175,18 +1175,8 @@ fn answer_settled_project_index(
     mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
     mut commands: Commands,
 ) {
-    let Some(asked) = index.asked() else {
-        return;
-    };
-    if !browsers.can_emit_to(&asked.webview) {
-        return;
-    }
-    let roots = ProjectQuery::roots_for(
-        &asked.query,
-        workspace.project_root.as_deref(),
-        &projects.roots,
-    );
-    if roots.is_empty() {
+    let pending = index.pending();
+    if pending.is_empty() {
         return;
     }
     let bias = RankBias::of(
@@ -1196,14 +1186,27 @@ fn answer_settled_project_index(
         ),
         &work.recent_files,
     );
-    let Some(completions) = index.settled(&roots, &bias) else {
-        return;
-    };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        asked.webview,
-        PATH_COMPLETE_RESPONSE,
-        &completions.response(),
-    ));
+    for asked in pending {
+        if !browsers.can_emit_to(&asked.webview) {
+            continue;
+        }
+        let roots = ProjectQuery::roots_for(
+            &asked.query,
+            workspace.project_root.as_deref(),
+            &projects.roots,
+        );
+        if roots.is_empty() {
+            continue;
+        }
+        let Some(completions) = index.settled_for(asked.webview, &roots, &bias) else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            asked.webview,
+            PATH_COMPLETE_RESPONSE,
+            &completions.response(),
+        ));
+    }
 }
 
 /// Decides whether a query is asking to walk the filesystem or to search the open project.
