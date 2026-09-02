@@ -4,7 +4,7 @@ use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::MenuDirection;
 use vmux_ui::launcher::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
-use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteState};
+use vmux_ui::launcher::palette::{PaletteDraft, PaletteMode, PaletteRows, PaletteState};
 
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
@@ -108,6 +108,7 @@ impl PaletteKeys {
         let landed = rows.step(rows.selected(*self.signals.selected.peek()), direction);
         drop(rows);
         self.signals.highlight(landed);
+        TextCaret::in_field(COMMAND_BAR_INPUT_ID).to_end();
     }
 
     fn accept_completion(&mut self) {
@@ -130,11 +131,11 @@ impl TypedDigit {
         let Key::Character(typed) = event.key() else {
             return None;
         };
-        let digit = typed
-            .chars()
-            .next()
-            .filter(char::is_ascii_digit)
-            .and_then(|character| character.to_digit(10))?;
+        let character = typed.chars().next()?;
+        if !character.is_ascii_digit() {
+            return None;
+        }
+        let digit = character.to_digit(10)?;
         Some(digit as usize)
     }
 }
@@ -142,7 +143,13 @@ impl TypedDigit {
 pub struct CommandBarField;
 
 impl CommandBarField {
-    pub fn focus() {
+    pub fn focus(opened: &CommandBarOpenEvent) {
+        if PaletteMode::opened(opened).opens_at_end(&opened.url) {
+            FocusClaim::new(COMMAND_BAR_INPUT_ID)
+                .caret_at_end()
+                .request();
+            return;
+        }
         FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
         TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
     }

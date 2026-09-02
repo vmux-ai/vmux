@@ -9,6 +9,7 @@ use crate::event::{
     LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, REMOTE_STATE_EVENT,
     ReloadEvent, RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT,
     StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    WindowDragRegionEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -30,8 +31,9 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::tree_row::{
-    SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren, SidebarTreeRow,
-    SidebarTreeRowGroup,
+    SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_CHEVRON_CLOSED,
+    SIDEBAR_TREE_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren,
+    SidebarTreeRow, SidebarTreeRowGroup,
 };
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::TypeIcon;
@@ -179,42 +181,31 @@ pub fn Page() -> Element {
         listener_ready(spaces_state_received(), &spaces_error),
     );
     let radius_px = state.radius;
-    let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
+    let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
     use_effect(move || set_root_radius_px(radius_px));
     use_effect(move || {
         if !layout_state().side_sheet_open {
+            reveal.forget();
             return;
         }
         let PaneTreeEvent { panes } = pane_tree_state();
-        let active_pane = panes.iter().find(|p| p.is_active);
-        let target = active_pane
-            .and_then(|p| {
-                p.stacks
-                    .iter()
-                    .find(|s| s.is_active)
-                    .map(|s| (p.id, s.stack_index))
-            })
-            .or_else(|| {
-                panes.iter().find_map(|p| {
-                    p.stacks
-                        .iter()
-                        .find(|s| s.is_active)
-                        .map(|s| (p.id, s.stack_index))
-                })
-            });
-        let Some((pane_id, stack_index)) = target else {
+        let Some(target) = ActiveStack::of(&panes) else {
             return;
         };
-        if last_scrolled_stack() == Some((pane_id, stack_index)) {
-            return;
-        }
-        if ScrollIntoView::nearest(&format!("sidesheet-stack-{pane_id}-{stack_index}")) {
-            last_scrolled_stack.set(Some((pane_id, stack_index)));
-        }
+        reveal.follow(target);
     });
+    let host_sheet_width = state.side_sheet_width;
+    let sheet_left = state.window_pad_left;
+    let mut sheet_width = use_signal(|| host_sheet_width);
+    let mut sheet_resizing = use_signal(|| false);
+    use_effect(use_reactive!(|host_sheet_width| {
+        if !*sheet_resizing.peek() {
+            sheet_width.set(host_sheet_width);
+        }
+    }));
     let side_sheet_vars = format!(
         "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
-        state.side_sheet_width,
+        sheet_width(),
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
@@ -236,6 +227,7 @@ pub fn Page() -> Element {
                     id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
+                    SideSheetGrab { resizing: sheet_resizing }
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
                             panes,
@@ -274,6 +266,94 @@ pub fn Page() -> Element {
                 }
             }
             CommandBarPanel {}
+            if sheet_resizing() {
+                div {
+                    class: "pointer-events-auto fixed inset-0 z-[900] cursor-col-resize",
+                    onmousemove: move |event: Event<MouseData>| {
+                        let x = event.client_coordinates().x as f32 - sheet_left;
+                        sheet_width.set(crate::event::SideSheetResizeEvent { width: x }.clamped());
+                    },
+                    onmouseup: move |_| {
+                        sheet_resizing.set(false);
+                        let _ = send(
+                            &crate::event::SideSheetResizeEvent {
+                                width: sheet_width(),
+                            },
+                        );
+                    },
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize",
+            onmousedown: move |event: Event<MouseData>| {
+                event.prevent_default();
+                resizing.set(true);
+            },
+            div { class: "mx-auto h-full w-px bg-transparent transition-colors duration-150 hover:bg-cyan-400/40" }
+        }
+    }
+}
+
+struct ActiveStack;
+
+impl ActiveStack {
+    fn of(panes: &[PaneNode]) -> Option<(u64, u64)> {
+        let mut fallback = None;
+        for pane in panes {
+            for stack in &pane.stacks {
+                if !stack.is_active {
+                    continue;
+                }
+                if pane.is_active {
+                    return Some((pane.id, stack.id));
+                }
+                if fallback.is_none() {
+                    fallback = Some((pane.id, stack.id));
+                }
+            }
+        }
+        fallback
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StackReveal {
+    settled: Signal<Option<(u64, u64)>>,
+    prefix: &'static str,
+}
+
+impl StackReveal {
+    fn side_sheet(settled: Signal<Option<(u64, u64)>>) -> Self {
+        Self {
+            settled,
+            prefix: "sidesheet-stack",
+        }
+    }
+
+    fn forget(mut self) {
+        if (self.settled)().is_some() {
+            self.settled.set(None);
+        }
+    }
+
+    fn follow(mut self, target: (u64, u64)) {
+        let Some(settled) = (self.settled)() else {
+            self.settled.set(Some(target));
+            return;
+        };
+        if settled == target {
+            return;
+        }
+        let (pane_id, stack_id) = target;
+        if ScrollIntoView::nearest(&format!("{}-{pane_id}-{stack_id}", self.prefix)) {
+            self.settled.set(Some(target));
         }
     }
 }
@@ -500,6 +580,7 @@ fn HeaderView(
                             }
                         }
                         NewTabButton {}
+                        WindowDragRegion {}
                     }
                 }
             }
@@ -673,8 +754,9 @@ fn ProjectsCard(
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "projects", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1048,8 +1130,9 @@ fn BookmarksSection(
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "bookmarks", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1263,8 +1346,9 @@ fn KnowledgeCard(
                                 "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                             },
                             onclick: move |_| set_side_sheet_section(pane_id, "knowledge", !expanded),
-                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                                path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                            Icon {
+                                class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                                path { d: "m9 18 6-6-6-6" }
                             }
                         }
                     }
@@ -1437,8 +1521,9 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "tools", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1475,7 +1560,8 @@ fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
             "collapse_section".to_string()
         },
         pane_id: pane_id.to_string(),
-        stack_index: 0,
+        stack_id: 0,
+        line: 0,
         path: section.to_string(),
     });
 }
@@ -1540,8 +1626,9 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| set_side_sheet_section(pane_id, "pane", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    Icon {
+                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -1703,7 +1790,8 @@ fn open_project_path(pane_id: u64, path: String) {
     let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_project_path".to_string(),
         pane_id: pane_id.to_string(),
-        stack_index: 0,
+        stack_id: 0,
+        line: 0,
         path,
     });
 }
@@ -1716,7 +1804,8 @@ fn open_knowledge_result(pane_id: u64, path: String, line: u32) {
     let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_knowledge_path".to_string(),
         pane_id: pane_id.to_string(),
-        stack_index: line,
+        stack_id: 0,
+        line,
         path,
     });
 }
@@ -1925,6 +2014,38 @@ fn NewTabButton() -> Element {
 }
 
 #[component]
+fn WindowDragRegion() -> Element {
+    let mut region = use_signal(|| None::<Rc<MountedData>>);
+    let publish = move || {
+        spawn(async move {
+            let Some(region) = region() else {
+                return;
+            };
+            let Ok(rect) = region.get_client_rect().await else {
+                return;
+            };
+            let _ = send(&WindowDragRegionEvent {
+                left: rect.origin.x as f32,
+                top: rect.origin.y as f32,
+                width: rect.size.width as f32,
+                height: rect.size.height as f32,
+            });
+        });
+    };
+
+    rsx! {
+        div {
+            class: "h-10 min-w-0 flex-1 self-stretch",
+            onmounted: move |event: Event<MountedData>| {
+                region.set(Some(event.data()));
+                publish();
+            },
+            onresize: move |_: Event<ResizeData>| publish(),
+        }
+    }
+}
+
+#[component]
 fn NavButton(
     label: String,
     command: &'static str,
@@ -1975,7 +2096,8 @@ fn open_tools(pane_id: u64) {
     let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_tools".to_string(),
         pane_id: pane_id.to_string(),
-        stack_index: 0,
+        stack_id: 0,
+        line: 0,
         path: String::new(),
     });
 }
@@ -1984,7 +2106,8 @@ fn open_vault(pane_id: u64) {
     let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_vault".to_string(),
         pane_id: pane_id.to_string(),
-        stack_index: 0,
+        stack_id: 0,
+        line: 0,
         path: String::new(),
     });
 }
@@ -3254,8 +3377,9 @@ fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
                 r#type: "button",
                 class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                 onclick: move |_| expanded.set(!expanded()),
-                Icon { class: "h-3 w-3 shrink-0",
-                    path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                Icon {
+                    class: if expanded() { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                    path { d: "m9 18 6-6-6-6" }
                 }
                 span { class: "min-w-0 flex-1 truncate text-ui font-medium", {tools_provider_title(category.provider)} }
                 if updates > 0 {
@@ -3289,7 +3413,8 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let folders = folder_context();
     let is_active = stack.is_active;
-    let stack_index = stack.stack_index;
+    let stack_id = stack.id;
+    let command = StackCommand::new(pane_id, stack_id);
     let mut hovered = use_signal(|| false);
     let menu_val = use_signal(|| stack.url.clone());
     let metadata = PageMetadata {
@@ -3304,7 +3429,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let bookmark_metadata = metadata.clone();
     let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
-    let display_title = localized_stack_title(&stack);
+    let display_title = StackTitle::of(&stack);
     let close_title = translate("layout-close-stack");
 
     let title_class = if is_active {
@@ -3329,7 +3454,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         let item = drag_item.clone();
                         move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                     },
-                    id: "sidesheet-stack-{pane_id}-{stack_index}",
+                    id: "sidesheet-stack-{pane_id}-{stack_id}",
                     class: if is_active {
                         "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
                     } else {
@@ -3343,12 +3468,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = send(&crate::event::SideSheetCommandEvent {
-                            command: "activate_stack".to_string(),
-                            pane_id: pane_id.to_string(),
-                            stack_index,
-                            path: String::new(),
-                        });
+                        command.activate();
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
                     span { class: "{title_class}", "{display_title}" }
@@ -3372,12 +3492,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
-                            let _ = send(&crate::event::SideSheetCommandEvent {
-                                command: "close_stack".to_string(),
-                                pane_id: pane_id.to_string(),
-                                stack_index,
-                                path: String::new(),
-                            });
+                            command.close();
                         },
                         Icon { class: "h-3 w-3 pointer-events-none",
                             path { d: "M18 6 6 18" }
@@ -3455,7 +3570,8 @@ fn NewStackRow(pane_id: u64) -> Element {
                 let _ = send(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
-                    stack_index: 0,
+                    stack_id: 0,
+                    line: 0,
                     path: String::new(),
                 });
             },
@@ -3502,6 +3618,57 @@ fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Elem
             onclick: move |e| onclick.call(e),
             {children}
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct StackCommand {
+    pane_id: u64,
+    stack_id: u64,
+}
+
+impl StackCommand {
+    fn new(pane_id: u64, stack_id: u64) -> Self {
+        Self { pane_id, stack_id }
+    }
+
+    fn activate(self) {
+        self.dispatch("activate_stack");
+    }
+
+    fn close(self) {
+        self.dispatch("close_stack");
+    }
+
+    fn dispatch(self, command: &str) {
+        let _ = send(&crate::event::SideSheetCommandEvent {
+            command: command.to_string(),
+            pane_id: self.pane_id.to_string(),
+            stack_id: self.stack_id,
+            line: 0,
+            path: String::new(),
+        });
+    }
+}
+
+struct StackTitle;
+
+impl StackTitle {
+    fn of(stack: &StackNode) -> String {
+        let title = localized_stack_title(stack);
+        if !title.trim().is_empty() {
+            return title;
+        }
+        if let Some(host) = vmux_ui::favicon::host_for_favicon_fallback(&stack.url) {
+            return host.to_string();
+        }
+        if stack.is_loading {
+            return translate("layout-loading");
+        }
+        if stack.url.is_empty() {
+            return translate("layout-new-stack");
+        }
+        stack.url.clone()
     }
 }
 

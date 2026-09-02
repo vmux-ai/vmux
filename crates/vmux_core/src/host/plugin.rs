@@ -38,7 +38,8 @@ impl Plugin for CorePlugin {
             .register_type::<Collapsed>()
             .register_type::<Uuid>()
             .register_type::<Children>()
-            .register_type::<ChildOf>();
+            .register_type::<ChildOf>()
+            .add_plugins(crate::page::HostHistoryPlugin);
     }
 }
 

@@ -138,6 +138,60 @@ pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 pub const PANE_GAP_PX: f32 = 4.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
+pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
+pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SideSheetResizeEvent {
+    pub width: f32,
+}
+
+impl SideSheetResizeEvent {
+    pub fn clamped(self) -> f32 {
+        if !self.width.is_finite() {
+            return SIDE_SHEET_WIDTH_PX;
+        }
+        self.width
+            .clamp(SIDE_SHEET_MIN_WIDTH_PX, SIDE_SHEET_MAX_WIDTH_PX)
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct WindowDragRegionEvent {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl WindowDragRegionEvent {
+    pub fn is_finite(self) -> bool {
+        self.left.is_finite()
+            && self.top.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+    }
+}
 
 #[cfg(test)]
 mod address_tests {
@@ -554,6 +608,7 @@ pub struct PaneNode {
     rkyv::Deserialize,
 )]
 pub struct StackNode {
+    pub id: u64,
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -561,9 +616,9 @@ pub struct StackNode {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
-    pub stack_index: u32,
-    #[serde(default)]
     pub is_loading: bool,
+    #[serde(default)]
+    pub is_dirty: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
 }
@@ -582,7 +637,9 @@ pub struct SideSheetCommandEvent {
     #[serde(default)]
     pub pane_id: String,
     #[serde(default)]
-    pub stack_index: u32,
+    pub stack_id: u64,
+    #[serde(default)]
+    pub line: u32,
     #[serde(default)]
     pub path: String,
 }

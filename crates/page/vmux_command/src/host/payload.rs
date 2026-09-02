@@ -5,13 +5,67 @@ use crate::snapshot::{CommandBarPagesSnapshot, CommandBarSpacesSnapshot, Contrib
 use bevy::prelude::default;
 use vmux_ui::i18n::{Locale, TranslationValue};
 use vmux_wire::command_bar::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
+    CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
+    CommandBarSpace, CommandBarTab, SearchEngine,
 };
 
 pub struct CommandBarEntry {
     pub id: String,
     pub name: String,
     pub shortcut: String,
+}
+
+pub struct CommandBarPicks;
+
+impl CommandBarPicks {
+    pub fn of(picker: CommandBarPicker, locale: &Locale) -> Vec<CommandBarPickRow> {
+        match picker {
+            CommandBarPicker::Space | CommandBarPicker::GotoLine => Vec::new(),
+            CommandBarPicker::Indent => Self::indents(locale),
+            CommandBarPicker::LineEnding => vec![
+                CommandBarPick::LineEnding { crlf: false }.labelled("LF"),
+                CommandBarPick::LineEnding { crlf: true }.labelled("CRLF"),
+            ],
+            CommandBarPicker::Encoding => vec![
+                CommandBarPick::Picker(CommandBarPicker::EncodingReopen)
+                    .labelled(locale.translate(CommandBarPicker::EncodingReopen.label())),
+                CommandBarPick::Picker(CommandBarPicker::EncodingSave)
+                    .labelled(locale.translate(CommandBarPicker::EncodingSave.label())),
+            ],
+            CommandBarPicker::EncodingReopen => Self::encodings(false),
+            CommandBarPicker::EncodingSave => Self::encodings(true),
+        }
+    }
+
+    fn indents(locale: &Locale) -> Vec<CommandBarPickRow> {
+        let mut rows = Vec::with_capacity(6);
+        for spaces in [true, false] {
+            for width in [2u16, 4, 8] {
+                let id = match spaces {
+                    true => "editor-status-spaces",
+                    false => "editor-status-tabs",
+                };
+                let label = locale
+                    .translate_with(id, &[("width", TranslationValue::Number(i64::from(width)))]);
+                rows.push(CommandBarPick::Indent { spaces, width }.labelled(label));
+            }
+        }
+        rows
+    }
+
+    fn encodings(save: bool) -> Vec<CommandBarPickRow> {
+        let mut rows = Vec::with_capacity(vmux_core::event::FileEncoding::ALL.len());
+        for encoding in vmux_core::event::FileEncoding::ALL {
+            rows.push(
+                CommandBarPick::Encoding {
+                    label: encoding.label().to_string(),
+                    save,
+                }
+                .labelled(encoding.label()),
+            );
+        }
+        rows
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -97,6 +151,7 @@ pub fn build_command_bar_open_payload(
         work_snapshot.work_dirs.clone(),
         work_snapshot.recent_files.clone(),
         work_snapshot.search_engines.clone(),
+        work_snapshot.projects.clone(),
     )
 }
 
@@ -168,6 +223,7 @@ pub fn command_bar_open_payload(
     work_dirs: Vec<crate::event::CommandBarWorkDir>,
     recent_files: Vec<crate::event::CommandBarRecentFile>,
     search_engines: Vec<SearchEngine>,
+    projects: Vec<String>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -180,11 +236,13 @@ pub fn command_bar_open_payload(
         pages,
         work_dirs,
         recent_files,
+        projects,
         search_engines,
         prompt_context: default(),
         agent_models: Vec::new(),
         target,
-        space_switch: false,
+        picker: None,
+        picks: Vec::new(),
     }
 }
 

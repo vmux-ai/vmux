@@ -217,6 +217,10 @@ pub enum EditCommand {
     SearchWord {
         forward: bool,
     },
+    OpenFind {
+        forward: bool,
+    },
+    OpenCommandLine,
     ClearSearchHighlight,
     Substitute {
         range: crate::edit::ex::ExRange,
@@ -226,6 +230,7 @@ pub enum EditCommand {
     },
     ExDelete(crate::edit::ex::ExRange),
     ExYank(crate::edit::ex::ExRange),
+    Reshape(crate::shape::BufferShape),
     SetMark(char),
     GotoMark {
         name: char,

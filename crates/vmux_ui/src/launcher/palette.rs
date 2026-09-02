@@ -1,7 +1,7 @@
 use vmux_wire::agent::supports_inline_agent_transition;
 use vmux_wire::command_bar::{
-    AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPromptContext,
-    CommandBarQuery, HistoryEntry, PathEntry, is_data_uri,
+    AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
+    CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry, PathEntry, is_data_uri,
 };
 use vmux_wire::open_target::OpenTarget;
 use vmux_wire::prompt_media::ChatAttachment;
@@ -11,7 +11,7 @@ use vmux_wire::space::ProjectRow;
 use crate::components::agent_menu::ComposerAgentOption;
 use crate::i18n::translate;
 use crate::launcher::results::{
-    CommandBarResultItem, active_space_index, filter_results, open_session_results,
+    CommandBarResultItem, PickerRows, active_space_index, filter_results, open_session_results,
     prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
     space_switch_results, start_page_results, terminal_matches_query,
 };
@@ -29,6 +29,89 @@ impl PaletteSurface {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaletteMode {
+    #[default]
+    Search,
+    Command,
+    Ex,
+    Path,
+    Url,
+    Picking(CommandBarPicker),
+}
+
+impl PaletteMode {
+    pub fn of(query: &str, asserted: Option<CommandBarPicker>) -> Self {
+        if let Some(picker) = asserted {
+            return Self::Picking(picker);
+        }
+        if ExLine::claims(query) {
+            return Self::Ex;
+        }
+        let trimmed = query.trim();
+        if trimmed.starts_with('>') {
+            return Self::Command;
+        }
+        if trimmed.starts_with('/') || trimmed.starts_with('~') {
+            return Self::Path;
+        }
+        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
+            return Self::Url;
+        }
+        Self::Search
+    }
+
+    pub fn opened(state: &CommandBarOpenEvent) -> Self {
+        Self::of(&state.url, state.picker)
+    }
+
+    pub const fn is_ex(self) -> bool {
+        matches!(self, Self::Ex)
+    }
+
+    pub const fn is_space(self) -> bool {
+        matches!(self, Self::Picking(CommandBarPicker::Space))
+    }
+
+    pub const fn picking(self) -> Option<CommandBarPicker> {
+        match self {
+            Self::Picking(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Ex => ":",
+            Self::Command => ">",
+            Self::Path => "/",
+            Self::Search | Self::Url | Self::Picking(_) => "",
+        }
+    }
+
+    pub fn opens_at_end(self, query: &str) -> bool {
+        let prefix = self.prefix();
+        !prefix.is_empty() && query == prefix
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Ex => translate("palette-mode-ex"),
+            Self::Command => translate("palette-mode-command"),
+            Self::Path => translate("palette-mode-path"),
+            Self::Picking(picker) => {
+                let id = picker.label();
+                if id.is_empty() {
+                    String::new()
+                } else {
+                    translate(id)
+                }
+            }
+            Self::Search | Self::Url => String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {
     pub query: String,
@@ -36,6 +119,8 @@ pub struct PaletteDraft {
     pub nav_mode: bool,
     pub target_url: String,
     pub completions: Vec<PathEntry>,
+    pub completions_partial: bool,
+    pub completions_total: usize,
     pub history: Vec<HistoryEntry>,
 }
 
@@ -63,7 +148,20 @@ impl PaletteDraft {
     }
 
     pub fn completing(mut self, completions: Vec<PathEntry>) -> Self {
+        self.completions_total = completions.len();
         self.completions = completions;
+        self
+    }
+
+    pub fn partially_completing(mut self, completions: Vec<PathEntry>) -> Self {
+        self.completions_total = completions.len();
+        self.completions = completions;
+        self.completions_partial = true;
+        self
+    }
+
+    pub fn out_of(mut self, total: usize) -> Self {
+        self.completions_total = total;
         self
     }
 }
@@ -75,12 +173,14 @@ pub struct PaletteRows {
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,
     pub start_prompt_mode: bool,
+    pub mode: PaletteMode,
 }
 
 impl PaletteRows {
     pub fn of(state: &CommandBarOpenEvent, draft: &PaletteDraft, surface: PaletteSurface) -> Self {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
+        let mode = PaletteMode::of(query, state.picker);
         let prompt_targets = if is_start {
             prompt_target_results(&state.pages, "")
         } else {
@@ -93,7 +193,10 @@ impl PaletteRows {
             .or_else(|| prompt_targets.first().cloned());
         let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
 
-        let mut items = Self::listed(state, draft, surface, start_prompt_mode);
+        let mut items = FileRows::under_projects(
+            Self::listed(state, draft, surface, mode, start_prompt_mode),
+            &state.projects,
+        );
         if start_prompt_mode {
             prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
         }
@@ -104,31 +207,51 @@ impl PaletteRows {
             default_target,
             ghost: Self::ghost_of(query, &draft.completions),
             start_prompt_mode,
+            mode,
         }
+    }
+
+    fn with_completions(
+        query: &str,
+        draft: &PaletteDraft,
+        matched: Vec<CommandBarResultItem>,
+    ) -> Vec<CommandBarResultItem> {
+        FileRows::merge(query, Completions::of(draft, query), matched)
     }
 
     fn listed(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
         surface: PaletteSurface,
+        mode: PaletteMode,
         start_prompt_mode: bool,
     ) -> Vec<CommandBarResultItem> {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
-        if state.space_switch {
-            return space_switch_results(&state.spaces, &state.pages, query);
+        if let Some(picker) = mode.picking() {
+            if picker.is_space() {
+                return space_switch_results(&state.spaces, &state.pages, query);
+            }
+            return PickerRows::of(picker, &state.picks, query);
+        }
+        if mode.is_ex() {
+            if is_start {
+                return Vec::new();
+            }
+            return ExLine::suggestions(query);
         }
         if is_start && query.trim().is_empty() {
             return open_session_results(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            return start_page_results(
+            let matched = start_page_results(
                 &state.pages,
                 &state.work_dirs,
                 &state.recent_files,
                 &state.search_engines,
                 query,
             );
+            return Self::with_completions(query, draft, matched);
         }
         let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
         let matched = filter_results(
@@ -142,12 +265,7 @@ impl PaletteRows {
             &state.work_dirs,
             &state.recent_files,
         );
-        let completions: &[PathEntry] = if CompletionQuery::of(query).is_some() {
-            &draft.completions
-        } else {
-            &[]
-        };
-        let matched = FileRows::merge(query, completions, matched);
+        let matched = Self::with_completions(query, draft, matched);
         if !is_start {
             return matched;
         }
@@ -209,17 +327,26 @@ pub enum PaletteGlyph {
 }
 
 impl PaletteGlyph {
-    fn of(navigating: Option<&CommandBarResultItem>, query: &str) -> Self {
+    fn of(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Option<Self> {
+        if let PaletteMode::Picking(picker) = mode
+            && !picker.is_space()
+        {
+            return None;
+        }
         let Some(item) = navigating else {
-            return Self::typed(query);
+            return Self::in_mode(mode);
         };
-        match item {
-            CommandBarResultItem::Command { .. } => Self::Command,
+        let glyph = match item {
+            CommandBarResultItem::Command { .. }
+            | CommandBarResultItem::Ex { .. }
+            | CommandBarResultItem::Pick { .. } => Self::Command,
             CommandBarResultItem::Terminal { path } if path.is_empty() => Self::Command,
             CommandBarResultItem::Terminal { .. }
             | CommandBarResultItem::Editor { .. }
             | CommandBarResultItem::File { .. }
             | CommandBarResultItem::WorkDir { .. }
+            | CommandBarResultItem::PartialIndex
+            | CommandBarResultItem::MoreMatches { .. }
             | CommandBarResultItem::RecentFile { .. } => Self::Path,
             CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => Self::Url,
             CommandBarResultItem::Navigate { url } => {
@@ -229,21 +356,45 @@ impl PaletteGlyph {
             CommandBarResultItem::Space { .. }
             | CommandBarResultItem::Page { .. }
             | CommandBarResultItem::Search { .. } => Self::Search,
-        }
+        };
+        Some(glyph)
     }
 
-    fn typed(query: &str) -> Self {
-        let trimmed = query.trim();
-        if trimmed.starts_with('>') {
-            return Self::Command;
+    const fn in_mode(mode: PaletteMode) -> Option<Self> {
+        match mode {
+            PaletteMode::Command | PaletteMode::Ex => Some(Self::Command),
+            PaletteMode::Path => Some(Self::Path),
+            PaletteMode::Url => Some(Self::Url),
+            PaletteMode::Picking(CommandBarPicker::Space) | PaletteMode::Search => {
+                Some(Self::Search)
+            }
+            PaletteMode::Picking(_) => None,
         }
-        if trimmed.starts_with('/') || trimmed.starts_with('~') {
-            return Self::Path;
+    }
+}
+
+pub struct ExLine;
+
+impl ExLine {
+    pub fn claims(query: &str) -> bool {
+        query.starts_with(':')
+    }
+
+    pub fn of(query: &str) -> Option<String> {
+        let body = query.strip_prefix(':')?.trim();
+        (!body.is_empty()).then(|| body.to_string())
+    }
+
+    pub fn suggestions(query: &str) -> Vec<CommandBarResultItem> {
+        let typed = query.strip_prefix(':').unwrap_or(query).trim_start();
+        let mut rows = Vec::new();
+        for entry in ExCommandName::matching(typed) {
+            rows.push(CommandBarResultItem::Ex {
+                name: entry.name.to_string(),
+                hint: translate(entry.hint),
+            });
         }
-        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
-            return Self::Url;
-        }
-        Self::Search
+        rows
     }
 }
 
@@ -384,9 +535,10 @@ pub struct PaletteState {
     pub rows: Vec<CommandBarResultItem>,
     pub selected: usize,
     pub ghost: String,
-    pub display_text: String,
+    pub row_text: Option<String>,
     pub placeholder: String,
-    pub glyph: PaletteGlyph,
+    pub glyph: Option<PaletteGlyph>,
+    pub mode: PaletteMode,
     pub start_prompt_mode: bool,
     pub space_switch: bool,
     pub nav_mode: bool,
@@ -432,10 +584,10 @@ impl PaletteState {
             rows.default_target.as_ref()
         })
         .or_else(|| AgentSegment::of(rows.default_target.as_ref()));
-        let display_text = if draft.nav_mode && !rows.start_prompt_mode {
-            DisplayText::of(active, &draft.query)
+        let row_text = if rows.start_prompt_mode {
+            None
         } else {
-            draft.query.clone()
+            RowText::over(navigating, &draft.query)
         };
 
         Self {
@@ -444,11 +596,12 @@ impl PaletteState {
             rows: rows.items.clone(),
             selected,
             ghost: rows.ghost.clone(),
-            display_text,
-            placeholder: Placeholder::of(state, surface),
-            glyph: PaletteGlyph::of(navigating, &draft.query),
+            row_text,
+            placeholder: Placeholder::of(rows.mode, state, surface),
+            glyph: PaletteGlyph::of(navigating, rows.mode),
+            mode: rows.mode,
             start_prompt_mode: rows.start_prompt_mode,
-            space_switch: state.space_switch,
+            space_switch: rows.mode.is_space(),
             nav_mode: draft.nav_mode,
             open_target: state.target,
             space_name: state.space_name.clone(),
@@ -550,6 +703,12 @@ impl PaletteState {
                 id: id.clone(),
                 open: self.open_target,
             }),
+            CommandBarResultItem::Ex { name, .. } => {
+                Some(CommandBarActionEvent::Ex { line: name.clone() })
+            }
+            CommandBarResultItem::Pick { pick, .. } => {
+                Some(CommandBarActionEvent::Pick { pick: pick.clone() })
+            }
             CommandBarResultItem::Space { id, .. } => {
                 Some(CommandBarActionEvent::Space { id: id.clone() })
             }
@@ -565,17 +724,43 @@ impl PaletteState {
                 &engine.search_url(query),
                 self.open_target,
             )),
+            CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => None,
         }
     }
 
     pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
-        if self.space_switch {
-            let Some(item) = self.row(self.selected) else {
+        if let Some(picker) = self.mode.picking() {
+            return self.submit_picked(picker, attachments);
+        }
+        if self.mode.is_ex() {
+            if self.nav_mode
+                && let Some(item) = self.row(self.selected)
+            {
+                return self.activate(item, attachments);
+            }
+            let Some(line) = ExLine::of(&self.query) else {
                 return Submission::default();
             };
-            return self.activate(item, attachments);
+            return Submission::closing(CommandBarActionEvent::Ex { line });
         }
         self.submit_typed(attachments)
+    }
+
+    fn submit_picked(
+        &self,
+        picker: CommandBarPicker,
+        attachments: &[ChatAttachment],
+    ) -> Submission {
+        if picker.takes_typed_value() {
+            let Some(pick) = CommandBarPick::goto_line(&self.query) else {
+                return Submission::default();
+            };
+            return Submission::closing(CommandBarActionEvent::Pick { pick });
+        }
+        let Some(item) = self.row(self.selected) else {
+            return Submission::default();
+        };
+        self.activate(item, attachments)
     }
 
     pub fn submit_start(&self, attachments: &[ChatAttachment]) -> Submission {
@@ -631,13 +816,7 @@ impl PaletteState {
     }
 
     fn submit_typed(&self, attachments: &[ChatAttachment]) -> Submission {
-        let trimmed = self.query.trim();
-        let prefer_page = matches!(
-            self.row(self.selected),
-            Some(CommandBarResultItem::Page { url, .. })
-                if trimmed.starts_with("vmux://") && url.starts_with(trimmed)
-        );
-        if !prefer_page
+        if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
             && CommandBarQuery(&self.query)
                 .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
@@ -653,7 +832,7 @@ impl PaletteState {
     }
 
     pub fn opening_selection(state: &CommandBarOpenEvent) -> usize {
-        if state.space_switch {
+        if state.picker == Some(CommandBarPicker::Space) {
             active_space_index(&state.spaces)
         } else {
             0
@@ -661,12 +840,45 @@ impl PaletteState {
     }
 }
 
+struct TypedRow;
+
+impl TypedRow {
+    fn beats_a_guessed_url(row: Option<&CommandBarResultItem>, query: &str) -> bool {
+        let query = query.trim();
+        let Some(row) = row else {
+            return false;
+        };
+        match row {
+            CommandBarResultItem::Page { url, .. } => {
+                query.starts_with("vmux://") && url.starts_with(query)
+            }
+            CommandBarResultItem::File { path, is_dir, .. } => {
+                !is_dir && Self::is_named(path, query)
+            }
+            CommandBarResultItem::Editor { path } => Self::is_named(path, query),
+            CommandBarResultItem::RecentFile { title, .. } => Self::is_called(title, query),
+            _ => false,
+        }
+    }
+
+    fn is_named(path: &str, query: &str) -> bool {
+        Self::is_called(path.rsplit('/').next().unwrap_or(path), query)
+    }
+
+    fn is_called(name: &str, query: &str) -> bool {
+        !query.contains("://") && name.eq_ignore_ascii_case(query)
+    }
+}
+
 struct Placeholder;
 
 impl Placeholder {
-    fn of(state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
-        if state.space_switch {
-            return translate("command-switch-space");
+    fn of(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
+        if let Some(picker) = mode.picking() {
+            return translate(picker.placeholder());
+        }
+        if mode.is_ex() {
+            return translate("command-ex-placeholder");
         }
         match surface {
             PaletteSurface::Start => translate("command-search-ask"),
@@ -681,27 +893,39 @@ impl Placeholder {
     }
 }
 
-struct DisplayText;
+struct RowText;
 
-impl DisplayText {
-    fn of(item: Option<&CommandBarResultItem>, query: &str) -> String {
+impl RowText {
+    fn over(item: Option<&CommandBarResultItem>, query: &str) -> Option<String> {
+        let text = Self::of(item?, query);
+        if text == query {
+            return None;
+        }
+        Some(text)
+    }
+
+    fn of(item: &CommandBarResultItem, query: &str) -> String {
         match item {
-            Some(CommandBarResultItem::Command { name, .. }) => format!("> {name}"),
-            Some(CommandBarResultItem::Navigate { url }) => url.clone(),
-            Some(CommandBarResultItem::Search { query, .. }) => query.clone(),
-            Some(CommandBarResultItem::Stack { url, .. }) => url.clone(),
-            Some(CommandBarResultItem::Space { name, .. }) => name.clone(),
-            Some(CommandBarResultItem::Page { title, .. }) => title.clone(),
-            Some(CommandBarResultItem::Terminal { path }) if path.is_empty() => {
+            CommandBarResultItem::Command { name, .. } => format!("> {name}"),
+            CommandBarResultItem::Ex { name, .. } => format!(":{name}"),
+            CommandBarResultItem::Pick { label, .. } => label.clone(),
+            CommandBarResultItem::Navigate { url } => url.clone(),
+            CommandBarResultItem::Search { query, .. } => query.clone(),
+            CommandBarResultItem::Stack { url, .. } => url.clone(),
+            CommandBarResultItem::Space { name, .. } => name.clone(),
+            CommandBarResultItem::Page { title, .. } => title.clone(),
+            CommandBarResultItem::Terminal { path } if path.is_empty() => {
                 translate("command-terminal")
             }
-            Some(CommandBarResultItem::Terminal { path }) => path.clone(),
-            Some(CommandBarResultItem::Editor { path }) => path.clone(),
-            Some(CommandBarResultItem::History { title, url, .. }) => Self::titled(title, url),
-            Some(CommandBarResultItem::File { path, .. }) => path.clone(),
-            Some(CommandBarResultItem::WorkDir { path, .. }) => path.clone(),
-            Some(CommandBarResultItem::RecentFile { title, url }) => Self::titled(title, url),
-            None => query.to_string(),
+            CommandBarResultItem::Terminal { path } => path.clone(),
+            CommandBarResultItem::Editor { path } => path.clone(),
+            CommandBarResultItem::History { title, url, .. } => Self::titled(title, url),
+            CommandBarResultItem::File { path, .. } => path.clone(),
+            CommandBarResultItem::WorkDir { path, .. } => path.clone(),
+            CommandBarResultItem::RecentFile { title, url } => Self::titled(title, url),
+            CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => {
+                query.to_string()
+            }
         }
     }
 
@@ -772,14 +996,28 @@ impl CompletionQuery {
         if Self::looks_like_path(trimmed) {
             return Some(trimmed.to_string());
         }
-        if trimmed.is_empty()
-            || trimmed.contains(' ')
-            || trimmed.contains("://")
-            || is_data_uri(trimmed)
-        {
+        if trimmed.is_empty() || trimmed.contains("://") || is_data_uri(trimmed) {
             return None;
         }
         Some(trimmed.to_string())
+    }
+
+    pub fn names_a_file(value: &str) -> bool {
+        for term in value.split_whitespace() {
+            if term.contains('/') {
+                return true;
+            }
+            let Some((stem, extension)) = term.rsplit_once('.') else {
+                continue;
+            };
+            if stem.is_empty() || extension.is_empty() || extension.len() > 5 {
+                continue;
+            }
+            if extension.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return true;
+            }
+        }
+        false
     }
 
     fn looks_like_path(value: &str) -> bool {
@@ -794,46 +1032,145 @@ impl CompletionQuery {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Completions<'a> {
+    pub entries: &'a [PathEntry],
+    pub partial: bool,
+    pub total: usize,
+}
+
+impl<'a> Completions<'a> {
+    pub fn of(draft: &'a PaletteDraft, query: &str) -> Self {
+        if CompletionQuery::of(query).is_none() {
+            return Self::default();
+        }
+        Self {
+            entries: &draft.completions,
+            partial: draft.completions_partial,
+            total: draft.completions_total,
+        }
+    }
+
+    fn withheld(&self) -> usize {
+        self.total.saturating_sub(self.entries.len())
+    }
+}
+
 pub struct FileRows;
 
 impl FileRows {
-    const LEADING: usize = 8;
-    const TRAILING: usize = 5;
-
     pub fn merge(
         query: &str,
-        completions: &[PathEntry],
+        completions: Completions<'_>,
         matched: Vec<CommandBarResultItem>,
     ) -> Vec<CommandBarResultItem> {
-        if completions.is_empty() {
+        if completions.entries.is_empty() && !completions.partial {
             return matched;
         }
-        let leads = CompletionQuery::looks_like_path(query.trim());
-        let take = if leads { Self::LEADING } else { Self::TRAILING };
-        let mut files = Vec::with_capacity(take);
-        let mut listed = Vec::with_capacity(take);
-        for entry in completions.iter().take(take) {
+        let trimmed = query.trim();
+        let leads =
+            CompletionQuery::looks_like_path(trimmed) || CompletionQuery::names_a_file(trimmed);
+        let mut files = Vec::with_capacity(completions.entries.len());
+        let mut listed = Vec::with_capacity(completions.entries.len());
+        for entry in completions.entries {
             files.push(CommandBarResultItem::File {
                 path: entry.full_path.clone(),
                 is_dir: entry.is_dir,
+                project: entry.project.clone(),
+                relative: entry.name.clone(),
             });
             listed.push(entry.full_path.as_str());
         }
         let mut rest = Vec::with_capacity(matched.len());
         for item in matched {
-            if let CommandBarResultItem::Editor { path } = &item
-                && listed.contains(&path.as_str())
-            {
+            if Self::already_listed(&item, &listed) {
                 continue;
             }
             rest.push(item);
         }
-        if leads {
+        let mut merged = if leads {
             files.extend(rest);
-            return files;
+            files
+        } else {
+            rest.extend(files);
+            rest
+        };
+        if completions.partial {
+            merged.push(CommandBarResultItem::PartialIndex);
         }
-        rest.extend(files);
-        rest
+        if completions.withheld() > 0 {
+            merged.push(CommandBarResultItem::MoreMatches {
+                shown: completions.entries.len(),
+                total: completions.total,
+            });
+        }
+        merged
+    }
+
+    fn already_listed(item: &CommandBarResultItem, listed: &[&str]) -> bool {
+        let Some(path) = Self::local_path(item) else {
+            return false;
+        };
+        listed.contains(&path)
+    }
+
+    fn local_path(item: &CommandBarResultItem) -> Option<&str> {
+        match item {
+            CommandBarResultItem::Editor { path } => Some(path.as_str()),
+            CommandBarResultItem::RecentFile { url, .. }
+            | CommandBarResultItem::History { url, .. } => url.strip_prefix("file://"),
+            _ => None,
+        }
+    }
+
+    pub fn under_projects(
+        items: Vec<CommandBarResultItem>,
+        projects: &[String],
+    ) -> Vec<CommandBarResultItem> {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(path) = Self::local_path(&item) else {
+                out.push(item);
+                continue;
+            };
+            let Some((project, relative)) = ProjectPath::of(path, projects) else {
+                out.push(item);
+                continue;
+            };
+            out.push(CommandBarResultItem::File {
+                path: path.to_string(),
+                is_dir: false,
+                project,
+                relative,
+            });
+        }
+        out
+    }
+}
+
+struct ProjectPath;
+
+impl ProjectPath {
+    fn of(path: &str, projects: &[String]) -> Option<(String, String)> {
+        let mut owner = "";
+        for project in projects {
+            let root = project.trim().trim_end_matches('/');
+            if root.is_empty() || root.len() <= owner.len() {
+                continue;
+            }
+            let Some(rest) = path.strip_prefix(root) else {
+                continue;
+            };
+            if !rest.starts_with('/') {
+                continue;
+            }
+            owner = root;
+        }
+        if owner.is_empty() {
+            return None;
+        }
+        let label = owner.rsplit('/').next().unwrap_or(owner);
+        Some((label.to_string(), path[owner.len() + 1..].to_string()))
     }
 }
 
@@ -844,6 +1181,24 @@ mod tests {
         CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
     };
 
+    impl<'a> Completions<'a> {
+        fn listing(entries: &'a [PathEntry]) -> Self {
+            Self {
+                entries,
+                partial: false,
+                total: entries.len(),
+            }
+        }
+
+        fn partial(entries: &'a [PathEntry]) -> Self {
+            Self {
+                entries,
+                partial: true,
+                total: entries.len(),
+            }
+        }
+    }
+
     impl FileRows {
         fn hits(paths: &[&str]) -> Vec<PathEntry> {
             let mut entries = Vec::new();
@@ -852,6 +1207,7 @@ mod tests {
                     name: (*path).to_string(),
                     is_dir: false,
                     full_path: format!("/root/{path}"),
+                    project: "root".to_string(),
                 });
             }
             entries
@@ -912,7 +1268,7 @@ mod tests {
 
         fn switching_spaces() -> CommandBarOpenEvent {
             CommandBarOpenEvent {
-                space_switch: true,
+                picker: Some(CommandBarPicker::Space),
                 spaces: vec![
                     CommandBarSpace {
                         id: "space-1".into(),
@@ -933,6 +1289,36 @@ mod tests {
             }
         }
 
+        fn picking(picker: CommandBarPicker) -> CommandBarOpenEvent {
+            let picks = match picker {
+                CommandBarPicker::Encoding => vec![
+                    CommandBarPick::Picker(CommandBarPicker::EncodingReopen)
+                        .labelled("Reopen with Encoding"),
+                    CommandBarPick::Picker(CommandBarPicker::EncodingSave)
+                        .labelled("Save with Encoding"),
+                ],
+                CommandBarPicker::EncodingReopen => {
+                    let mut rows = Vec::new();
+                    for label in ["UTF-8", "Shift_JIS", "EUC-JP"] {
+                        rows.push(
+                            CommandBarPick::Encoding {
+                                label: label.to_string(),
+                                save: false,
+                            }
+                            .labelled(label),
+                        );
+                    }
+                    rows
+                }
+                _ => Vec::new(),
+            };
+            CommandBarOpenEvent {
+                picker: Some(picker),
+                picks,
+                ..Self::state()
+            }
+        }
+
         fn with_open_stack() -> CommandBarOpenEvent {
             CommandBarOpenEvent {
                 tabs: vec![CommandBarTab {
@@ -948,6 +1334,21 @@ mod tests {
         }
     }
 
+    struct ExNames;
+
+    impl ExNames {
+        fn of(palette: &PaletteState) -> Vec<String> {
+            let mut names = Vec::new();
+            for row in &palette.rows {
+                let CommandBarResultItem::Ex { name, .. } = row else {
+                    continue;
+                };
+                names.push(name.clone());
+            }
+            names
+        }
+    }
+
     impl PaletteState {
         fn start(state: &CommandBarOpenEvent, draft: PaletteDraft) -> Self {
             Self::resolve(state, &draft, PaletteSurface::Start)
@@ -960,9 +1361,10 @@ mod tests {
 
     #[test]
     fn a_bare_word_keeps_commands_above_the_files_it_also_matched() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "settings",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
         assert!(matches!(merged[0], CommandBarResultItem::Command { .. }));
@@ -971,9 +1373,10 @@ mod tests {
 
     #[test]
     fn a_typed_path_puts_its_files_first() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "~/src",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
         assert!(matches!(merged[0], CommandBarResultItem::File { .. }));
@@ -982,9 +1385,10 @@ mod tests {
 
     #[test]
     fn an_editor_row_for_an_already_listed_file_is_dropped() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
             "~/src",
-            &FileRows::hits(&["src/settings.rs"]),
+            Completions::listing(&hits),
             vec![CommandBarResultItem::Editor {
                 path: "/root/src/settings.rs".to_string(),
             }],
@@ -994,11 +1398,127 @@ mod tests {
     }
 
     #[test]
+    fn every_ranked_completion_is_listed_rather_than_the_first_handful() {
+        let paths: Vec<String> = (0..40).map(|at| format!("src/main_{at:02}.rs")).collect();
+        let named: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let hits = FileRows::hits(&named);
+        let merged = FileRows::merge("main.rs", Completions::listing(&hits), Vec::new());
+
+        assert_eq!(merged.len(), 40);
+        assert!(
+            !merged
+                .iter()
+                .any(|row| matches!(row, CommandBarResultItem::MoreMatches { .. })),
+            "nothing was withheld, so the palette must not claim otherwise"
+        );
+    }
+
+    #[test]
+    fn a_withheld_tail_is_counted_in_the_last_row() {
+        let state = Launcher::state();
+        let palette = PaletteState::modal(
+            &state,
+            PaletteDraft::typed("main.rs")
+                .completing(FileRows::hits(&["src/main.rs", "src/other/main.rs"]))
+                .out_of(14),
+        );
+
+        assert_eq!(
+            palette.rows.last(),
+            Some(&CommandBarResultItem::MoreMatches {
+                shown: 2,
+                total: 14
+            })
+        );
+    }
+
+    #[test]
+    fn a_partial_index_owns_up_to_it_below_the_files_it_did_find() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
+        let merged = FileRows::merge(
+            "settings",
+            Completions::partial(&hits),
+            vec![FileRows::a_command()],
+        );
+
+        assert_eq!(merged.last(), Some(&CommandBarResultItem::PartialIndex));
+        assert!(matches!(merged[1], CommandBarResultItem::File { .. }));
+    }
+
+    #[test]
+    fn a_partial_index_that_found_nothing_still_says_why() {
+        let merged = FileRows::merge("settings", Completions::partial(&[]), Vec::new());
+
+        assert_eq!(merged, vec![CommandBarResultItem::PartialIndex]);
+    }
+
+    #[test]
+    fn the_partial_index_notice_does_nothing_and_leaves_the_typed_text_alone() {
+        let state = Launcher::state();
+        let palette = PaletteState::modal(
+            &state,
+            PaletteDraft::typed("settings")
+                .partially_completing(FileRows::hits(&["src/settings.rs"]))
+                .navigating(),
+        );
+        let at = palette
+            .rows
+            .iter()
+            .position(|row| matches!(row, CommandBarResultItem::PartialIndex))
+            .expect("the notice is listed");
+
+        let submission = palette.activate(&palette.rows[at], &[]);
+        assert_eq!(submission.action, None);
+        assert_eq!(
+            RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_complete_index_says_nothing() {
+        let hits = FileRows::hits(&["src/settings.rs"]);
+        let merged = FileRows::merge(
+            "settings",
+            Completions::listing(&hits),
+            vec![FileRows::a_command()],
+        );
+
+        assert!(
+            !merged
+                .iter()
+                .any(|row| matches!(row, CommandBarResultItem::PartialIndex))
+        );
+    }
+
+    #[test]
     fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
         assert_eq!(CompletionQuery::of("handler").as_deref(), Some("handler"));
-        assert_eq!(CompletionQuery::of("how do i").as_deref(), None);
         assert_eq!(CompletionQuery::of("https://example.com").as_deref(), None);
         assert_eq!(CompletionQuery::of("file://~/x").as_deref(), Some("~/x"));
+    }
+
+    #[test]
+    fn several_words_reach_the_host_so_a_path_can_be_narrowed_word_by_word() {
+        assert_eq!(
+            CompletionQuery::of("mobile main").as_deref(),
+            Some("mobile main")
+        );
+        assert_eq!(
+            CompletionQuery::of("desktop src/lib").as_deref(),
+            Some("desktop src/lib")
+        );
+    }
+
+    #[test]
+    fn a_file_under_a_project_is_shown_against_that_project() {
+        let projects = vec!["/code/dashboard".to_string(), "/code".to_string()];
+        assert_eq!(
+            ProjectPath::of("/code/dashboard/src/main.rs", &projects),
+            Some(("dashboard".to_string(), "src/main.rs".to_string())),
+            "the longest matching root wins, or a worktree is shown against its parent repo"
+        );
+        assert_eq!(ProjectPath::of("/elsewhere/main.rs", &projects), None);
     }
 
     #[test]
@@ -1069,12 +1589,13 @@ mod tests {
     }
 
     #[test]
-    fn navigation_shows_the_highlighted_row_but_prose_keeps_the_prompt() {
+    fn navigation_overlays_the_highlighted_row_and_still_edits_the_typed_text() {
         let state = Launcher::state();
 
         let navigated =
             PaletteState::modal(&state, PaletteDraft::typed("setti").at(0).navigating());
-        assert_eq!(navigated.display_text, "Settings");
+        assert_eq!(navigated.row_text.as_deref(), Some("Settings"));
+        assert_eq!(navigated.query, "setti");
 
         let prompting = PaletteState::start(
             &state,
@@ -1082,7 +1603,8 @@ mod tests {
                 .at(0)
                 .navigating(),
         );
-        assert_eq!(prompting.display_text, "fix the failing test");
+        assert_eq!(prompting.row_text, None);
+        assert_eq!(prompting.query, "fix the failing test");
     }
 
     #[test]
@@ -1091,28 +1613,214 @@ mod tests {
 
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("> close")).glyph,
-            PaletteGlyph::Command
+            Some(PaletteGlyph::Command)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("~/src")).glyph,
-            PaletteGlyph::Path
+            Some(PaletteGlyph::Path)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("example.com")).glyph,
-            PaletteGlyph::Url
+            Some(PaletteGlyph::Url)
         );
         assert_eq!(
             PaletteState::modal(&state, PaletteDraft::typed("how do i")).glyph,
-            PaletteGlyph::Search
+            Some(PaletteGlyph::Search)
         );
 
         let navigated =
             PaletteState::modal(&state, PaletteDraft::typed("close").at(0).navigating());
         assert_eq!(
             navigated.glyph,
-            PaletteGlyph::of(navigated.row(0), "close"),
+            PaletteGlyph::of(navigated.row(0), navigated.mode),
             "navigating reads the row, not the text"
         );
+    }
+
+    #[test]
+    fn a_picker_shows_no_input_glyph_because_its_chip_already_names_it() {
+        assert_eq!(
+            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
+            None
+        );
+        assert_eq!(
+            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Space)),
+            Some(PaletteGlyph::Search),
+            "the space switcher is a picker but reads as a search"
+        );
+    }
+
+    #[test]
+    fn a_highlighted_file_wins_over_reading_its_name_as_a_hostname() {
+        let row = CommandBarResultItem::File {
+            path: "/repo/ts/packages/csp/src/index.ts".into(),
+            is_dir: false,
+            project: "dashboard".into(),
+            relative: "ts/packages/csp/src".into(),
+        };
+
+        assert!(TypedRow::beats_a_guessed_url(Some(&row), "index.ts"));
+        assert!(TypedRow::beats_a_guessed_url(Some(&row), " Index.TS "));
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&row), "csp"),
+            "a partial match is still a search, not an open"
+        );
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&row), "https://index.ts"),
+            "an explicit scheme means the user typed a URL"
+        );
+    }
+
+    #[test]
+    fn a_highlighted_file_never_hijacks_a_real_domain() {
+        let row = CommandBarResultItem::File {
+            path: "/repo/docs/google.com".into(),
+            is_dir: false,
+            project: "dashboard".into(),
+            relative: "docs".into(),
+        };
+        let directory = CommandBarResultItem::File {
+            path: "/repo/example.com".into(),
+            is_dir: true,
+            project: "dashboard".into(),
+            relative: "".into(),
+        };
+
+        assert!(
+            TypedRow::beats_a_guessed_url(Some(&row), "google.com"),
+            "a file that really is named google.com is still the highlighted row"
+        );
+        assert!(
+            !TypedRow::beats_a_guessed_url(Some(&directory), "example.com"),
+            "a directory is not something Enter opens over a URL"
+        );
+        assert!(!TypedRow::beats_a_guessed_url(None, "google.com"));
+    }
+
+    #[test]
+    fn a_colon_offers_the_ex_commands_and_narrows_them_as_the_line_grows() {
+        let state = Launcher::state();
+
+        let offered = PaletteState::modal(&state, PaletteDraft::typed(":"));
+        let names = ExNames::of(&offered);
+        assert_eq!(names.len(), ExCommandName::ALL.len(), "{names:?}");
+
+        let narrowed = PaletteState::modal(&state, PaletteDraft::typed(":w"));
+        assert_eq!(ExNames::of(&narrowed), vec!["w", "wq"]);
+
+        let typed_out = PaletteState::modal(&state, PaletteDraft::typed(":%s/a/b/g"));
+        assert!(
+            typed_out.rows.is_empty(),
+            "a line the catalog cannot complete offers nothing: {:?}",
+            typed_out.rows
+        );
+    }
+
+    #[test]
+    fn an_ex_line_runs_what_was_typed_unless_a_suggestion_is_highlighted() {
+        let state = Launcher::state();
+
+        let typed = PaletteState::modal(&state, PaletteDraft::typed(":noh"));
+        assert_eq!(
+            typed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Ex {
+                line: "noh".to_string()
+            })
+        );
+
+        let picked = PaletteState::modal(&state, PaletteDraft::typed(":").at(1).navigating());
+        assert_eq!(
+            picked.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Ex {
+                line: ExCommandName::ALL[1].name.to_string()
+            }),
+            "an empty line still runs the row the user walked to: {:?}",
+            picked.rows
+        );
+    }
+
+    #[test]
+    fn an_asserted_picker_outranks_every_shape_the_typed_text_could_take() {
+        let asserted = CommandBarPicker::EncodingReopen;
+        for typed in [">", ":", "~/etc", "example.com", "how do i", ""] {
+            assert_eq!(
+                PaletteMode::of(typed, Some(asserted)),
+                PaletteMode::Picking(asserted),
+                "`{typed}` must not steal the picker the caller asked for"
+            );
+        }
+
+        assert_eq!(PaletteMode::of("> close", None), PaletteMode::Command);
+        assert_eq!(PaletteMode::of(":w", None), PaletteMode::Ex);
+        assert_eq!(PaletteMode::of("~/src", None), PaletteMode::Path);
+        assert_eq!(PaletteMode::of("example.com", None), PaletteMode::Url);
+        assert_eq!(PaletteMode::of("how do i", None), PaletteMode::Search);
+    }
+
+    #[test]
+    fn a_picker_narrows_its_host_built_rows_and_submits_the_highlighted_one() {
+        let state = Launcher::picking(CommandBarPicker::EncodingReopen);
+
+        let offered = PaletteState::modal(&state, PaletteDraft::default());
+        assert_eq!(offered.rows.len(), 3, "{:?}", offered.rows);
+
+        let narrowed = PaletteState::modal(&state, PaletteDraft::typed("shift"));
+        assert_eq!(narrowed.rows.len(), 1, "{:?}", narrowed.rows);
+        assert_eq!(
+            narrowed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::Encoding {
+                    label: "Shift_JIS".to_string(),
+                    save: false,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_sub_list_row_asks_for_another_picker_rather_than_applying_anything() {
+        let state = Launcher::picking(CommandBarPicker::Encoding);
+        let palette = PaletteState::modal(&state, PaletteDraft::default());
+
+        assert_eq!(
+            palette.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
+            })
+        );
+    }
+
+    #[test]
+    fn the_line_picker_reads_the_typed_number_instead_of_a_row() {
+        let state = Launcher::picking(CommandBarPicker::GotoLine);
+
+        let typed = PaletteState::modal(&state, PaletteDraft::typed("42"));
+        assert!(typed.rows.is_empty(), "{:?}", typed.rows);
+        assert_eq!(
+            typed.submit_modal(&[]).action,
+            Some(CommandBarActionEvent::Pick {
+                pick: CommandBarPick::GotoLine { line: 41 },
+            })
+        );
+
+        let refused = PaletteState::modal(&state, PaletteDraft::typed("abc"));
+        assert_eq!(refused.submit_modal(&[]), Submission::default());
+    }
+
+    #[test]
+    fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
+        for seed in [":", ">", "/"] {
+            assert!(
+                PaletteMode::of(seed, None).opens_at_end(seed),
+                "`{seed}` opens a mode, so the next keystroke must append to it"
+            );
+        }
+        for seed in ["https://example.com", "", ":w"] {
+            assert!(
+                !PaletteMode::of(seed, None).opens_at_end(seed),
+                "`{seed}` is a value, so the next keystroke must replace it"
+            );
+        }
     }
 
     #[test]
@@ -1353,6 +2061,8 @@ mod tests {
             &CommandBarResultItem::File {
                 path: "/work/main.rs".into(),
                 is_dir: false,
+                project: String::new(),
+                relative: String::new(),
             },
             &[],
         );

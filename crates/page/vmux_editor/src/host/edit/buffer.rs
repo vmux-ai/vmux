@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use ropey::Rope;
 use unicode_segmentation::UnicodeSegmentation;
+use vmux_core::event::FileEncoding;
 
 pub struct TextBuffer {
     pub rope: Rope,
     pub path: PathBuf,
     pub language: String,
+    pub encoding: FileEncoding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +32,7 @@ impl TextBuffer {
             rope: Rope::from_str(text),
             path,
             language,
+            encoding: FileEncoding::Utf8,
         }
     }
 

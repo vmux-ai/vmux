@@ -73,6 +73,10 @@ pub enum FileKeyCommand {
     #[menu(id = "file_find", label = "Find In File")]
     #[shortcut(direct = "Super+f", when = "files")]
     Find,
+    #[menu(id = "file_find_in_files", label = "Find In Files")]
+    #[shortcut(direct = "Super+Shift+f", when = "files")]
+    #[shortcut(direct = "Ctrl+Shift+f", when = "files")]
+    FindInFiles,
 }
 
 impl From<FileKeyCommand> for vmux_core::event::FileKey {
@@ -84,7 +88,8 @@ impl From<FileKeyCommand> for vmux_core::event::FileKey {
             FileKeyCommand::PanelPrevious => Self::PanelPrevious,
             FileKeyCommand::PanelChoose => Self::PanelChoose,
             FileKeyCommand::PanelDismiss => Self::PanelDismiss,
-            FileKeyCommand::Find => Self::Find,
+            FileKeyCommand::Find => Self::Find { forward: true },
+            FileKeyCommand::FindInFiles => Self::FindInFiles,
         }
     }
 }
@@ -325,7 +330,7 @@ pub enum BrowserViewCommand {
         hidden
     )]
     ViewSource,
-    #[menu(id = "browser_print", label = "Print", accel = "super+p", hidden)]
+    #[menu(id = "browser_print", label = "Print", hidden)]
     Print,
 }
 
@@ -340,7 +345,7 @@ pub enum BrowserBarCommand {
         label = "Command Bar",
         accel = "super+k"
     )]
-    #[shortcut(direct = "Super+k")]
+    #[shortcut(direct = "Super+k", direct = "Super+p")]
     OpenCommandBar,
     #[menu(
         id = "browser_open_page_in_command_bar",
@@ -361,8 +366,56 @@ pub enum BrowserBarCommand {
     OpenCommands,
     #[menu(id = "browser_open_history", label = "History", accel = "super+y")]
     OpenHistory,
-    #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
-    Find,
+    #[menu(id = "browser_open_ex_bar", label = "Vim Command Line")]
+    OpenExBar,
+    #[menu(id = "browser_open_goto_line", label = "Go to Line")]
+    OpenGotoLine,
+    #[menu(id = "browser_open_indentation", label = "Select Indentation")]
+    OpenIndentation,
+    #[menu(id = "browser_open_line_ending", label = "Select End of Line Sequence")]
+    OpenLineEnding,
+    #[menu(id = "browser_open_encoding", label = "Select Encoding")]
+    OpenEncoding,
+    #[menu(
+        id = "browser_open_reopen_with_encoding",
+        label = "Reopen with Encoding"
+    )]
+    OpenReopenWithEncoding,
+    #[menu(id = "browser_open_save_with_encoding", label = "Save with Encoding")]
+    OpenSaveWithEncoding,
+}
+
+impl BrowserBarCommand {
+    pub const fn picker(self) -> Option<vmux_wire::command_bar::CommandBarPicker> {
+        use vmux_wire::command_bar::CommandBarPicker;
+        match self {
+            Self::OpenGotoLine => Some(CommandBarPicker::GotoLine),
+            Self::OpenIndentation => Some(CommandBarPicker::Indent),
+            Self::OpenLineEnding => Some(CommandBarPicker::LineEnding),
+            Self::OpenEncoding => Some(CommandBarPicker::Encoding),
+            Self::OpenReopenWithEncoding => Some(CommandBarPicker::EncodingReopen),
+            Self::OpenSaveWithEncoding => Some(CommandBarPicker::EncodingSave),
+            Self::OpenCommandBar
+            | Self::OpenPageInCommandBar
+            | Self::OpenPathBar
+            | Self::OpenCommands
+            | Self::OpenHistory
+            | Self::OpenExBar => None,
+        }
+    }
+
+    pub const fn opening(picker: vmux_wire::command_bar::CommandBarPicker) -> Option<Self> {
+        use vmux_wire::command_bar::CommandBarPicker;
+        match picker {
+            CommandBarPicker::GotoLine => Some(Self::OpenGotoLine),
+            CommandBarPicker::Indent => Some(Self::OpenIndentation),
+            CommandBarPicker::LineEnding => Some(Self::OpenLineEnding),
+            CommandBarPicker::Encoding => Some(Self::OpenEncoding),
+            CommandBarPicker::EncodingReopen => Some(Self::OpenReopenWithEncoding),
+            CommandBarPicker::EncodingSave => Some(Self::OpenSaveWithEncoding),
+            CommandBarPicker::Space => None,
+        }
+    }
 }
 
 #[allow(dead_code)]

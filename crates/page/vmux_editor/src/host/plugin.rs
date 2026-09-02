@@ -19,6 +19,7 @@ use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
+use crate::page_model::DisplayCells;
 use crate::preview;
 use crate::wrap::WrapView;
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
@@ -66,8 +67,11 @@ impl Plugin for EditorPlugin {
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(crate::contract::EditorContractPlugin)
+            .add_plugins(EditorHistoryPlugin)
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(crate::app_key::FileKeyPlugin)
+            .add_plugins(crate::search::ProjectSearchPlugin)
+            .add_plugins(ExplorerTreePlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
@@ -91,6 +95,7 @@ impl Plugin for EditorPlugin {
                 FileVideoRect,
                 FileViewModeSet,
                 FileKeymapSet,
+                FileShapeSet,
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,
@@ -108,6 +113,10 @@ impl Plugin for EditorPlugin {
                 ExplorerPanelWidth,
                 ExplorerGoto,
                 ExplorerSearchOpen,
+            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                FileEncodingSet,
+                ExplorerCollapseAll,
             )>::default())
             .add_systems(
                 Update,
@@ -158,12 +167,11 @@ impl Plugin for EditorPlugin {
                     send_note.after(mark_notes_on_knowledge_change),
                 ),
             )
-            .add_systems(Update, (drain_explorer_dir_loads, drain_explorer_mutations))
+            .add_systems(Update, drain_explorer_mutations)
             .add_systems(
                 Update,
                 (
-                    init_explorer_state,
-                    emit_explorer_tree.after(drain_explorer_dir_loads),
+                    emit_explorer_tree.after(mark_explorer_tree_dirty),
                     sync_explorer_chrome,
                     emit_explorer_chrome,
                     sync_open_editors,
@@ -185,6 +193,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
             .add_observer(on_file_hover_request)
+            .add_systems(Update, run_submitted_ex_lines)
             .add_observer(on_file_find_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
@@ -199,10 +208,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_fold_toggle)
             .add_observer(on_file_view_mode_set)
             .add_observer(on_file_keymap_set)
-            .add_observer(on_explorer_tree_toggle)
-            .add_observer(on_explorer_tree_prefetch)
-            .add_observer(on_explorer_tree_refresh)
-            .add_observer(on_explorer_reveal_current)
+            .add_observer(on_file_shape_set)
+            .add_observer(on_file_encoding_set)
             .add_observer(on_explorer_create)
             .add_observer(on_explorer_rename)
             .add_observer(on_explorer_delete)
@@ -219,14 +226,97 @@ pub struct FileView {
     pub path: PathBuf,
 }
 
+impl FileView {
+    fn in_stack(
+        stack: Entity,
+        children_q: &Query<&Children>,
+        views: &Query<NavigableFileView>,
+    ) -> Option<Entity> {
+        let Ok(children) = children_q.get(stack) else {
+            return None;
+        };
+        children.iter().find(|&child| views.contains(child))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn navigate(
+        &mut self,
+        entity: Entity,
+        path: PathBuf,
+        top_line: u32,
+        viewport: &mut FileViewport,
+        metadata: &mut PageMetadata,
+        manager: &mut crate::lsp::manager::LspManager,
+        commands: &mut Commands,
+    ) {
+        let previous = std::mem::replace(&mut self.path, path);
+        manager.close(&previous);
+        let url = url::Url::from_file_path(&self.path)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()));
+        metadata.title = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.path.to_string_lossy().to_string());
+        metadata.url = url;
+        viewport.top_row = top_line;
+        commands.queue(move |world: &mut World| {
+            let Ok(mut entity) = world.get_entity_mut(entity) else {
+                return;
+            };
+            ParkedEdits::park(&mut entity, previous);
+        });
+        commands
+            .entity(entity)
+            .remove::<FileDir>()
+            .remove::<FileBuffer>()
+            .remove::<FileMedia>()
+            .remove::<EditorKeymap>()
+            .remove::<NoteSent>()
+            .remove::<LspEditDirty>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LspOpened>()
+            .remove::<crate::lsp::manager::LintRan>();
+    }
+}
+
 #[derive(Component, Clone, Debug)]
 pub struct FileBuffer {
     pub language: String,
 }
 
 impl FileBuffer {
-    fn error(message: String) -> Self {
-        Self { language: message }
+    fn failed(reason: LoadFailure, message: String) -> Self {
+        Self {
+            language: format!("{}{message}", reason.marker()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LoadFailure {
+    Fatal,
+    Undecodable,
+}
+
+impl LoadFailure {
+    const FATAL: &'static str = "__error__:";
+    const UNDECODABLE: &'static str = "__undecodable__:";
+
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Fatal => Self::FATAL,
+            Self::Undecodable => Self::UNDECODABLE,
+        }
+    }
+
+    fn of(language: &str) -> Option<(Self, &str)> {
+        if let Some(message) = language.strip_prefix(Self::UNDECODABLE) {
+            return Some((Self::Undecodable, message));
+        }
+        let message = language.strip_prefix(Self::FATAL)?;
+        Some((Self::Fatal, message))
     }
 }
 
@@ -237,6 +327,32 @@ pub struct FileViewport {
     pub wrap_columns: u16,
     pub word_wrap: vmux_core::editor::WordWrap,
     pub word_wrap_column: u16,
+}
+
+impl FileViewport {
+    fn scroll_to(
+        &mut self,
+        top: u32,
+        entity: Entity,
+        browsers: &Browsers,
+        commands: &mut Commands,
+    ) {
+        let was = self.top_row;
+        if top == was {
+            return;
+        }
+        self.top_row = top;
+        if !browsers.can_emit_to(&entity) {
+            return;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_SCROLL_BY_EVENT,
+            &FileScrollByEvent {
+                lines: top as i32 - was as i32,
+            },
+        ));
+    }
 }
 
 #[derive(Component, Clone, Debug)]
@@ -261,6 +377,7 @@ pub struct EditState {
     pub core: EditCore,
     pub hl: HighlightCache,
     pub folds: crate::fold::FoldState,
+    indent_width: u16,
     parsed_note: Option<crate::markdown::ParsedNote>,
     wrap_generation: u64,
     wrap_cache: Option<CachedWrapView>,
@@ -270,10 +387,14 @@ impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
+        let indent_width = crate::shape::BufferShape::of(&core.buffer.rope)
+            .indent
+            .width;
         Self {
             core,
             hl,
             folds,
+            indent_width,
             parsed_note,
             wrap_generation: 0,
             wrap_cache: None,
@@ -382,16 +503,134 @@ pub struct FileThemeSent;
 #[derive(Component, Default)]
 pub(crate) struct ExplorerState {
     pub root: PathBuf,
-    pub expanded: HashSet<PathBuf>,
-    pub loading: HashSet<PathBuf>,
-    pub children: HashMap<PathBuf, Vec<FileDirEntry>>,
     pub open_editors: Vec<PathBuf>,
     pub focus_path: Option<PathBuf>,
 }
 
+impl ExplorerState {
+    fn allows(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ExplorerTree {
+    pub expanded: HashSet<PathBuf>,
+    pub loading: HashSet<PathBuf>,
+    pub children: HashMap<PathBuf, Vec<FileDirEntry>>,
+    used: u64,
+}
+
+impl ExplorerTree {
+    fn rows(&self, root: &Path) -> Vec<TreeRow> {
+        flatten_tree(root, &self.expanded, &self.loading, &self.children)
+    }
+
+    fn evict_subtree(&mut self, path: &Path) {
+        self.expanded.retain(|entry| !entry.starts_with(path));
+        self.loading.retain(|entry| !entry.starts_with(path));
+        self.children.retain(|entry, _| !entry.starts_with(path));
+    }
+}
+
+const IDLE_TREE_CAPACITY: usize = 4;
+
+#[derive(Resource, Default)]
+pub(crate) struct ExplorerTrees {
+    by_root: HashMap<PathBuf, ExplorerTree>,
+    dirty: HashSet<PathBuf>,
+    clock: u64,
+}
+
+impl ExplorerTrees {
+    fn at(&mut self, root: &Path) -> &mut ExplorerTree {
+        self.clock += 1;
+        let used = self.clock;
+        let tree = self.by_root.entry(root.to_path_buf()).or_default();
+        tree.used = used;
+        tree
+    }
+
+    fn prune(&mut self, live: &HashSet<PathBuf>) {
+        let mut idle = Vec::new();
+        for (root, tree) in &self.by_root {
+            if live.contains(root) {
+                continue;
+            }
+            idle.push((tree.used, root.clone()));
+        }
+        if idle.len() <= IDLE_TREE_CAPACITY {
+            return;
+        }
+        idle.sort_by_key(|(used, _)| *used);
+        let drop_count = idle.len() - IDLE_TREE_CAPACITY;
+        for (_, root) in idle.into_iter().take(drop_count) {
+            self.by_root.remove(&root);
+            self.dirty.remove(&root);
+        }
+    }
+
+    fn rows(&self, root: &Path) -> Vec<TreeRow> {
+        match self.by_root.get(root) {
+            Some(tree) => tree.rows(root),
+            None => Vec::new(),
+        }
+    }
+
+    fn is_loading(&self, root: &Path, path: &Path) -> bool {
+        self.by_root
+            .get(root)
+            .is_some_and(|tree| tree.loading.contains(path))
+    }
+
+    fn roots(&self) -> Vec<PathBuf> {
+        self.by_root.keys().cloned().collect()
+    }
+
+    fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
+        self.by_root.values().flat_map(|tree| tree.expanded.iter())
+    }
+
+    fn touch(&mut self, root: &Path) {
+        self.dirty.insert(root.to_path_buf());
+    }
+
+    fn has_dirty(&self) -> bool {
+        !self.dirty.is_empty()
+    }
+
+    fn take_dirty(&mut self) -> HashSet<PathBuf> {
+        std::mem::take(&mut self.dirty)
+    }
+
+    fn start_dir_load(
+        &mut self,
+        root: &Path,
+        path: PathBuf,
+        commands: &mut Commands,
+        force: bool,
+    ) -> bool {
+        let tree = self.at(root);
+        if tree.loading.contains(&path) || !force && tree.children.contains_key(&path) {
+            return false;
+        }
+        tree.loading.insert(path.clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let entries = list_dir(&path);
+            (path, entries)
+        });
+        commands.spawn(ExplorerDirLoadTask {
+            root: root.to_path_buf(),
+            task,
+        });
+        self.touch(root);
+        true
+    }
+}
+
 #[derive(Component)]
 struct ExplorerDirLoadTask {
-    webview: Entity,
+    root: PathBuf,
     task: Task<(PathBuf, Vec<FileDirEntry>)>,
 }
 
@@ -477,7 +716,8 @@ pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
     pub root: String,
     pub query: String,
-    pub matches: Vec<ExplorerSearchMatch>,
+    pub files: Vec<ExplorerSearchFile>,
+    pub capped: bool,
 }
 
 #[derive(Component, Clone)]
@@ -495,6 +735,7 @@ struct PendingGlobalSearchRequest {
 }
 
 const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
+const STICKY_SCROLL_DEPTH: usize = 5;
 
 #[derive(Component)]
 struct FileViewModeSent;
@@ -514,6 +755,19 @@ type UnloadedFileView = (
     Without<FileDir>,
     Without<FileMedia>,
     Without<EditState>,
+);
+type UnloadedFile = (
+    Entity,
+    &'static FileView,
+    Option<&'static mut ParkedEdits>,
+    Option<&'static ForcedEncoding>,
+);
+type EncodingTarget = (
+    &'static FileView,
+    Option<&'static mut EditState>,
+    Option<&'static EditorKeymap>,
+    Option<&'static mut FileViewport>,
+    Option<&'static mut vmux_git::GitDiffSource>,
 );
 type ReadyUnsentMeta = (
     Without<FileInitialMetaSent>,
@@ -562,6 +816,11 @@ type ChromeUnsentReady = (
     Without<ExplorerChromeSent>,
     With<vmux_core::page::PageReady>,
 );
+type NavigableFileView = (
+    &'static mut FileView,
+    &'static mut FileViewport,
+    &'static mut PageMetadata,
+);
 
 fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = path
@@ -591,6 +850,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
             },
             vmux_core::host::page::HostsPage,
             vmux_core::host::page::BindsEditingChords,
+            vmux_core::host::page::HostHistory::default(),
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -624,6 +884,8 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 pub fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
+    mut views: Query<NavigableFileView>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
@@ -650,10 +912,30 @@ pub fn handle_file_page_open(
             });
         }
         let pending = parse_goto_fragment(&task.url);
-        clear_stack_children(task.stack, &children_q, &mut commands);
-        let view = commands
-            .spawn((new_file_view_bundle(&clean_url, path), ChildOf(task.stack)))
-            .id();
+        let view = match FileView::in_stack(task.stack, &children_q, &views) {
+            Some(view) => {
+                if let Ok((mut fv, mut viewport, mut metadata)) = views.get_mut(view)
+                    && fv.path != path
+                {
+                    fv.navigate(
+                        view,
+                        path,
+                        0,
+                        &mut viewport,
+                        &mut metadata,
+                        &mut manager,
+                        &mut commands,
+                    );
+                }
+                view
+            }
+            None => {
+                clear_stack_children(task.stack, &children_q, &mut commands);
+                commands
+                    .spawn((new_file_view_bundle(&clean_url, path), ChildOf(task.stack)))
+                    .id()
+            }
+        };
         if let Some(pg) = pending {
             commands.entity(view).insert(pg);
         }
@@ -678,12 +960,13 @@ fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_co
 }
 
 fn load_file_buffers(
-    mut q: Query<(Entity, &FileView, Option<&mut ParkedEdits>), UnloadedFileView>,
+    mut q: Query<UnloadedFile, UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
-    for (entity, fv, mut parked) in &mut q {
+    for (entity, fv, mut parked, forced) in &mut q {
+        let forced = forced.and_then(|f| f.of(&fv.path));
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
             commands
@@ -712,18 +995,21 @@ fn load_file_buffers(
                 commands
                     .entity(entity)
                     .remove::<MissingFileView>()
-                    .insert(FileBuffer::error(format!(
-                        "__error__:file too large ({len} bytes, max {})",
-                        crate::highlight::FILE_VIEW_MAX_BYTES
-                    )));
+                    .insert(FileBuffer::failed(
+                        LoadFailure::Fatal,
+                        format!(
+                            "file too large ({len} bytes, max {})",
+                            crate::highlight::FILE_VIEW_MAX_BYTES
+                        ),
+                    ));
                 continue;
             }
             Err(e) => {
                 let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::error(format!(
-                    "__error__:cannot open {}: {e}",
-                    fv.path.display()
-                )));
+                entity_commands.insert(FileBuffer::failed(
+                    LoadFailure::Fatal,
+                    format!("cannot open {}: {e}", fv.path.display()),
+                ));
                 if e.kind() == std::io::ErrorKind::NotFound {
                     entity_commands.insert(MissingFileView);
                 } else {
@@ -736,7 +1022,8 @@ fn load_file_buffers(
         let kind = settings_keymap(&settings);
         let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
-        if let Some(parked) = parked.as_mut()
+        if forced.is_none()
+            && let Some(parked) = parked.as_mut()
             && let Some(resumed) = parked.resume(&fv.path)
         {
             let mut entity_commands = commands.entity(entity);
@@ -752,26 +1039,28 @@ fn load_file_buffers(
             }
             continue;
         }
-        let text = match std::fs::read(&fv.path) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(t) => t,
-                Err(_) => {
-                    commands
-                        .entity(entity)
-                        .remove::<MissingFileView>()
-                        .insert(FileBuffer::error(format!(
-                            "__error__:not a UTF-8 text file: {}",
-                            fv.path.display()
-                        )));
-                    continue;
-                }
+        let decoded = match std::fs::read(&fv.path) {
+            Ok(bytes) => match forced {
+                Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
+                None => match crate::encoding::DecodedText::of(&bytes) {
+                    Some(decoded) => decoded,
+                    None => {
+                        commands.entity(entity).remove::<MissingFileView>().insert(
+                            FileBuffer::failed(
+                                LoadFailure::Undecodable,
+                                format!("not a text file: {}", fv.path.display()),
+                            ),
+                        );
+                        continue;
+                    }
+                },
             },
             Err(e) => {
                 let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::error(format!(
-                    "__error__:cannot read {}: {e}",
-                    fv.path.display()
-                )));
+                entity_commands.insert(FileBuffer::failed(
+                    LoadFailure::Fatal,
+                    format!("cannot read {}: {e}", fv.path.display()),
+                ));
                 if e.kind() == std::io::ErrorKind::NotFound {
                     entity_commands.insert(MissingFileView);
                 } else {
@@ -780,6 +1069,7 @@ fn load_file_buffers(
                 continue;
             }
         };
+        let crate::encoding::DecodedText { text, encoding } = decoded;
         let hl = match heavy {
             true => HighlightCache::plain(&fv.path),
             false => HighlightCache::new(&fv.path),
@@ -790,6 +1080,7 @@ fn load_file_buffers(
             &text,
             kind.initial_mode(),
         );
+        core.buffer.encoding = encoding;
         let mut folds = crate::fold::FoldState::default();
         if !heavy {
             folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
@@ -895,12 +1186,13 @@ fn send_initial_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        if let Some(message) = buf.language.strip_prefix("__error__:") {
+        if let Some((reason, message)) = LoadFailure::of(&buf.language) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 FILE_ERROR_EVENT,
                 &FileErrorEvent {
                     message: message.to_string(),
+                    undecodable: reason == LoadFailure::Undecodable,
                 },
             ));
         }
@@ -926,6 +1218,7 @@ fn send_initial_text_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
+        let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_META_EVENT,
@@ -934,6 +1227,9 @@ fn send_initial_text_meta(
                 abs_path: fv.path.to_string_lossy().into_owned(),
                 language: edit.core.buffer.language.clone(),
                 total_lines: edit.core.buffer.len_lines() as u32,
+                indent: shape.indent,
+                line_ending: shape.line_ending,
+                encoding: edit.core.buffer.encoding,
             },
         ));
         if vp.rows > 0 {
@@ -1230,58 +1526,79 @@ fn emit_window(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let total = edit.core.buffer.len_lines() as u32;
-    let (visible, wrap_columns) = {
-        let wrap = wrapped_view(edit, vp);
-        (wrap.total_rows(), wrap.columns())
-    };
-    let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
-    let overscan = vmux_core::scroll::overscan_for(
-        vp.rows,
-        vmux_core::scroll::EDITOR_OVERSCAN_K,
-        vmux_core::scroll::OVERSCAN_FLOOR,
-        vmux_core::scroll::OVERSCAN_CAP,
-    );
-    let first_row = vis_first.saturating_sub(overscan);
-    let end_row = (vis_end + overscan).min(visible);
-    let layouts = wrapped_view(edit, vp).window(first_row, end_row);
-    let first_row = layouts.first().map_or(first_row, |line| line.row);
-    let mut lines = Vec::with_capacity(layouts.len());
-    if let (Some(first_line), Some(last_line)) = (
-        layouts.first().map(|layout| layout.line_no),
-        layouts.last().map(|layout| layout.line_no),
-    ) {
-        let mut window: Vec<Option<vmux_core::event::FileLine>> = edit
-            .hl
-            .line_window(
-                &edit.core.buffer.rope,
-                first_line as usize,
-                last_line as usize + 1,
-            )
-            .into_iter()
-            .map(Some)
-            .collect();
-        for layout in &layouts {
-            let index = (layout.line_no - first_line) as usize;
-            let Some(mut line) = window.get_mut(index).and_then(Option::take) else {
-                continue;
-            };
-            line.fold = edit.folds.gutter(layout.line_no);
-            lines.push(line);
-        }
-    }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
-        &FileViewportPatch {
+        &EditorWindow::of(edit, vp),
+    ));
+}
+
+struct EditorWindow;
+
+impl EditorWindow {
+    fn of(edit: &mut EditState, vp: &FileViewport) -> FileViewportPatch {
+        let total = edit.core.buffer.len_lines() as u32;
+        let wrap = wrapped_view(edit, vp);
+        let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
+        let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
+        let overscan = vmux_core::scroll::overscan_for(
+            vp.rows,
+            vmux_core::scroll::EDITOR_OVERSCAN_K,
+            vmux_core::scroll::OVERSCAN_FLOOR,
+            vmux_core::scroll::OVERSCAN_CAP,
+        );
+        let first_row = vis_first.saturating_sub(overscan);
+        let end_row = (vis_end + overscan).min(visible);
+        let visible_top = wrap.line_at(vis_first);
+        let layouts = wrap.window(first_row, end_row);
+        let first_row = layouts.first().map_or(first_row, |line| line.row);
+        let mut lines = Vec::with_capacity(layouts.len());
+        if let (Some(first_line), Some(last_line)) = (
+            layouts.first().map(|layout| layout.line_no),
+            layouts.last().map(|layout| layout.line_no),
+        ) {
+            let mut window = edit.hl.line_window(
+                &edit.core.buffer.rope,
+                first_line as usize,
+                last_line as usize + 1,
+            );
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
+            for layout in &layouts {
+                let index = (layout.line_no - first_line) as usize;
+                let Some(line) = window.get_mut(index) else {
+                    continue;
+                };
+                let mut line = std::mem::take(line);
+                line.fold = edit.folds.gutter(layout.line_no);
+                line.indent_levels = guides.levels(layout.line_no as usize);
+                lines.push(line);
+            }
+        }
+        let mut sticky = Vec::new();
+        if let Some(top) = visible_top {
+            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
+            for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
+                let at = header as usize;
+                let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
+                if window.is_empty() {
+                    continue;
+                }
+                let mut line = window.remove(0);
+                line.fold = edit.folds.gutter(header);
+                line.indent_levels = guides.levels(at);
+                sticky.push(line);
+            }
+        }
+        FileViewportPatch {
             first_row,
             total_rows: visible,
             total_lines: total,
             wrap_columns,
             layouts,
             lines,
-        },
-    ));
+            sticky,
+        }
+    }
 }
 
 /// The buffer lines whose selection, search and word highlights the page can actually show.
@@ -1383,7 +1700,6 @@ fn emit_cursor(
             selections,
             source_primary,
             source_selections: raw_selections,
-            command_line: keymap.command_line().unwrap_or_default(),
             search,
             word_highlights,
         },
@@ -1448,10 +1764,8 @@ impl ScrolledCursor {
         if line == cursor.line {
             return false;
         }
-        let at = edit
-            .core
-            .buffer
-            .coords_to_char(line as usize, cursor.col as usize);
+        let col = edit.core.char_at_cell(line as usize, cursor.col);
+        let at = edit.core.buffer.coords_to_char(line as usize, col);
         if edit.core.mode.is_visual() {
             let anchor = edit.core.primary().anchor;
             edit.core.selections = vec![Selection { anchor, head: at }];
@@ -1470,12 +1784,12 @@ fn wrapped_autoscroll(edit: &mut EditState, vp: &FileViewport) -> Option<u32> {
     let cursor = edit.core.cursor_pos();
     let row = wrapped_view(edit, vp).position(cursor.line, cursor.col).0;
     if row < vp.top_row {
-        Some(row)
-    } else if row >= vp.top_row + vp.rows as u32 {
-        Some(row + 1 - vp.rows as u32)
-    } else {
-        None
+        return Some(row);
     }
+    if row >= vp.top_row + vp.rows as u32 {
+        return Some(row + 1 - vp.rows as u32);
+    }
+    None
 }
 
 fn rehighlight_on_color_scheme(
@@ -1506,17 +1820,22 @@ fn sync_editor_wrap_settings(
     mut commands: Commands,
 ) {
     for (entity, mut viewport, edit, keymap) in &mut views {
+        let wanted_column = settings.editor.word_wrap_column.max(1);
         if viewport.word_wrap == settings.editor.word_wrap
-            && viewport.word_wrap_column == settings.editor.word_wrap_column
+            && viewport.word_wrap_column == wanted_column
         {
             continue;
         }
+        let showing = viewport.top_row;
         viewport.word_wrap = settings.editor.word_wrap;
-        viewport.word_wrap_column = settings.editor.word_wrap_column.max(1);
+        viewport.word_wrap_column = wanted_column;
         viewport.top_row = 0;
         if let Some(mut edit) = edit {
-            if let Some(top) = wrapped_autoscroll(&mut edit, &viewport) {
-                viewport.top_row = top;
+            let wanted = wrapped_autoscroll(&mut edit, &viewport);
+            viewport.top_row = showing;
+            if viewport.rows > 0 {
+                viewport.scroll_to(wanted.unwrap_or(0), entity, &browsers, &mut commands);
+                edit.core.top_row = viewport.top_row;
             }
             emit_window(entity, &mut edit, &viewport, &browsers, &mut commands);
             if let Some(keymap) = keymap {
@@ -1611,6 +1930,118 @@ fn on_file_keymap_set(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn on_file_shape_set(
+    trigger: On<BinReceive<FileShapeSet>>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    run_commands(
+        entity,
+        vec![EditCommand::Reshape(crate::shape::BufferShape {
+            indent: wanted.indent,
+            line_ending: wanted.line_ending,
+        })],
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+    let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
+    edit.indent_width = shape.indent.width;
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_SHAPE_EVENT,
+        &FileShapeEvent {
+            indent: shape.indent,
+            line_ending: shape.line_ending,
+        },
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_encoding_set(
+    trigger: On<BinReceive<FileEncodingSet>>,
+    mut q: Query<EncodingTarget>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok((fv, edit, keymap, vp, diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    if wanted.action == FileEncodingAction::Reopen {
+        commands
+            .entity(entity)
+            .insert(ForcedEncoding {
+                path: fv.path.clone(),
+                encoding: wanted.encoding,
+            })
+            .remove::<EditState>()
+            .remove::<vmux_git::GitDiffSource>()
+            .remove::<FileBuffer>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LintRan>();
+        manager.change(&fv.path);
+        return;
+    }
+    let (Some(mut edit), Some(keymap), Some(mut vp), Some(mut diff_source)) =
+        (edit, keymap, vp, diff_source)
+    else {
+        return;
+    };
+    edit.core.buffer.encoding = wanted.encoding;
+    run_commands(
+        entity,
+        vec![EditCommand::Save],
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_ENCODING_EVENT,
+        &FileEncodingEvent {
+            encoding: edit.core.buffer.encoding,
+        },
+    ));
+}
+
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
     mut q: Query<(
@@ -1663,6 +2094,10 @@ fn on_file_scroll(
     };
     let visible = wrapped_view(&mut edit, &vp).total_rows();
     vp.top_row = clamp_top_line(evt.top_row, visible, vp.rows);
+    edit.core.top_row = vp.top_row;
+    if !evt.needs_rows {
+        return;
+    }
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
     emit_cursor(
@@ -1935,51 +2370,68 @@ fn on_file_open_external(
     let _ = std::process::Command::new(program).arg(&req_path).spawn();
 }
 
-#[allow(clippy::too_many_arguments)]
-fn navigate_file_view(
-    entity: Entity,
-    path: PathBuf,
-    top_line: u32,
-    fv: &mut FileView,
-    vp: &mut FileViewport,
-    meta: &mut PageMetadata,
-    manager: &mut crate::lsp::manager::LspManager,
-    commands: &mut Commands,
+struct EditorHistoryPlugin;
+
+impl Plugin for EditorHistoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                show_traversed_file_view.in_set(vmux_core::host::page::HostHistorySet::Apply),
+                record_file_view_visit.in_set(vmux_core::host::page::HostHistorySet::Record),
+            ),
+        );
+    }
+}
+
+fn show_traversed_file_view(
+    mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
+    mut views: Query<NavigableFileView>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
-    let previous = std::mem::replace(&mut fv.path, path);
-    manager.close(&previous);
-    let url = url::Url::from_file_path(&fv.path)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{}", fv.path.to_string_lossy()));
-    meta.title = fv
-        .path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| fv.path.to_string_lossy().to_string());
-    meta.url = url;
-    vp.top_row = top_line;
-    commands.queue(move |world: &mut World| {
-        let Ok(mut entity) = world.get_entity_mut(entity) else {
-            return;
+    for event in traversed.read() {
+        let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(event.webview) else {
+            continue;
         };
-        ParkedEdits::park(&mut entity, previous);
-    });
-    commands
-        .entity(entity)
-        .remove::<FileDir>()
-        .remove::<FileBuffer>()
-        .remove::<FileMedia>()
-        .remove::<EditorKeymap>()
-        .remove::<NoteSent>()
-        .remove::<LspEditDirty>()
-        .remove::<FileInitialMetaSent>()
-        .remove::<crate::lsp::manager::LspOpened>()
-        .remove::<crate::lsp::manager::LintRan>();
+        let Some(path) =
+            vmux_core::file_url::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
+        else {
+            continue;
+        };
+        view.navigate(
+            event.webview,
+            path,
+            event.entry.top_line,
+            &mut viewport,
+            &mut metadata,
+            &mut manager,
+            &mut commands,
+        );
+    }
+}
+
+fn record_file_view_visit(
+    mut views: Query<
+        (
+            &PageMetadata,
+            &FileViewport,
+            &mut vmux_core::host::page::HostHistory,
+        ),
+        With<FileView>,
+    >,
+) {
+    for (metadata, viewport, mut history) in &mut views {
+        if metadata.url.is_empty() || history.showing(&metadata.url, viewport.top_row) {
+            continue;
+        }
+        history.observe(&metadata.url, viewport.top_row);
+    }
 }
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<NavigableFileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -1988,11 +2440,10 @@ fn on_file_open(
     let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
-    navigate_file_view(
+    fv.navigate(
         entity,
         path,
         0,
-        &mut fv,
         &mut vp,
         &mut meta,
         &mut manager,
@@ -2044,7 +2495,10 @@ fn on_knowledge_link_open(
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
                             FILE_ERROR_EVENT,
-                            &FileErrorEvent { message: error },
+                            &FileErrorEvent {
+                                message: error,
+                                undecodable: false,
+                            },
                         ));
                     }
                     return;
@@ -2082,6 +2536,21 @@ fn on_knowledge_link_open(
 #[derive(Component)]
 struct FileReloadRequested;
 
+#[derive(Component, Clone)]
+struct ForcedEncoding {
+    path: PathBuf,
+    encoding: FileEncoding,
+}
+
+impl ForcedEncoding {
+    fn of(&self, path: &Path) -> Option<FileEncoding> {
+        match self.path == path {
+            true => Some(self.encoding),
+            false => None,
+        }
+    }
+}
+
 #[derive(Component)]
 struct MissingFileView;
 
@@ -2118,7 +2587,7 @@ fn ensure_file_watch(watch: &mut FileWatch, dir: PathBuf) {
 
 fn reconcile_file_watches(
     views: Query<&FileView>,
-    explorers: Query<&ExplorerState>,
+    trees: Res<ExplorerTrees>,
     watch: Option<NonSendMut<FileWatch>>,
 ) {
     let Some(mut watch) = watch else {
@@ -2129,10 +2598,8 @@ fn reconcile_file_watches(
             ensure_file_watch(&mut watch, dir);
         }
     }
-    for st in &explorers {
-        for dir in st.expanded.iter() {
-            ensure_file_watch(&mut watch, dir.clone());
-        }
+    for dir in trees.expanded_dirs() {
+        ensure_file_watch(&mut watch, dir.clone());
     }
 }
 
@@ -2140,7 +2607,7 @@ fn drain_file_changes(
     watch: Option<NonSend<FileWatch>>,
     self_writes: Option<NonSendMut<SelfWrites>>,
     views: Query<(Entity, &FileView, Has<MissingFileView>)>,
-    mut explorers: Query<(Entity, &mut ExplorerState)>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -2172,16 +2639,19 @@ fn drain_file_changes(
             commands.entity(entity).insert(FileReloadRequested);
         }
     }
-    for (entity, mut st) in &mut explorers {
-        let cached: Vec<PathBuf> = st.children.keys().cloned().collect();
+    let mut changed_dirs: HashSet<PathBuf> = HashSet::new();
+    for path in &changed {
+        if let Some(parent) = path.parent() {
+            changed_dirs.insert(canon(parent));
+        }
+    }
+    for root in trees.roots() {
+        let cached: Vec<PathBuf> = trees.at(&root).children.keys().cloned().collect();
         for d in cached {
-            let dc = canon(&d);
-            if changed
-                .iter()
-                .any(|c| c.parent().map(|p| canon(p) == dc).unwrap_or(false))
-            {
-                let _ = start_explorer_dir_load(entity, d, &mut st, &mut commands, true);
+            if !changed_dirs.contains(&canon(&d)) {
+                continue;
             }
+            trees.start_dir_load(&root, d, &mut commands, true);
         }
     }
 }
@@ -2389,27 +2859,18 @@ fn run_commands(
 ) -> bool {
     let top_before = vp.top_row;
     let mut text_changed = false;
-    let mut sel_or_mode = false;
+    let mut cursor_stale = false;
     let mut dirty_changed = false;
     let mut fold_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
             let visible = wrapped_view(edit, vp).total_rows();
-            let was = vp.top_row;
-            let target = (was as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
-            vp.top_row = clamp_top_line(target, visible, vp.rows);
+            let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
+            let target = clamp_top_line(target, visible, vp.rows);
+            vp.scroll_to(target, entity, browsers, commands);
             edit.core.top_row = vp.top_row;
             if ScrolledCursor::follow(edit, vp) {
-                sel_or_mode = true;
-            }
-            if vp.top_row != was && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
-                    FILE_SCROLL_BY_EVENT,
-                    &FileScrollByEvent {
-                        lines: vp.top_row as i32 - was as i32,
-                    },
-                ));
+                cursor_stale = true;
             }
             continue;
         }
@@ -2419,22 +2880,13 @@ fn run_commands(
                 .view(edit.core.buffer.len_lines() as u32)
                 .buffer_to_row(edit.core.cursor_pos().line);
             let rows = vp.rows.max(1) as u32;
-            let was = vp.top_row;
-            vp.top_row = match placement {
+            let target = match placement {
                 crate::edit::command::ScrollPlacement::Top => row,
                 crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
                 crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
             };
+            vp.scroll_to(target, entity, browsers, commands);
             edit.core.top_row = vp.top_row;
-            if vp.top_row != was && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
-                    FILE_SCROLL_BY_EVENT,
-                    &FileScrollByEvent {
-                        lines: vp.top_row as i32 - was as i32,
-                    },
-                ));
-            }
             continue;
         }
         if matches!(
@@ -2515,6 +2967,30 @@ fn run_commands(
                 ));
                 continue;
             }
+            EditCommand::ClearSearchHighlight => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_KEY_EVENT,
+                    &vmux_core::event::FileKey::FindClose,
+                ));
+                cursor_stale = true;
+            }
+            EditCommand::OpenFind { forward } => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    vmux_core::event::FILE_KEY_EVENT,
+                    &vmux_core::event::FileKey::Find { forward: *forward },
+                ));
+                continue;
+            }
+            EditCommand::OpenCommandLine => {
+                commands.write_message(vmux_command::host::command::AppCommand::Browser(
+                    vmux_command::host::command::BrowserCommand::Bar(
+                        vmux_command::host::command::BrowserBarCommand::OpenExBar,
+                    ),
+                ));
+                continue;
+            }
             EditCommand::TriggerCompletion => {
                 let (line, utf16, ccol, lt) = caret_lsp(edit);
                 let replace_from = word_start_col(&lt, ccol);
@@ -2528,7 +3004,25 @@ fn run_commands(
         if matches!(cmd, EditCommand::Save) {
             let path = edit.core.buffer.path.clone();
             let body = edit.core.buffer.text();
-            match write_atomic(&path, body.as_bytes()) {
+            let encoding = edit.core.buffer.encoding;
+            let bytes = match (crate::encoding::Reencode { encoding }).applied(&body) {
+                Ok(bytes) => bytes,
+                Err(unmappable) => {
+                    tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
+                    if browsers.can_emit_to(&entity) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            FILE_ERROR_EVENT,
+                            &FileErrorEvent {
+                                message: format!("save failed: {unmappable}"),
+                                undecodable: false,
+                            },
+                        ));
+                    }
+                    continue;
+                }
+            };
+            match write_atomic(&path, &bytes) {
                 Ok(()) => {
                     self_writes
                         .0
@@ -2551,6 +3045,7 @@ fn run_commands(
                             FILE_ERROR_EVENT,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
+                                undecodable: false,
                             },
                         ));
                     }
@@ -2570,7 +3065,7 @@ fn run_commands(
                 let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
                 edit.hl.invalidate_from(l.saturating_sub(1));
             }
-            sel_or_mode = true;
+            cursor_stale = true;
             dirty_changed = true;
             continue;
         }
@@ -2590,7 +3085,7 @@ fn run_commands(
             let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
             edit.hl.invalidate_from(l.saturating_sub(1));
         }
-        sel_or_mode |= out.sel_changed || out.mode_changed;
+        cursor_stale |= out.sel_changed || out.mode_changed;
         dirty_changed |= out.dirty_changed;
         if let Some(value) = out.yank
             && let Some(cb) = clipboard.0.as_mut()
@@ -2614,17 +3109,21 @@ fn run_commands(
         }
     }
     if let Some(top) = wrapped_autoscroll(edit, vp) {
-        vp.top_row = top;
+        vp.scroll_to(top, entity, browsers, commands);
+        edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;
     if text_changed || fold_changed || DriftedWindow::of(top_before, &vpc).left_the_band() {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
-    if text_changed || sel_or_mode || fold_changed {
+    if text_changed || cursor_stale || fold_changed {
         emit_cursor(entity, edit, keymap, &vpc, browsers, commands);
     }
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
+    }
+    if dirty_changed {
+        commands.entity(entity).insert(OpenEditorsDirty);
     }
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
@@ -2873,7 +3372,10 @@ fn on_file_property_edit(
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 FILE_ERROR_EVENT,
-                &FileErrorEvent { message },
+                &FileErrorEvent {
+                    message,
+                    undecodable: false,
+                },
             ));
             return;
         }
@@ -3069,6 +3571,55 @@ fn edit_closed_file(
         .map_err(|e| format!("{}: {e}", document.path.display()))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_submitted_ex_lines(
+    mut submitted: MessageReader<vmux_command::host::ExLineSubmitted>,
+    children: Query<&Children>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for message in submitted.read() {
+        let cmds = crate::edit::ex::ExLine::edits(&message.line);
+        if cmds.is_empty() {
+            continue;
+        }
+        let Some(stack) = message.stack else {
+            continue;
+        };
+        let Ok(kids) = children.get(stack) else {
+            continue;
+        };
+        let Some(entity) = kids.iter().find(|child| q.contains(*child)) else {
+            continue;
+        };
+        let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+            continue;
+        };
+        run_commands(
+            entity,
+            cmds,
+            &mut edit,
+            &mut diff_source,
+            keymap.0.as_ref(),
+            &mut vp,
+            &mut clipboard,
+            &mut self_writes,
+            &mut manager,
+            &browsers,
+            &mut commands,
+        );
+    }
+}
+
 fn on_file_find_request(
     trigger: On<BinReceive<FileFindRequest>>,
     mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
@@ -3087,9 +3638,13 @@ fn on_file_find_request(
             reverse: request.reverse,
         }));
     } else {
+        let pattern = match request.regex {
+            true => crate::edit::search::translate(&request.query),
+            false => regex::escape(&request.query),
+        };
         edit.core.apply(EditCommand::SetSearch {
-            pattern: regex::escape(&request.query),
-            forward: true,
+            pattern,
+            forward: request.forward,
         });
     }
     emit_cursor(
@@ -3112,19 +3667,8 @@ fn on_file_hover_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let line = req
-        .line
-        .min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
-    let lt: String = edit
-        .core
-        .buffer
-        .rope
-        .line(line as usize)
-        .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
-        .collect();
-    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, req.col);
-    manager.hover(entity, &edit.core.buffer.path, line, utf16, req.col);
+    let (line, utf16, _, col) = req_pos(edit, req.line, req.col);
+    manager.hover(entity, &edit.core.buffer.path, line, utf16, col);
 }
 
 #[derive(Component)]
@@ -3152,7 +3696,7 @@ fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
     })
 }
 
-fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
+fn req_pos(edit: &EditState, line: u32, cell: u32) -> (u32, u32, String, u32) {
     let line = line.min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
     let lt: String = edit
         .core
@@ -3162,8 +3706,9 @@ fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
         .chars()
         .filter(|c| *c != '\n' && *c != '\r')
         .collect();
+    let col = DisplayCells::char_at(&lt, cell) as u32;
     let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, col);
-    (line, utf16, lt)
+    (line, utf16, lt, col)
 }
 
 fn on_file_definition_request(
@@ -3176,7 +3721,7 @@ fn on_file_definition_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.definition(entity, &path, line, utf16);
 }
@@ -3324,7 +3869,7 @@ fn on_file_rename_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.rename(entity, &path, line, utf16, &req.new_name);
 }
@@ -3339,7 +3884,7 @@ fn on_file_references_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
     let path = edit.core.buffer.path.clone();
     manager.references(entity, &path, line, utf16);
 }
@@ -3363,8 +3908,8 @@ fn on_file_completion_request(
     {
         return;
     }
-    let (line, utf16, lt) = req_pos(edit, req.line, req.col);
-    let replace_from = word_start_col(&lt, req.col as usize);
+    let (line, utf16, lt, col) = req_pos(edit, req.line, req.col);
+    let replace_from = word_start_col(&lt, col as usize);
     let path = edit.core.buffer.path.clone();
     manager.completion(entity, &path, line, utf16, replace_from);
 }
@@ -3427,7 +3972,15 @@ fn on_file_completion_commit(
     );
 }
 
-fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileViewport) {
+fn goto_caret(
+    entity: Entity,
+    edit: &mut EditState,
+    line: u32,
+    utf16_col: u32,
+    vp: &mut FileViewport,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
     let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
     let lt: String = edit
         .core
@@ -3441,7 +3994,8 @@ fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileView
     let at = edit.core.buffer.coords_to_char(line, ccol as usize);
     edit.core.set_caret(at);
     if let Some(top) = wrapped_autoscroll(edit, vp) {
-        vp.top_row = top;
+        vp.scroll_to(top, entity, browsers, commands);
+        edit.core.top_row = vp.top_row;
     }
 }
 
@@ -3464,7 +4018,15 @@ fn apply_goto(
             continue;
         };
         if canon(&fv.path) == canon(&g.path) {
-            goto_caret(&mut edit, g.line, g.utf16_col, &mut vp);
+            goto_caret(
+                g.entity,
+                &mut edit,
+                g.line,
+                g.utf16_col,
+                &mut vp,
+                &browsers,
+                &mut commands,
+            );
             let vpc = *vp;
             emit_window(g.entity, &mut edit, &vpc, &browsers, &mut commands);
             emit_cursor(
@@ -3520,7 +4082,15 @@ fn apply_pending_goto(
     mut commands: Commands,
 ) {
     for (entity, mut edit, mut vp, keymap, pg) in &mut q {
-        goto_caret(&mut edit, pg.line, pg.utf16_col, &mut vp);
+        goto_caret(
+            entity,
+            &mut edit,
+            pg.line,
+            pg.utf16_col,
+            &mut vp,
+            &browsers,
+            &mut commands,
+        );
         if let Some(end) = pg.select_end_col {
             let line = (pg.line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
             let lt: String = edit
@@ -3562,10 +4132,8 @@ fn on_file_pointer(
     let Ok((mut edit, mut keymap, vp)) = q.get_mut(entity) else {
         return;
     };
-    let at = edit
-        .core
-        .buffer
-        .coords_to_char(p.line as usize, p.col as usize);
+    let col = edit.core.char_at_cell(p.line as usize, p.col);
+    let at = edit.core.buffer.coords_to_char(p.line as usize, col);
     if p.add {
         edit.core.toggle_caret(at);
     } else if p.extend {
@@ -3622,49 +4190,20 @@ fn explorer_root_name(root: &Path) -> String {
 
 const EXPLORER_WARM_AHEAD: usize = 64;
 
-fn start_explorer_dir_load(
-    entity: Entity,
-    path: PathBuf,
-    st: &mut ExplorerState,
-    commands: &mut Commands,
-    force: bool,
-) -> bool {
-    if st.loading.contains(&path) || !force && st.children.contains_key(&path) {
-        return false;
-    }
-    st.loading.insert(path.clone());
-    let task_path = path.clone();
-    let task = IoTaskPool::get().spawn(async move {
-        let entries = list_dir(&task_path);
-        (task_path, entries)
-    });
-    commands.spawn(ExplorerDirLoadTask {
-        webview: entity,
-        task,
-    });
-    commands.entity(entity).insert(ExplorerTreeDirty);
-    true
-}
-
-fn explorer_path_allowed(st: &ExplorerState, path: &Path) -> bool {
-    path == st.root || path.starts_with(&st.root)
-}
-
 fn reveal_current_in_tree(
     entity: Entity,
     current: &Path,
     st: &mut ExplorerState,
+    trees: &mut ExplorerTrees,
     commands: &mut Commands,
 ) {
-    let mut tree_changed = false;
+    let mut shared_changed = false;
+    let mut page_changed = false;
     let root = project_root(current);
     if st.root != root {
         st.root = root;
-        st.expanded.clear();
-        st.loading.clear();
-        st.children.clear();
         st.focus_path = None;
-        tree_changed = true;
+        page_changed = true;
     }
     let current_dir = if current.is_dir() {
         current
@@ -3675,14 +4214,17 @@ fn reveal_current_in_tree(
         return;
     };
     let mut dir = st.root.clone();
-    tree_changed |= st.expanded.insert(dir.clone());
-    tree_changed |= start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+    shared_changed |= trees.at(&st.root).expanded.insert(dir.clone());
+    shared_changed |= trees.start_dir_load(&st.root, dir.clone(), commands, false);
     for component in relative.components() {
         dir.push(component);
-        tree_changed |= st.expanded.insert(dir.clone());
-        tree_changed |= start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+        shared_changed |= trees.at(&st.root).expanded.insert(dir.clone());
+        shared_changed |= trees.start_dir_load(&st.root, dir.clone(), commands, false);
     }
-    if tree_changed {
+    if shared_changed {
+        trees.touch(&st.root);
+    }
+    if shared_changed || page_changed {
         st.focus_path = Some(current.to_path_buf());
         commands.entity(entity).insert(ExplorerTreeDirty);
     }
@@ -3691,6 +4233,7 @@ fn reveal_current_in_tree(
 fn emit_explorer_focus(
     entity: Entity,
     current: &Path,
+    reveal: ExplorerReveal,
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
@@ -3700,13 +4243,39 @@ fn emit_explorer_focus(
             EXPLORER_FOCUS_EVENT,
             &ExplorerFocusEvent {
                 path: current.to_string_lossy().into_owned(),
+                reveal,
             },
         ));
     }
 }
 
+struct ExplorerTreePlugin;
+
+impl Plugin for ExplorerTreePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ExplorerTrees>()
+            .add_systems(
+                Update,
+                (
+                    init_explorer_state,
+                    drain_explorer_dir_loads,
+                    reveal_on_file_change,
+                    mark_explorer_tree_dirty,
+                    prune_idle_explorer_trees,
+                )
+                    .chain(),
+            )
+            .add_observer(on_explorer_reveal_current)
+            .add_observer(on_explorer_collapse_all)
+            .add_observer(on_explorer_tree_toggle)
+            .add_observer(on_explorer_tree_prefetch)
+            .add_observer(on_explorer_tree_refresh);
+    }
+}
+
 fn init_explorer_state(
     mut q: Query<(Entity, &FileView, &mut ExplorerState)>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     for (entity, fv, mut st) in &mut q {
@@ -3714,52 +4283,117 @@ fn init_explorer_state(
             continue;
         }
         let root = project_root(&fv.path);
-        st.expanded.insert(root.clone());
         st.root = root.clone();
-        let _ = start_explorer_dir_load(entity, root, &mut st, &mut commands, false);
+        trees.at(&root).expanded.insert(root.clone());
+        trees.start_dir_load(&root, root.clone(), &mut commands, false);
+        commands.entity(entity).insert(ExplorerTreeDirty);
     }
 }
 
 fn drain_explorer_dir_loads(
     mut tasks: Query<(Entity, &mut ExplorerDirLoadTask)>,
-    mut states: Query<&mut ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending) in &mut tasks {
         let Some((path, entries)) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        let webview = pending.webview;
+        let root = pending.root.clone();
         commands.entity(task_entity).despawn();
-        let Ok(mut st) = states.get_mut(webview) else {
-            continue;
-        };
-        if !st.loading.remove(&path) {
+        let tree = trees.at(&root);
+        if !tree.loading.remove(&path) {
             continue;
         }
-        let warm_ahead = st.expanded.contains(&path);
-        st.children.insert(path.clone(), entries);
-        commands.entity(webview).insert(ExplorerTreeDirty);
+        let warm_ahead = tree.expanded.contains(&path);
+        tree.children.insert(path.clone(), entries);
+        trees.touch(&root);
         if !warm_ahead {
             continue;
         }
-        let ahead = st
-            .children
-            .get(&path)
-            .into_iter()
-            .flatten()
-            .filter(|entry| entry.is_dir)
-            .take(EXPLORER_WARM_AHEAD)
-            .map(|entry| PathBuf::from(&entry.path))
-            .collect::<Vec<_>>();
-        for dir in ahead {
-            start_explorer_dir_load(webview, dir, &mut st, &mut commands, false);
+        let mut ahead = Vec::new();
+        for entry in trees.at(&root).children.get(&path).into_iter().flatten() {
+            if !entry.is_dir {
+                continue;
+            }
+            if ahead.len() == EXPLORER_WARM_AHEAD {
+                break;
+            }
+            ahead.push(PathBuf::from(&entry.path));
         }
+        for dir in ahead {
+            trees.start_dir_load(&root, dir, &mut commands, false);
+        }
+    }
+}
+
+fn mark_explorer_tree_dirty(
+    mut trees: ResMut<ExplorerTrees>,
+    views: Query<(Entity, &ExplorerState)>,
+    mut commands: Commands,
+) {
+    if !trees.has_dirty() {
+        return;
+    }
+    let dirty = trees.take_dirty();
+    for (entity, st) in &views {
+        if dirty.contains(&st.root) {
+            commands.entity(entity).insert(ExplorerTreeDirty);
+        }
+    }
+}
+
+fn prune_idle_explorer_trees(
+    mut closed: RemovedComponents<ExplorerState>,
+    views: Query<&ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
+) {
+    if closed.read().count() == 0 {
+        return;
+    }
+    let mut live = HashSet::new();
+    for st in &views {
+        live.insert(st.root.clone());
+    }
+    trees.prune(&live);
+}
+
+fn reveal_on_file_change(
+    mut views: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
+    child_of: Query<&ChildOf>,
+    visibility: Query<&StackExplorerVisibility>,
+    chrome: Res<ExplorerChrome>,
+    mut trees: ResMut<ExplorerTrees>,
+    browsers: Option<NonSend<Browsers>>,
+    mut commands: Commands,
+) {
+    let browsers = browsers.as_deref();
+    for (entity, fv, mut st) in &mut views {
+        let scope = explorer_scope(entity, &child_of);
+        let visible = visibility
+            .get(scope)
+            .map(|state| state.visible)
+            .unwrap_or(chrome.default_visible);
+        if !visible {
+            continue;
+        }
+        reveal_current_in_tree(entity, &fv.path, &mut st, &mut trees, &mut commands);
+        let Some(browsers) = browsers else {
+            continue;
+        };
+        emit_explorer_focus(
+            entity,
+            &fv.path,
+            ExplorerReveal::Followed,
+            browsers,
+            &mut commands,
+        );
     }
 }
 
 fn emit_explorer_tree(
     mut q: Query<(Entity, &FileView, &mut ExplorerState), TreeDirtyReady>,
+    trees: Res<ExplorerTrees>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -3767,7 +4401,7 @@ fn emit_explorer_tree(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        let rows = flatten_tree(&st.root, &st.expanded, &st.loading, &st.children);
+        let rows = trees.rows(&st.root);
         let focus_ready = st.focus_path.as_ref().is_some_and(|path| {
             path == &st.root || rows.iter().any(|row| Path::new(&row.path) == path)
         });
@@ -3787,7 +4421,7 @@ fn emit_explorer_tree(
                 root_path: st.root.to_string_lossy().into_owned(),
                 current_path: fv.path.to_string_lossy().into_owned(),
                 focus_path,
-                loading: st.loading.contains(&st.root),
+                loading: trees.is_loading(&st.root, &st.root),
                 rows,
             },
         ));
@@ -3797,59 +4431,63 @@ fn emit_explorer_tree(
 
 fn on_explorer_tree_toggle(
     trigger: On<BinReceive<ExplorerTreeToggle>>,
-    mut q: Query<&mut ExplorerState>,
+    q: Query<&ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok(mut st) = q.get_mut(entity) else {
+    let Ok(st) = q.get(entity) else {
         return;
     };
-    if st.expanded.contains(&path) {
-        st.expanded.remove(&path);
-    } else {
-        if !explorer_path_allowed(&st, &path) {
+    let root = st.root.clone();
+    if !trees.at(&root).expanded.remove(&path) {
+        if !st.allows(&path) {
             return;
         }
-        st.expanded.insert(path.clone());
-        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
+        trees.at(&root).expanded.insert(path.clone());
+        trees.start_dir_load(&root, path, &mut commands, false);
     }
+    trees.touch(&root);
     commands.entity(entity).insert(ExplorerTreeDirty);
 }
 
 fn on_explorer_tree_prefetch(
     trigger: On<BinReceive<ExplorerTreePrefetch>>,
-    mut q: Query<&mut ExplorerState>,
+    q: Query<&ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok(mut st) = q.get_mut(entity) else {
+    let Ok(st) = q.get(entity) else {
         return;
     };
-    if explorer_path_allowed(&st, &path) {
-        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
+    if st.allows(&path) {
+        trees.start_dir_load(&st.root, path, &mut commands, false);
     }
 }
 
 fn on_explorer_tree_refresh(
     trigger: On<BinReceive<ExplorerTreeRefresh>>,
-    mut q: Query<&mut ExplorerState>,
+    q: Query<&ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok(mut st) = q.get_mut(entity) else {
+    let Ok(st) = q.get(entity) else {
         return;
     };
-    if explorer_path_allowed(&st, &path) {
-        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, true);
+    if st.allows(&path) {
+        trees.start_dir_load(&st.root, path, &mut commands, true);
     }
 }
 
 fn on_explorer_reveal_current(
     trigger: On<BinReceive<ExplorerRevealCurrent>>,
     mut q: Query<(&FileView, &mut ExplorerState)>,
+    mut trees: ResMut<ExplorerTrees>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -3857,10 +4495,32 @@ fn on_explorer_reveal_current(
     let Ok((fv, mut st)) = q.get_mut(entity) else {
         return;
     };
-    reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+    reveal_current_in_tree(entity, &fv.path, &mut st, &mut trees, &mut commands);
     if let Some(browsers) = browsers {
-        emit_explorer_focus(entity, &fv.path, &browsers, &mut commands);
+        emit_explorer_focus(
+            entity,
+            &fv.path,
+            ExplorerReveal::Requested,
+            &browsers,
+            &mut commands,
+        );
     }
+}
+
+fn on_explorer_collapse_all(
+    trigger: On<BinReceive<ExplorerCollapseAll>>,
+    q: Query<&ExplorerState>,
+    mut trees: ResMut<ExplorerTrees>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(st) = q.get(entity) else {
+        return;
+    };
+    let root = st.root.clone();
+    trees.at(&root).expanded.retain(|path| *path == root);
+    trees.touch(&root);
+    commands.entity(entity).insert(ExplorerTreeDirty);
 }
 
 fn run_explorer_mutation(
@@ -4008,12 +4668,6 @@ fn remap_path(path: &Path, old: &Path, new: &Path) -> Option<PathBuf> {
     path.strip_prefix(old).ok().map(|suffix| new.join(suffix))
 }
 
-fn evict_explorer_subtree(st: &mut ExplorerState, path: &Path) {
-    st.expanded.retain(|entry| !entry.starts_with(path));
-    st.loading.retain(|entry| !entry.starts_with(path));
-    st.children.retain(|entry, _| !entry.starts_with(path));
-}
-
 fn explorer_mutation_message(
     operation: &ExplorerMutation,
     outcome: &ExplorerMutationOutcome,
@@ -4074,6 +4728,7 @@ fn emit_explorer_fs_result(
 fn drain_explorer_mutations(
     mut tasks: Query<(Entity, &mut ExplorerMutationTask)>,
     mut views: Query<(&FileView, &mut ExplorerState)>,
+    mut trees: ResMut<ExplorerTrees>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -4087,6 +4742,7 @@ fn drain_explorer_mutations(
         let Ok((fv, mut st)) = views.get_mut(webview) else {
             continue;
         };
+        let root = st.root.clone();
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -4127,16 +4783,11 @@ fn drain_explorer_mutations(
                 ExplorerMutation::Create { .. } => {}
             }
             if outcome.was_dir {
-                evict_explorer_subtree(&mut st, old_path);
+                trees.at(&root).evict_subtree(old_path);
+                trees.touch(&root);
             }
         }
-        let _ = start_explorer_dir_load(
-            webview,
-            outcome.refresh_dir.clone(),
-            &mut st,
-            &mut commands,
-            true,
-        );
+        trees.start_dir_load(&root, outcome.refresh_dir.clone(), &mut commands, true);
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
@@ -4230,12 +4881,39 @@ fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Comm
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct StackExplorerPanel<'w, 's> {
+    visibility: Query<'w, 's, &'static mut StackExplorerVisibility>,
+    revisions: Query<'w, 's, &'static mut StackExplorerRevision>,
+}
+
+impl StackExplorerPanel<'_, '_> {
+    fn apply(
+        &mut self,
+        scope: Entity,
+        visibility: StackExplorerVisibility,
+        revision: StackExplorerRevision,
+        commands: &mut Commands,
+    ) {
+        if let Ok(mut state) = self.visibility.get_mut(scope) {
+            *state = visibility;
+        } else {
+            commands.entity(scope).insert(visibility);
+        }
+        if let Ok(mut state) = self.revisions.get_mut(scope) {
+            *state = revision;
+        } else {
+            commands.entity(scope).insert(revision);
+        }
+    }
+}
+
 fn on_explorer_panel_set_visible(
     trigger: On<BinReceive<ExplorerPanelSetVisible>>,
     child_of: Query<&ChildOf>,
-    mut visibility: Query<&mut StackExplorerVisibility>,
-    mut revisions: Query<&mut StackExplorerRevision>,
+    mut panel: StackExplorerPanel,
     mut editors: Query<(Entity, &FileView, &mut ExplorerState, Option<&ChildOf>)>,
+    mut trees: ResMut<ExplorerTrees>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -4244,20 +4922,11 @@ fn on_explorer_panel_set_visible(
     let next_visibility = StackExplorerVisibility {
         visible: trigger.event().payload.visible,
     };
-    if let Ok(mut state) = visibility.get_mut(scope) {
-        *state = next_visibility;
-    } else {
-        commands.entity(scope).insert(next_visibility);
-    }
     let next_revision = StackExplorerRevision {
         client_id: trigger.event().payload.client_id,
         request_id: trigger.event().payload.request_id,
     };
-    if let Ok(mut revision) = revisions.get_mut(scope) {
-        *revision = next_revision;
-    } else {
-        commands.entity(scope).insert(next_revision);
-    }
+    panel.apply(scope, next_visibility, next_revision, &mut commands);
     for (view, _, _, parent) in &mut editors {
         let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
         if view_scope != scope {
@@ -4272,9 +4941,15 @@ fn on_explorer_panel_set_visible(
     if next_visibility.visible
         && let Ok((_, fv, mut st, _)) = editors.get_mut(entity)
     {
-        reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+        reveal_current_in_tree(entity, &fv.path, &mut st, &mut trees, &mut commands);
         if let Some(browsers) = browsers {
-            emit_explorer_focus(entity, &fv.path, &browsers, &mut commands);
+            emit_explorer_focus(
+                entity,
+                &fv.path,
+                ExplorerReveal::Followed,
+                &browsers,
+                &mut commands,
+            );
         }
     }
 }
@@ -4471,7 +5146,8 @@ fn apply_global_search_requests(
             GlobalSearchState(ExplorerSearchEvent {
                 root: request.root,
                 query: request.query,
-                matches: request.matches,
+                files: request.files,
+                capped: request.capped,
             }),
             GlobalSearchDirty,
         ));
@@ -4499,7 +5175,7 @@ fn emit_global_search(
 
 fn on_explorer_search_open(
     trigger: On<BinReceive<ExplorerSearchOpen>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<NavigableFileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -4508,11 +5184,10 @@ fn on_explorer_search_open(
     let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
         return;
     };
-    navigate_file_view(
+    view.navigate(
         entity,
         PathBuf::from(&request.path),
         request.line.saturating_sub(1),
-        &mut view,
         &mut viewport,
         &mut metadata,
         &mut manager,
@@ -4623,16 +5298,18 @@ mod edit_flow_tests {
         let (tx, rx) = mpsc::channel();
         let watcher = notify::recommended_watcher(|_| {}).unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (
-                reconcile_file_watches,
-                drain_file_changes,
-                reload_changed_files,
-                load_file_buffers,
-            )
-                .chain(),
-        );
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ExplorerTrees>()
+            .add_systems(
+                Update,
+                (
+                    reconcile_file_watches,
+                    drain_file_changes,
+                    reload_changed_files,
+                    load_file_buffers,
+                )
+                    .chain(),
+            );
         app.world_mut().insert_non_send(FileWatch {
             watcher,
             rx,
@@ -4857,14 +5534,48 @@ mod explorer_tests {
         });
     }
 
-    fn wait_for_children(app: &mut App, e: Entity, path: &Path) {
+    impl ExplorerTree {
+        fn of<'a>(app: &'a App, root: &Path) -> &'a Self {
+            app.world()
+                .resource::<ExplorerTrees>()
+                .by_root
+                .get(root)
+                .unwrap_or_else(|| panic!("no explorer tree for {}", root.display()))
+        }
+    }
+
+    struct ExplorerApp;
+
+    impl ExplorerApp {
+        fn hidden() -> App {
+            Self::with(false)
+        }
+
+        fn visible() -> App {
+            Self::with(true)
+        }
+
+        fn with(default_visible: bool) -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ExplorerTreePlugin))
+                .insert_resource(ExplorerChrome {
+                    default_visible,
+                    width: 240,
+                });
+            app
+        }
+    }
+
+    fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
         for _ in 0..1000 {
             app.update();
-            if app
+            let loaded = app
                 .world()
-                .get::<ExplorerState>(e)
-                .is_some_and(|st| st.children.contains_key(path))
-            {
+                .resource::<ExplorerTrees>()
+                .by_root
+                .get(root)
+                .is_some_and(|tree| tree.children.contains_key(path));
+            if loaded {
                 return;
             }
             std::thread::yield_now();
@@ -4876,19 +5587,20 @@ mod explorer_tests {
     fn init_builds_root_listing_and_marks_dirty() {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads));
+        let mut app = ExplorerApp::hidden();
         let e = app
             .world_mut()
             .spawn((FileView { path: file }, ExplorerState::default()))
             .id();
-        wait_for_children(&mut app, e, tmp.path());
-        let st = app.world().get::<ExplorerState>(e).unwrap();
-        assert_eq!(st.root.as_path(), tmp.path());
-        assert!(st.expanded.contains(&tmp.path().to_path_buf()));
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        assert_eq!(
+            app.world().get::<ExplorerState>(e).unwrap().root.as_path(),
+            tmp.path()
+        );
+        let tree = ExplorerTree::of(&app, tmp.path());
+        assert!(tree.expanded.contains(&tmp.path().to_path_buf()));
         assert!(
-            st.children
+            tree.children
                 .get(tmp.path())
                 .unwrap()
                 .iter()
@@ -4898,14 +5610,11 @@ mod explorer_tests {
     }
 
     #[test]
-    fn expanding_warms_the_next_level_and_stops_there() {
+    fn a_second_page_on_a_warm_root_reuses_the_loaded_tree() {
         let tmp = git_repo();
-        let deep = tmp.path().join("src").join("deep");
-        fs::create_dir_all(&deep).unwrap();
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads));
-        let e = app
+        let src = tmp.path().join("src");
+        let mut app = ExplorerApp::hidden();
+        let first = app
             .world_mut()
             .spawn((
                 FileView {
@@ -4914,21 +5623,107 @@ mod explorer_tests {
                 ExplorerState::default(),
             ))
             .id();
+        wait_for_children(&mut app, tmp.path(), &src);
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<ExplorerTreeDirty>();
+        let second = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: src.join("lib.rs"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world().get::<ExplorerTreeDirty>(second).is_some(),
+            "a page joining a warm root must still be asked to draw its tree"
+        );
+        assert!(
+            app.world().get::<ExplorerTreeDirty>(first).is_none(),
+            "a page joining a warm root must not re-walk the directories others already hold"
+        );
+    }
 
-        wait_for_children(&mut app, e, tmp.path());
-        wait_for_children(&mut app, e, &tmp.path().join("src"));
+    #[test]
+    fn expansion_outlives_the_page_that_made_it() {
+        let tmp = git_repo();
+        let src = tmp.path().join("src");
+        let mut app = ExplorerApp::hidden();
+        let first = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: tmp.path().join("README.md"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        toggle(&mut app, first, &src);
+        wait_for_children(&mut app, tmp.path(), &src);
+        app.world_mut().entity_mut(first).despawn();
+        app.update();
+        assert!(
+            ExplorerTree::of(&app, tmp.path()).expanded.contains(&src),
+            "closing a page must not collapse the workspace tree the next one opens on"
+        );
+    }
+
+    #[test]
+    fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
+        let mut trees = ExplorerTrees::default();
+        let roots: Vec<PathBuf> = (0..IDLE_TREE_CAPACITY + 2)
+            .map(|n| PathBuf::from(format!("/project{n}")))
+            .collect();
+        for root in &roots {
+            trees.at(root);
+        }
+        let live: HashSet<PathBuf> = [roots[0].clone()].into_iter().collect();
+
+        trees.prune(&live);
+
+        assert!(
+            trees.by_root.contains_key(&roots[0]),
+            "a root a page still shows must survive however stale it is"
+        );
+        assert!(
+            !trees.by_root.contains_key(&roots[1]),
+            "the stalest idle root is the one that goes"
+        );
+        assert!(trees.by_root.contains_key(roots.last().unwrap()));
+        assert_eq!(trees.by_root.len(), IDLE_TREE_CAPACITY + 1);
+    }
+
+    #[test]
+    fn expanding_warms_the_next_level_and_stops_there() {
+        let tmp = git_repo();
+        let deep = tmp.path().join("src").join("deep");
+        fs::create_dir_all(&deep).unwrap();
+        let mut app = ExplorerApp::hidden();
+        app.world_mut().spawn((
+            FileView {
+                path: tmp.path().join("README.md"),
+            },
+            ExplorerState::default(),
+        ));
+
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
 
         for _ in 0..200 {
             app.update();
             std::thread::yield_now();
         }
-        let st = app.world().get::<ExplorerState>(e).unwrap();
+        let tree = ExplorerTree::of(&app, tmp.path());
         assert!(
-            !st.expanded.contains(&tmp.path().join("src")),
+            !tree.expanded.contains(&tmp.path().join("src")),
             "warming must not expand anything on the user's behalf"
         );
         assert!(
-            !st.children.contains_key(&deep),
+            !tree.children.contains_key(&deep),
             "a warmed directory must not warm its own children, or a deep tree loads itself"
         );
     }
@@ -4937,75 +5732,72 @@ mod explorer_tests {
     fn toggle_expands_then_collapses_subdir() {
         let tmp = git_repo();
         let file = tmp.path().join("README.md");
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
-            .add_observer(on_explorer_tree_toggle);
+        let mut app = ExplorerApp::hidden();
         let e = app
             .world_mut()
             .spawn((FileView { path: file }, ExplorerState::default()))
             .id();
-        wait_for_children(&mut app, e, tmp.path());
+        wait_for_children(&mut app, tmp.path(), tmp.path());
         let src = tmp.path().join("src");
         toggle(&mut app, e, &src);
-        wait_for_children(&mut app, e, &src);
-        let st = app.world().get::<ExplorerState>(e).unwrap();
-        assert!(st.expanded.contains(&src));
+        wait_for_children(&mut app, tmp.path(), &src);
+        let tree = ExplorerTree::of(&app, tmp.path());
+        assert!(tree.expanded.contains(&src));
         assert!(
-            st.children
+            tree.children
                 .get(&src)
                 .unwrap()
                 .iter()
                 .any(|x| x.name == "lib.rs")
         );
         toggle(&mut app, e, &src);
-        let st = app.world().get::<ExplorerState>(e).unwrap();
-        assert!(!st.expanded.contains(&src));
+        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
     }
 
     #[test]
     fn reveal_current_expands_ancestors_and_focuses_file() {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
-            .add_observer(on_explorer_reveal_current);
+        let mut app = ExplorerApp::hidden();
         let e = app
             .world_mut()
             .spawn((FileView { path: file.clone() }, ExplorerState::default()))
             .id();
-        wait_for_children(&mut app, e, tmp.path());
+        wait_for_children(&mut app, tmp.path(), tmp.path());
         app.world_mut().trigger(BinReceive {
             webview: e,
             payload: ExplorerRevealCurrent,
         });
         let src = tmp.path().join("src");
-        wait_for_children(&mut app, e, &src);
-        let st = app.world().get::<ExplorerState>(e).unwrap();
-        assert!(st.expanded.contains(tmp.path()));
-        assert!(st.expanded.contains(&src));
-        assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
+        wait_for_children(&mut app, tmp.path(), &src);
+        let tree = ExplorerTree::of(&app, tmp.path());
+        assert!(tree.expanded.contains(tmp.path()));
+        assert!(tree.expanded.contains(&src));
+        assert_eq!(
+            app.world()
+                .get::<ExplorerState>(e)
+                .unwrap()
+                .focus_path
+                .as_deref(),
+            Some(file.as_path())
+        );
     }
 
     #[test]
     fn repeated_reveal_skips_unchanged_tree_rebuild() {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
-            .add_observer(on_explorer_reveal_current);
+        let mut app = ExplorerApp::hidden();
         let e = app
             .world_mut()
             .spawn((FileView { path: file }, ExplorerState::default()))
             .id();
-        wait_for_children(&mut app, e, tmp.path());
+        wait_for_children(&mut app, tmp.path(), tmp.path());
         app.world_mut().trigger(BinReceive {
             webview: e,
             payload: ExplorerRevealCurrent,
         });
-        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
         app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
         app.world_mut()
             .get_mut::<ExplorerState>(e)
@@ -5026,9 +5818,207 @@ mod explorer_tests {
     }
 
     #[test]
+    fn opening_a_file_reveals_it_without_an_explicit_request() {
+        let tmp = git_repo();
+        let src = tmp.path().join("src");
+        let file = src.join("lib.rs");
+        let mut app = ExplorerApp::visible();
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: tmp.path().join("README.md"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = file.clone();
+        wait_for_children(&mut app, tmp.path(), &src);
+        assert!(ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert_eq!(
+            app.world()
+                .get::<ExplorerState>(e)
+                .unwrap()
+                .focus_path
+                .as_deref(),
+            Some(file.as_path())
+        );
+    }
+
+    #[test]
+    fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
+        let tmp = git_repo();
+        let src = tmp.path().join("src");
+        let mut app = ExplorerApp::hidden();
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: tmp.path().join("README.md"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = src.join("lib.rs");
+        for _ in 0..200 {
+            app.update();
+            std::thread::yield_now();
+        }
+        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert!(
+            app.world()
+                .get::<ExplorerState>(e)
+                .unwrap()
+                .focus_path
+                .is_none()
+        );
+    }
+
+    #[derive(Resource, Default)]
+    struct SentReveals(Vec<ExplorerReveal>);
+
+    impl SentReveals {
+        fn watch(app: &mut App, webview: Entity) {
+            let mut browsers = Browsers::default();
+            browsers.set_externally_hosted(webview);
+            app.insert_non_send(browsers)
+                .init_resource::<Self>()
+                .add_observer(Self::record);
+        }
+
+        fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
+            if emit.id != EXPLORER_FOCUS_EVENT {
+                return;
+            }
+            let decoded =
+                rkyv::from_bytes::<ExplorerFocusEvent, rkyv::rancor::Error>(&emit.payload);
+            let Ok(event) = decoded else {
+                return;
+            };
+            sent.0.push(event.reveal);
+        }
+
+        fn drain(app: &mut App) -> Vec<ExplorerReveal> {
+            std::mem::take(&mut app.world_mut().resource_mut::<Self>().0)
+        }
+    }
+
+    #[test]
+    fn only_an_asked_for_reveal_may_take_focus_from_the_editor() {
+        let tmp = git_repo();
+        let src = tmp.path().join("src");
+        let mut app = ExplorerApp::visible();
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: tmp.path().join("README.md"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        SentReveals::watch(&mut app, e);
+        wait_for_children(&mut app, tmp.path(), tmp.path());
+        let _ = SentReveals::drain(&mut app);
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = src.join("lib.rs");
+        wait_for_children(&mut app, tmp.path(), &src);
+        assert_eq!(
+            SentReveals::drain(&mut app),
+            vec![ExplorerReveal::Followed],
+            "opening a file must not pull the caret out of the editor"
+        );
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        app.update();
+        assert_eq!(
+            SentReveals::drain(&mut app),
+            vec![ExplorerReveal::Requested]
+        );
+    }
+
+    #[test]
+    fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
+        let tmp = git_repo();
+        let src = tmp.path().join("src");
+        let mut app = ExplorerApp::visible();
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: src.join("lib.rs"),
+                },
+                ExplorerState::default(),
+            ))
+            .id();
+        wait_for_children(&mut app, tmp.path(), &src);
+        assert!(ExplorerTree::of(&app, tmp.path()).expanded.len() > 1);
+        app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerCollapseAll,
+        });
+        app.update();
+        assert_eq!(
+            ExplorerTree::of(&app, tmp.path()).expanded,
+            HashSet::from([tmp.path().to_path_buf()]),
+            "dropping the root makes the next reveal look like a tree change and re-scroll"
+        );
+        assert!(app.world().get::<ExplorerTreeDirty>(e).is_some());
+    }
+
+    #[test]
+    fn showing_the_panel_reveals_without_taking_the_caret() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ExplorerTrees>()
+            .insert_resource(ExplorerChrome {
+                default_visible: false,
+                width: 240,
+            })
+            .add_observer(on_explorer_panel_set_visible);
+        let stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/a.rs"),
+                },
+                ExplorerState::default(),
+                ChildOf(stack),
+            ))
+            .id();
+        SentReveals::watch(&mut app, view);
+
+        app.world_mut().trigger(BinReceive {
+            webview: view,
+            payload: ExplorerPanelSetVisible {
+                visible: true,
+                client_id: 1,
+                request_id: 1,
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            SentReveals::drain(&mut app),
+            vec![ExplorerReveal::Followed],
+            "opening the panel shows where you are; it does not move the keyboard there"
+        );
+    }
+
+    #[test]
     fn panel_visibility_is_shared_only_within_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<ExplorerTrees>()
             .add_observer(on_explorer_panel_set_visible);
         let first_stack = app
             .world_mut()
@@ -5157,7 +6147,8 @@ mod explorer_tests {
                 target_path: target,
                 root: "/project".to_string(),
                 query: "needle".to_string(),
-                matches: Vec::new(),
+                files: Vec::new(),
+                capped: false,
             });
         app.update();
 
@@ -5181,10 +6172,8 @@ mod explorer_tests {
     fn panel_open_reveals_current_file() {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
-            .add_observer(on_explorer_panel_set_visible);
+        let mut app = ExplorerApp::hidden();
+        app.add_observer(on_explorer_panel_set_visible);
         let stack = app
             .world_mut()
             .spawn(StackExplorerVisibility { visible: false })
@@ -5197,7 +6186,7 @@ mod explorer_tests {
                 ChildOf(stack),
             ))
             .id();
-        wait_for_children(&mut app, e, tmp.path());
+        wait_for_children(&mut app, tmp.path(), tmp.path());
         app.world_mut().trigger(BinReceive {
             webview: e,
             payload: ExplorerPanelSetVisible {
@@ -5206,7 +6195,7 @@ mod explorer_tests {
                 request_id: 1,
             },
         });
-        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
         assert!(
             app.world()
                 .get::<StackExplorerVisibility>(stack)
@@ -5323,8 +6312,82 @@ mod page_open_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_systems(Update, handle_file_page_open);
+            .insert_resource(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspOutbox::default(),
+                crate::lsp::server_request::ServerEvents::default().sender(),
+            ))
+            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain());
         app
+    }
+
+    struct EditorStack {
+        app: App,
+        stack: Entity,
+    }
+
+    impl EditorStack {
+        fn empty() -> Self {
+            let mut app = app();
+            let stack = app.world_mut().spawn_empty().id();
+            Self { app, stack }
+        }
+
+        fn showing(url: &str) -> Self {
+            let mut stack = Self::empty();
+            stack.open(url);
+            stack
+        }
+
+        fn open(&mut self, url: &str) {
+            let stack = self.stack;
+            self.app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            });
+            self.app.update();
+            self.app.update();
+        }
+
+        fn pages(&mut self) -> Vec<Entity> {
+            let stack = self.stack;
+            let mut q = self
+                .app
+                .world_mut()
+                .query::<(Entity, &ChildOf, &FileView)>();
+            let mut found = Vec::new();
+            for (entity, child_of, _) in q.iter(self.app.world()) {
+                if child_of.0 == stack {
+                    found.push(entity);
+                }
+            }
+            found
+        }
+
+        fn page(&mut self) -> Entity {
+            let pages = self.pages();
+            assert_eq!(pages.len(), 1);
+            pages[0]
+        }
+
+        fn path(&self, page: Entity) -> PathBuf {
+            self.app.world().get::<FileView>(page).unwrap().path.clone()
+        }
+
+        fn goto_line(&self, page: Entity) -> Option<u32> {
+            let goto = self.app.world().get::<PendingGoto>(page)?;
+            Some(goto.line)
+        }
+
+        fn open_editors(&self, page: Entity) -> Vec<PathBuf> {
+            self.app
+                .world()
+                .get::<ExplorerState>(page)
+                .unwrap()
+                .open_editors
+                .clone()
+        }
     }
 
     #[test]
@@ -5388,6 +6451,48 @@ mod page_open_tests {
             .id();
         app.update();
         assert!(app.world().get::<PageOpenHandled>(task).is_none());
+    }
+
+    #[test]
+    fn opening_another_file_navigates_the_editor_already_in_the_stack() {
+        let mut stack = EditorStack::showing("file:///etc/hostname");
+        let page = stack.page();
+        stack.open("file:///etc/hosts#L12");
+        assert_eq!(stack.pages(), vec![page]);
+        assert_eq!(stack.path(page), PathBuf::from("/etc/hosts"));
+        assert_eq!(stack.goto_line(page), Some(11));
+        assert_eq!(
+            stack.open_editors(page),
+            vec![PathBuf::from("/etc/hostname"), PathBuf::from("/etc/hosts")]
+        );
+    }
+
+    #[test]
+    fn reopening_the_file_already_shown_keeps_the_page_loaded_and_adds_no_tab() {
+        let mut stack = EditorStack::showing("file:///etc/hostname");
+        let page = stack.page();
+        stack.app.world_mut().entity_mut(page).insert(FileDir {
+            entries: Vec::new(),
+        });
+        stack.open("file:///etc/hostname#L7");
+        assert_eq!(stack.pages(), vec![page]);
+        assert!(stack.app.world().get::<FileDir>(page).is_some());
+        assert_eq!(stack.goto_line(page), Some(6));
+        assert_eq!(
+            stack.open_editors(page),
+            vec![PathBuf::from("/etc/hostname")]
+        );
+    }
+
+    #[test]
+    fn a_stack_holding_no_editor_page_gets_a_fresh_one() {
+        let mut stack = EditorStack::empty();
+        let target = stack.stack;
+        let occupant = stack.app.world_mut().spawn(ChildOf(target)).id();
+        stack.open("file:///etc/hostname");
+        assert!(stack.app.world().get_entity(occupant).is_err());
+        let page = stack.page();
+        assert_eq!(stack.path(page), PathBuf::from("/etc/hostname"));
     }
 
     #[test]
@@ -5500,6 +6605,86 @@ mod scrolled_cursor_tests {
 }
 
 #[cfg(test)]
+mod file_scroll_tests {
+    use super::*;
+
+    impl FileViewport {
+        fn scrolling(top_row: u32, rows: u16) -> (App, Entity) {
+            let text = (0..400).map(|i| format!("line {i}\n")).collect::<String>();
+            let path = PathBuf::from("/tmp/scroll-report.rs");
+            let core = EditCore::new(
+                path.clone(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let edit = EditState::new(
+                core,
+                HighlightCache::new(&path),
+                crate::fold::FoldState::default(),
+            );
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins).add_observer(on_file_scroll);
+            app.world_mut().insert_non_send(Browsers::default());
+            let entity = app
+                .world_mut()
+                .spawn((
+                    edit,
+                    FileViewport {
+                        top_row,
+                        rows,
+                        wrap_columns: 0,
+                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap_column: 80,
+                    },
+                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                ))
+                .id();
+            (app, entity)
+        }
+    }
+
+    #[test]
+    fn a_report_that_asks_for_no_rows_still_moves_the_host_viewport() {
+        let (mut app, entity) = FileViewport::scrolling(0, 40);
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileScrollEvent {
+                top_row: 120,
+                needs_rows: false,
+            },
+        });
+
+        assert_eq!(
+            app.world().get::<FileViewport>(entity).unwrap().top_row,
+            120
+        );
+        assert_eq!(
+            app.world().get::<EditState>(entity).unwrap().core.top_row,
+            120,
+            "screen-relative motions read core.top_row"
+        );
+    }
+
+    #[test]
+    fn a_report_past_the_end_is_clamped_to_the_last_screenful() {
+        let (mut app, entity) = FileViewport::scrolling(0, 40);
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileScrollEvent {
+                top_row: 9_000,
+                needs_rows: true,
+            },
+        });
+
+        assert_eq!(
+            app.world().get::<FileViewport>(entity).unwrap().top_row,
+            361
+        );
+    }
+}
+
+#[cfg(test)]
 mod parked_edit_tests {
     use super::*;
 
@@ -5515,9 +6700,11 @@ mod parked_edit_tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_systems(Update, load_file_buffers)
-                .add_observer(on_file_open);
+                .add_observer(on_file_open)
+                .add_observer(on_file_encoding_set);
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
+            app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut()
                 .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
@@ -5544,6 +6731,38 @@ mod parked_edit_tests {
 
         fn write(&self, name: &str, text: &str) {
             std::fs::write(self.dir.path().join(name), text).unwrap();
+        }
+
+        fn write_bytes(&self, name: &str, bytes: &[u8]) {
+            std::fs::write(self.dir.path().join(name), bytes).unwrap();
+        }
+
+        fn bytes(&self, name: &str) -> Vec<u8> {
+            std::fs::read(self.dir.path().join(name)).unwrap()
+        }
+
+        fn encoding(&self) -> FileEncoding {
+            self.app
+                .world()
+                .get::<EditState>(self.entity)
+                .expect("a loaded buffer")
+                .core
+                .buffer
+                .encoding
+        }
+
+        fn failure(&self) -> Option<LoadFailure> {
+            let buf = self.app.world().get::<FileBuffer>(self.entity)?;
+            let (reason, _) = LoadFailure::of(&buf.language)?;
+            Some(reason)
+        }
+
+        fn encoding_action(&mut self, encoding: FileEncoding, action: FileEncodingAction) {
+            self.app.world_mut().trigger(BinReceive {
+                webview: self.entity,
+                payload: FileEncodingSet { encoding, action },
+            });
+            self.app.update();
         }
 
         fn navigate_to(&mut self, name: &str) {
@@ -5582,6 +6801,111 @@ mod parked_edit_tests {
                 .core
                 .apply(EditCommand::Undo);
         }
+    }
+
+    const SHIFT_JIS_SAMPLE: [u8; 17] = [
+        0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA, 0x82, 0xCC, 0x83, 0x65, 0x83, 0x4C, 0x83, 0x58, 0x83,
+        0x67, 0x0A,
+    ];
+
+    #[test]
+    fn a_shift_jis_file_opens_and_saves_back_as_shift_jis() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+
+        assert_eq!(s.text(), "日本語のテキスト\n", "decoded on load");
+        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
+
+        s.type_into_buffer("EDIT");
+        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+
+        let mut expected = b"EDIT".to_vec();
+        expected.extend_from_slice(&SHIFT_JIS_SAMPLE);
+        assert_eq!(
+            s.bytes("main.txt"),
+            expected,
+            "the file is still shift_jis, not transcoded to utf-8"
+        );
+    }
+
+    #[test]
+    fn saving_a_character_the_encoding_cannot_hold_leaves_the_file_untouched() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+
+        s.type_into_buffer("€");
+        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+
+        assert_eq!(
+            s.bytes("main.txt"),
+            SHIFT_JIS_SAMPLE,
+            "a lossy save is refused rather than written with substitutions"
+        );
+    }
+
+    #[test]
+    fn reopening_with_an_encoding_redecodes_the_same_bytes() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.app.update();
+        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
+
+        s.encoding_action(FileEncoding::EucJp, FileEncodingAction::Reopen);
+        s.app.update();
+
+        assert_eq!(s.encoding(), FileEncoding::EucJp);
+        assert_ne!(
+            s.text(),
+            "日本語のテキスト\n",
+            "the override is honoured over what detection chose"
+        );
+    }
+
+    #[test]
+    fn a_file_that_would_not_decode_can_be_reopened_from_the_failure_itself() {
+        let mut s = Session::open("main.log");
+        s.write_bytes("main.log", b"caf\xe9\x00\x00 log\x00");
+        s.app.update();
+
+        assert_eq!(s.failure(), Some(LoadFailure::Undecodable));
+        assert!(
+            s.app.world().get::<EditState>(s.entity).is_none(),
+            "no buffer is loaded, so the footer chooser has nothing to hang off"
+        );
+
+        s.encoding_action(FileEncoding::Iso8859_1, FileEncodingAction::Reopen);
+        s.app.update();
+
+        assert_eq!(s.failure(), None, "the failure is cleared, not repeated");
+        assert_eq!(s.encoding(), FileEncoding::Iso8859_1);
+        assert_eq!(s.text(), "café\u{0}\u{0} log\u{0}");
+    }
+
+    #[test]
+    fn a_failure_no_encoding_can_rescue_is_not_offered_one() {
+        let mut s = Session::open("gone.log");
+        s.app.update();
+
+        assert_eq!(s.failure(), Some(LoadFailure::Fatal));
+    }
+
+    #[test]
+    fn an_encoding_chosen_for_one_file_does_not_follow_the_pane_to_the_next() {
+        let mut s = Session::open("main.txt");
+        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        s.write("plain.txt", "ascii\n");
+        s.app.update();
+
+        s.encoding_action(FileEncoding::Utf16Le, FileEncodingAction::Reopen);
+        s.app.update();
+        assert_eq!(s.encoding(), FileEncoding::Utf16Le);
+
+        s.navigate_to("plain.txt");
+
+        assert_eq!(s.encoding(), FileEncoding::Utf8);
+        assert_eq!(s.text(), "ascii\n");
     }
 
     #[test]
@@ -5941,5 +7265,368 @@ mod workspace_edit_tests {
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 two 3\n");
         assert_eq!(h.sent.try_recv().unwrap()["result"]["applied"], true);
+    }
+}
+
+#[cfg(test)]
+mod host_history_tests {
+    use super::*;
+    use vmux_core::PageOpenId;
+    use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
+
+    struct Editor {
+        app: App,
+        view: Entity,
+        dir: tempfile::TempDir,
+    }
+
+    impl Editor {
+        fn opened(name: &str) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_plugins(vmux_core::CorePlugin)
+                .add_plugins(EditorHistoryPlugin)
+                .add_message::<vmux_core::event::RecordVisitRequest>()
+                .add_systems(Update, handle_file_page_open)
+                .add_observer(on_file_open);
+            app.world_mut()
+                .insert_resource(crate::lsp::manager::LspManager::new(
+                    crate::lsp::LspOutbox::default(),
+                    crate::lsp::server_request::ServerEvents::default().sender(),
+                ));
+            let stack = app.world_mut().spawn_empty().id();
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: format!("file://{}", dir.path().join(name).display()),
+                request_id: None,
+            });
+            app.update();
+            app.update();
+            let view = app
+                .world_mut()
+                .query_filtered::<Entity, With<FileView>>()
+                .single(app.world())
+                .expect("opening a file:// page spawns one file view");
+            Self { app, view, dir }
+        }
+
+        fn open(&mut self, name: &str) {
+            let path = self.dir.path().join(name).to_string_lossy().into_owned();
+            self.app.world_mut().trigger(BinReceive {
+                webview: self.view,
+                payload: FileOpenEvent { path },
+            });
+            self.app.update();
+        }
+
+        fn scroll_to(&mut self, top_row: u32) {
+            self.app
+                .world_mut()
+                .get_mut::<FileViewport>(self.view)
+                .expect("a file view has a viewport")
+                .top_row = top_row;
+            self.app.update();
+        }
+
+        fn step(&mut self, delta: HostHistoryDelta) {
+            let webview = self.view;
+            self.app
+                .world_mut()
+                .write_message(HostHistoryStep { webview, delta });
+            self.app.update();
+        }
+
+        fn showing(&self) -> String {
+            self.app
+                .world()
+                .get::<FileView>(self.view)
+                .expect("a file view")
+                .path
+                .file_name()
+                .expect("a named file")
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        fn top_row(&self) -> u32 {
+            self.app
+                .world()
+                .get::<FileViewport>(self.view)
+                .expect("a file view has a viewport")
+                .top_row
+        }
+
+        fn history(&self) -> &HostHistory {
+            self.app
+                .world()
+                .get::<HostHistory>(self.view)
+                .expect("a file view owns its history")
+        }
+    }
+
+    #[test]
+    fn back_and_forward_walk_the_files_the_editor_opened() {
+        let mut editor = Editor::opened("a.rs");
+        editor.open("b.rs");
+        editor.open("c.rs");
+        assert!(editor.history().can_go_back());
+        assert!(!editor.history().can_go_forward());
+
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "b.rs");
+        assert!(editor.history().can_go_forward());
+
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "a.rs");
+        assert!(!editor.history().can_go_back());
+
+        editor.step(HostHistoryDelta::Forward);
+        assert_eq!(editor.showing(), "b.rs");
+    }
+
+    #[test]
+    fn opening_a_file_after_going_back_drops_the_forward_trail() {
+        let mut editor = Editor::opened("a.rs");
+        editor.open("b.rs");
+        editor.open("c.rs");
+        editor.step(HostHistoryDelta::Back);
+        editor.step(HostHistoryDelta::Back);
+
+        editor.open("d.rs");
+
+        assert!(!editor.history().can_go_forward());
+        editor.step(HostHistoryDelta::Back);
+        assert_eq!(editor.showing(), "a.rs");
+        editor.step(HostHistoryDelta::Forward);
+        assert_eq!(editor.showing(), "d.rs");
+    }
+
+    #[test]
+    fn going_back_lands_on_the_line_the_file_was_left_at() {
+        let mut editor = Editor::opened("a.rs");
+        editor.scroll_to(120);
+        editor.open("b.rs");
+        assert_eq!(editor.top_row(), 0);
+
+        editor.step(HostHistoryDelta::Back);
+
+        assert_eq!(editor.showing(), "a.rs");
+        assert_eq!(editor.top_row(), 120);
+    }
+}
+
+#[cfg(test)]
+mod editor_window_tests {
+    use super::*;
+
+    impl EditorWindow {
+        fn nested_file(lines: usize) -> EditState {
+            let mut text = String::new();
+            for i in 0..lines {
+                match i % 8 {
+                    0 => text.push_str(&format!("fn f{i}() {{\n")),
+                    7 => text.push_str("}\n"),
+                    _ => text.push_str(&format!("    let v{i} = {i};\n")),
+                }
+            }
+            let path = PathBuf::from("/tmp/window.rs");
+            let core = EditCore::new(
+                path.clone(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let mut folds = crate::fold::FoldState::default();
+            folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+            let mut edit = EditState::new(core, HighlightCache::new(&path), folds);
+            sync_fold_view(&mut edit);
+            edit
+        }
+
+        fn scrolled(top_row: u32, wrap_columns: u16) -> FileViewport {
+            FileViewport {
+                top_row,
+                rows: 40,
+                wrap_columns,
+                word_wrap: vmux_core::editor::WordWrap::On,
+                word_wrap_column: 80,
+            }
+        }
+
+        fn paired(patch: &FileViewportPatch) -> bool {
+            patch.lines.len() == patch.layouts.len()
+                && std::iter::zip(&patch.lines, &patch.layouts)
+                    .all(|(line, layout)| line.line_no == layout.line_no)
+        }
+    }
+
+    #[test]
+    fn every_laid_out_row_carries_its_line_however_the_window_is_placed() {
+        for wrap_columns in [0u16, 12, 100] {
+            for collapsed in [false, true] {
+                let mut edit = EditorWindow::nested_file(400);
+                if collapsed {
+                    for header in (0..400).step_by(8) {
+                        edit.folds.close(header as u32);
+                    }
+                    sync_fold_view(&mut edit);
+                }
+                let rows = EditorWindow::of(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
+                    .total_rows;
+                for top in (0..rows + 40).step_by(11) {
+                    let patch =
+                        EditorWindow::of(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
+                    assert!(
+                        EditorWindow::paired(&patch),
+                        "cols {wrap_columns} collapsed {collapsed} top {top}: \
+                         {} layouts against {} lines",
+                        patch.layouts.len(),
+                        patch.lines.len()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn opening_a_line_deep_in_the_file_keeps_the_window_whole() {
+        let mut edit = EditorWindow::nested_file(400);
+        let vp = EditorWindow::scrolled(300, 100);
+        let at = edit.core.buffer.coords_to_char(316, 0);
+        edit.core.set_caret(at);
+
+        for command in [
+            EditCommand::OpenLine { above: false },
+            EditCommand::InsertText("let inserted = 1;".into()),
+        ] {
+            edit.core.apply(command);
+            let (line, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
+            edit.hl.invalidate_from(line.saturating_sub(1));
+            edit.folds
+                .set_regions(crate::fold::indent_regions(&edit.core.buffer.rope));
+            sync_fold_view(&mut edit);
+            assert!(EditorWindow::paired(&EditorWindow::of(&mut edit, &vp)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod announced_scroll_tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct Emitted(Vec<String>);
+
+    struct GotoSession {
+        app: App,
+        view: Entity,
+    }
+
+    impl GotoSession {
+        fn scrolled_to_the_top_of(path: &Path) -> Self {
+            let text = (0..600)
+                .map(|i| format!("let v{i} = {i};\n"))
+                .collect::<String>();
+            let core = EditCore::new(
+                path.to_path_buf(),
+                "Rust".into(),
+                &text,
+                crate::edit::EditMode::Normal,
+            );
+            let edit = EditState::new(
+                core,
+                HighlightCache::new(path),
+                crate::fold::FoldState::default(),
+            );
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<crate::lsp::manager::LspGoto>()
+                .init_resource::<Emitted>()
+                .add_systems(Update, apply_goto)
+                .add_observer(
+                    |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
+                        emitted.0.push(trigger.event().id.clone());
+                    },
+                );
+            app.world_mut()
+                .insert_resource(crate::lsp::manager::LspManager::new(
+                    crate::lsp::LspOutbox::default(),
+                    crate::lsp::server_request::ServerEvents::default().sender(),
+                ));
+            let view = app
+                .world_mut()
+                .spawn((
+                    edit,
+                    FileView {
+                        path: path.to_path_buf(),
+                    },
+                    FileViewport {
+                        top_row: 0,
+                        rows: 40,
+                        wrap_columns: 0,
+                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap_column: 80,
+                    },
+                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    PageMetadata {
+                        title: String::new(),
+                        url: String::new(),
+                        icon: vmux_core::PageIcon::None,
+                        bg_color: None,
+                    },
+                ))
+                .id();
+            let mut browsers = Browsers::default();
+            browsers.set_externally_hosted(view);
+            app.world_mut().insert_non_send(browsers);
+            Self { app, view }
+        }
+
+        fn goto(&mut self, line: u32) {
+            let entity = self.view;
+            let path = self
+                .app
+                .world()
+                .get::<FileView>(entity)
+                .expect("a file view")
+                .path
+                .clone();
+            self.app
+                .world_mut()
+                .write_message(crate::lsp::manager::LspGoto {
+                    entity,
+                    path,
+                    line,
+                    utf16_col: 0,
+                });
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn a_jump_that_moves_the_viewport_tells_the_page_where_it_went() {
+        let mut session = GotoSession::scrolled_to_the_top_of(Path::new("/tmp/goto.rs"));
+        session.goto(500);
+
+        let top = session
+            .app
+            .world()
+            .get::<FileViewport>(session.view)
+            .expect("a viewport")
+            .top_row;
+        assert!(top > 0, "jumping to line 500 has to move the window");
+        assert!(
+            session
+                .app
+                .world()
+                .resource::<Emitted>()
+                .0
+                .contains(&FILE_SCROLL_BY_EVENT.to_string()),
+            "the window was repainted at row {top}, so a page still parked at row 0 \
+             would render the band off screen unless the move is announced: {:?}",
+            session.app.world().resource::<Emitted>().0
+        );
     }
 }

@@ -1,6 +1,9 @@
 use bevy::{ecs::relationship::Relationship, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
-use vmux_core::{PageIdentity, PageMetadata, page::PageReady};
+use vmux_core::{
+    PageIdentity, PageMetadata,
+    page::{HostHistory, PageReady},
+};
 use vmux_history::LastActivatedAt;
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -156,6 +159,7 @@ fn push_stacks_host_emit(
             &PageMetadata,
             &ChildOf,
             Option<&NavigationState>,
+            Option<&HostHistory>,
             Option<&PageIdentity>,
         ),
         With<Browser>,
@@ -192,16 +196,21 @@ fn push_stacks_host_emit(
             .unwrap_or_default(),
     };
     if let Some(active_stack_entity) = active_stack_opt {
-        for (meta, child_of, nav_state, osc) in &browser_q {
+        for (meta, child_of, nav_state, host_history, osc) in &browser_q {
             let stack_entity = child_of.get();
             let stack_pane = child_of_q.get(stack_entity).ok().map(|co| co.get());
             if stack_pane != active_pane {
                 continue;
             }
             let is_active = stack_entity == active_stack_entity;
-            if is_active && let Some(ns) = nav_state {
-                can_go_back = ns.can_go_back;
-                can_go_forward = ns.can_go_forward;
+            if is_active {
+                if let Some(history) = host_history {
+                    can_go_back = history.can_go_back();
+                    can_go_forward = history.can_go_forward();
+                } else if let Some(ns) = nav_state {
+                    can_go_back = ns.can_go_back;
+                    can_go_forward = ns.can_go_forward;
+                }
             }
             let title = meta.title_with(osc).to_string();
             rows.push(StackRow {
@@ -246,7 +255,15 @@ fn push_pane_tree_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&PageIdentity>), With<Browser>>,
+    browser_meta: Query<
+        (
+            &PageMetadata,
+            Has<Loading>,
+            Option<&PageIdentity>,
+            Option<&vmux_git::GitDiffSource>,
+        ),
+        With<Browser>,
+    >,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -273,7 +290,6 @@ fn push_pane_tree_emit(
         let is_active = active_pane == Some(pane_entity);
         let active_stack = active_stack_in_pane(pane_entity, &pane_children, &stack_ts);
         let mut stacks: Vec<StackNode> = Vec::new();
-        let mut stack_index: usize = 0;
         if let Ok(children) = pane_children.get(pane_entity) {
             for child in children.iter() {
                 if !stack_q.contains(child) {
@@ -283,9 +299,10 @@ fn push_pane_tree_emit(
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
-                        if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading, osc, diff)) = browser_meta.get(browser_e) {
                             let is_new_stack = false;
                             stacks.push(StackNode {
+                                id: child.to_bits(),
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
@@ -302,8 +319,8 @@ fn push_pane_tree_emit(
                                     meta.icon.clone()
                                 },
                                 is_active: stack_is_active,
-                                stack_index: stack_index as u32,
                                 is_loading: loading,
+                                is_dirty: diff.is_some_and(|source| source.dirty),
                                 bg_color: meta.bg_color.clone(),
                             });
                             found_browser = true;
@@ -312,16 +329,16 @@ fn push_pane_tree_emit(
                 }
                 if !found_browser {
                     stacks.push(StackNode {
+                        id: child.to_bits(),
                         title: "New Stack".to_string(),
                         url: String::new(),
                         icon: vmux_core::PageIcon::None,
                         is_active: stack_is_active,
-                        stack_index: stack_index as u32,
                         is_loading: false,
+                        is_dirty: false,
                         bg_color: None,
                     });
                 }
-                stack_index += 1;
             }
         }
         panes.push(PaneNode {
@@ -415,7 +432,7 @@ fn push_tab_boundary_emit(
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         for row in &mut projects {
-            if row.missing || !row.kind.opens_a_tree() {
+            if row.missing || !row.kind.carries_a_branch() {
                 continue;
             }
             if let Some(info) = cache.get(std::path::Path::new(&row.path)) {

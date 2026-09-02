@@ -63,7 +63,7 @@ impl PromptMedia {
             self.entries.set(Vec::new());
             self.loading.set(true);
             self.selected.set(0);
-            timer.schedule(move || {
+            timer.schedule(crate::page::search::HOST_SEARCH_DEBOUNCE_MS, move || {
                 if *self.request_id.peek() != request_id
                     || self.requested_query.peek().as_deref() != Some(media_query.as_str())
                 {
@@ -248,12 +248,17 @@ pub struct FileLabel;
 
 impl FileLabel {
     pub fn of(name: &str) -> String {
-        std::path::Path::new(name)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .map(|extension| extension.to_ascii_uppercase())
-            .filter(|extension| !extension.is_empty())
-            .unwrap_or_else(|| "FILE".to_string())
+        let Some(extension) = std::path::Path::new(name).extension() else {
+            return "FILE".to_string();
+        };
+        let Some(extension) = extension.to_str() else {
+            return "FILE".to_string();
+        };
+        let extension = extension.to_ascii_uppercase();
+        if extension.is_empty() {
+            return "FILE".to_string();
+        }
+        extension
     }
 }
 

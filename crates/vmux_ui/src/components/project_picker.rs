@@ -41,11 +41,12 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
         on_choose_another,
         on_dismiss,
     } = props;
-    let roots = projects
-        .iter()
-        .filter(|project| project.depth == 0)
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut roots = Vec::new();
+    for project in &projects {
+        if project.depth == 0 {
+            roots.push(project.clone());
+        }
+    }
     rsx! {
         PromptPopup {
             placement,

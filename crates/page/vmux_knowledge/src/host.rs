@@ -222,19 +222,18 @@ fn drain_knowledge_tree_scan(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct KnowledgeExpansion<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
+    active: Res<'w, vmux_layout::space::ActiveSpaceEntity>,
     expanded: Query<'w, 's, &'static ExpandedKnowledgeDirs>,
     toggled: Query<'w, 's, (), Changed<ExpandedKnowledgeDirs>>,
 }
 
 impl KnowledgeExpansion<'_, '_> {
-    fn just_toggled(&self) -> bool {
-        !self.toggled.is_empty()
+    fn just_moved(&self) -> bool {
+        !self.toggled.is_empty() || self.active.is_changed()
     }
 
-    fn stamp(&self, layout: Entity, tree: &mut KnowledgeTreeEvent) {
-        let Some(space) = vmux_layout::space::space_of(layout, &self.child_of, &self.spaces) else {
+    fn stamp(&self, tree: &mut KnowledgeTreeEvent) {
+        let Some(space) = self.active.0 else {
             return;
         };
         let Ok(open) = self.expanded.get(space) else {
@@ -252,6 +251,7 @@ fn emit_knowledge_tree(
     layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     expansion: KnowledgeExpansion,
     mut last_revision: Local<u64>,
+    mut pending: Local<bool>,
     mut commands: Commands,
 ) {
     if !state.loaded {
@@ -260,19 +260,23 @@ fn emit_knowledge_tree(
     let Ok((entity, page_ready)) = layout.single() else {
         return;
     };
-    if state.revision == *last_revision && !page_ready.is_changed() && !expansion.just_toggled() {
+    if state.revision != *last_revision || page_ready.is_changed() || expansion.just_moved() {
+        *pending = true;
+    }
+    if !*pending {
         return;
     }
     if !browsers.can_emit_to(&entity) {
         return;
     }
     let mut tree = state.tree.clone();
-    expansion.stamp(entity, &mut tree);
+    expansion.stamp(&mut tree);
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         KNOWLEDGE_TREE_EVENT,
         &tree,
     ));
+    *pending = false;
     *last_revision = state.revision;
 }
 

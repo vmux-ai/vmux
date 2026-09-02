@@ -26,6 +26,7 @@ vmux_wire = { path = "../../vmux_wire" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
+ignore = "0.4"
 muda = "0.19"
 vmux_flex = { path = "../../vmux_flex" }
 vmux_macro = { path = "../../vmux_macro" }

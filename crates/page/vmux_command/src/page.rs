@@ -23,13 +23,14 @@ use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlaceme
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
+use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
     PaletteGlyph, PaletteRows, PaletteState, PaletteSurface, Submission,
 };
 use vmux_ui::launcher::row::ResultRow;
 use vmux_ui::launcher::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_list_class,
+    command_bar_row_overlay_class, result_list_class,
 };
 use vmux_ui::scroll::ScrollIntoView;
 
@@ -53,6 +54,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut media = use_prompt_media();
     let search = use_host_search();
     let menu = use_composer_menu();
+    let ime = use_ime_guard();
 
     let keys = use_key_claim(Unclaimed::Types, move || match surface {
         PaletteSurface::Modal => vec!["command-bar".to_string()],
@@ -81,11 +83,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
-        if signals.refocus(state().open_id) {
+        let opened = state();
+        if signals.refocus(opened.open_id) {
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
             } else {
-                CommandBarField::focus();
+                CommandBarField::focus(&opened);
             }
         }
     });
@@ -113,7 +116,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         use_listener::<CommandBarKey, _>(COMMAND_BAR_KEY_EVENT, move |key| palette_keys.apply(key));
 
     let state_val = state();
-    let palette = PaletteState::of(&rows(), &state_val, &signals.draft(), surface);
+    let palette = std::rc::Rc::new(PaletteState::of(
+        &rows(),
+        &state_val,
+        &signals.draft(),
+        surface,
+    ));
     let query = signals.query;
     let mut attachments = media.attachments;
     let q = palette.query.clone();
@@ -195,7 +203,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let start_status = rsx! {
         span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
             span { class: "h-1.5 w-1.5 rounded-full bg-success" }
-            "Ready"
+            {translate("composer-ready")}
         }
     };
     let start_composer_footer = rsx! {
@@ -282,6 +290,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let modal_keydown = {
         let palette = palette.clone();
         move |e: KeyboardEvent| {
+            if ime.swallows(&e) {
+                return;
+            }
             if Readline::chord(&e, signals.query, &palette.ghost, COMMAND_BAR_INPUT_ID) {
                 return;
             }
@@ -319,7 +330,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if is_start {
                 {start_menus}
                 PromptComposer {
-                    value: palette.display_text.clone(),
+                    value: q.clone(),
+                    overlay: palette.row_text.clone().unwrap_or_default(),
                     completion: ghost_text.clone(),
                     attachments: start_prompt_attachments,
                     show_examples: q.is_empty() && ghost_text.is_empty(),
@@ -356,11 +368,17 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 "{palette.space_name}"
                             }
                         }
-                        PaletteGlyphIcon { glyph: palette.glyph }
+                        PaletteModeChip { label: palette.mode.label() }
+                        if let Some(glyph) = palette.glyph {
+                            PaletteGlyphIcon { glyph }
+                        }
                         div { class: command_bar_input_wrap_class(),
-                            if !ghost_text.is_empty() {
-                                div {
-                                    class: "pointer-events-none absolute inset-0 flex items-center",
+                            if let Some(row_text) = palette.row_text.clone() {
+                                div { class: command_bar_row_overlay_class(),
+                                    span { class: "truncate text-base text-foreground", "{row_text}" }
+                                }
+                            } else if !ghost_text.is_empty() {
+                                div { class: command_bar_row_overlay_class(),
                                     span { class: "invisible text-base", "{q}" }
                                     span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
@@ -369,11 +387,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: command_bar_input_class(),
-                                placeholder: palette.placeholder.clone(),
-                                value: "{palette.display_text}",
+                                class: command_bar_input_class(palette.row_text.is_some()),
+                                placeholder: if palette.row_text.is_some() { String::new() } else { palette.placeholder.clone() },
+                                value: "{q}",
                                 autofocus: true,
                                 oninput: move |event| signals.retype(event.value()),
+                                oncompositionstart: move |_| ime.start(),
+                                oncompositionend: move |_| ime.commit(),
                                 onkeydown: modal_keydown,
                             }
                         }
@@ -429,6 +449,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 }
 
 #[component]
+fn PaletteModeChip(label: String) -> Element {
+    rsx! {
+        if !label.is_empty() {
+            span {
+                class: "shrink-0 rounded-md bg-accent/15 px-2 py-1 text-ui-xs font-medium text-accent-foreground",
+                "{label}"
+            }
+        }
+    }
+}
+
+#[component]
 fn PaletteGlyphIcon(glyph: PaletteGlyph) -> Element {
     let class = "h-4 w-4 shrink-0 text-muted-foreground";
     match glyph {
@@ -472,17 +504,17 @@ fn StartContextBadges(
                 span {
                     class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
                     title: "{worktree_title}",
-                    "Worktree"
+                    {translate("composer-worktree")}
                 }
             }
             if uncommitted > 0 {
-                span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "\u{25cf} {uncommitted}" }
+                span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: translate("composer-uncommitted-changes"), "\u{25cf} {uncommitted}" }
             }
             if ahead > 0 {
-                span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "\u{2191}{ahead}" }
+                span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: translate("composer-commits-ahead"), "\u{2191}{ahead}" }
             }
         } else if !cwd.is_empty() {
-            span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+            span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", {translate("composer-no-git")} }
         }
     }
 }

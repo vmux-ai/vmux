@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use unicode_width::UnicodeWidthChar;
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
+    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, OpenEditorItem,
+    StyledSpan, TreeRow,
 };
 
 pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
@@ -456,6 +458,190 @@ pub fn gutter_width(total_lines: u32) -> usize {
     digits.max(3)
 }
 
+pub struct DisplayCells;
+
+impl DisplayCells {
+    pub fn of_char(ch: char) -> u32 {
+        UnicodeWidthChar::width(ch).unwrap_or(0) as u32
+    }
+
+    pub fn of_str(text: &str) -> u32 {
+        let mut cells = 0;
+        for ch in text.chars() {
+            cells += Self::of_char(ch);
+        }
+        cells
+    }
+
+    pub fn char_at(text: &str, cell: u32) -> usize {
+        let mut cells = 0;
+        for (index, ch) in text.chars().enumerate() {
+            if cells >= cell {
+                return index;
+            }
+            let width = Self::of_char(ch);
+            if cells + width > cell {
+                return index;
+            }
+            cells += width;
+        }
+        text.chars().count()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CellMetrics {
+    pub narrow: f64,
+    pub wide: f64,
+    pub height: f64,
+}
+
+impl CellMetrics {
+    pub fn measured(self) -> bool {
+        self.narrow > 0.0 && self.height > 0.0
+    }
+
+    pub fn vars(self) -> String {
+        if !self.measured() {
+            return String::new();
+        }
+        format!("--cw:{}px;--ch:{}px;", self.narrow, self.height)
+    }
+
+    pub fn wide_advance(self) -> f64 {
+        match self.wide > 0.0 {
+            true => self.wide,
+            false => self.narrow * 2.0,
+        }
+    }
+
+    fn advance_of(self, ch: char) -> f64 {
+        match DisplayCells::of_char(ch) {
+            0 => 0.0,
+            2 => self.wide_advance(),
+            cells => self.narrow * f64::from(cells),
+        }
+    }
+}
+
+pub struct ColumnRuler<'a> {
+    text: &'a str,
+    metrics: CellMetrics,
+}
+
+impl<'a> ColumnRuler<'a> {
+    pub fn new(text: &'a str, metrics: CellMetrics) -> Self {
+        Self { text, metrics }
+    }
+
+    pub fn wrapped_row(text: &'a str, metrics: CellMetrics, wrap_columns: u16, index: u32) -> Self {
+        if wrap_columns == 0 || index == 0 && u32::from(wrap_columns) >= DisplayCells::of_str(text)
+        {
+            return Self::new(text, metrics);
+        }
+        let columns = u32::from(wrap_columns);
+        let skip = index.saturating_mul(columns);
+        let mut start = None;
+        let mut end = text.len();
+        let mut cells = 0;
+        for (at, ch) in text.char_indices() {
+            if start.is_none() && cells >= skip {
+                start = Some(at);
+            }
+            if cells >= skip.saturating_add(columns) {
+                end = at;
+                break;
+            }
+            cells += DisplayCells::of_char(ch);
+        }
+        let start = start.unwrap_or(text.len());
+        Self::new(&text[start..end.max(start)], metrics)
+    }
+
+    pub fn x_of(&self, col: u32) -> f64 {
+        let mut cells = 0;
+        let mut x = 0.0;
+        for ch in self.text.chars() {
+            if cells >= col {
+                return x;
+            }
+            let width = DisplayCells::of_char(ch);
+            let advance = self.metrics.advance_of(ch);
+            if cells + width > col {
+                return x + advance * f64::from(col - cells) / f64::from(width);
+            }
+            cells += width;
+            x += advance;
+        }
+        x + f64::from(col.saturating_sub(cells)) * self.metrics.narrow
+    }
+
+    pub fn width_between(&self, start: u32, end: u32) -> f64 {
+        (self.x_of(end) - self.x_of(start)).max(0.0)
+    }
+
+    pub fn x_of_char(&self, char_col: u32) -> f64 {
+        let mut seen = 0;
+        let mut x = 0.0;
+        for ch in self.text.chars() {
+            if seen >= char_col {
+                return x;
+            }
+            seen += 1;
+            x += self.metrics.advance_of(ch);
+        }
+        x + f64::from(char_col - seen) * self.metrics.narrow
+    }
+
+    pub fn advance_at(&self, col: u32) -> f64 {
+        let mut cells = 0;
+        for ch in self.text.chars() {
+            let width = DisplayCells::of_char(ch);
+            if width == 0 {
+                continue;
+            }
+            if cells >= col {
+                return self.metrics.advance_of(ch);
+            }
+            cells += width;
+        }
+        self.metrics.narrow
+    }
+
+    pub fn col_at(&self, x: f64, snap: bool) -> u32 {
+        if x <= 0.0 || !self.metrics.measured() {
+            return 0;
+        }
+        let mut cells = 0;
+        let mut at = 0.0;
+        for ch in self.text.chars() {
+            let width = DisplayCells::of_char(ch);
+            if width == 0 {
+                continue;
+            }
+            let advance = self.metrics.advance_of(ch);
+            if x < at + advance {
+                if !snap {
+                    return cells;
+                }
+                let into = (x - at) / advance;
+                return match into < 0.5 {
+                    true => cells,
+                    false => cells + width,
+                };
+            }
+            cells += width;
+            at += advance;
+        }
+        let past = (x - at) / self.metrics.narrow;
+        let extra = match snap {
+            true => past.round(),
+            false => past.floor(),
+        };
+        cells + extra.max(0.0) as u32
+    }
+}
+
 pub fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");
@@ -512,16 +698,95 @@ pub fn severity_color_class(sev: DiagSeverity) -> &'static str {
     }
 }
 
-pub fn squiggle_style(start_col: u32, end_col: u32, color_rgb: &str) -> String {
-    let width = end_col.saturating_sub(start_col).max(1);
+pub fn squiggle_style(left: f64, width: f64, color_rgb: &str) -> String {
     format!(
-        "position:absolute;left:calc(var(--cw,1ch) * {start});\
-         width:calc(var(--cw,1ch) * {width});bottom:0;height:1.1em;\
+        "position:absolute;left:{left}px;width:{width}px;bottom:0;height:1.1em;\
          border-bottom:2px solid {color};pointer-events:auto;",
-        start = start_col,
-        width = width,
+        left = left,
+        width = width.max(1.0),
         color = color_rgb,
     )
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct EditorTabItem {
+    pub name: String,
+    pub context: String,
+    pub path: String,
+    pub active: bool,
+    pub dirty: bool,
+}
+
+impl EditorTabItem {
+    pub fn all(items: &[OpenEditorItem]) -> Vec<EditorTabItem> {
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for item in items {
+            *seen.entry(item.name.as_str()).or_insert(0) += 1;
+        }
+        let mut tabs = Vec::with_capacity(items.len());
+        for item in items {
+            let shared = seen.get(item.name.as_str()).copied().unwrap_or(0) > 1;
+            let context = match shared {
+                true => Self::parent_of(&item.path),
+                false => String::new(),
+            };
+            tabs.push(EditorTabItem {
+                name: item.name.clone(),
+                context,
+                path: item.path.clone(),
+                active: item.active,
+                dirty: item.dirty,
+            });
+        }
+        tabs
+    }
+
+    pub fn element_id(&self) -> String {
+        format!("editor-tab-{}", self.path)
+    }
+
+    fn parent_of(path: &str) -> String {
+        let Some((parent, _)) = path.trim_end_matches('/').rsplit_once('/') else {
+            return String::new();
+        };
+        match parent.rsplit('/').next() {
+            Some("") | None => "/".to_string(),
+            Some(name) => name.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod editor_tab_tests {
+    use super::*;
+
+    fn open(name: &str, path: &str) -> OpenEditorItem {
+        OpenEditorItem {
+            name: name.to_string(),
+            path: path.to_string(),
+            active: false,
+            dirty: false,
+        }
+    }
+
+    #[test]
+    fn only_a_shared_basename_carries_its_directory() {
+        let tabs = EditorTabItem::all(&[
+            open("mod.rs", "/w/alpha/mod.rs"),
+            open("page.rs", "/w/beta/page.rs"),
+            open("mod.rs", "/w/beta/mod.rs"),
+        ]);
+        assert_eq!(tabs[0].context, "alpha");
+        assert_eq!(tabs[1].context, "");
+        assert_eq!(tabs[2].context, "beta");
+    }
+
+    #[test]
+    fn a_shared_basename_at_the_root_names_the_root() {
+        let tabs = EditorTabItem::all(&[open("a.rs", "/a.rs"), open("a.rs", "/w/a.rs")]);
+        assert_eq!(tabs[0].context, "/");
+        assert_eq!(tabs[1].context, "w");
+    }
 }
 
 #[cfg(test)]
@@ -660,10 +925,10 @@ mod tests {
     }
 
     #[test]
-    fn squiggle_style_positions_by_columns() {
-        let s = squiggle_style(2, 6, "rgb(255,0,0)");
-        assert!(s.contains("left:calc(var(--cw,1ch) * 2)"));
-        assert!(s.contains("width:calc(var(--cw,1ch) * 4)"));
+    fn squiggle_style_keeps_a_hit_target_on_an_empty_range() {
+        let s = squiggle_style(16.0, 0.0, "rgb(255,0,0)");
+        assert!(s.contains("left:16px"));
+        assert!(s.contains("width:1px"));
     }
 
     #[test]
@@ -807,5 +1072,114 @@ mod tests {
             merged.iter().all(|(_, visible)| !visible),
             "nothing on screen to animate from, so every row is staged for entry"
         );
+    }
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+
+    const MENLO: CellMetrics = CellMetrics {
+        narrow: 8.4287109375,
+        wide: 14.0,
+        height: 17.0,
+    };
+
+    #[test]
+    fn a_wide_glyph_is_placed_at_its_measured_advance_not_two_narrow_cells() {
+        let ruler = ColumnRuler::new("今日の予定は？", MENLO);
+
+        assert_eq!(ruler.x_of(14), 7.0 * MENLO.wide);
+        assert_eq!(ruler.x_of(4), 2.0 * MENLO.wide);
+        assert!(
+            ruler.x_of(14) < 14.0 * MENLO.narrow,
+            "the caret used to sit {} px past the text",
+            14.0 * MENLO.narrow - ruler.x_of(14)
+        );
+    }
+
+    #[test]
+    fn a_mixed_line_round_trips_every_character_boundary() {
+        let text = "ab今c😀d\u{0301}e";
+        let ruler = ColumnRuler::new(text, MENLO);
+
+        assert_eq!(DisplayCells::of_str(text), 9);
+
+        let mut boundaries = vec![0];
+        let mut cells = 0;
+        for ch in text.chars() {
+            cells += DisplayCells::of_char(ch);
+            boundaries.push(cells);
+        }
+        boundaries.dedup();
+
+        for col in boundaries {
+            let x = ruler.x_of(col);
+            assert_eq!(
+                ruler.col_at(x, true),
+                col,
+                "column {col} at {x}px did not come back"
+            );
+        }
+    }
+
+    #[test]
+    fn a_column_inside_a_wide_glyph_snaps_out_to_a_boundary() {
+        let ruler = ColumnRuler::new("ab今c", MENLO);
+
+        assert_eq!(ruler.col_at(ruler.x_of(3), true), 4);
+        assert_eq!(ruler.col_at(ruler.x_of(3), false), 2);
+    }
+
+    #[test]
+    fn x_grows_with_every_column_that_has_width() {
+        let ruler = ColumnRuler::new("a今b", MENLO);
+        let widths = [
+            ruler.x_of(0),
+            ruler.x_of(1),
+            ruler.x_of(2),
+            ruler.x_of(3),
+            ruler.x_of(4),
+        ];
+
+        assert_eq!(widths[0], 0.0);
+        assert_eq!(widths[1], MENLO.narrow);
+        assert_eq!(widths[2], MENLO.narrow + MENLO.wide / 2.0);
+        assert_eq!(widths[3], MENLO.narrow + MENLO.wide);
+        assert_eq!(widths[4], MENLO.narrow * 2.0 + MENLO.wide);
+    }
+
+    #[test]
+    fn a_click_snaps_to_the_nearer_edge_of_a_wide_glyph() {
+        let ruler = ColumnRuler::new("今日", MENLO);
+
+        assert_eq!(ruler.col_at(MENLO.wide * 0.4, true), 0);
+        assert_eq!(ruler.col_at(MENLO.wide * 0.6, true), 2);
+        assert_eq!(ruler.col_at(MENLO.wide * 0.6, false), 0);
+        assert_eq!(ruler.col_at(MENLO.wide * 1.6, false), 2);
+    }
+
+    #[test]
+    fn a_click_past_the_end_counts_narrow_cells() {
+        let ruler = ColumnRuler::new("今", MENLO);
+
+        assert_eq!(ruler.col_at(MENLO.wide + MENLO.narrow * 3.0, false), 5);
+    }
+
+    #[test]
+    fn a_wrapped_row_measures_only_its_own_segment() {
+        let ruler = ColumnRuler::wrapped_row("今日の予定は？", MENLO, 4, 1);
+
+        assert_eq!(ruler.x_of(4), 2.0 * MENLO.wide);
+        assert_eq!(ruler.col_at(2.0 * MENLO.wide, true), 4);
+    }
+
+    #[test]
+    fn cell_and_character_columns_diverge_on_wide_text() {
+        assert_eq!(DisplayCells::of_str("今日の予定は？"), 14);
+        assert_eq!(DisplayCells::char_at("今日の予定は？", 14), 7);
+        assert_eq!(DisplayCells::char_at("今日の予定は？", 4), 2);
+        assert_eq!(DisplayCells::char_at("ab今", 3), 2);
+        assert_eq!(DisplayCells::char_at("ab今", 4), 3);
     }
 }

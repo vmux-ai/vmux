@@ -43,6 +43,21 @@ impl FoldState {
             .min_by_key(|r| r.end - r.start)
     }
 
+    pub fn sticky(&self, line: u32, depth: usize) -> Vec<u32> {
+        let mut headers = Vec::new();
+        for region in &self.regions {
+            if region.contains_body(line) && !self.collapsed.contains(&region.start) {
+                headers.push(region.start);
+            }
+        }
+        headers.sort_unstable();
+        headers.dedup();
+        if headers.len() > depth {
+            headers.drain(..headers.len() - depth);
+        }
+        headers
+    }
+
     pub fn gutter(&self, line: u32) -> FoldGutter {
         match self.region_at_start(line) {
             Some(_) if self.collapsed.contains(&line) => FoldGutter::Collapsed,
@@ -264,6 +279,42 @@ fn indent_width(line: &str) -> Option<usize> {
     None
 }
 
+pub struct IndentGuides<'a> {
+    rope: &'a Rope,
+    columns: usize,
+}
+
+impl<'a> IndentGuides<'a> {
+    pub fn of(rope: &'a Rope, columns: u16) -> Self {
+        Self {
+            rope,
+            columns: usize::from(columns).max(1),
+        }
+    }
+
+    pub fn levels(&self, line: usize) -> u16 {
+        let total = self.rope.len_lines();
+        let mut probe = line;
+        while probe < total {
+            if let Some(width) = self.width(probe) {
+                return u16::try_from(width / self.columns).unwrap_or(u16::MAX);
+            }
+            probe += 1;
+        }
+        0
+    }
+
+    fn width(&self, line: usize) -> Option<usize> {
+        let text: String = self
+            .rope
+            .line(line)
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .collect();
+        indent_width(&text)
+    }
+}
+
 pub fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
     let total = rope.len_lines();
     let indents: Vec<Option<usize>> = (0..total)
@@ -331,6 +382,95 @@ mod indent_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sticky_names_the_enclosing_headers_outermost_first() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 0, end: 20 },
+            FoldRegion { start: 4, end: 12 },
+            FoldRegion { start: 6, end: 8 },
+            FoldRegion { start: 30, end: 40 },
+        ]);
+
+        assert_eq!(s.sticky(7, 5), vec![0, 4, 6]);
+        assert_eq!(
+            s.sticky(4, 5),
+            vec![0],
+            "a header is not pinned above itself, it is already the top line"
+        );
+        assert_eq!(s.sticky(25, 5), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn sticky_keeps_the_innermost_headers_when_nesting_runs_deep() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 0, end: 50 },
+            FoldRegion { start: 1, end: 40 },
+            FoldRegion { start: 2, end: 30 },
+        ]);
+
+        assert_eq!(
+            s.sticky(10, 2),
+            vec![1, 2],
+            "the closest scopes are the ones worth the space"
+        );
+    }
+
+    #[test]
+    fn a_collapsed_scope_is_not_pinned() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![FoldRegion { start: 0, end: 20 }]);
+        s.toggle(0);
+
+        assert_eq!(s.sticky(5, 5), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {
+        let rope = Rope::from_str("fn a() {\n    let x = 1;\n\n        deep();\n}\n");
+        let guides = IndentGuides::of(&rope, 4);
+
+        assert_eq!(guides.levels(0), 0);
+        assert_eq!(guides.levels(1), 1);
+        assert_eq!(
+            guides.levels(2),
+            2,
+            "a blank line takes the next non-blank line's depth so the guide does not break"
+        );
+        assert_eq!(guides.levels(3), 2);
+    }
+
+    #[test]
+    fn trailing_blank_lines_have_no_guide_to_carry() {
+        let rope = Rope::from_str("fn a() {\n    x;\n}\n\n\n");
+        let guides = IndentGuides::of(&rope, 4);
+
+        assert_eq!(guides.levels(3), 0);
+        assert_eq!(guides.levels(4), 0);
+    }
+
+    #[test]
+    fn a_guide_counts_one_level_per_detected_indent_not_per_four_columns() {
+        let rope = Rope::from_str("a\n  b\n    c\n");
+        let two = IndentGuides::of(&rope, 2);
+
+        assert_eq!(
+            two.levels(1),
+            1,
+            "a two-space file still guides its first indent"
+        );
+        assert_eq!(two.levels(2), 2);
+
+        let eight = IndentGuides::of(&rope, 8);
+
+        assert_eq!(
+            eight.levels(2),
+            0,
+            "four columns is not yet one eight-wide indent"
+        );
+    }
 
     fn state() -> FoldState {
         let mut s = FoldState::default();

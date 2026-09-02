@@ -59,6 +59,7 @@ impl Plugin for GitPlugin {
             .insert_resource(RepoInfoCache {
                 entries: HashMap::new(),
                 canonical: HashMap::new(),
+                guessed: HashMap::new(),
                 wake: repo_info_wake,
             })
             .add_plugins(BinEventEmitterPlugin::<(
@@ -195,27 +196,51 @@ struct RepoInfoCacheEntry {
     ignore_events_until: Option<Instant>,
 }
 
+const UNRESOLVED_RETRY: Duration = Duration::from_secs(1);
+
+struct GuessedPath {
+    guess: PathBuf,
+    made_at: Instant,
+}
+
+impl GuessedPath {
+    fn of(path: &Path) -> Self {
+        Self {
+            guess: canon(path),
+            made_at: Instant::now(),
+        }
+    }
+
+    fn worth_reusing(&self) -> bool {
+        self.made_at.elapsed() < UNRESOLVED_RETRY
+    }
+}
+
 #[derive(Resource)]
 pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
     canonical: HashMap<PathBuf, PathBuf>,
+    guessed: HashMap<PathBuf, GuessedPath>,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
-    /// Resolves `path` once and remembers the answer.
-    ///
-    /// `canonicalize` is a syscall per path component, and the systems asking for repo info run
-    /// every frame, which put the filesystem in the scroll path. Only a successful resolution is
-    /// kept: the fallback guesses at a path that does not exist yet, and that guess must not
-    /// outlive the file appearing.
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
         if let Some(known) = self.canonical.get(path) {
             return known.clone();
         }
+        if let Some(guessed) = self.guessed.get(path)
+            && guessed.worth_reusing()
+        {
+            return guessed.guess.clone();
+        }
         let Ok(resolved) = path.canonicalize() else {
-            return canon(path);
+            let guessed = GuessedPath::of(path);
+            let guess = guessed.guess.clone();
+            self.guessed.insert(path.to_path_buf(), guessed);
+            return guess;
         };
+        self.guessed.remove(path);
         self.canonical.insert(path.to_path_buf(), resolved.clone());
         resolved
     }
@@ -352,27 +377,30 @@ fn is_git_lock_path(path: &Path) -> bool {
         .is_some_and(|name| name.to_string_lossy().ends_with(".lock"))
 }
 
-fn target_matches(target: &GitWatchTarget, changed: &Path) -> bool {
-    let changed = canon(changed);
-    let matches = changed == target.path
-        || if target.recursive {
-            changed.starts_with(&target.path)
-        } else {
-            changed.parent() == Some(target.path.as_path())
-        };
-    if !matches {
-        return false;
-    }
-    match target.kind {
-        GitWatchKind::Metadata => !is_git_lock_path(&changed),
-        GitWatchKind::Worktree => changed
-            .strip_prefix(&target.path)
-            .ok()
-            .is_none_or(|relative| {
-                !relative
-                    .components()
-                    .any(|component| component.as_os_str() == ".git")
-            }),
+impl GitWatchTarget {
+    fn matches(&self, changed: &Path) -> bool {
+        let matches = changed == self.path
+            || if self.recursive {
+                changed.starts_with(&self.path)
+            } else {
+                changed.parent() == Some(self.path.as_path())
+            };
+        if !matches {
+            return false;
+        }
+        match self.kind {
+            GitWatchKind::Metadata => !is_git_lock_path(changed),
+            GitWatchKind::Worktree => {
+                changed
+                    .strip_prefix(&self.path)
+                    .ok()
+                    .is_none_or(|relative| {
+                        !relative
+                            .components()
+                            .any(|component| component.as_os_str() == ".git")
+                    })
+            }
+        }
     }
 }
 
@@ -628,7 +656,9 @@ fn drain_git_watch(
         if matches!(event.kind, EventKind::Access(_)) {
             continue;
         }
-        changed.extend(event.paths);
+        for path in event.paths {
+            changed.insert(canon(&path));
+        }
     }
     if changed.is_empty() {
         return;
@@ -640,7 +670,7 @@ fn drain_git_watch(
             subscription
                 .targets
                 .iter()
-                .any(|target| changed.iter().any(|path| target_matches(target, path)))
+                .any(|target| changed.iter().any(|path| target.matches(path)))
         })
         .map(|(entity, _)| *entity)
         .collect();
@@ -657,7 +687,7 @@ fn drain_git_watch(
         .filter(|(_, targets)| {
             targets
                 .iter()
-                .any(|target| changed.iter().any(|path| target_matches(target, path)))
+                .any(|target| changed.iter().any(|path| target.matches(path)))
         })
         .map(|(path, _)| path.clone())
         .collect();
@@ -932,22 +962,19 @@ mod tests {
             kind: GitWatchKind::Metadata,
         };
 
-        assert!(target_matches(&direct, &root.join("index")));
-        assert!(!target_matches(&direct, &root.join("index.lock")));
-        assert!(!target_matches(&direct, &root.join("refs/heads/main")));
-        assert!(target_matches(&recursive, &root.join("refs/heads/main")));
-        assert!(!target_matches(
-            &recursive,
-            &root.join("refs/heads/main.lock")
-        ));
+        assert!(direct.matches(&root.join("index")));
+        assert!(!direct.matches(&root.join("index.lock")));
+        assert!(!direct.matches(&root.join("refs/heads/main")));
+        assert!(recursive.matches(&root.join("refs/heads/main")));
+        assert!(!recursive.matches(&root.join("refs/heads/main.lock")));
 
         let worktree = GitWatchTarget {
             path: root.clone(),
             recursive: true,
             kind: GitWatchKind::Worktree,
         };
-        assert!(target_matches(&worktree, &root.join("Cargo.lock")));
-        assert!(!target_matches(&worktree, &root.join(".git/index")));
+        assert!(worktree.matches(&root.join("Cargo.lock")));
+        assert!(!worktree.matches(&root.join(".git/index")));
     }
 
     #[test]
@@ -959,16 +986,43 @@ mod tests {
         let info = crate::host::worktree::repo_info(repo.path()).unwrap();
         let targets = repo_info_watch_targets(repo.path(), Some(&info));
 
-        assert!(targets.iter().any(|target| target_matches(target, &file)));
-        assert!(
-            targets
-                .iter()
-                .any(|target| target_matches(target, &info.git_dir.join("HEAD")))
+        let file = canon(&file);
+        let head = canon(&info.git_dir.join("HEAD"));
+        let lock = canon(&info.git_dir.join("index.lock"));
+
+        assert!(targets.iter().any(|target| target.matches(&file)));
+        assert!(targets.iter().any(|target| target.matches(&head)));
+        assert!(targets.iter().all(|target| !target.matches(&lock)));
+    }
+
+    #[test]
+    fn a_path_that_will_not_resolve_is_guessed_once_rather_than_every_call() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&real).expect("create real");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let absent = link.join("not-yet").join("file.txt");
+        let mut cache = RepoInfoCache {
+            entries: HashMap::new(),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            wake: None,
+        };
+
+        let guessed = cache.canonical_path(&absent);
+        std::fs::create_dir_all(absent.parent().expect("parent")).expect("create");
+        std::fs::write(&absent, "").expect("write");
+
+        assert_eq!(
+            cache.canonical_path(&absent),
+            guessed,
+            "the guess is reused inside the retry window instead of hitting the filesystem again"
         );
-        assert!(
-            targets
-                .iter()
-                .all(|target| !target_matches(target, &info.git_dir.join("index.lock")))
+        assert_ne!(
+            guessed,
+            absent.canonicalize().expect("now resolvable"),
+            "the guess must differ from a fresh resolution, or this test cannot tell them apart"
         );
     }
 
@@ -983,6 +1037,7 @@ mod tests {
         let mut cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
+            guessed: HashMap::new(),
             wake: None,
         };
         let wait_for = |cache: &mut RepoInfoCache, expected| {
@@ -1016,6 +1071,7 @@ mod tests {
         test_repo::write(repo.path(), "a.txt", "two\n");
         let mut cache = RepoInfoCache {
             canonical: HashMap::new(),
+            guessed: HashMap::new(),
             entries: HashMap::from([(
                 path.clone(),
                 RepoInfoCacheEntry {

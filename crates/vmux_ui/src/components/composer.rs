@@ -25,6 +25,7 @@ pub enum PromptComposerAction {
 pub fn PromptComposer(
     value: String,
     #[props(default)] preview: String,
+    #[props(default)] overlay: String,
     #[props(default)] completion: String,
     #[props(default)] attachments: Vec<PromptComposerAttachment>,
     #[props(default)] ghost: Option<Element>,
@@ -60,6 +61,8 @@ pub fn PromptComposer(
         })
     });
     let has_ghost = ghost.is_some();
+    let overlaid = !overlay.is_empty();
+    let typed_text_class = if overlaid { "text-transparent" } else { "" };
     let action_class = if action_enabled {
         match action {
             PromptComposerAction::Send => format!(
@@ -145,7 +148,11 @@ pub fn PromptComposer(
                             div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5", {ghost} }
                         }
                     }
-                    if !completion.is_empty() {
+                    if overlaid {
+                        div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
+                            div { class: "max-w-full truncate whitespace-nowrap text-base leading-6 text-foreground sm:text-[15px]", "{overlay}" }
+                        }
+                    } else if !completion.is_empty() {
                         div {
                             class: "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1.5 py-2.5 text-base leading-6 sm:py-2 sm:text-[15px]",
                             span { class: "text-transparent", "{value}" }
@@ -154,7 +161,7 @@ pub fn PromptComposer(
                     }
                     textarea {
                         id: "{input_id}",
-                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
+                        class: "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 {typed_text_class} caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
                         autofocus,
                         disabled,
                         rows: "1",
@@ -162,7 +169,7 @@ pub fn PromptComposer(
                         autocapitalize: "off",
                         autocomplete: "off",
                         "autocorrect": "off",
-                        placeholder: if preview.is_empty() && !has_ghost { placeholder } else { String::new() },
+                        placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
                         value: "{value}",
                         oninput: move |event| on_input.call(event.value()),
                         onpaste: move |_| on_paste.call(()),

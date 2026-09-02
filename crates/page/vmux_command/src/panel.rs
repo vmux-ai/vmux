@@ -159,7 +159,7 @@ pub fn CommandBarPanel() -> Element {
     let card_class = if placed.is_some() {
         "absolute"
     } else {
-        "absolute left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2"
+        "absolute left-1/2 top-1/2 w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2"
     };
     let shell_class = if placed.is_some() {
         "relative flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"

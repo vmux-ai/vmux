@@ -271,7 +271,9 @@ impl MobileHost {
             CommandBarActionEvent::Open { .. }
             | CommandBarActionEvent::Terminal { .. }
             | CommandBarActionEvent::Command { .. }
-            | CommandBarActionEvent::Space { .. } => Err(EventListenerError::Unsupported),
+            | CommandBarActionEvent::Space { .. }
+            | CommandBarActionEvent::Ex { .. }
+            | CommandBarActionEvent::Pick { .. } => Err(EventListenerError::Unsupported),
         }
     }
 

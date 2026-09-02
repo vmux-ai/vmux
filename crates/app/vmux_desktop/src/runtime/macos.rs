@@ -24,7 +24,8 @@ impl Plugin for RuntimePlatformPlugin {
 }
 
 use super::native::{
-    NativeWindowFrame, NativeWindowResizeDrag, native_resize_edges, native_scroll_should_wake,
+    NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
+    WindowTitlebarGesture, WindowZoom, native_resize_edges, native_scroll_should_wake,
     resized_native_window_frame, windowed_pointer_inside_after_event,
 };
 use vmux_flex::prelude::*;
@@ -51,7 +52,7 @@ fn activate_primary_window_on_startup(
 }
 
 fn grab_key_window_on_pane_hover(
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
     panes: Query<
         &ComputedNode,
         (
@@ -61,6 +62,9 @@ fn grab_key_window_on_pane_hover(
     >,
 ) {
     if !HOVER_OVER_PANE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if !app_is_frontmost() {
         return;
     }
     let Some(pointer) = vmux_layout::native_pointer::snapshot() else {
@@ -76,10 +80,22 @@ fn grab_key_window_on_pane_hover(
     if !over_pane {
         return;
     }
-    let Ok(window_entity) = primary_window.single() else {
+    let Ok((window_entity, window)) = primary_window.single() else {
         return;
     };
+    if !window.visible {
+        return;
+    }
     ensure_native_window_active(window_entity);
+}
+
+fn app_is_frontmost() -> bool {
+    use objc2_app_kit::NSApp;
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    NSApp(mtm).isActive()
 }
 
 fn activate_native_window(window_entity: Entity) {
@@ -149,15 +165,14 @@ const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
 fn activate_app() -> bool {
     use objc2_app_kit::NSApp;
 
+    if app_is_frontmost() {
+        return true;
+    }
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
-    let app = NSApp(mtm);
-    if app.isActive() {
-        return true;
-    }
     #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
+    NSApp(mtm).activateIgnoringOtherApps(true);
     false
 }
 
@@ -226,6 +241,26 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
     })
 }
 
+impl NativeWindowFrame {
+    fn of(rect: objc2_foundation::NSRect) -> Self {
+        Self {
+            x: rect.origin.x,
+            y: rect.origin.y,
+            width: rect.size.width,
+            height: rect.size.height,
+        }
+    }
+
+    fn rect(self) -> objc2_foundation::NSRect {
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+        NSRect::new(
+            NSPoint::new(self.x, self.y),
+            NSSize::new(self.width, self.height),
+        )
+    }
+}
+
 fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWindowResizeDrag> {
     use objc2_app_kit::{NSEvent, NSWindowStyleMask};
 
@@ -238,14 +273,8 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
     if !style.contains(NSWindowStyleMask::Resizable) {
         window.setStyleMask(style | NSWindowStyleMask::Resizable);
     }
-    let frame = window.frame();
     let cursor = NSEvent::mouseLocation();
-    let frame = NativeWindowFrame {
-        x: frame.origin.x,
-        y: frame.origin.y,
-        width: frame.size.width,
-        height: frame.size.height,
-    };
+    let frame = NativeWindowFrame::of(window.frame());
     let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
     if !edges.any() {
         return None;
@@ -263,7 +292,6 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
 
 fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindowResizeDrag) {
     use objc2_app_kit::NSEvent;
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
 
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
@@ -273,13 +301,75 @@ fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindo
     };
     let cursor = NSEvent::mouseLocation();
     let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
-    window.setFrame_display(
-        NSRect::new(
-            NSPoint::new(frame.x, frame.y),
-            NSSize::new(frame.width, frame.height),
-        ),
-        true,
-    );
+    window.setFrame_display(frame.rect(), true);
+}
+
+const TITLEBAR_DOUBLE_CLICK_SLOP_PX: f32 = 8.0;
+
+impl WindowTitlebarGesture {
+    fn capture(
+        event: &objc2_app_kit::NSEvent,
+        clicks: &mut TitlebarClicks,
+        zoom: &mut WindowZoom,
+    ) -> Option<Self> {
+        let mtm = objc2::MainThreadMarker::new()?;
+        let Some((x, y)) = event_location_in_window_physical_px(event) else {
+            clicks.forget();
+            return None;
+        };
+        if !vmux_browser::WindowDragRegion::contains_point(x, y) {
+            clicks.forget();
+            return None;
+        }
+        let window = event.window(mtm)?;
+        let count = clicks.count(
+            TitlebarClick {
+                at: event.timestamp(),
+                x,
+                y,
+            },
+            objc2_app_kit::NSEvent::doubleClickInterval(),
+            TITLEBAR_DOUBLE_CLICK_SLOP_PX,
+        );
+        let gesture = Self::of(count, Self::double_click_action().as_deref());
+        match gesture {
+            Self::Drag => window.performWindowDragWithEvent(event),
+            Self::Zoom => zoom.animate(window),
+            Self::Miniaturize => window.miniaturize(None),
+            Self::Ignore => {}
+        }
+        Some(gesture)
+    }
+
+    fn double_click_action() -> Option<String> {
+        use objc2_foundation::{NSString, NSUserDefaults};
+
+        let defaults = NSUserDefaults::standardUserDefaults();
+        let action = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
+        Some(action.to_string())
+    }
+}
+
+impl WindowZoom {
+    fn animate(&mut self, window: objc2::rc::Retained<objc2_app_kit::NSWindow>) {
+        use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext};
+
+        let Some(screen) = window.screen() else {
+            return;
+        };
+        let target = self
+            .toggled(
+                NativeWindowFrame::of(window.frame()),
+                NativeWindowFrame::of(screen.visibleFrame()),
+            )
+            .rect();
+        let duration = window.animationResizeTime(target);
+        let changes = block2::RcBlock::new(move |context: NonNull<NSAnimationContext>| {
+            unsafe { context.as_ref() }.setDuration(duration);
+            window.animator().setFrame_display(target, true);
+        });
+        NSAnimationContext::runAnimationGroup(&changes);
+    }
 }
 
 fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
@@ -297,11 +387,14 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
     });
     let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
     let local_resize_drag = Arc::clone(&resize_drag);
+    let titlebar_clicks = Arc::new(Mutex::new(TitlebarClicks::default()));
+    let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
-        let capture_window_resize = match event_type {
+        let mut titlebar_gesture = None;
+        let capture_window_gesture = match event_type {
             NSEventType::LeftMouseDown => {
                 let drag = begin_native_window_resize(ev);
                 *local_resize_drag
@@ -311,7 +404,14 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                     IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
                     true
                 } else {
-                    false
+                    let mut clicks = titlebar_clicks
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut zoom = window_zoom
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    titlebar_gesture = WindowTitlebarGesture::capture(ev, &mut clicks, &mut zoom);
+                    titlebar_gesture.is_some()
                 }
             }
             NSEventType::LeftMouseDragged => {
@@ -343,6 +443,9 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         if event_type == NSEventType::LeftMouseDown {
             vmux_browser::set_native_left_mouse_down(true);
         } else if event_type == NSEventType::LeftMouseUp {
+            vmux_browser::set_native_left_mouse_down(false);
+        }
+        if titlebar_gesture == Some(WindowTitlebarGesture::Drag) {
             vmux_browser::set_native_left_mouse_down(false);
         }
         let motion = matches!(
@@ -400,7 +503,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         } else {
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
-        if capture_window_resize {
+        if capture_window_gesture {
             return std::ptr::null_mut();
         }
         event.as_ptr()

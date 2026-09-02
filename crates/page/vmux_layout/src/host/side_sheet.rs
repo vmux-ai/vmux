@@ -1,8 +1,8 @@
 use super::Open;
 use crate::settings::LayoutSettings;
+use bevy::prelude::*;
 #[cfg(target_os = "macos")]
-use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{ecs::system::NonSendMarker, window::PrimaryWindow, winit::WINIT_WINDOWS};
 use vmux_flex::prelude::*;
 
 impl Plugin for SideSheetLayoutPlugin {
@@ -10,7 +10,6 @@ impl Plugin for SideSheetLayoutPlugin {
         app.register_type::<SideSheetSectionsExpanded>()
             .register_type::<SideSheetPaneExpanded>()
             .insert_resource(SideSheetWidth(0.0))
-            .add_systems(Update, side_sheet_drag_resize)
             .add_systems(
                 PostUpdate,
                 (
@@ -92,81 +91,23 @@ pub enum SideSheetPosition {
 #[derive(Resource)]
 pub struct SideSheetWidth(pub f32);
 
-#[derive(Component)]
-struct SideSheetDrag {
-    start_cursor_x: f32,
-    start_width: f32,
-}
-
-const MIN_SIDE_SHEET_WIDTH: f32 = 120.0;
-const MAX_SIDE_SHEET_WIDTH: f32 = 800.0;
-const EDGE_HIT_ZONE: f32 = 6.0;
-
-fn side_sheet_drag_resize(
-    windows: Query<&Window, With<PrimaryWindow>>,
-
-    mut width_res: ResMut<SideSheetWidth>,
-    sheet_q: Query<(&SideSheetPosition, Has<Open>, &ComputedNode), With<SideSheet>>,
-    active_drags: Query<(Entity, &SideSheetDrag)>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    mut side_sheet_q: Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
-    mut commands: Commands,
-) {
-    let is_open = sheet_q
-        .iter()
-        .any(|(pos, open, _)| *pos == SideSheetPosition::Left && open);
-    if !is_open {
-        return;
-    }
-
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor_pos) = window.physical_cursor_position() else {
-        return;
-    };
-    let cursor_x = cursor_pos.x;
-
-    if let Ok((drag_entity, drag)) = active_drags.single() {
-        if mouse.pressed(MouseButton::Left) {
-            let new_width = (drag.start_width + cursor_x - drag.start_cursor_x)
-                .clamp(MIN_SIDE_SHEET_WIDTH, MAX_SIDE_SHEET_WIDTH);
-            width_res.0 = new_width;
-
-            for (pos, mut node) in &mut side_sheet_q {
-                if *pos == SideSheetPosition::Left {
-                    node.width = Val::Px(new_width);
-                }
+impl SideSheetWidth {
+    pub fn apply(
+        &mut self,
+        width: f32,
+        sheets: &mut Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
+    ) {
+        self.0 = width;
+        for (position, mut node) in sheets {
+            if *position == SideSheetPosition::Left {
+                node.width = Val::Px(width);
             }
-        } else {
-            commands.entity(drag_entity).despawn();
-            return;
-        }
-
-        return;
-    }
-
-    for (pos, _, &rect) in &sheet_q {
-        if *pos != SideSheetPosition::Left {
-            continue;
-        }
-        let right_edge = rect.max().x;
-        let cursor_y = cursor_pos.y;
-
-        if cursor_x >= right_edge - EDGE_HIT_ZONE
-            && cursor_x <= right_edge + EDGE_HIT_ZONE
-            && cursor_y >= rect.min().y
-            && cursor_y <= rect.max().y
-            && mouse.just_pressed(MouseButton::Left)
-        {
-            commands.spawn(SideSheetDrag {
-                start_cursor_x: cursor_x,
-                start_width: width_res.0,
-            });
         }
     }
 }
 
 fn sync_side_sheet_visibility(
-    _settings: Res<LayoutSettings>,
+    settings: Res<LayoutSettings>,
     mut width_res: ResMut<SideSheetWidth>,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
@@ -194,7 +135,10 @@ fn sync_side_sheet_visibility(
     let Some(is_open) = left_open else { return };
 
     if width_res.0 <= 0.0 {
-        width_res.0 = crate::event::SIDE_SHEET_WIDTH_PX;
+        width_res.0 = crate::event::SideSheetResizeEvent {
+            width: settings.side_sheet.width,
+        }
+        .clamped();
     }
 
     let width = width_res.0;

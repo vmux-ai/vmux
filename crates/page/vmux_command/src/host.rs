@@ -15,12 +15,12 @@ pub mod surface;
 
 pub use bundle::CommandBar;
 pub use command::*;
-pub use issued::{CommandIssued, CommandIssuer};
+pub use issued::{CommandIssued, CommandIssuer, ExLineSubmitted, FileStatusPicked};
 pub use open::*;
 pub use page_key::{PageKeyPlugin, ScopedKeys};
 pub use payload::{
-    CommandBarEntry, build_command_bar_open_payload, command_bar_open_payload, command_list,
-    localized_command_name,
+    CommandBarEntry, CommandBarPicks, build_command_bar_open_payload, command_bar_open_payload,
+    command_list, localized_command_name,
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::*;

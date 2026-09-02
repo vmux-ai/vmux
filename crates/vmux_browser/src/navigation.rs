@@ -1,6 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, BrowserBarCommand, BrowserCommand, ReadAppCommands};
+use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
@@ -132,6 +133,7 @@ fn handle_browser_go_back_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -152,6 +154,9 @@ fn handle_browser_go_back_requests(
         ) else {
             continue;
         };
+        if host_history.stepped(webview, HostHistoryDelta::Back) {
+            continue;
+        }
         commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
     }
 }
@@ -165,6 +170,7 @@ fn handle_browser_go_forward_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -185,6 +191,9 @@ fn handle_browser_go_forward_requests(
         ) else {
             continue;
         };
+        if host_history.stepped(webview, HostHistoryDelta::Forward) {
+            continue;
+        }
         commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
     }
 }

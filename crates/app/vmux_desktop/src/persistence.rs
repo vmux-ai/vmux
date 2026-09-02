@@ -7,11 +7,11 @@ use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
+use vmux_core::host::page::NativelyHosted;
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
 };
 use vmux_flex::prelude::*;
-use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
 use vmux_layout::space::{Space, SpaceId};
@@ -23,9 +23,7 @@ use vmux_layout::{
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
-use vmux_setting::event::SETTINGS_PAGE_URL;
 use vmux_space::ActiveSpace;
-use vmux_space::event::SPACES_PAGE_URL;
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -419,6 +417,25 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
     tabs.into_iter().map(|(entity, _, _)| entity).collect()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct PageUrl<'a>(&'a str);
+
+impl<'a> PageUrl<'a> {
+    fn of(url: &'a str) -> Self {
+        let path = url.split(['?', '#']).next().unwrap_or(url);
+        Self(path.trim_end_matches('/'))
+    }
+
+    fn hosted_by(self, pages: &Query<&NativelyHosted>) -> Option<NativelyHosted> {
+        for page in pages {
+            if PageUrl::of(page.url) == self {
+                return Some(*page);
+            }
+        }
+        None
+    }
+}
+
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
     tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
@@ -437,6 +454,7 @@ pub(crate) fn rebuild_space_views(
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     browser_q: Query<(), With<Browser>>,
+    native_pages: Query<&NativelyHosted>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
     mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
@@ -545,15 +563,9 @@ pub(crate) fn rebuild_space_views(
             .unwrap_or(false);
 
         if !has_browser {
-            if meta
-                .url
-                .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
-            {
+            if let Some(page) = PageUrl::of(&meta.url).hosted_by(&native_pages) {
                 commands.spawn((
-                    vmux_layout::cef::Browser::native_page(
-                        SERVICES_PAGE_URL,
-                        "Background Services",
-                    ),
+                    vmux_layout::cef::Browser::native_page(page.url, page.title),
                     ChildOf(entity),
                 ));
             } else if meta
@@ -603,22 +615,6 @@ pub(crate) fn rebuild_space_views(
                         });
                     }
                 }
-            } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
-                commands.spawn((
-                    vmux_layout::cef::Browser::native_page(SPACES_PAGE_URL, "Spaces"),
-                    ChildOf(entity),
-                ));
-            } else if meta
-                .url
-                .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
-            {
-                commands.spawn((
-                    vmux_layout::cef::Browser::native_page(
-                        vmux_setting::event::SETTINGS_PAGE_URL,
-                        "Settings",
-                    ),
-                    ChildOf(entity),
-                ));
             } else if meta.url.starts_with("file:") {
                 if let Some(bundle) = vmux_editor::restore_file_view_bundle(&meta.url) {
                     commands.spawn((bundle, ChildOf(entity)));
@@ -1055,6 +1051,117 @@ mod tests {
 
         let _ = saved_url;
         assert_eq!(meta.url, TERMINAL_PAGE_URL);
+    }
+
+    #[test]
+    fn a_restored_natively_hosted_page_is_rebuilt_native_not_cef() {
+        for saved_url in [
+            "vmux://start/",
+            "vmux://start",
+            "vmux://vault/?provider=github",
+        ] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(test_settings())
+                .init_resource::<vmux_agent::strategy::AgentStrategies>()
+                .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+                .add_systems(Update, rebuild_space_views);
+
+            let main = app.world_mut().spawn(Main).id();
+            app.world_mut().spawn(PrimaryWindow);
+            app.world_mut().spawn(NativelyHosted {
+                url: "vmux://start/",
+                title: "Start",
+            });
+            app.world_mut().spawn(NativelyHosted {
+                url: "vmux://vault/",
+                title: "Vault",
+            });
+            let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+            let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    Stack::default(),
+                    PageMetadata {
+                        url: saved_url.to_string(),
+                        ..default()
+                    },
+                    ChildOf(pane),
+                ))
+                .id();
+
+            app.update();
+
+            let page = app
+                .world()
+                .get::<Children>(stack)
+                .and_then(|children| children.iter().next())
+                .unwrap_or_else(|| panic!("{saved_url} restored no page"));
+            assert!(
+                app.world()
+                    .entity(page)
+                    .contains::<vmux_core::host::page::HostsPage>(),
+                "{saved_url} restored without a native host"
+            );
+            assert!(
+                !app.world().entity(page).contains::<WebviewSource>(),
+                "{saved_url} restored as a CEF browser, which serves it no document"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restored_web_page_is_still_rebuilt_as_a_cef_browser() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_systems(Update, rebuild_space_views);
+
+        let main = app.world_mut().spawn(Main).id();
+        app.world_mut().spawn(PrimaryWindow);
+        app.world_mut().spawn(NativelyHosted {
+            url: "vmux://start/",
+            title: "Start",
+        });
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://example.com/".to_string(),
+                    ..default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.update();
+
+        let page = app
+            .world()
+            .get::<Children>(stack)
+            .and_then(|children| children.iter().next())
+            .expect("restored page");
+        assert!(app.world().entity(page).contains::<WebviewSource>());
+    }
+
+    #[test]
+    fn a_neighbouring_url_does_not_claim_a_hosted_page() {
+        assert_eq!(PageUrl::of("vmux://vault/"), PageUrl::of("vmux://vault"));
+        assert_eq!(
+            PageUrl::of("vmux://vault/?provider=github"),
+            PageUrl::of("vmux://vault/")
+        );
+        assert_ne!(PageUrl::of("vmux://vaults/"), PageUrl::of("vmux://vault/"));
+        assert_ne!(
+            PageUrl::of("vmux://vault/deep"),
+            PageUrl::of("vmux://vault/")
+        );
     }
 
     #[test]

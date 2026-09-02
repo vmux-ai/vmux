@@ -47,7 +47,11 @@ fn AgentMenuRow(
     on_pick: EventHandler<String>,
 ) -> Element {
     let url = option.url.clone();
-    let initial = option.title.chars().next().unwrap_or('A');
+    let fallback = translate("agent-menu-fallback-initial");
+    let initial = match option.title.chars().next() {
+        Some(character) => character.to_string(),
+        None => fallback,
+    };
     rsx! {
         button {
             class: if selected { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_SELECTED} text-foreground") } else { format!("{PROMPT_MENU_ROW} {PROMPT_MENU_ROW_IDLE} text-foreground/75 hover:text-foreground") },

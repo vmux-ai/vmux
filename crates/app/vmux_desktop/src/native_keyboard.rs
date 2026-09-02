@@ -35,6 +35,7 @@ static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
 
 static WINDOW_FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static EXIT_FULLSCREEN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_shortcut_map(map: Keymap) {
     *SHORTCUT_MAP.lock() = Some(map);
@@ -48,6 +49,18 @@ pub(crate) fn set_window_fullscreen(value: bool) {
 #[cfg(feature = "native-glass")]
 pub(crate) fn take_exit_fullscreen_request() -> bool {
     EXIT_FULLSCREEN_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
+pub(crate) fn take_quit_request() -> bool {
+    QUIT_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
+fn quits_the_app(combo: &KeyCombo) -> bool {
+    combo.key == KeyCode::KeyQ
+        && combo.modifiers.super_key
+        && !combo.modifiers.ctrl
+        && !combo.modifiers.alt
+        && !combo.modifiers.shift
 }
 
 fn escape_exits_fullscreen(combo: &KeyCombo) -> bool {
@@ -100,6 +113,10 @@ fn decide(
 fn classify(combo: KeyCombo) -> KeyAction {
     if escape_exits_fullscreen(&combo) {
         EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
+        return KeyAction::Consume(None);
+    }
+    if quits_the_app(&combo) {
+        QUIT_REQUESTED.store(true, Ordering::Relaxed);
         return KeyAction::Consume(None);
     }
     let guard = SHORTCUT_MAP.lock();
@@ -264,7 +281,11 @@ fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
 fn process_monitored_keys(
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
+    mut lifecycle: MessageWriter<crate::runtime::LifecycleEvent>,
 ) {
+    if take_quit_request() {
+        lifecycle.write(crate::runtime::LifecycleEvent::HideAllWindows);
+    }
     let drained = {
         let mut queue = PENDING_COMMANDS.lock();
         if queue.is_empty() {

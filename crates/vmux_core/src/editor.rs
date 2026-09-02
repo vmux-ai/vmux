@@ -74,6 +74,8 @@ pub struct CursorPos {
     pub line: u32,
     pub row: u32,
     pub col: u32,
+    #[serde(default)]
+    pub char_col: u32,
 }
 
 #[derive(

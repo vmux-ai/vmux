@@ -11,7 +11,9 @@ use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::launcher::palette::{CompletionQuery, PaletteDraft, PaletteSurface};
 use vmux_ui::platform::sleep_ms;
 
-const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
+pub const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
+
+const COMPLETION_DEBOUNCE_MS: u32 = 60;
 
 const HISTORY_SUGGESTION_LIMIT: u32 = 5;
 
@@ -25,13 +27,13 @@ impl HostSearchTimer {
         }
     }
 
-    pub fn schedule(&self, callback: impl FnOnce() + 'static) {
+    pub fn schedule(&self, delay_ms: u32, callback: impl FnOnce() + 'static) {
         self.cancel();
         let cancelled = Rc::new(Cell::new(false));
         *self.0.borrow_mut() = Some(cancelled.clone());
         let slot = self.clone();
         spawn(async move {
-            sleep_ms(HOST_SEARCH_DEBOUNCE_MS).await;
+            sleep_ms(delay_ms).await;
             if cancelled.get() {
                 return;
             }
@@ -63,6 +65,8 @@ impl HostSearch {
 #[derive(Clone, Copy, PartialEq)]
 pub struct PaletteFeeds {
     pub completions: Signal<Vec<PathEntry>>,
+    pub completions_partial: Signal<bool>,
+    pub completions_total: Signal<usize>,
     pub completion_id: Signal<u64>,
     pub suggestions: Signal<Vec<HistoryEntry>>,
     pub suggestion_id: Signal<u64>,
@@ -71,6 +75,8 @@ pub struct PaletteFeeds {
 pub fn use_palette_feeds() -> PaletteFeeds {
     PaletteFeeds {
         completions: use_signal(Vec::<PathEntry>::new),
+        completions_partial: use_signal(|| false),
+        completions_total: use_signal(|| 0usize),
         completion_id: use_signal(|| 0u64),
         suggestions: use_signal(Vec::<HistoryEntry>::new),
         suggestion_id: use_signal(|| 0u64),
@@ -83,6 +89,8 @@ impl PaletteFeeds {
             query: (signals.query)(),
             target_url: (signals.target_url)(),
             completions: (self.completions)(),
+            completions_partial: (self.completions_partial)(),
+            completions_total: (self.completions_total)(),
             history: (self.suggestions)(),
             ..PaletteDraft::default()
         }
@@ -90,13 +98,19 @@ impl PaletteFeeds {
 
     pub fn clear(&self) {
         let mut completions = self.completions;
+        let mut partial = self.completions_partial;
+        let mut total = self.completions_total;
         let mut suggestions = self.suggestions;
         completions.set(Vec::new());
+        partial.set(false);
+        total.set(0);
         suggestions.set(Vec::new());
     }
 
     pub fn watch(&self) {
         let _ = (self.completions)();
+        let _ = (self.completions_partial)();
+        let _ = (self.completions_total)();
         let _ = (self.suggestions)();
     }
 
@@ -107,10 +121,14 @@ impl PaletteFeeds {
 
     fn complete_paths(self, signals: PaletteSignals, timer: HostSearchTimer) {
         let mut completions = self.completions;
+        let mut partial = self.completions_partial;
+        let mut total = self.completions_total;
         let mut request_id = self.completion_id;
         let _response =
             use_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
                 completions.set(data.completions);
+                partial.set(data.truncated);
+                total.set(data.total as usize);
             });
 
         let query = signals.query;
@@ -121,9 +139,11 @@ impl PaletteFeeds {
             let Some(path_query) = CompletionQuery::of(&typed) else {
                 timer.cancel();
                 completions.set(Vec::new());
+                partial.set(false);
+                total.set(0);
                 return;
             };
-            timer.schedule(move || {
+            timer.schedule(COMPLETION_DEBOUNCE_MS, move || {
                 if *request_id.peek() != id {
                     return;
                 }
@@ -168,7 +188,7 @@ impl PaletteFeeds {
                 return;
             }
             let query = trimmed.to_string();
-            timer.schedule(move || {
+            timer.schedule(HOST_SEARCH_DEBOUNCE_MS, move || {
                 if *request_id.peek() != id {
                     return;
                 }

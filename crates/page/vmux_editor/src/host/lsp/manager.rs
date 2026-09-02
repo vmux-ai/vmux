@@ -1472,6 +1472,7 @@ mod tests {
                 bold: false,
                 italic: false,
             }],
+            indent_levels: 0,
         }
     }
 

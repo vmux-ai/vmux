@@ -25,6 +25,17 @@ pub(super) struct NativeWindowFrame {
     pub(super) height: f64,
 }
 
+impl NativeWindowFrame {
+    fn matches(self, other: Self) -> bool {
+        const SLOP: f64 = 1.0;
+
+        (self.x - other.x).abs() <= SLOP
+            && (self.y - other.y).abs() <= SLOP
+            && (self.width - other.width).abs() <= SLOP
+            && (self.height - other.height).abs() <= SLOP
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct NativeResizeEdges {
     pub(super) left: bool,
@@ -98,6 +109,85 @@ pub(super) fn resized_native_window_frame(
         frame.height = (drag.frame.height + delta_y).max(drag.min_height);
     }
     frame
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WindowTitlebarGesture {
+    Drag,
+    Zoom,
+    Miniaturize,
+    Ignore,
+}
+
+impl WindowTitlebarGesture {
+    pub(super) fn of(click_count: isize, double_click_action: Option<&str>) -> Self {
+        if click_count < 2 {
+            return Self::Drag;
+        }
+        match double_click_action {
+            Some("Minimize") => Self::Miniaturize,
+            Some("None") => Self::Ignore,
+            _ => Self::Zoom,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct TitlebarClick {
+    pub(super) at: f64,
+    pub(super) x: f32,
+    pub(super) y: f32,
+}
+
+impl TitlebarClick {
+    fn repeats(self, earlier: Self, interval: f64, slop_px: f32) -> bool {
+        self.at >= earlier.at
+            && self.at - earlier.at <= interval
+            && (self.x - earlier.x).abs() <= slop_px
+            && (self.y - earlier.y).abs() <= slop_px
+    }
+}
+
+#[derive(Default)]
+pub(super) struct TitlebarClicks(Option<TitlebarClick>);
+
+impl TitlebarClicks {
+    pub(super) fn count(&mut self, click: TitlebarClick, interval: f64, slop_px: f32) -> isize {
+        let Some(earlier) = self.0 else {
+            self.0 = Some(click);
+            return 1;
+        };
+        if !click.repeats(earlier, interval, slop_px) {
+            self.0 = Some(click);
+            return 1;
+        }
+        self.0 = None;
+        2
+    }
+
+    pub(super) fn forget(&mut self) {
+        self.0 = None;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct WindowZoom(Option<NativeWindowFrame>);
+
+impl WindowZoom {
+    pub(super) fn toggled(
+        &mut self,
+        current: NativeWindowFrame,
+        zoomed: NativeWindowFrame,
+    ) -> NativeWindowFrame {
+        if let Some(restore) = self.0
+            && current.matches(zoomed)
+        {
+            self.0 = None;
+            return restore;
+        }
+        self.0 = Some(current);
+        zoomed
+    }
 }
 
 #[cfg(test)]
@@ -192,5 +282,139 @@ mod tests {
         assert!(!native_scroll_should_wake(false, true));
         assert!(native_scroll_should_wake(true, true));
         assert!(native_scroll_should_wake(false, false));
+    }
+
+    #[test]
+    fn a_quick_second_click_in_the_same_spot_is_a_double_and_a_third_is_not() {
+        let mut clicks = TitlebarClicks::default();
+        let first = TitlebarClick {
+            at: 10.0,
+            x: 400.0,
+            y: 20.0,
+        };
+        let again = TitlebarClick {
+            at: 10.2,
+            x: 403.0,
+            y: 22.0,
+        };
+        let third = TitlebarClick { at: 10.3, ..again };
+
+        let counts = [
+            clicks.count(first, 0.5, 8.0),
+            clicks.count(again, 0.5, 8.0),
+            clicks.count(third, 0.5, 8.0),
+        ];
+
+        assert_eq!(counts, [1, 2, 1]);
+    }
+
+    #[test]
+    fn a_second_click_too_late_or_too_far_away_starts_over() {
+        let first = TitlebarClick {
+            at: 10.0,
+            x: 400.0,
+            y: 20.0,
+        };
+        let mut late = TitlebarClicks::default();
+        late.count(first, 0.5, 8.0);
+        let mut far = TitlebarClicks::default();
+        far.count(first, 0.5, 8.0);
+
+        assert_eq!(late.count(TitlebarClick { at: 10.9, ..first }, 0.5, 8.0), 1);
+        assert_eq!(
+            far.count(
+                TitlebarClick {
+                    at: 10.2,
+                    x: 440.0,
+                    ..first
+                },
+                0.5,
+                8.0
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn a_second_click_on_the_titlebar_follows_the_system_double_click_action() {
+        assert_eq!(
+            WindowTitlebarGesture::of(1, Some("Minimize")),
+            WindowTitlebarGesture::Drag
+        );
+        assert_eq!(
+            WindowTitlebarGesture::of(2, Some("Minimize")),
+            WindowTitlebarGesture::Miniaturize
+        );
+        assert_eq!(
+            WindowTitlebarGesture::of(2, Some("None")),
+            WindowTitlebarGesture::Ignore
+        );
+        assert_eq!(
+            WindowTitlebarGesture::of(2, Some("Maximize")),
+            WindowTitlebarGesture::Zoom
+        );
+        assert_eq!(
+            WindowTitlebarGesture::of(2, None),
+            WindowTitlebarGesture::Zoom
+        );
+    }
+
+    #[test]
+    fn leaving_the_drag_region_forgets_the_first_titlebar_click() {
+        let mut clicks = TitlebarClicks::default();
+        let first = TitlebarClick {
+            at: 10.0,
+            x: 400.0,
+            y: 20.0,
+        };
+
+        clicks.count(first, 0.5, 8.0);
+        clicks.forget();
+
+        assert_eq!(
+            clicks.count(TitlebarClick { at: 10.2, ..first }, 0.5, 8.0),
+            1
+        );
+    }
+
+    const WINDOWED: NativeWindowFrame = NativeWindowFrame {
+        x: 240.0,
+        y: 180.0,
+        width: 900.0,
+        height: 600.0,
+    };
+    const VISIBLE: NativeWindowFrame = NativeWindowFrame {
+        x: 0.0,
+        y: 0.0,
+        width: 1512.0,
+        height: 944.0,
+    };
+
+    #[test]
+    fn zooming_twice_puts_the_window_back_where_it_started() {
+        let mut zoom = WindowZoom::default();
+
+        let zoomed = zoom.toggled(WINDOWED, VISIBLE);
+        let restored = zoom.toggled(zoomed, VISIBLE);
+
+        assert_eq!(zoomed, VISIBLE);
+        assert_eq!(restored, WINDOWED);
+    }
+
+    #[test]
+    fn moving_a_zoomed_window_makes_the_next_zoom_remember_where_it_was_moved_to() {
+        let mut zoom = WindowZoom::default();
+        let moved = NativeWindowFrame {
+            x: 40.0,
+            y: 60.0,
+            ..VISIBLE
+        };
+        zoom.toggled(WINDOWED, VISIBLE);
+
+        let rezoomed = zoom.toggled(moved, VISIBLE);
+        let restored = zoom.toggled(rezoomed, VISIBLE);
+
+        assert_eq!(rezoomed, VISIBLE);
+        assert_eq!(restored, moved);
     }
 }

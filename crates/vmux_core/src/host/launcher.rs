@@ -25,11 +25,6 @@ impl PendingLaunch {
 pub struct HostsLauncher;
 
 #[derive(Message, Clone, Copy, Debug)]
-pub struct FocusLauncherInput {
-    pub webview: Entity,
-}
-
-#[derive(Message, Clone, Copy, Debug)]
 pub struct InlineTransitionRequested {
     pub stack: Entity,
     pub webview: Entity,

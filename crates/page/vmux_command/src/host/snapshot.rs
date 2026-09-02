@@ -36,6 +36,7 @@ pub struct CommandBarWorkspaceSnapshot {
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarProjectRoots {
     pub roots: Vec<String>,
+    pub active: Option<String>,
 }
 
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
@@ -207,6 +208,7 @@ pub struct CommandBarWorkSnapshot {
     pub work_dirs: Vec<CommandBarWorkDir>,
     pub recent_files: Vec<CommandBarRecentFile>,
     pub search_engines: Vec<SearchEngine>,
+    pub projects: Vec<String>,
 }
 
 fn update_pages_snapshot(

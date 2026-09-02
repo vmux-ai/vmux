@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::edit::buffer::TextBuffer;
 use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
@@ -9,6 +7,7 @@ use crate::edit::command::{
 };
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
+use crate::page_model::DisplayCells;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -371,7 +370,19 @@ impl EditCore {
             .slice(line_start..line_start + col)
             .chars()
             .collect();
-        UnicodeWidthStr::width(s.as_str()) as u32
+        DisplayCells::of_str(&s)
+    }
+
+    pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let text: String = self
+            .buffer
+            .rope
+            .line(line)
+            .chars()
+            .filter(|ch| *ch != '\n' && *ch != '\r')
+            .collect();
+        DisplayCells::char_at(&text, cell)
     }
 
     pub fn cursor_pos(&self) -> CursorPos {
@@ -391,6 +402,7 @@ impl EditCore {
             line: line as u32,
             row: line as u32,
             col: self.vis_col(line_start, col),
+            char_col: col as u32,
         }
     }
 
@@ -617,37 +629,24 @@ impl EditCore {
     fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
         let search = self.search.as_ref()?;
         let forward = search.forward != reverse;
+        if let Some((rev, pattern, cached)) = self.search_cache.as_ref()
+            && *rev == self.rev
+            && *pattern == search.pattern
+        {
+            return crate::edit::search::step(cached, from, forward);
+        }
         let matches = self.search_matches();
         crate::edit::search::step(&matches, from, forward)
     }
 
-    fn is_word_char(&self, at: usize) -> bool {
-        at < self.buffer.len_chars() && {
-            let c = self.buffer.rope.char(at);
-            c.is_alphanumeric() || c == '_'
-        }
-    }
-
-    fn word_at(&self, caret: usize) -> Option<std::ops::Range<usize>> {
-        let caret = caret.min(self.buffer.len_chars());
-        let mut start = caret;
-        while start > 0 && self.is_word_char(start - 1) {
-            start -= 1;
-        }
-        let mut end = caret;
-        while self.is_word_char(end) {
-            end += 1;
-        }
-        (start != end).then_some(start..end)
-    }
-
     pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
-        if rows == 0 || !self.primary().is_empty() {
+        if rows == 0 {
             return Vec::new();
         }
-        let Some(word) = self.word_at(self.primary().head) else {
+        let word = self.primary().range();
+        if word.is_empty() {
             return Vec::new();
-        };
+        }
         let first_line = first as usize;
         let last_line = (first_line + rows as usize).min(self.buffer.len_lines());
         if first_line >= last_line {
@@ -672,9 +671,7 @@ impl EditCore {
         while at + needle.len() <= band.len() {
             let found = band[at..at + needle.len()] == needle[..];
             let absolute = band_start + at;
-            let bounded = (absolute == 0 || !self.is_word_char(absolute - 1))
-                && !self.is_word_char(absolute + needle.len());
-            if found && bounded {
+            if found {
                 let (line, column) = self.buffer.char_to_coords(absolute);
                 let line_start = self.buffer.line_to_char(line);
                 out.push(SelSpan {
@@ -700,13 +697,15 @@ impl EditCore {
             return Vec::new();
         }
         let last_line = first as usize + rows as usize;
+        let above =
+            matches.partition_point(|m| self.buffer.char_to_coords(m.end).0 < first as usize);
         let mut out = Vec::new();
-        for m in matches.iter().cloned() {
+        for m in matches[above..].iter().cloned() {
             let (l0, _) = self.buffer.char_to_coords(m.start);
-            let (l1, _) = self.buffer.char_to_coords(m.end);
-            if l1 < first as usize || l0 >= last_line {
-                continue;
+            if l0 >= last_line {
+                break;
             }
+            let (l1, _) = self.buffer.char_to_coords(m.end);
             for line in l0..=l1 {
                 if line < first as usize || line >= last_line {
                     continue;
@@ -1300,6 +1299,23 @@ impl EditCore {
         self.buf_insert(span.start, &out);
         let at = (span.start + out.chars().count()).min(self.buffer.len_chars());
         self.set_caret(self.first_non_blank(at.saturating_sub(1)));
+        true
+    }
+
+    fn reshape(&mut self, to: crate::shape::BufferShape) -> bool {
+        let source: String = self.buffer.rope.chars().collect();
+        let from = crate::shape::BufferShape::of(&self.buffer.rope).indent;
+        let out = crate::shape::Reindent { from, to }.applied(&source);
+        if out == source {
+            return false;
+        }
+        let line = self.cursor_pos().line as usize;
+        self.checkpoint(Group::Other);
+        self.buf_remove(0..self.buffer.len_chars());
+        self.buf_insert(0, &out);
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let at = self.buffer.line_to_char(line);
+        self.set_caret(self.first_non_blank(at));
         true
     }
 
@@ -1907,6 +1923,7 @@ impl EditCore {
                 }
             }
             EditCommand::ClearSearchHighlight => self.search_highlight = false,
+            EditCommand::OpenFind { .. } | EditCommand::OpenCommandLine => {}
             EditCommand::Substitute {
                 range,
                 pattern,
@@ -1936,6 +1953,9 @@ impl EditCore {
                     self.registers.write_yank(None, value.clone());
                     yank = Some(value);
                 }
+            }
+            EditCommand::Reshape(shape) => {
+                text_changed = self.reshape(shape);
             }
             EditCommand::SetMark(name) => {
                 self.marks.insert(name, self.primary().head);
@@ -2213,11 +2233,16 @@ mod tests {
     }
 
     #[test]
-    fn word_highlight_scans_the_band_and_skips_longer_words() {
+    fn only_a_selection_highlights_its_other_occurrences() {
         let mut c = core("id\nid_x\nother\nid\nid\n");
         c.mode = EditMode::Normal;
         c.set_caret(0);
+        assert!(
+            c.word_highlight_spans(0, 5).is_empty(),
+            "a bare caret sitting on a word must not light up the whole file"
+        );
 
+        c.set_active(Selection { anchor: 0, head: 2 });
         let in_band = |first, rows| {
             c.word_highlight_spans(first, rows)
                 .iter()
@@ -2225,8 +2250,11 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        assert_eq!(in_band(0, 3), vec![(0, 0, 2)]);
-        assert_eq!(in_band(0, 5), vec![(0, 0, 2), (3, 0, 2), (4, 0, 2)]);
+        assert_eq!(in_band(0, 3), vec![(0, 0, 2), (1, 0, 2)]);
+        assert_eq!(
+            in_band(0, 5),
+            vec![(0, 0, 2), (1, 0, 2), (3, 0, 2), (4, 0, 2)]
+        );
         assert_eq!(in_band(3, 2), vec![(3, 0, 2), (4, 0, 2)]);
     }
 
@@ -2951,6 +2979,42 @@ mod tests {
     }
 
     #[test]
+    fn reshape_rewrites_the_indentation_as_one_undoable_edit() {
+        let mut c = core("fn a() {\n\tb();\n\t\tc();\n}\n");
+        c.mode = EditMode::Normal;
+
+        c.apply(EditCommand::Reshape(crate::shape::BufferShape {
+            indent: vmux_core::event::FileIndent {
+                spaces: true,
+                width: 2,
+            },
+            line_ending: vmux_core::event::FileLineEnding::Lf,
+        }));
+
+        assert_eq!(text_of(&c), "fn a() {\n  b();\n    c();\n}\n");
+        assert!(c.dirty);
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "fn a() {\n\tb();\n\t\tc();\n}\n");
+    }
+
+    #[test]
+    fn reshaping_to_the_current_shape_leaves_the_buffer_unchanged() {
+        let mut c = core("a\n  b\n");
+        c.mode = EditMode::Normal;
+
+        c.apply(EditCommand::Reshape(crate::shape::BufferShape {
+            indent: vmux_core::event::FileIndent {
+                spaces: true,
+                width: 2,
+            },
+            line_ending: vmux_core::event::FileLineEnding::Lf,
+        }));
+
+        assert_eq!(text_of(&c), "a\n  b\n");
+        assert!(!c.dirty);
+    }
+
+    #[test]
     fn ex_delete_removes_lines_and_yanks_them_linewise() {
         let mut c = core("one\ntwo\nthree\n");
         c.mode = EditMode::Normal;
@@ -3360,9 +3424,20 @@ mod tests {
             CursorPos {
                 line: 0,
                 row: 0,
-                col: 2
+                col: 2,
+                char_col: 1
             }
         );
+    }
+
+    #[test]
+    fn a_cell_column_resolves_to_the_character_the_pointer_landed_on() {
+        let c = core("今日の予定は？");
+
+        assert_eq!(c.char_at_cell(0, 0), 0);
+        assert_eq!(c.char_at_cell(0, 4), 2);
+        assert_eq!(c.char_at_cell(0, 14), 7);
+        assert_eq!(c.char_at_cell(0, 99), 7);
     }
 
     #[test]

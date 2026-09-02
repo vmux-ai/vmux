@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::{message::Messages, relationship::Relationship},
+    ecs::{message::Messages, relationship::Relationship, system::SystemParam},
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -7,20 +7,24 @@ use bevy_cef::prelude::*;
 use std::path::Path;
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
+    ReadAppCommands, open::OpenCommand,
 };
 use vmux_core::{
-    HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget, page::PageReady,
+    HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
+    page::{HostHistoryDelta, HostHistoryNavigation, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::SideSheetCommandEvent;
+use vmux_layout::event::{SideSheetCommandEvent, SideSheetResizeEvent};
 use vmux_layout::{
     Header, LayoutCef,
     event::{HeaderCommandEvent, RELOAD_EVENT, ReloadEvent},
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetSectionsExpanded},
-    stack::{ActiveTabParam, Stack, focused_stack},
+    side_sheet::{
+        SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
+        SideSheetWidth,
+    },
+    stack::{ActiveTabParam, CloseStackRequest, Stack, focused_stack},
 };
 
 use vmux_terminal::{RestartPty, Terminal};
@@ -32,6 +36,7 @@ impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
+            .add_observer(on_side_sheet_resize)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_systems(Update, handle_browser_commands.in_set(ReadAppCommands));
@@ -40,12 +45,7 @@ impl Plugin for CommandPlugin {
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
@@ -54,21 +54,14 @@ fn handle_browser_commands(
     host_spawn: Res<HostSpawnRegistry>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
+    mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
         let AppCommand::Browser(browser_cmd) = cmd else {
             continue;
         };
-        let (_, _, active_stack_opt) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
-        let Some(active) = active_stack_opt else {
+        let Some(active) = active_stack.get() else {
             continue;
         };
         let Some(webview) = browsers
@@ -83,14 +76,16 @@ fn handle_browser_commands(
         match browser_cmd {
             BrowserCommand::Navigation(nav) => match nav {
                 BrowserNavigationCommand::PrevPage => {
-                    if !is_terminal {
-                        commands.trigger(RequestGoBack { webview });
+                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
+                        continue;
                     }
+                    commands.trigger(RequestGoBack { webview });
                 }
                 BrowserNavigationCommand::NextPage => {
-                    if !is_terminal {
-                        commands.trigger(RequestGoForward { webview });
+                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
+                        continue;
                     }
+                    commands.trigger(RequestGoForward { webview });
                 }
                 BrowserNavigationCommand::Reload => {
                     if is_terminal {
@@ -182,6 +177,30 @@ fn handle_browser_commands(
     }
 }
 
+#[derive(SystemParam)]
+struct ActiveStack<'w, 's> {
+    active_tab: ActiveTabParam<'w, 's>,
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+}
+
+impl ActiveStack<'_, '_> {
+    fn get(&self) -> Option<Entity> {
+        let (_, _, stack) = focused_stack(
+            self.active_tab.get(),
+            &self.all_children,
+            &self.leaf_panes,
+            &self.pane_ts,
+            &self.pane_children,
+            &self.stack_ts,
+        );
+        stack
+    }
+}
+
 fn on_header_command_emit(
     trigger: On<BinReceive<HeaderCommandEvent>>,
     mut messages: ResMut<Messages<AppCommand>>,
@@ -238,18 +257,40 @@ fn on_hard_reload_notify_header(
     }
 }
 
+fn on_side_sheet_resize(
+    trigger: On<BinReceive<SideSheetResizeEvent>>,
+    mut width: ResMut<SideSheetWidth>,
+    mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    saves: Option<ResMut<Messages<vmux_setting::SettingsSaveRequest>>>,
+) {
+    let next = trigger.event().payload.clamped();
+    if width.0 == next {
+        return;
+    }
+    width.apply(next, &mut sheets);
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.layout.side_sheet.width = next;
+    if let Some(mut saves) = saves {
+        saves.write(vmux_setting::SettingsSaveRequest);
+    }
+}
+
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut last_activated: Query<&mut LastActivatedAt>,
+    mut activation: StackActivation,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
+    mut close_stack_requests: MessageWriter<CloseStackRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -264,24 +305,16 @@ fn on_side_sheet_command_emit(
     let Ok(children) = pane_children.get(target_pane) else {
         return;
     };
-    let stack_entities: Vec<Entity> = children.iter().filter(|&e| stack_q.contains(e)).collect();
+    let named_stack = children
+        .iter()
+        .find(|&e| stack_q.contains(e) && e.to_bits() == evt.stack_id);
 
     match evt.command.as_str() {
         "activate_stack" => {
-            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
+            let Some(target_stack) = named_stack else {
                 return;
             };
-            let activated_at = LastActivatedAt::now();
-            if let Ok(mut value) = last_activated.get_mut(target_pane) {
-                *value = activated_at;
-            } else {
-                commands.entity(target_pane).insert(activated_at);
-            }
-            if let Ok(mut value) = last_activated.get_mut(target_stack) {
-                *value = activated_at;
-            } else {
-                commands.entity(target_stack).insert(activated_at);
-            }
+            activation.activate(target_pane, target_stack, &mut commands);
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
@@ -290,17 +323,10 @@ fn on_side_sheet_command_emit(
             }
         }
         "close_stack" => {
-            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
+            let Some(target_stack) = named_stack else {
                 return;
             };
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            commands.entity(target_stack).insert(LastActivatedAt::now());
-            let cmd = AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            messages.write(cmd);
+            close_stack_requests.write(CloseStackRequest::by_user(target_stack));
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
@@ -371,8 +397,8 @@ fn on_side_sheet_command_emit(
             ) else {
                 return;
             };
-            if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {
-                url.push_str(&format!("#L{}", evt.stack_index));
+            if evt.line > 0 && !Path::new(&evt.path).is_dir() {
+                url.push_str(&format!("#L{}", evt.line));
             }
             open_beside.write(vmux_layout::OpenBesideRequest {
                 pane: target_pane,
@@ -408,17 +434,139 @@ fn on_side_sheet_command_emit(
     }
 }
 
+#[derive(SystemParam)]
+struct StackActivation<'w, 's> {
+    last_activated: Query<'w, 's, &'static mut LastActivatedAt>,
+}
+
+impl StackActivation<'_, '_> {
+    fn activate(&mut self, pane: Entity, stack: Entity, commands: &mut Commands) {
+        let at = LastActivatedAt::now();
+        self.stamp(pane, at, commands);
+        self.stamp(stack, at, commands);
+    }
+
+    fn stamp(&mut self, entity: Entity, at: LastActivatedAt, commands: &mut Commands) {
+        if let Ok(mut value) = self.last_activated.get_mut(entity) {
+            *value = at;
+            return;
+        }
+        commands.entity(entity).insert(at);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_core::page::HostHistory;
     use vmux_layout::pane::Pane;
     use vmux_layout::space::{Space, SpaceId};
     use vmux_layout::stack::stack_bundle;
     use vmux_layout::tab::Tab;
 
+    #[derive(Resource, Default)]
+    struct CefNavigations(Vec<Entity>);
+
+    impl CefNavigations {
+        fn record_back(trigger: On<RequestGoBack>, mut navigations: ResMut<Self>) {
+            navigations.0.push(trigger.webview);
+        }
+    }
+
+    struct NavArrow {
+        app: App,
+        view: Entity,
+    }
+
+    impl NavArrow {
+        fn over(page: impl Bundle) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_core::CorePlugin, CommandPlugin))
+                .add_message::<AppCommand>()
+                .add_message::<vmux_command::CommandIssued>()
+                .add_message::<PageOpenRequest>()
+                .add_message::<vmux_terminal::TerminalFontSizeCommand>()
+                .init_resource::<HostSpawnRegistry>()
+                .init_resource::<CefNavigations>()
+                .add_observer(CefNavigations::record_back);
+
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt::now()))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id();
+            let view = app.world_mut().spawn((Browser, ChildOf(stack), page)).id();
+
+            Self { app, view }
+        }
+
+        fn over_a_natively_hosted_page() -> Self {
+            let mut history = HostHistory::default();
+            history.observe("file:///a.rs", 0);
+            history.observe("file:///b.rs", 0);
+            Self::over(history)
+        }
+
+        fn pressed(&mut self, button: &str) {
+            self.app
+                .world_mut()
+                .trigger(BinReceive::<HeaderCommandEvent> {
+                    webview: Entity::PLACEHOLDER,
+                    payload: HeaderCommandEvent {
+                        header_command: button.to_string(),
+                    },
+                });
+            self.app.update();
+            self.app.update();
+        }
+
+        fn walked_back(&self) -> bool {
+            self.app
+                .world()
+                .get::<HostHistory>(self.view)
+                .is_some_and(HostHistory::can_go_forward)
+        }
+
+        fn cef_navigations(&self) -> Vec<Entity> {
+            self.app.world().resource::<CefNavigations>().0.clone()
+        }
+    }
+
     #[test]
-    fn side_sheet_close_routes_through_the_stack_command() {
+    fn the_back_arrow_walks_host_history_instead_of_asking_chromium() {
+        let mut arrow = NavArrow::over_a_natively_hosted_page();
+
+        arrow.pressed("prev_page");
+
+        assert!(
+            arrow.walked_back(),
+            "the arrow must move the host history cursor off its newest entry"
+        );
+        assert!(
+            arrow.cef_navigations().is_empty(),
+            "a natively hosted page has no Chromium browser to walk back"
+        );
+    }
+
+    #[test]
+    fn the_back_arrow_still_asks_chromium_for_a_page_chromium_renders() {
+        let mut arrow = NavArrow::over(());
+
+        arrow.pressed("prev_page");
+
+        assert_eq!(arrow.cef_navigations(), vec![arrow.view]);
+    }
+
+    #[test]
+    fn the_side_sheet_close_button_names_the_stack_it_sits_on() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<AppCommand>()
@@ -427,7 +575,18 @@ mod tests {
             .add_observer(on_side_sheet_command_emit);
 
         let pane = app.world_mut().spawn(Pane).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let middle = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let active = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+        let mut cursor = app
+            .world()
+            .resource::<Messages<CloseStackRequest>>()
+            .get_cursor();
 
         app.world_mut()
             .trigger(BinReceive::<SideSheetCommandEvent> {
@@ -435,22 +594,25 @@ mod tests {
                 payload: SideSheetCommandEvent {
                     command: "close_stack".to_string(),
                     pane_id: pane.to_bits().to_string(),
-                    stack_index: 0,
+                    stack_id: middle.to_bits(),
+                    line: 0,
                     path: String::new(),
                 },
             });
         app.world_mut().flush();
 
-        let commands = app.world().resource::<Messages<AppCommand>>();
-        let mut cursor = commands.get_cursor();
-        let sent: Vec<&AppCommand> = cursor.read(commands).collect();
+        let requests = app.world().resource::<Messages<CloseStackRequest>>();
+        let closed: Vec<Entity> = cursor.read(requests).map(|request| request.stack).collect();
         assert_eq!(
-            sent,
-            vec![&AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close
-            ))],
+            closed,
+            vec![middle],
+            "the button closes its own stack, not whichever one is active"
         );
-        assert!(app.world().get::<LastActivatedAt>(stack).is_some());
+        assert_eq!(
+            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            2,
+            "closing an inactive stack must not disturb activation"
+        );
     }
 
     struct SideSheetSpaces {
@@ -503,7 +665,8 @@ mod tests {
                     payload: SideSheetCommandEvent {
                         command: "expand_section".to_string(),
                         pane_id: self.pane_in_first_tab.to_bits().to_string(),
-                        stack_index: 0,
+                        stack_id: 0,
+                        line: 0,
                         path: section.to_string(),
                     },
                 });

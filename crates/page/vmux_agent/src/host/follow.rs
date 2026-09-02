@@ -4,6 +4,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_command::WriteAppCommands;
 use vmux_core::agent::AgentKind;
+use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch};
 use vmux_layout::pane::Pane;
 use vmux_service::protocol::AgentCommand as ServiceAgentCommand;
 use vmux_setting::AppSettings;
@@ -421,24 +422,43 @@ fn handle_agent_file_search(
         else {
             continue;
         };
-        let Some(target_path) = matches.first().map(|result| PathBuf::from(&result.path)) else {
+        let files = SearchGrouping::of(matches);
+        let Some(first) = files.first() else {
             continue;
         };
         writer.write(vmux_editor::GlobalSearchRequest {
-            target_path,
+            target_path: PathBuf::from(&first.path),
             root: root.clone(),
             query: query.clone(),
-            matches: matches
-                .iter()
-                .map(|result| vmux_core::event::ExplorerSearchMatch {
-                    path: result.path.clone(),
-                    line: result.line,
-                    col: result.col,
-                    end_col: result.end_col,
-                    preview: result.preview.clone(),
-                })
-                .collect(),
+            files,
+            capped: false,
         });
+    }
+}
+
+struct SearchGrouping;
+
+impl SearchGrouping {
+    fn of(matches: &[vmux_wire::protocol::FileSearchMatch]) -> Vec<ExplorerSearchFile> {
+        let mut files: Vec<ExplorerSearchFile> = Vec::new();
+        for result in matches {
+            let hit = ExplorerSearchMatch {
+                line: result.line,
+                col: result.col,
+                end_col: result.end_col,
+                preview: result.preview.clone(),
+            };
+            if let Some(file) = files.iter_mut().find(|file| file.path == result.path) {
+                file.matches.push(hit);
+                continue;
+            }
+            files.push(ExplorerSearchFile {
+                path: result.path.clone(),
+                matches: vec![hit],
+                capped: false,
+            });
+        }
+        files
     }
 }
 
@@ -475,7 +495,7 @@ fn tidy_follow_pane(
     }
     if settings.agent.tidy_files_auto {
         for stack in closable {
-            close.write(vmux_layout::CloseStackRequest { stack });
+            close.write(vmux_layout::CloseStackRequest::tidying(stack));
         }
         return;
     }
@@ -624,12 +644,12 @@ pub(crate) fn on_tidy_action(
             settings.agent.tidy_files_auto = true;
             save.write(vmux_setting::SettingsSaveRequest);
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest { stack });
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
             }
         }
         vmux_core::event::TidyChoice::Tidy => {
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest { stack });
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
             }
         }
     }
@@ -855,13 +875,29 @@ mod tests {
                     anchor,
                     root: "/repo".into(),
                     query: "needle".into(),
-                    matches: vec![vmux_service::protocol::FileSearchMatch {
-                        path: "/repo/src/main.rs".into(),
-                        line: 9,
-                        col: 4,
-                        end_col: 10,
-                        preview: "let needle = true;".into(),
-                    }],
+                    matches: vec![
+                        vmux_service::protocol::FileSearchMatch {
+                            path: "/repo/src/main.rs".into(),
+                            line: 9,
+                            col: 4,
+                            end_col: 10,
+                            preview: "let needle = true;".into(),
+                        },
+                        vmux_service::protocol::FileSearchMatch {
+                            path: "/repo/src/lib.rs".into(),
+                            line: 2,
+                            col: 0,
+                            end_col: 6,
+                            preview: "needle".into(),
+                        },
+                        vmux_service::protocol::FileSearchMatch {
+                            path: "/repo/src/main.rs".into(),
+                            line: 21,
+                            col: 8,
+                            end_col: 14,
+                            preview: "    needle();".into(),
+                        },
+                    ],
                 },
             });
 
@@ -875,7 +911,13 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].target_path, PathBuf::from("/repo/src/main.rs"));
         assert_eq!(requests[0].query, "needle");
-        assert_eq!(requests[0].matches[0].line, 9);
+        let files = &requests[0].files;
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "/repo/src/main.rs");
+        assert_eq!(files[1].path, "/repo/src/lib.rs");
+        let lines: Vec<u32> = files[0].matches.iter().map(|hit| hit.line).collect();
+        assert_eq!(lines, vec![9, 21]);
+        assert_eq!(files[1].matches.len(), 1);
     }
 
     #[test]

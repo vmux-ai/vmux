@@ -35,6 +35,12 @@ pub fn ResultRow(
             onclick: move |_| on_activate.call(()),
             onmouseenter: move |_| on_hover.call(()),
             match &item {
+                            ResultItem::Pick { label, .. } => rsx! {
+                                div { class: result_content_row_class(),
+                                    span { class: result_primary_text_class(), "{label}" }
+                                }
+                                span { class: result_trailing_slot_class(), "\u{21b5}" }
+                            },
                             ResultItem::Terminal { path } => rsx! {
                                 div { class: result_content_row_class(),
                                     span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
@@ -99,6 +105,14 @@ pub fn ResultRow(
                                         span { class: result_shortcut_badge_class(), "{shortcut}" }
                                     }
                                 }
+                            },
+                            ResultItem::Ex { name, hint } => rsx! {
+                                div { class: result_content_row_class(),
+                                    span { class: "shrink-0 font-mono text-sm text-muted-foreground", ":" }
+                                    span { class: "shrink-0 font-mono text-sm text-foreground", "{name}" }
+                                    span { class: "{result_secondary_text_class()} min-w-0 truncate", "{hint}" }
+                                }
+                                span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
                             ResultItem::History { url, title, favicon_url, .. } => rsx! {
                                 div { class: result_content_row_class(),
@@ -180,8 +194,9 @@ pub fn ResultRow(
                                 }
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
-                            ResultItem::File { path, is_dir } => {
+                            ResultItem::File { path, is_dir, project, relative } => {
                                 let name = FilePath(path).name();
+                                let location = FileLocation::of(project, relative, path);
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         if *is_dir {
@@ -196,7 +211,12 @@ pub fn ResultRow(
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                             span { class: result_primary_text_class(), "{name}" }
-                                            span { class: result_secondary_text_class(), "{path}" }
+                                            div { class: "flex min-w-0 items-center gap-1.5",
+                                                if !project.is_empty() {
+                                                    span { class: "{result_shortcut_badge_class()} shrink-0", "{project}" }
+                                                }
+                                                span { class: "{result_secondary_text_class()} min-w-0 truncate", "{location}" }
+                                            }
                                         }
                                     }
                                     if *is_dir {
@@ -232,6 +252,35 @@ pub fn ResultRow(
                                     }
                                 }
                             },
+                            ResultItem::PartialIndex => rsx! {
+                                div { class: result_content_row_class(),
+                                    Icon { class: result_leading_icon_class(),
+                                        circle { cx: "12", cy: "12", r: "10" }
+                                        path { d: "M12 8v4" }
+                                        path { d: "M12 16h.01" }
+                                    }
+                                    span { class: result_secondary_text_class(), {translate("command-partial-index")} }
+                                }
+                                span { class: result_trailing_slot_class() }
+                            },
+                            ResultItem::MoreMatches { shown, total } => rsx! {
+                                div { class: result_content_row_class(),
+                                    Icon { class: result_leading_icon_class(),
+                                        circle { cx: "12", cy: "12", r: "10" }
+                                        path { d: "M8 12h8" }
+                                    }
+                                    span { class: result_secondary_text_class(),
+                                        {translate_with(
+                                            "command-more-matches",
+                                            &[
+                                                ("shown", TranslationValue::Number(*shown as i64)),
+                                                ("total", TranslationValue::Number(*total as i64)),
+                                            ],
+                                        )}
+                                    }
+                                }
+                                span { class: result_trailing_slot_class() }
+                            },
                             ResultItem::RecentFile { url, title } => {
                                 let display = url.strip_prefix("file://").unwrap_or(url.as_str()).to_string();
                                 let name = if title.is_empty() {
@@ -255,5 +304,20 @@ pub fn ResultRow(
                             },
             }
         }
+    }
+}
+
+struct FileLocation;
+
+impl FileLocation {
+    fn of(project: &str, relative: &str, path: &str) -> String {
+        let shown = match project.is_empty() {
+            true => path,
+            false => relative,
+        };
+        let Some((dir, _)) = shown.trim_end_matches('/').rsplit_once('/') else {
+            return String::new();
+        };
+        dir.to_string()
     }
 }

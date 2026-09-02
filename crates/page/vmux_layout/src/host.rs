@@ -42,7 +42,7 @@ pub use contract::LayoutContractPlugin;
 pub use header::Header;
 pub use pane::{OpenBesideRequest, handle_open_beside_requests};
 pub use plugin::LayoutPlugin;
-pub use stack::CloseStackRequest;
+pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
 pub use vmux_core::launcher::PendingLaunch;
 pub use webview_reveal::PendingWebviewReveal;

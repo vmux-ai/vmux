@@ -119,6 +119,7 @@ impl HighlightCache {
             out.push(FileLine {
                 line_no: i as u32,
                 fold: vmux_core::event::FoldGutter::None,
+                indent_levels: 0,
                 spans,
             });
         }
@@ -146,6 +147,7 @@ impl HighlightCache {
             out.push(FileLine {
                 line_no: i as u32,
                 fold: vmux_core::event::FoldGutter::None,
+                indent_levels: 0,
                 spans: self.semantic.apply(i as u32, spans, self.dark),
             });
         }

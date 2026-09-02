@@ -3,24 +3,27 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::explorer::ExplorerPanel;
+use crate::breadcrumb::EditorBreadcrumbs;
+use crate::columns::{DirColumns, DirWindow};
+use crate::explorer::{EditorTabCommand, ExplorerPanel, SidebarView};
 use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
-    dir_select_index, editor_drag_started, gutter_width, heading_class, image_mime, line_severity,
-    note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
-    note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
-    squiggle_style,
+    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
+    centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started, gutter_width,
+    heading_class, image_mime, line_severity, note_cursor_activation, note_inline_nodes,
+    note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
+    should_apply_explorer_chrome, span_style, squiggle_style,
 };
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use vmux_core::event::CommandBarPicker;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 use vmux_core::media::MediaKind;
 use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
-use vmux_git::ui::{DiffView, GitBar, GitFooter};
+use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::icon::Icon;
@@ -28,6 +31,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::ime::{ImeGuard, use_ime_guard};
 use vmux_ui::media::MediaElement;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 use vmux_ui::scroll::ScrollIntoView;
@@ -41,7 +45,13 @@ pub fn Page() -> Element {
     let mut total_rows = use_signal(|| 0u32);
     let mut first_row = use_signal(|| 0u32);
     let mut gutter_hover = use_signal(|| false);
+    let mut language = use_signal(String::new);
+    let mut indent = use_signal(vmux_core::event::FileIndent::default);
+    let mut line_ending = use_signal(vmux_core::event::FileLineEnding::default);
+    let mut encoding = use_signal(vmux_core::event::FileEncoding::default);
     let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut sticky_lines = use_signal(Vec::<FileLine>::new);
+    let mut outline = use_signal(Vec::<OutlineRow>::new);
     let mut line_layouts = use_signal(Vec::<FileLineLayout>::new);
     let mut wrap_columns = use_signal(|| 0u16);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
@@ -57,6 +67,7 @@ pub fn Page() -> Element {
     let mut rename_failed = use_signal(String::new);
     let mut rename_failed_generation = use_signal(|| 0u32);
     let mut error = use_signal(String::new);
+    let mut error_undecodable = use_signal(|| false);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut parent_path = use_signal(String::new);
@@ -69,9 +80,9 @@ pub fn Page() -> Element {
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
-    let mut cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let mut cell_dims = use_signal(CellMetrics::default);
     let viewport = FileViewport::new();
-    let mut page_width = use_signal(|| 0u32);
+    let page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
     let mut git_has_diff = use_signal(|| false);
@@ -88,17 +99,30 @@ pub fn Page() -> Element {
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
+    let git_refresh_settled = use_signal(|| true);
     let git_branch = use_signal(String::new);
     let git_ahead = use_signal(|| 0u32);
     let git_behind = use_signal(|| 0u32);
     let git_staged = use_signal(|| 0u32);
     let git_message = use_signal(String::new);
+    GitStatusFeed {
+        path: git_path.into(),
+        nonce: git_nonce,
+        has_diff: git_has_diff,
+        branch: git_branch,
+        ahead: git_ahead,
+        behind: git_behind,
+        staged_count: git_staged,
+        message: git_message,
+    }
+    .subscribe();
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
-    let mut ed_command_line = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
+    let find_forward = use_signal(|| true);
+    let sidebar_view = use_signal(SidebarView::default);
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
@@ -108,8 +132,9 @@ pub fn Page() -> Element {
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
-    let mut dirty = use_signal(|| false);
-    let mut composing = use_signal(|| false);
+    let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
+    let ime = use_ime_guard();
+    let rename_ime = use_ime_guard();
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
@@ -161,6 +186,8 @@ pub fn Page() -> Element {
         reference_selection: refs_sel,
         references: refs,
         find_open,
+        find_forward,
+        sidebar_view,
     };
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
@@ -185,23 +212,33 @@ pub fn Page() -> Element {
     });
 
     let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+        let arrival = FileMeta::arriving(&m.abs_path, &git_path.peek());
+        doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
+        path.set(m.path);
+        git_path.set(m.abs_path);
+        total_lines.set(m.total_lines);
+        language.set(m.language);
+        indent.set(m.indent);
+        line_ending.set(m.line_ending);
+        encoding.set(m.encoding);
+        mode.set(Mode::Text);
+        if !arrival.resets_view() {
+            return;
+        }
         error.set(String::new());
         clear_preview(preview, thumbs);
         media.set(None);
         viewport.reset();
         last_scroll_req.set(0);
-        doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
-        path.set(m.path);
+        let _ = send(&FileScrollEvent {
+            top_row: 0,
+            needs_rows: true,
+        });
         diagnostics.set(Vec::new());
         hover_diag.set(None);
         lsp_status.set(None);
-        if git_path() != m.abs_path {
-            git_has_diff.set(false);
-            git_line_markers.set(HashMap::new());
-        }
-        git_path.set(m.abs_path);
-        total_lines.set(m.total_lines);
-        mode.set(Mode::Text);
+        git_has_diff.set(false);
+        git_line_markers.set(HashMap::new());
         lsp_install_notice.set(None);
         lsp_install_request.set(None);
         lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
@@ -218,6 +255,15 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
+    let _shape = use_listener::<FileShapeEvent, _>(FILE_SHAPE_EVENT, move |s| {
+        indent.set(s.indent);
+        line_ending.set(s.line_ending);
+    });
+
+    let _encoding = use_listener::<FileEncodingEvent, _>(FILE_ENCODING_EVENT, move |e| {
+        encoding.set(e.encoding);
+    });
+
     let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
@@ -229,7 +275,14 @@ pub fn Page() -> Element {
         if lines.peek().as_slice() != p.lines.as_slice() {
             lines.set(p.lines);
         }
+        if sticky_lines.peek().as_slice() != p.sticky.as_slice() {
+            sticky_lines.set(p.sticky);
+        }
         lsp_hover.set(None);
+    });
+
+    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+        outline.set(e.items);
     });
 
     let _cur = use_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
@@ -254,9 +307,6 @@ pub fn Page() -> Element {
         }
         if source_sel.peek().as_slice() != c.source_selections.as_slice() {
             source_sel.set(c.source_selections.clone());
-        }
-        if ed_command_line.peek().ne(&c.command_line) {
-            ed_command_line.set(c.command_line.clone());
         }
         if search_spans.peek().as_slice() != c.search.as_slice() {
             search_spans.set(c.search.clone());
@@ -309,24 +359,35 @@ pub fn Page() -> Element {
     });
 
     let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
-        let line_height = if file_view_mode() == FileViewMode::Note {
-            28.0
-        } else {
-            cell_dims().1
-        };
-        if line_height <= 0.0 {
+        let Some(line_height) =
+            ScrolledLineHeight::of(file_view_mode(), &git_path(), cell_dims().height)
+        else {
             return;
-        }
+        };
         viewport.scroll_by(event.lines, line_height);
     });
 
-    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
-        dirty.set(d.dirty);
-        schedule_git_refresh(git_refresh_generation, git_nonce);
+    let _open_editors =
+        use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |event| {
+            open_editors.set(event.items);
+        });
+
+    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |_| {
+        GitRefresh {
+            generation: git_refresh_generation,
+            nonce: git_nonce,
+            settled: git_refresh_settled,
+        }
+        .schedule();
     });
 
     let _git_changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
-        schedule_git_refresh(git_refresh_generation, git_nonce);
+        GitRefresh {
+            generation: git_refresh_generation,
+            nonce: git_nonce,
+            settled: git_refresh_settled,
+        }
+        .schedule();
     });
 
     let _view_mode = use_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
@@ -348,7 +409,7 @@ pub fn Page() -> Element {
                 }
             }
             FileViewMode::Editor => {
-                viewport.center_row(cursor().row, cell_dims().1);
+                viewport.center_row(cursor().row, cell_dims().height);
             }
             _ => {}
         }
@@ -513,6 +574,7 @@ pub fn Page() -> Element {
         });
 
     let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+        error_undecodable.set(e.undecodable);
         error.set(e.message);
     });
 
@@ -665,13 +727,32 @@ pub fn Page() -> Element {
     });
 
     let gw = gutter_width(total_lines());
-    let cur_basename = path()
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_string();
+    let editor_tabs = EditorTabItem::all(&open_editors.read());
+    let breadcrumb_path = match error().is_empty() {
+        true => git_path(),
+        false => String::new(),
+    };
+    let breadcrumb_outline = match mode() {
+        Mode::Text => outline(),
+        Mode::Dir | Mode::Media(_) => Vec::new(),
+    };
+    let breadcrumb_caret_line =
+        match file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
+            true => source_cursor().line,
+            false => cursor().line,
+        };
+    let status_scope = FileStatusScope {
+        mode: mode(),
+        view: file_view_mode(),
+        markdown: is_markdown_file(&git_path()),
+        has_diff: git_has_diff(),
+    };
+    let status_caret = match status_scope.reading_note() {
+        true => source_cursor(),
+        false => cursor(),
+    };
     let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
+    let measure_wide_text = MEASURE_WIDE_GLYPH.repeat(MEASURE_COLS);
     let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
 
@@ -680,17 +761,12 @@ pub fn Page() -> Element {
         }
         div {
             id: PAGE_ID,
-            class: "flex h-full w-full flex-row overflow-hidden bg-background",
-            onresize: move |event: Event<ResizeData>| {
-                let Ok(size) = event.get_border_box_size() else {
-                    return;
-                };
-                page_width.set(size.width.max(0.0) as u32);
-            },
+            class: "relative flex h-full w-full flex-col overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
                     let x = e.client_coordinates().x as i32;
-                    explorer_width.set((x.max(0) as u32).clamp(160, 600));
+                    explorer_width
+                        .set((x.max(0) as u32).clamp(EXPLORER_MIN_WIDTH_PX, EXPLORER_MAX_WIDTH_PX));
                 }
             },
             onmouseup: move |_| {
@@ -703,17 +779,24 @@ pub fn Page() -> Element {
                 }
             },
 
+            PaneWidth { width: page_width }
+
+        div {
+            class: "flex min-h-0 flex-1 flex-row overflow-hidden",
+
             ExplorerSidebar {
                 visible: explorer_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
+                caret_line: breadcrumb_caret_line,
+                view: sidebar_view,
             }
 
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
-            style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
+            class: "relative flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
+            style: "min-width:{EDITOR_MIN_WIDTH_PX}px;outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);--iw:{indent().width};{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
                 match mode() {
@@ -872,31 +955,46 @@ pub fn Page() -> Element {
                     let Ok(size) = event.get_border_box_size() else {
                         return;
                     };
-                    let cell = (
-                        size.width / MEASURE_COLS as f64,
-                        size.height / MEASURE_ROWS as f64,
-                    );
-                    let (cw, ch) = *cell_dims.peek();
-                    if (cw - cell.0).abs() > 0.01 || (ch - cell.1).abs() > 0.01 {
-                        cell_dims.set(cell);
+                    let measured = CellMetrics {
+                        narrow: size.width / MEASURE_COLS as f64,
+                        wide: cell_dims.peek().wide,
+                        height: size.height / MEASURE_ROWS as f64,
+                    };
+                    if measured != *cell_dims.peek() {
+                        cell_dims.set(measured);
                     }
                 },
                 {measure_text}
             }
 
+            span {
+                id: MEASURE_WIDE_ID,
+                style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
+                onresize: move |event: Event<ResizeData>| {
+                    let Ok(size) = event.get_border_box_size() else {
+                        return;
+                    };
+                    let measured = CellMetrics {
+                        wide: size.width / MEASURE_COLS as f64,
+                        ..*cell_dims.peek()
+                    };
+                    if measured != *cell_dims.peek() {
+                        cell_dims.set(measured);
+                    }
+                },
+                {measure_wide_text}
+            }
+
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
                 ExplorerToggleButton { pane: explorer, mode }
-                {rsx! { TypeIcon { path: cur_basename.clone(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
-                span { class: "truncate text-foreground/90", "{cur_basename}" }
-                if dirty() {
-                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
-                }
-                div { class: "flex-1" }
+                EditorTabStrip { tabs: editor_tabs }
                 if find_open() {
                     FindBar {
                         query: find_query,
                         open: find_open,
+                        forward: find_forward,
+                        vim: keymap() == vmux_core::KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
                     }
@@ -935,7 +1033,7 @@ pub fn Page() -> Element {
                                 onclick: move |_| {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
-                                    viewport.center_row(cursor().row, cell_dims().1);
+                                    viewport.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
@@ -999,16 +1097,6 @@ pub fn Page() -> Element {
                         }
                     }
                 }
-                GitBar {
-                    path: git_path,
-                    has_diff: git_has_diff,
-                    nonce: git_nonce,
-                    branch: git_branch,
-                    ahead: git_ahead,
-                    behind: git_behind,
-                    staged_count: git_staged,
-                    message: git_message,
-                }
                 {
                     tidy_prompt().map(|count| {
                         rsx! {
@@ -1051,6 +1139,14 @@ pub fn Page() -> Element {
                 }
             }
 
+            EditorBreadcrumbs {
+                display_path: path(),
+                abs_path: breadcrumb_path,
+                leaf_is_dir: mode() == Mode::Dir,
+                outline: breadcrumb_outline,
+                caret_line: breadcrumb_caret_line,
+            }
+
             {
                 let msg = error.read().clone();
                 (!msg.is_empty()).then(|| rsx! {
@@ -1058,8 +1154,11 @@ pub fn Page() -> Element {
                         class: "absolute inset-0 z-50 flex items-center justify-center",
                         style: "background:rgba(0,0,0,0.6);",
                         div {
-                            class: "rounded-md border border-ansi-1 bg-background px-4 py-2 text-sm text-ansi-1",
-                            "{msg}"
+                            class: "flex max-w-xl flex-col items-center gap-3 rounded-md border border-ansi-1 bg-background px-4 py-3 text-sm text-ansi-1",
+                            span { class: "break-all text-center", "{msg}" }
+                            if error_undecodable() {
+                                EncodingRecovery {}
+                            }
                         }
                     }
                 })
@@ -1114,55 +1213,19 @@ pub fn Page() -> Element {
                     }
                 },
                 Mode::Dir => rsx! {
-                    div {
-                        class: "grid min-h-0 flex-1 gap-3 p-3",
-                        style: "grid-template-columns: minmax(8rem,14rem) minmax(10rem,1fr) minmax(12rem,1.3fr);",
-
-                        div { class: PANE_CLASS,
-                            for e in visible_entries(&parent_entries(), show_hidden()) {
-                                div {
-                                    key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-foreground/[0.04]" },
-                                    EntryVisual { entry: e.clone(), thumb: None }
-                                    span { class: "truncate text-xs", "{e.name}" }
-                                }
-                            }
-                        }
-
-                        div { class: PANE_CLASS,
-                            for (i, e) in visible_entries(&dir_entries(), show_hidden()).into_iter().enumerate() {
-                                {
-                                    let p_sel = e.path.clone();
-                                    let p_open = e.path.clone();
-                                    let is_dir = e.is_dir;
-                                    let thumb = thumbs().get(&e.path).cloned();
-                                    rsx! {
-                                        div {
-                                            key: "{e.path}",
-                                            id: "dir-row-{i}",
-                                            class: row_class(i == selected()),
-                                            title: "{e.path}",
-                                            onclick: move |_| {
-                                                selected.set(i);
-                                                request_preview(p_sel.clone());
-                                            },
-                                            ondoubleclick: move |_| {
-                                                if !is_dir {
-                                                    back_dir.set(Some(parent_of(&p_open)));
-                                                }
-                                                open_path(p_open.clone());
-                                            },
-                                            EntryVisual { entry: e.clone(), thumb: thumb.clone() }
-                                            span { class: "truncate text-xs", "{e.name}" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
-                            PreviewPane { preview: preview() }
-                        }
+                    DirColumns {
+                        window: DirWindow {
+                            dir_entries,
+                            parent_entries,
+                            path,
+                            parent_path,
+                            selected,
+                            preview,
+                            thumbs,
+                            came_from,
+                            back_dir,
+                            show_hidden,
+                        },
                     }
                 },
                 Mode::Text => rsx! {
@@ -1255,20 +1318,20 @@ pub fn Page() -> Element {
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
-                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
-                                                composing.set(false);
+                                                ime.commit();
                                                 send_committed_text(event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
-                                                if composing() {
+                                                if ime.active() {
                                                     return;
                                                 }
                                                 send_committed_text(event.value());
                                             },
                                             onkeydown: move |event: Event<KeyboardData>| {
                                                 event.stop_propagation();
-                                                if composing() {
+                                                if ime.swallows(&event) {
                                                     return;
                                                 }
                                                 if keys.offer(&event) {
@@ -1337,9 +1400,18 @@ pub fn Page() -> Element {
                         }
                     } else if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
                         {
-                            let (cw, ch) = cell_dims();
+                            let cell = cell_dims();
+                            let (cw, ch) = (cell.narrow, cell.height);
+                            let overlay_lines = lines();
+                            let overlay_layouts = line_layouts();
+                            let ruler = RowRuler {
+                                lines: &overlay_lines,
+                                layouts: &overlay_layouts,
+                                metrics: cell,
+                                wrap_columns: wrap_columns(),
+                            };
                             let gutter = gw as f64 * cw + 48.0;
-                            let cx = gutter + cursor().col as f64 * cw;
+                            let cx = gutter + ruler.x_of(cursor().row, cursor().col);
                             let cy = cursor().row as f64 * ch;
                             let cursor_style = if ed_mode().accepts_text() {
                                 format!(
@@ -1348,13 +1420,15 @@ pub fn Page() -> Element {
                             } else {
                                 format!(
                                     "left:{cx}px;top:{cy}px;height:{ch}px;width:{}px;background:color-mix(in srgb,currentColor 28%,transparent);outline:1px solid currentColor;",
-                                    cw.max(2.0)
+                                    ruler.advance_at(cursor().row, cursor().col).max(2.0)
                                 )
                             };
                             let cursor_key =
                                 format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
                             let spacer = total_rows() as f64 * ch;
-                            let txtcol = if composing() { "inherit" } else { "transparent" };
+                            let preedit = PreeditField::of(ime);
+                            let txtcol = preedit.text_color();
+                            let field_caret = preedit.caret_class();
                             rsx! {
                                 div {
                                     id: SCROLL_ID,
@@ -1402,11 +1476,15 @@ pub fn Page() -> Element {
                                             event.scroll_left(),
                                             event.scroll_top(),
                                         ));
-                                        let (_, ch) = cell_dims();
+                                        let ch = cell_dims().height;
                                         if ch <= 0.0 {
                                             return;
                                         }
                                         let vis_first = (event.scroll_top() / ch).floor().max(0.0) as u32;
+                                        if last_scroll_req() == vis_first {
+                                            return;
+                                        }
+                                        last_scroll_req.set(vis_first);
                                         let vis_rows = (event.client_height() as f64 / ch).ceil() as u32 + 1;
                                         let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
@@ -1414,13 +1492,24 @@ pub fn Page() -> Element {
                                             .read()
                                             .last()
                                             .map_or(0, |line| line.row + line.rows as u32 - rfirst);
-                                        if vmux_core::scroll::needs_refetch(vis_first, vis_rows, rfirst, loaded_len, trigger)
-                                            && last_scroll_req() != vis_first
-                                        {
-                                            last_scroll_req.set(vis_first);
-                                            let _ = send(&FileScrollEvent { top_row: vis_first });
-                                        }
+                                        let needs_rows = vmux_core::scroll::needs_refetch(
+                                            vis_first,
+                                            vis_rows,
+                                            rfirst,
+                                            loaded_len,
+                                            trigger,
+                                        );
+                                        let _ = send(&FileScrollEvent {
+                                            top_row: vis_first,
+                                            needs_rows,
+                                        });
                                     },
+                                    StickyScope {
+                                        lines: sticky_lines(),
+                                        cell_height: ch,
+                                        gutter_chars: gw,
+                                        on_pick: move |row: u32| viewport.center_row(row, ch),
+                                    }
                                     div { class: "relative", style: "height:{spacer}px;",
                                         EditorLines {
                                             lines,
@@ -1472,8 +1561,8 @@ pub fn Page() -> Element {
                                         for s in word_spans().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
-                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
+                                                let w = ruler.width_between(s.row, s.start, s.end);
                                                 let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
                                                 rsx! {
                                                     div {
@@ -1488,8 +1577,8 @@ pub fn Page() -> Element {
                                         for s in search_spans().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
-                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
+                                                let w = ruler.width_between(s.row, s.start, s.end);
                                                 let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
                                                 rsx! {
                                                     div {
@@ -1504,11 +1593,11 @@ pub fn Page() -> Element {
                                         for s in sel().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
-                                                let left = gutter + s.start as f64 * cw;
+                                                let left = gutter + ruler.x_of(s.row, s.start);
                                                 let style = if s.end == u32::MAX {
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
                                                 } else {
-                                                    let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                    let w = ruler.width_between(s.row, s.start, s.end);
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;")
                                                 };
                                                 rsx! {
@@ -1521,15 +1610,17 @@ pub fn Page() -> Element {
                                             }
                                         }
 
-                                        div {
-                                            key: "{cursor_key}",
-                                            class: "pointer-events-none absolute z-20 rounded-[1px]",
-                                            style: "{cursor_style}",
+                                        if !preedit.owns_caret() {
+                                            div {
+                                                key: "{cursor_key}",
+                                                class: "pointer-events-none absolute z-20 rounded-[1px]",
+                                                style: "{cursor_style}",
+                                            }
                                         }
 
                                         for extra in carets().iter().filter(|c| **c != cursor()) {
                                             {
-                                                let ex = gutter + extra.col as f64 * cw;
+                                                let ex = gutter + ruler.x_of(extra.row, extra.col);
                                                 let ey = extra.row as f64 * ch;
                                                 let style = format!(
                                                     "left:{ex}px;top:{ey}px;height:{ch}px;width:2px;background-color:currentColor;"
@@ -1549,25 +1640,25 @@ pub fn Page() -> Element {
                                             onmounted: move |event: Event<MountedData>| {
                                                 viewport.field_mounted(event.data());
                                             },
-                                            class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 caret-transparent outline-none",
+                                            class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 outline-none {field_caret}",
                                             style: "left:{cx}px;top:{cy}px;min-width:2ch;height:{ch}px;color:{txtcol};",
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
-                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
-                                                composing.set(false);
+                                                ime.commit();
                                                 send_committed_text(event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
-                                                if composing() {
+                                                if ime.active() {
                                                     return;
                                                 }
                                                 send_committed_text(event.value());
                                             },
                                             onkeydown: move |e: Event<KeyboardData>| {
                                                 e.stop_propagation();
-                                                if composing() {
+                                                if ime.swallows(&e) {
                                                     return;
                                                 }
                                                 if keys.offer(&e) {
@@ -1579,13 +1670,17 @@ pub fn Page() -> Element {
 
                                         {
                                             lsp_hover().map(|h| {
-                                                let (cw, ch) = cell_dims();
                                                 let Some(i) = lines().iter().position(|l| l.line_no == h.line) else {
                                                     return rsx! {};
                                                 };
+                                                let mut hovered = String::new();
+                                                for span in &lines()[i].spans {
+                                                    hovered.push_str(&span.text);
+                                                }
                                                 let hrow = first_row() + i as u32;
                                                 let top = hrow as f64 * ch + ch;
-                                                let left = gw as f64 * cw + 48.0 + h.col as f64 * cw;
+                                                let left = gutter
+                                                    + ColumnRuler::new(&hovered, cell).x_of_char(h.col);
                                                 rsx! {
                                                     div {
                                                         class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
@@ -1621,7 +1716,7 @@ pub fn Page() -> Element {
                                                 let titles = code_actions();
                                                 let chosen = code_action_sel().min(titles.len() - 1);
                                                 let top = cursor().row as f64 * ch + ch;
-                                                let left = gutter + cursor().col as f64 * cw;
+                                                let left = gutter + ruler.x_of(cursor().row, cursor().col);
                                                 rsx! {
                                                     div {
                                                         id: CODE_ACTION_ID,
@@ -1677,7 +1772,7 @@ pub fn Page() -> Element {
                                         {
                                             rename_box().map(|box_| {
                                                 let top = box_.line as f64 * ch + ch;
-                                                let left = gutter + box_.col as f64 * cw;
+                                                let left = gutter + ruler.x_of_char(box_.line, box_.col);
                                                 rsx! {
                                                     input {
                                                         id: RENAME_ID,
@@ -1692,8 +1787,13 @@ pub fn Page() -> Element {
                                                                 open.draft = e.value();
                                                             }
                                                         },
-                                                        onkeydown: move |e| {
+                                                        oncompositionstart: move |_| rename_ime.start(),
+                                                        oncompositionend: move |_| rename_ime.commit(),
+                                                        onkeydown: move |e: Event<KeyboardData>| {
                                                             e.stop_propagation();
+                                                            if rename_ime.swallows(&e) {
+                                                                return;
+                                                            }
                                                             match e.key() {
                                                                 Key::Enter => {
                                                                     e.prevent_default();
@@ -1723,7 +1823,7 @@ pub fn Page() -> Element {
                                             (comp_open() && !comp_filtered.is_empty()).then(|| {
                                                 let (cline, cfrom) = comp_anchor();
                                                 let top = cline as f64 * ch + ch;
-                                                let left = gutter + cfrom as f64 * cw;
+                                                let left = gutter + ruler.x_of_char(cline, cfrom);
                                                 rsx! {
                                                     div {
                                                         class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
@@ -1797,7 +1897,7 @@ pub fn Page() -> Element {
             {
                 hover_diag().map(|d| rsx! {
                     div {
-                        class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        class: "pointer-events-none absolute right-4 bottom-5 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         div { class: "flex items-center gap-2",
                             span { class: "{severity_color_class(d.severity)}", "●" }
                             span { class: "whitespace-pre-wrap", "{d.message}" }
@@ -1844,24 +1944,13 @@ pub fn Page() -> Element {
             }
 
             {
-                (!ed_command_line().is_empty()).then(|| rsx! {
-                    div {
-                        id: "vim-command-line",
-                        class: "pointer-events-none absolute bottom-0 left-0 z-50 flex h-6 max-w-full items-center gap-px overflow-hidden bg-background/95 pl-2 pr-3 font-mono text-xs text-foreground",
-                        span { class: "truncate", "{ed_command_line()}" }
-                        span { class: "inline-block h-[1.05em] w-[0.5em] shrink-0 bg-foreground/70" }
-                    }
-                })
-            }
-
-            {
                 refs_open().then(|| {
                     let items = refs();
                     rsx! {
                         div {
                             id: "refs-panel",
                             tabindex: "0",
-                            class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                            class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
                                 e.stop_propagation();
                                 if keys.offer(&e) {
@@ -1916,6 +2005,8 @@ pub fn Page() -> Element {
                     }
                 })
             }
+        }
+        }
 
             GitFooter {
                 path: git_path,
@@ -1927,17 +2018,8 @@ pub fn Page() -> Element {
                 always_visible: mode() == Mode::Text
                     && keymap() == vmux_core::KeymapKind::Vim,
                 leading: rsx! {
-                    {
-                        let lbl = ed_label();
-                        (!lbl.is_empty()
-                            && mode() == Mode::Text
-                            && keymap() == vmux_core::KeymapKind::Vim)
-                            .then(|| rsx! {
-                                span {
-                                    class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
-                                    "{lbl}"
-                                }
-                            })
+                    if mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim {
+                        VimStatus { label: ed_label() }
                     }
                 },
                 {
@@ -1973,8 +2055,18 @@ pub fn Page() -> Element {
                         }
                     })
                 }
+                if status_scope.shows_anything() {
+                    FileStatusInfo {
+                        scope: status_scope,
+                        line: status_caret.line + 1,
+                        col: status_caret.char_col + 1,
+                        indent: indent(),
+                        line_ending: line_ending(),
+                        encoding: encoding(),
+                        language: language(),
+                    }
+                }
             }
-        }
         }
     }
 }
@@ -1995,7 +2087,7 @@ fn EditorLines(
     cell_height: f64,
     gutter_chars: usize,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2049,11 +2141,15 @@ impl LineChunk {
     fn split(lines: &[FileLine], layouts: &[FileLineLayout], first_row: u32) -> Vec<Self> {
         let mut chunks: Vec<Self> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            let layout = layouts.get(i).copied().unwrap_or(FileLineLayout {
-                line_no: line.line_no,
-                row: first_row + i as u32,
-                rows: 1,
-            });
+            let found = layouts.binary_search_by_key(&line.line_no, |layout| layout.line_no);
+            let layout = match found {
+                Ok(at) => layouts[at],
+                Err(_) => FileLineLayout {
+                    line_no: line.line_no,
+                    row: first_row + i as u32,
+                    rows: 1,
+                },
+            };
             let start = line.line_no - (line.line_no % Self::LINES);
             if chunks.last().is_none_or(|chunk| chunk.start != start) {
                 chunks.push(Self {
@@ -2078,7 +2174,7 @@ fn EditorLineChunk(
     cell_height: f64,
     gutter_chars: usize,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2141,7 +2237,7 @@ fn EditorLineRow(
     gutter_chars: usize,
     wrap_cols: u16,
     total_lines: Signal<u32>,
-    cell_dims: Signal<(f64, f64)>,
+    cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
@@ -2161,6 +2257,13 @@ fn EditorLineRow(
     let fold = line.fold;
     let ch = cell_height;
     let gw = gutter_chars;
+    let mut line_text = String::new();
+    for span in &line.spans {
+        line_text.push_str(&span.text);
+    }
+    let pointer_text = line_text.clone();
+    let menu_text = line_text.clone();
+    let hover_text = line_text.clone();
     let lt = layout.row as f64 * ch;
     let line_height = layout.rows as f64 * ch;
     let text_class = if wrap_cols > 0 {
@@ -2183,8 +2286,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (_, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &pointer_text,
                     wrap_cols,
                     true,
                 );
@@ -2209,8 +2313,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (_, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &menu_text,
                     wrap_cols,
                     true,
                 );
@@ -2221,8 +2326,9 @@ fn EditorLineRow(
                 let cell = cell_dims();
                 let (x, col) = column_in_line(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.0),
+                    gutter_px(total_lines(), cell.narrow),
                     cell,
+                    &hover_text,
                     wrap_cols,
                     editor_dragging(),
                 );
@@ -2284,6 +2390,7 @@ fn EditorLineRow(
                 }
             }
             span { class: "{text_class}", style: "{text_style}",
+                IndentGuides { levels: line.indent_levels }
                 for (i, s) in line.spans.iter().enumerate() {
                     span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
                 }
@@ -2296,10 +2403,15 @@ fn EditorLineRow(
                             DiagSeverity::Hint => "rgb(34,211,238)",
                         };
                         let dc = d.clone();
+                        let marks = ColumnRuler::new(&line_text, cell_dims());
                         rsx! {
                             span {
                                 key: "d{di}",
-                                style: squiggle_style(d.start_col, d.end_col, color),
+                                style: squiggle_style(
+                                    marks.x_of(d.start_col),
+                                    marks.width_between(d.start_col, d.end_col),
+                                    color,
+                                ),
                                 onmouseenter: move |_| hover_diag.set(Some(dc.clone())),
                                 onmouseleave: move |_| hover_diag.set(None),
                             }
@@ -2309,6 +2421,223 @@ fn EditorLineRow(
                 if fold == FoldGutter::Collapsed {
                     span { class: "ml-1 rounded bg-white/10 px-1 text-foreground/40", "⋯" }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FileStatusInfo(
+    scope: FileStatusScope,
+    line: u32,
+    col: u32,
+    indent: vmux_core::event::FileIndent,
+    line_ending: vmux_core::event::FileLineEnding,
+    encoding: vmux_core::event::FileEncoding,
+    language: String,
+) -> Element {
+    let position = translate_with(
+        "editor-status-position",
+        &[
+            ("line", TranslationValue::Number(i64::from(line))),
+            ("col", TranslationValue::Number(i64::from(col))),
+        ],
+    );
+    let eol = match line_ending {
+        vmux_core::event::FileLineEnding::Crlf => "CRLF",
+        vmux_core::event::FileLineEnding::Lf => "LF",
+    };
+    rsx! {
+        if scope.shows_caret() {
+            StatusItemButton {
+                label: position,
+                title: translate("editor-status-goto-title"),
+                extra: "tabular-nums",
+                picker: CommandBarPicker::GotoLine,
+            }
+        }
+        if scope.shows_indent() {
+            StatusItemButton {
+                label: IndentChoice::of(indent).label(),
+                title: translate("editor-status-indent-title"),
+                extra: "",
+                picker: CommandBarPicker::Indent,
+            }
+        }
+        StatusItemButton {
+            label: encoding.label().to_string(),
+            title: translate("editor-status-encoding-title"),
+            extra: "",
+            picker: CommandBarPicker::Encoding,
+        }
+        StatusItemButton {
+            label: eol.to_string(),
+            title: translate("editor-status-eol-title"),
+            extra: "",
+            picker: CommandBarPicker::LineEnding,
+        }
+        if !language.is_empty() {
+            span { class: "shrink-0", "{language}" }
+        }
+    }
+}
+
+#[component]
+fn StatusItemButton(
+    label: String,
+    title: String,
+    extra: String,
+    picker: CommandBarPicker,
+) -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
+            title,
+            onclick: move |_| {
+                let _ = send(&FileStatusPickerOpen::of(picker));
+            },
+            "{label}"
+        }
+    }
+}
+
+#[component]
+fn EncodingRecovery() -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
+            onclick: move |_| {
+                let _ = send(&FileStatusPickerOpen::of(CommandBarPicker::EncodingReopen));
+            },
+            {translate("editor-status-encoding-reopen")}
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStatusScope {
+    mode: Mode,
+    view: FileViewMode,
+    markdown: bool,
+    has_diff: bool,
+}
+
+impl FileStatusScope {
+    fn reading_note(self) -> bool {
+        self.mode == Mode::Text && self.view == FileViewMode::Note && self.markdown
+    }
+
+    fn reading_diff(self) -> bool {
+        self.mode == Mode::Text && self.view == FileViewMode::Diff && self.has_diff
+    }
+
+    fn shows_anything(self) -> bool {
+        self.mode == Mode::Text
+    }
+
+    fn shows_caret(self) -> bool {
+        self.shows_anything() && !self.reading_diff()
+    }
+
+    fn shows_indent(self) -> bool {
+        self.shows_caret() && !self.reading_note()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct IndentChoice {
+    spaces: bool,
+    width: u16,
+}
+
+impl IndentChoice {
+    fn of(indent: vmux_core::event::FileIndent) -> Self {
+        Self {
+            spaces: indent.spaces,
+            width: indent.width,
+        }
+    }
+
+    fn label(self) -> String {
+        let id = match self.spaces {
+            true => "editor-status-spaces",
+            false => "editor-status-tabs",
+        };
+        translate_with(
+            id,
+            &[("width", TranslationValue::Number(i64::from(self.width)))],
+        )
+    }
+}
+
+#[component]
+fn StickyScope(
+    lines: Vec<FileLine>,
+    cell_height: f64,
+    gutter_chars: usize,
+    on_pick: EventHandler<u32>,
+) -> Element {
+    if lines.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "sticky top-0 z-[12] h-0",
+            div { class: "absolute inset-x-0 top-0 border-b border-foreground/10 bg-background/95 backdrop-blur",
+                for line in lines {
+                    StickyScopeRow {
+                        key: "{line.line_no}",
+                        line,
+                        cell_height,
+                        gutter_chars,
+                        on_pick,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StickyScopeRow(
+    line: FileLine,
+    cell_height: f64,
+    gutter_chars: usize,
+    on_pick: EventHandler<u32>,
+) -> Element {
+    let row = line.line_no;
+    rsx! {
+        div {
+            class: "flex cursor-default whitespace-pre hover:bg-foreground/[0.05]",
+            style: "height:{cell_height}px;",
+            onclick: move |_| on_pick.call(row),
+            span {
+                class: "sticky left-0 flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums text-muted-foreground/60",
+                style: "min-width:calc(var(--cw, 1ch) * {gutter_chars} + 3rem);height:{cell_height}px;",
+                span {
+                    class: "shrink-0 text-right",
+                    style: "width:calc(var(--cw, 1ch) * {gutter_chars});",
+                    "{row + 1}"
+                }
+                span { class: "ml-1 w-[1ch] shrink-0" }
+            }
+            span { class: "pointer-events-none relative whitespace-pre pr-8",
+                IndentGuides { levels: line.indent_levels }
+                for (i, s) in line.spans.iter().enumerate() {
+                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn IndentGuides(levels: u16) -> Element {
+    rsx! {
+        for level in 0..levels {
+            div {
+                key: "{level}",
+                class: "pointer-events-none absolute inset-y-0 w-px bg-foreground/[0.09]",
+                style: "left:calc(var(--cw, 1ch) * var(--iw, 4) * {level});",
             }
         }
     }
@@ -2346,8 +2675,10 @@ fn FoldMarker(line: u32, collapsed: bool, revealed: bool) -> Element {
 const CONTAINER_ID: &str = "file-container";
 const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
+const MEASURE_WIDE_ID: &str = "file-measure-wide";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
+const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
@@ -2521,6 +2852,20 @@ impl RenameBox {
     }
 }
 
+struct ScrolledLineHeight;
+
+impl ScrolledLineHeight {
+    const NOTE: f64 = 28.0;
+
+    fn of(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
+        let height = match mode == FileViewMode::Note && is_markdown_file(path) {
+            true => Self::NOTE,
+            false => cell_height,
+        };
+        (height > 0.0).then_some(height)
+    }
+}
+
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
         .map(|(_, extension)| {
@@ -2542,28 +2887,24 @@ fn file_mode_class(active: bool) -> &'static str {
 fn column_in_line(
     at: ElementPoint,
     gutter: f64,
-    cell: (f64, f64),
+    cell: CellMetrics,
+    text: &str,
     wrap_columns: u16,
-    round: bool,
+    snap: bool,
 ) -> (f64, u32) {
-    let (cw, ch) = cell;
     let x = at.x - gutter;
-    if cw <= 0.0 {
+    if !cell.measured() {
         return (x, 0);
     }
-    let local = if round {
-        (x.max(0.0) / cw).round()
-    } else {
-        (x.max(0.0) / cw).floor()
-    } as u32;
-    if wrap_columns == 0 || ch <= 0.0 {
-        return (x, local);
+    if wrap_columns == 0 {
+        return (x, ColumnRuler::new(text, cell).col_at(x, snap));
     }
-    let wrapped_row = (at.y.max(0.0) / ch).floor() as u32;
+    let segment = (at.y.max(0.0) / cell.height).floor() as u32;
+    let local = ColumnRuler::wrapped_row(text, cell, wrap_columns, segment).col_at(x, snap);
 
     (
         x,
-        wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
+        segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
     )
 }
 
@@ -2789,20 +3130,41 @@ fn NoteCaret(width_class: String) -> Element {
 }
 
 #[component]
+fn PaneWidth(mut width: Signal<u32>) -> Element {
+    rsx! {
+        div {
+            class: "pointer-events-none absolute inset-x-0 top-0 h-0",
+            onresize: move |event: Event<ResizeData>| {
+                let Ok(size) = event.get_border_box_size() else {
+                    return;
+                };
+                width.set(size.width.max(0.0) as u32);
+            },
+        }
+    }
+}
+
+#[component]
 fn ExplorerSidebar(
     visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
+    caret_line: u32,
+    view: Signal<SidebarView>,
 ) -> Element {
     let keys = use_context::<FileKeys>();
     let open = visible();
     let panel_width = width();
     let wrapper_style = if open {
-        format!("width:{panel_width}px;contain:layout style;")
+        format!("width:{panel_width}px;min-width:{EXPLORER_MIN_WIDTH_PX}px;contain:layout style;")
     } else {
-        "width:0px;contain:layout style;".to_string()
+        "width:0px;min-width:0px;contain:layout style;".to_string()
     };
-    let panel_style = format!("width:{panel_width}px;");
+    let panel_style = if open {
+        "width:100%;".to_string()
+    } else {
+        format!("width:{panel_width}px;")
+    };
     let panel_class = if open {
         "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     } else {
@@ -2810,12 +3172,12 @@ fn ExplorerSidebar(
     };
     rsx! {
         div {
-            class: "relative z-[2] h-full shrink-0",
+            class: "relative z-[2] h-full shrink",
             style: "{wrapper_style}",
             onkeydown: move |event| {
                 keys.offer(&event);
             },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible, caret_line, view } }
         }
         div {
             class: if open {
@@ -2832,9 +3194,31 @@ fn ExplorerSidebar(
 }
 
 #[component]
-fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) -> Element {
+fn VimStatus(label: String) -> Element {
+    if label.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
+            "{label}"
+        }
+    }
+}
+
+#[component]
+fn FindBar(
+    query: Signal<String>,
+    open: Signal<bool>,
+    forward: Signal<bool>,
+    vim: bool,
+    total: u32,
+    index: u32,
+) -> Element {
     let mut query = query;
     let mut open = open;
+    let mut regex = use_signal(|| vim);
+    let ime = use_ime_guard();
     let mut close = move || {
         open.set(false);
         query.set(String::new());
@@ -2844,13 +3228,35 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
         });
         focus_file_input();
     };
+    let ask = move |text: String| {
+        let _ = send(&FileFindRequest {
+            query: text,
+            step: false,
+            reverse: false,
+            done: false,
+            regex: regex(),
+            forward: forward(),
+        });
+    };
+    let mut retype = move |text: String| {
+        query.set(text.clone());
+        ask(text);
+    };
     let step = move |reverse: bool| {
         let _ = send(&FileFindRequest {
             query: query.peek().clone(),
             step: true,
             reverse,
             done: false,
+            regex: regex(),
+            forward: forward(),
         });
+    };
+    let confirm = move |reverse: bool| {
+        step(reverse);
+        if vim {
+            focus_file_input();
+        }
     };
     let count = match (total, index) {
         (0, _) => translate("editor-find-no-results"),
@@ -2860,29 +3266,25 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
 
     rsx! {
         div {
-            class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-2 pr-1 ring-1 ring-inset ring-foreground/10",
+            class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-1 pr-1 ring-1 ring-inset ring-foreground/10",
             input {
                 id: FIND_INPUT_ID,
                 r#type: "text",
                 class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
                 placeholder: translate("editor-find-placeholder"),
                 value: "{query}",
-                oninput: move |event| {
-                    let text = event.value();
-                    query.set(text.clone());
-                    let _ = send(&FileFindRequest {
-                        query: text,
-                        step: false,
-                        reverse: false,
-                        done: false,
-                    });
-                },
+                oninput: move |event| retype(event.value()),
+                oncompositionstart: move |_| ime.start(),
+                oncompositionend: move |_| ime.commit(),
                 onkeydown: move |event: Event<KeyboardData>| {
                     event.stop_propagation();
+                    if ime.swallows(&event) {
+                        return;
+                    }
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
-                            step(event.modifiers().shift());
+                            confirm(event.modifiers().shift());
                         }
                         Key::Escape => {
                             event.prevent_default();
@@ -2891,6 +3293,20 @@ fn FindBar(query: Signal<String>, open: Signal<bool>, total: u32, index: u32) ->
                         _ => {}
                     }
                 },
+            }
+            button {
+                r#type: "button",
+                class: if regex() {
+                    "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
+                } else {
+                    "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
+                },
+                title: translate("editor-find-regex"),
+                onclick: move |_| {
+                    regex.toggle();
+                    ask(query.peek().clone());
+                },
+                ".*"
             }
             span {
                 class: if total == 0 && !query().is_empty() {
@@ -2944,6 +3360,80 @@ fn ExplorerToggleButton(pane: ExplorerPane, mode: Signal<Mode>) -> Element {
                 stroke_linejoin: "round",
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
                 line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorTabStrip(tabs: Vec<EditorTabItem>) -> Element {
+    let active_id = match tabs.iter().find(|tab| tab.active) {
+        Some(tab) => tab.element_id(),
+        None => String::new(),
+    };
+
+    use_effect(use_reactive!(|active_id| {
+        if active_id.is_empty() {
+            return;
+        }
+        ScrollIntoView::nearest(&active_id);
+    }));
+
+    rsx! {
+        div {
+            class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden py-1",
+            for tab in tabs {
+                EditorTab { key: "{tab.path}", tab }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorTab(tab: EditorTabItem) -> Element {
+    let command = EditorTabCommand {
+        path: tab.path.clone(),
+    };
+    let close_command = command.clone();
+    let class = match tab.active {
+        true => {
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.10] px-2.5 text-ui text-foreground"
+        }
+        false => {
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2.5 text-ui text-foreground/60 hover:bg-foreground/[0.05] hover:text-foreground/90"
+        }
+    };
+    let close_title = match tab.dirty {
+        true => translate("editor-unsaved"),
+        false => translate("editor-close-editor"),
+    };
+
+    rsx! {
+        div {
+            id: tab.element_id(),
+            class,
+            title: "{tab.path}",
+            onclick: move |_| command.open(),
+            TypeIcon { path: tab.path.clone(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" }
+            span { class: "truncate", "{tab.name}" }
+            if !tab.context.is_empty() {
+                span { class: "shrink-0 truncate text-[10px] text-muted-foreground/70", "{tab.context}" }
+            }
+            button {
+                r#type: "button",
+                class: "flex h-4 w-4 shrink-0 cursor-default items-center justify-center rounded-sm text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
+                aria_label: translate("editor-close-editor"),
+                title: close_title,
+                onclick: move |event: Event<MouseData>| {
+                    event.stop_propagation();
+                    close_command.close();
+                },
+                if tab.dirty {
+                    span { class: "h-1.5 w-1.5 rounded-full bg-cyan-300 group-hover:hidden" }
+                    span { class: "hidden leading-none group-hover:block", "\u{00D7}" }
+                } else {
+                    span { class: "leading-none", "\u{00D7}" }
+                }
             }
         }
     }
@@ -3547,7 +4037,7 @@ pub enum Mode {
 }
 
 #[derive(Clone, PartialEq)]
-enum Preview {
+pub(crate) enum Preview {
     None,
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
@@ -3581,7 +4071,7 @@ fn clear_preview(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String
     thumbs.set(HashMap::new());
 }
 
-fn request_preview(path: String) {
+pub(crate) fn request_preview(path: String) {
     let _ = send(&FilePreviewRequest { path, thumb: false });
 }
 
@@ -3589,22 +4079,42 @@ fn request_thumb(path: String) {
     let _ = send(&FilePreviewRequest { path, thumb: true });
 }
 
-fn open_path(path: String) {
+pub(crate) fn open_path(path: String) {
     let _ = send(&FileOpenEvent { path });
 }
 
-fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
-    let next = generation().wrapping_add(1);
-    generation.set(next);
-    spawn(async move {
-        sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
-        if generation() == next {
-            nonce.set(nonce().wrapping_add(1));
-        }
-    });
+#[derive(Clone, Copy)]
+struct GitRefresh {
+    generation: Signal<u32>,
+    nonce: Signal<u32>,
+    settled: Signal<bool>,
 }
 
-fn parent_of(path: &str) -> String {
+impl GitRefresh {
+    fn schedule(mut self) {
+        let next = self.generation.peek().wrapping_add(1);
+        self.generation.set(next);
+        if *self.settled.peek() {
+            self.settled.set(false);
+            self.bump();
+        }
+        spawn(async move {
+            sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
+            if *self.generation.peek() != next {
+                return;
+            }
+            self.settled.set(true);
+            self.bump();
+        });
+    }
+
+    fn bump(&mut self) {
+        let next = self.nonce.peek().wrapping_add(1);
+        self.nonce.set(next);
+    }
+}
+
+pub(crate) fn parent_of(path: &str) -> String {
     match path.trim_end_matches('/').rsplit_once('/') {
         Some(("", _)) => "/".to_string(),
         Some((prefix, _)) => prefix.to_string(),
@@ -3628,9 +4138,9 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+pub(crate) const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 
-fn row_class(selected: bool) -> String {
+pub(crate) fn row_class(selected: bool) -> String {
     let base =
         "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
     if selected {
@@ -3692,7 +4202,7 @@ fn note_block_diff_marker(
         .max_by_key(|marker| priority(*marker))
 }
 
-fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
+pub(crate) fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
     if show_hidden {
         all.to_vec()
     } else {
@@ -3704,7 +4214,7 @@ fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry>
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_dir(
+pub(crate) fn apply_dir(
     mut dir_entries: Signal<Vec<FileDirEntry>>,
     mut parent_entries: Signal<Vec<FileDirEntry>>,
     mut path: Signal<String>,
@@ -3739,7 +4249,7 @@ fn apply_dir(
 }
 
 #[component]
-fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
+pub(crate) fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
     let entry = &entry;
     let thumb = thumb.as_ref();
     if let Some(url) = thumb {
@@ -3751,10 +4261,10 @@ fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
 }
 
 #[component]
-fn PreviewPane(preview: Preview) -> Element {
+pub(crate) fn PreviewPane(preview: Preview) -> Element {
     let preview = &preview;
     match preview {
-        Preview::None => rsx! {
+        Preview::None | Preview::Dir(_) => rsx! {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
         },
         Preview::Image(url) => rsx! {
@@ -3793,16 +4303,6 @@ fn PreviewPane(preview: Preview) -> Element {
                 }
             }
         },
-        Preview::Dir(entries) => rsx! {
-            div { class: "h-full w-full overflow-auto",
-                for e in entries.iter() {
-                    div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
-                        EntryVisual { entry: e.clone(), thumb: None }
-                        span { class: "truncate text-xs", "{e.name}" }
-                    }
-                }
-            }
-        },
         Preview::Info {
             size,
             modified,
@@ -3834,8 +4334,36 @@ fn explorer_client_id() -> u64 {
     ((now_millis() as u64) << 12) ^ random_index(4096) as u64
 }
 
-fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
-    page_width > 0 && NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
+const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
+const EDITOR_MIN_WIDTH_PX: u32 = 320;
+const EXPLORER_MIN_WIDTH_PX: u32 = 160;
+const EXPLORER_MAX_WIDTH_PX: u32 = 600;
+
+#[derive(Clone, Copy)]
+struct ExplorerRoom {
+    page_width: u32,
+    explorer_width: u32,
+    open: bool,
+}
+
+impl ExplorerRoom {
+    fn fits(self) -> bool {
+        if self.page_width == 0 {
+            return false;
+        }
+        let mut needed = NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(self.explorer_width);
+        if self.open {
+            needed = needed.saturating_sub(EXPLORER_SQUEEZE_TOLERANCE_PX);
+        }
+        self.page_width >= needed
+    }
+
+    fn leaves_editor_usable(self) -> bool {
+        if self.page_width == 0 {
+            return false;
+        }
+        self.page_width >= self.explorer_width.saturating_add(EDITOR_MIN_WIDTH_PX)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3857,8 +4385,21 @@ pub struct ExplorerPane {
 }
 
 impl ExplorerPane {
+    fn room(self) -> ExplorerRoom {
+        ExplorerRoom {
+            page_width: (self.page_width)(),
+            explorer_width: (self.width)(),
+            open: (self.visible)(),
+        }
+    }
+
     fn has_room(self) -> bool {
-        explorer_has_room((self.page_width)(), (self.width)())
+        self.room().fits()
+    }
+
+    fn opens_unasked(self) -> bool {
+        let room = self.room();
+        room.leaves_editor_usable() && room.fits()
     }
 
     fn reflow_key(self) -> ExplorerReflowKey {
@@ -3874,7 +4415,7 @@ impl ExplorerPane {
             return;
         }
         self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible && ((self.user_chose)() || self.has_room());
+        let next = key.preferred_visible && ((self.user_chose)() || self.opens_unasked());
         if (self.visible)() != next {
             self.visible.set(next);
         }
@@ -3903,6 +4444,14 @@ impl ExplorerPane {
     pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
         self.user_chose.set(true);
         self.set_visible(!(self.visible)(), mode);
+    }
+
+    pub(crate) fn show(mut self, mode: Signal<Mode>) {
+        if (self.visible)() {
+            return;
+        }
+        self.user_chose.set(true);
+        self.set_visible(true, mode);
     }
 
     pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {
@@ -3949,6 +4498,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
     let mut key = use_signal(|| property.key.clone());
     let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
     let mut item = use_signal(String::new);
+    let ime = use_ime_guard();
     let values = property.values.clone();
     let key_for_kind = original_key.clone();
     let key_for_delete = original_key.clone();
@@ -4020,10 +4570,15 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                             placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
                             class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
                             oninput: move |event| item.set(event.value()),
+                            oncompositionstart: move |_| ime.start(),
+                            oncompositionend: move |_| ime.commit(),
                             onkeydown: {
                                 let add_key = original_key.clone();
                                 let add_values = values.clone();
                                 move |event: Event<KeyboardData>| {
+                                    if ime.swallows(&event) {
+                                        return;
+                                    }
                                     if event.key() != Key::Enter {
                                         return;
                                     }
@@ -4109,15 +4664,19 @@ pub(crate) fn focus_file_input() {
     FocusClaim::new(INPUT_ID).request();
 }
 
+pub(crate) fn focus_find_input() {
+    FocusClaim::new(FIND_INPUT_ID).request();
+}
+
 #[derive(Clone, Copy, Default, PartialEq)]
 struct ScrollBox {
     size: (f64, f64),
 }
 
 impl ScrollBox {
-    fn announce(self, cell: (f64, f64), total_lines: u32, mut last: Signal<FileResizeEvent>) {
-        let (cw, ch) = cell;
-        if cw <= 0.0 || ch <= 0.0 || self.size.0 <= 0.0 {
+    fn announce(self, cell: CellMetrics, total_lines: u32, mut last: Signal<FileResizeEvent>) {
+        let (cw, ch) = (cell.narrow, cell.height);
+        if !cell.measured() || self.size.0 <= 0.0 {
             return;
         }
         let next = FileResizeEvent {
@@ -4141,6 +4700,92 @@ impl ScrollBox {
 
 fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
     gutter_width(total_lines) as f64 * char_width + 48.0
+}
+
+struct RowRuler<'a> {
+    lines: &'a [FileLine],
+    layouts: &'a [FileLineLayout],
+    metrics: CellMetrics,
+    wrap_columns: u16,
+}
+
+impl RowRuler<'_> {
+    fn segment_of(&self, row: u32) -> Option<(String, u32)> {
+        let mut owner = None;
+        for layout in self.layouts {
+            if row >= layout.row && row < layout.row + u32::from(layout.rows) {
+                owner = Some(layout);
+                break;
+            }
+        }
+        let layout = owner?;
+        for line in self.lines {
+            if line.line_no != layout.line_no {
+                continue;
+            }
+            let mut text = String::new();
+            for span in &line.spans {
+                text.push_str(&span.text);
+            }
+            return Some((text, row - layout.row));
+        }
+        None
+    }
+
+    fn x_of(&self, row: u32, col: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return f64::from(col) * self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).x_of(col)
+    }
+
+    fn width_between(&self, row: u32, start: u32, end: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return f64::from(end.saturating_sub(start)) * self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment)
+            .width_between(start, end)
+    }
+
+    fn advance_at(&self, row: u32, col: u32) -> f64 {
+        let Some((text, segment)) = self.segment_of(row) else {
+            return self.metrics.narrow;
+        };
+        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).advance_at(col)
+    }
+
+    fn x_of_char(&self, line_no: u32, char_col: u32) -> f64 {
+        for line in self.lines {
+            if line.line_no != line_no {
+                continue;
+            }
+            let mut text = String::new();
+            for span in &line.spans {
+                text.push_str(&span.text);
+            }
+            return ColumnRuler::new(&text, self.metrics).x_of_char(char_col);
+        }
+        f64::from(char_col) * self.metrics.narrow
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileMeta {
+    OpensFile,
+    RefreshesOpenFile,
+}
+
+impl FileMeta {
+    fn arriving(abs_path: &str, showing: &str) -> Self {
+        if !showing.is_empty() && showing == abs_path {
+            return Self::RefreshesOpenFile;
+        }
+        Self::OpensFile
+    }
+
+    fn resets_view(self) -> bool {
+        self == Self::OpensFile
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -4276,6 +4921,33 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
     true
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PreeditField(bool);
+
+impl PreeditField {
+    fn of(ime: ImeGuard) -> Self {
+        Self(ime.active())
+    }
+
+    fn text_color(self) -> &'static str {
+        match self.0 {
+            true => "inherit",
+            false => "transparent",
+        }
+    }
+
+    fn caret_class(self) -> &'static str {
+        match self.0 {
+            true => "",
+            false => "caret-transparent",
+        }
+    }
+
+    fn owns_caret(self) -> bool {
+        self.0
+    }
+}
+
 #[component]
 fn NativeVideoHost(path: String) -> Element {
     let mut element = use_signal(|| None::<Rc<MountedData>>);
@@ -4313,6 +4985,61 @@ fn NativeVideoHost(path: String) -> Element {
             },
             onresize: move |_| report.call(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod file_meta_tests {
+    use super::*;
+
+    #[test]
+    fn a_meta_for_the_file_already_on_screen_leaves_the_view_alone() {
+        assert!(
+            !FileMeta::arriving("/w/src/main.rs", "/w/src/main.rs").resets_view(),
+            "the host re-sends META whenever a page announces itself ready, and a page that \
+             is already showing that file still holds the scroll position the reader left it at"
+        );
+    }
+
+    #[test]
+    fn a_meta_for_any_other_file_resets_the_view() {
+        assert!(FileMeta::arriving("/w/src/other.rs", "/w/src/main.rs").resets_view());
+        assert!(
+            FileMeta::arriving("/w/src/main.rs", "").resets_view(),
+            "a freshly loaded page shows nothing, so its first META opens the file"
+        );
+        assert!(FileMeta::arriving("", "").resets_view());
+    }
+}
+
+#[cfg(test)]
+mod scrolled_line_height_tests {
+    use super::*;
+
+    #[test]
+    fn a_code_file_scrolls_by_the_cell_height_its_rows_are_drawn_at() {
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 18.0),
+            Some(18.0),
+            "a non-markdown file shows the editor even while the shared view mode is Note, \
+             so an announced scroll moves by the row height the editor lays rows out with"
+        );
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Editor, "/w/notes/a.md", 18.0),
+            Some(18.0)
+        );
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/notes/a.md", 18.0),
+            Some(ScrolledLineHeight::NOTE)
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_cell_refuses_the_scroll_rather_than_landing_at_zero() {
+        assert_eq!(
+            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 0.0),
+            None
+        );
     }
 }
 
@@ -4364,6 +5091,176 @@ mod menu_tests {
         assert_eq!(
             opens, 3,
             "modification, clipboard and the palette; navigation is first so it opens nothing"
+        );
+    }
+}
+
+#[cfg(test)]
+mod file_status_scope_tests {
+    use super::*;
+
+    fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> FileStatusScope {
+        FileStatusScope {
+            mode: Mode::Text,
+            view,
+            markdown,
+            has_diff,
+        }
+    }
+
+    #[test]
+    fn a_view_with_no_text_buffer_offers_none_of_the_group() {
+        for mode in [Mode::Dir, Mode::Media(MediaKind::Image)] {
+            let scope = FileStatusScope {
+                mode,
+                view: FileViewMode::Editor,
+                markdown: false,
+                has_diff: false,
+            };
+
+            assert!(!scope.shows_anything());
+            assert!(!scope.shows_caret());
+            assert!(!scope.shows_indent());
+        }
+    }
+
+    #[test]
+    fn the_source_editor_answers_every_item() {
+        let scope = text(FileViewMode::Editor, false, false);
+
+        assert!(scope.shows_anything());
+        assert!(scope.shows_caret());
+        assert!(scope.shows_indent());
+    }
+
+    #[test]
+    fn a_rendered_note_keeps_the_caret_and_drops_the_indent() {
+        let scope = text(FileViewMode::Note, true, false);
+
+        assert!(scope.shows_caret());
+        assert!(!scope.shows_indent());
+        assert!(
+            text(FileViewMode::Note, false, false).shows_indent(),
+            "a non-markdown file shows the source editor whatever the shared view mode says"
+        );
+    }
+
+    #[test]
+    fn a_diff_drops_the_caret_and_the_indent_but_still_describes_the_file() {
+        let scope = text(FileViewMode::Diff, false, true);
+
+        assert!(scope.shows_anything());
+        assert!(!scope.shows_caret());
+        assert!(!scope.shows_indent());
+        assert!(
+            text(FileViewMode::Diff, false, false).shows_caret(),
+            "a file with nothing to diff falls back to the editor, caret and all"
+        );
+    }
+}
+
+#[cfg(test)]
+mod explorer_room_tests {
+    use super::*;
+
+    #[test]
+    fn the_width_that_will_not_open_the_explorer_does_not_close_it_either() {
+        let explorer_width = 240;
+        let short = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - 1;
+
+        assert!(
+            ExplorerRoom {
+                page_width: short,
+                explorer_width,
+                open: true,
+            }
+            .fits()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: short,
+                explorer_width,
+                open: false,
+            }
+            .fits()
+        );
+    }
+
+    #[test]
+    fn the_editor_floor_never_preempts_the_squeeze_tolerance() {
+        let explorer_width = 240;
+        let auto_closes_below =
+            NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - EXPLORER_SQUEEZE_TOLERANCE_PX;
+        let floor = explorer_width + EDITOR_MIN_WIDTH_PX;
+
+        assert!(floor < auto_closes_below);
+        assert!(
+            ExplorerRoom {
+                page_width: floor,
+                explorer_width,
+                open: true,
+            }
+            .leaves_editor_usable()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: floor - 1,
+                explorer_width,
+                open: true,
+            }
+            .leaves_editor_usable()
+        );
+    }
+
+    #[test]
+    fn the_row_settles_even_when_what_it_measures_follows_the_panel_it_renders() {
+        let explorer_width = 240;
+        let grip = 4;
+
+        for pane_width in [480u32, 502, 560, 746, 1496] {
+            let mut open = true;
+            let mut seen = Vec::new();
+
+            for _ in 0..6 {
+                let panel = explorer_width;
+                let measured = pane_width.saturating_sub(panel + grip);
+                let room = ExplorerRoom {
+                    page_width: measured,
+                    explorer_width,
+                    open,
+                };
+                open = room.fits() && room.leaves_editor_usable();
+                seen.push((measured, open));
+            }
+
+            let settled = seen[seen.len() - 1];
+            assert!(
+                seen[2..].iter().all(|step| *step == settled),
+                "a pane of {pane_width} never settled: {seen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explorer_still_opens_at_the_width_it_always_did() {
+        let explorer_width = 240;
+        let snug = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width;
+
+        assert!(
+            ExplorerRoom {
+                page_width: snug,
+                explorer_width,
+                open: false,
+            }
+            .fits()
+        );
+        assert!(
+            !ExplorerRoom {
+                page_width: snug - 1,
+                explorer_width,
+                open: false,
+            }
+            .fits()
         );
     }
 }

@@ -21,7 +21,9 @@ mod page_open;
 mod page_state;
 mod scroll;
 mod snapshot;
+mod window_drag;
 pub use host_focus::HostFocusIntent;
+pub use window_drag::WindowDragRegion;
 
 pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
@@ -42,7 +44,10 @@ use vmux_core::{
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
-use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
+use vmux_layout::event::{
+    RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent, SideSheetResizeEvent,
+    WindowDragRegionEvent,
+};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
@@ -176,6 +181,8 @@ impl Plugin for BrowserPlugin {
                 BinEventEmitterPlugin::<(
                     HeaderCommandEvent,
                     SideSheetCommandEvent,
+                    SideSheetResizeEvent,
+                    WindowDragRegionEvent,
                     RemoteCommandEvent,
                     RemoteCopyEvent,
                 )>::for_hosts(&["layout"]),
@@ -200,6 +207,7 @@ impl Plugin for BrowserPlugin {
                 page_state::PageStatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,
+                window_drag::WindowDragPlugin,
             ));
     }
 }
@@ -1837,6 +1845,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
+                vmux_core::CorePlugin,
                 vmux_command::CommandPlugin,
                 vmux_terminal::TerminalContractPlugin,
                 crate::command::CommandPlugin,

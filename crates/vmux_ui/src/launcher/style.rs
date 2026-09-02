@@ -30,8 +30,16 @@ pub fn command_bar_input_wrap_class() -> &'static str {
     "relative min-w-0 flex-1 overflow-hidden"
 }
 
-pub fn command_bar_input_class() -> &'static str {
-    "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-foreground caret-foreground outline-none placeholder:text-muted-foreground"
+pub fn command_bar_input_class(row_overlaid: bool) -> &'static str {
+    if row_overlaid {
+        "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
+    } else {
+        "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-foreground caret-foreground outline-none placeholder:text-muted-foreground"
+    }
+}
+
+pub fn command_bar_row_overlay_class() -> &'static str {
+    "pointer-events-none absolute inset-0 flex items-center"
 }
 
 pub fn result_list_class() -> &'static str {
@@ -173,7 +181,7 @@ mod tests {
     fn command_bar_input_shrinks_inside_shell() {
         let row = command_bar_input_row_class();
         let wrap = command_bar_input_wrap_class();
-        let input = command_bar_input_class();
+        let input = command_bar_input_class(false);
 
         assert!(row.contains("min-w-0"));
         assert!(row.contains("overflow-hidden"));
@@ -184,10 +192,12 @@ mod tests {
 
     #[test]
     fn command_bar_input_shows_text_cursor() {
-        let input = command_bar_input_class();
+        for row_overlaid in [false, true] {
+            let input = command_bar_input_class(row_overlaid);
 
-        assert!(input.contains("cursor-text"));
-        assert!(input.contains("caret-foreground"));
+            assert!(input.contains("cursor-text"));
+            assert!(input.contains("caret-foreground"));
+        }
     }
 
     #[test]

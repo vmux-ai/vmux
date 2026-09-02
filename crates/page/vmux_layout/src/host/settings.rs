@@ -49,7 +49,7 @@ impl Default for SideSheetSettings {
 }
 
 fn default_side_sheet_width() -> f32 {
-    280.0
+    crate::event::SIDE_SHEET_WIDTH_PX
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

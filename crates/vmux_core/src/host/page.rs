@@ -1,8 +1,9 @@
 use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
+    ecs::system::SystemParam,
     prelude::{
-        App, Commands, Component, Entity, IntoScheduleConfigs, Message, On, Plugin, Query, ResMut,
-        Startup, SystemSet,
+        App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
+        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
     },
 };
 use bevy_cef::prelude::BinReceive;
@@ -50,6 +51,155 @@ pub struct PrewarmPage {
 pub struct NativelyHosted {
     pub url: &'static str,
     pub title: &'static str,
+}
+
+pub(crate) struct HostHistoryPlugin;
+
+impl Plugin for HostHistoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<HostHistoryStep>()
+            .add_message::<HostHistoryTraversed>()
+            .configure_sets(
+                Update,
+                (
+                    HostHistorySet::Step,
+                    HostHistorySet::Apply,
+                    HostHistorySet::Record,
+                )
+                    .chain(),
+            )
+            .add_systems(Update, step_host_history.in_set(HostHistorySet::Step));
+    }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HostHistorySet {
+    Step,
+    Apply,
+    Record,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostHistoryDelta {
+    Back,
+    Forward,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostHistoryEntry {
+    pub url: String,
+    pub top_line: u32,
+}
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct HostHistory {
+    entries: Vec<HostHistoryEntry>,
+    cursor: usize,
+}
+
+impl HostHistory {
+    pub const CAPACITY: usize = 50;
+
+    pub fn can_go_back(&self) -> bool {
+        self.cursor > 0
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.cursor + 1 < self.entries.len()
+    }
+
+    pub fn showing(&self, url: &str, top_line: u32) -> bool {
+        let Some(current) = self.entries.get(self.cursor) else {
+            return false;
+        };
+        current.url == url && current.top_line == top_line
+    }
+
+    pub fn observe(&mut self, url: &str, top_line: u32) {
+        if let Some(current) = self.entries.get_mut(self.cursor)
+            && current.url == url
+        {
+            current.top_line = top_line;
+            return;
+        }
+        self.entries.truncate(self.cursor + 1);
+        self.entries.push(HostHistoryEntry {
+            url: url.to_string(),
+            top_line,
+        });
+        self.cursor = self.entries.len() - 1;
+        let overflow = self.entries.len().saturating_sub(Self::CAPACITY);
+        if overflow == 0 {
+            return;
+        }
+        self.entries.drain(..overflow);
+        self.cursor -= overflow;
+    }
+
+    fn step(&mut self, delta: HostHistoryDelta) -> Option<HostHistoryEntry> {
+        match delta {
+            HostHistoryDelta::Back => {
+                if !self.can_go_back() {
+                    return None;
+                }
+                self.cursor -= 1;
+            }
+            HostHistoryDelta::Forward => {
+                if !self.can_go_forward() {
+                    return None;
+                }
+                self.cursor += 1;
+            }
+        }
+        self.entries.get(self.cursor).cloned()
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub struct HostHistoryStep {
+    pub webview: Entity,
+    pub delta: HostHistoryDelta,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct HostHistoryTraversed {
+    pub webview: Entity,
+    pub entry: HostHistoryEntry,
+}
+
+#[derive(SystemParam)]
+pub struct HostHistoryNavigation<'w, 's> {
+    hosted: Query<'w, 's, (), With<HostHistory>>,
+    steps: MessageWriter<'w, HostHistoryStep>,
+}
+
+impl HostHistoryNavigation<'_, '_> {
+    pub fn stepped(&mut self, webview: Entity, delta: HostHistoryDelta) -> bool {
+        if !self.hosted.contains(webview) {
+            return false;
+        }
+        self.steps.write(HostHistoryStep { webview, delta });
+        true
+    }
+}
+
+fn step_host_history(
+    mut steps: MessageReader<HostHistoryStep>,
+    mut histories: Query<&mut HostHistory>,
+    mut traversed: MessageWriter<HostHistoryTraversed>,
+) {
+    for step in steps.read() {
+        let Ok(mut history) = histories.get_mut(step.webview) else {
+            continue;
+        };
+        let Some(entry) = history.step(step.delta) else {
+            continue;
+        };
+        traversed.write(HostHistoryTraversed {
+            webview: step.webview,
+            entry,
+        });
+    }
 }
 
 impl PageManifest {
@@ -208,6 +358,118 @@ pub struct SettingsPageSpawnRequest {
 #[derive(Message, Debug, Clone)]
 pub struct SpacesPageSpawnRequest {
     pub target_stack: Entity,
+}
+
+#[cfg(test)]
+mod host_history_tests {
+    use super::*;
+
+    impl HostHistory {
+        fn walked(urls: &[&str]) -> Self {
+            let mut history = Self::default();
+            for url in urls {
+                history.observe(url, 0);
+            }
+            history
+        }
+
+        fn url(&self) -> &str {
+            self.entries[self.cursor].url.as_str()
+        }
+    }
+
+    #[test]
+    fn a_repeat_of_the_current_url_does_not_add_an_entry() {
+        let mut history = HostHistory::walked(&["a", "b"]);
+        history.observe("b", 42);
+
+        assert!(!history.can_go_forward());
+        assert_eq!(history.url(), "b");
+        history.step(HostHistoryDelta::Back).expect("a is behind b");
+        assert_eq!(history.url(), "a");
+        assert!(!history.can_go_back());
+    }
+
+    #[test]
+    fn going_back_restores_the_scroll_position_the_entry_was_left_at() {
+        let mut history = HostHistory::default();
+        history.observe("a", 0);
+        history.observe("a", 120);
+        history.observe("b", 0);
+
+        let entry = history.step(HostHistoryDelta::Back).expect("a is behind b");
+
+        assert_eq!(entry.top_line, 120);
+    }
+
+    #[test]
+    fn a_new_visit_drops_everything_ahead_of_the_cursor() {
+        let mut history = HostHistory::walked(&["a", "b", "c"]);
+        history.step(HostHistoryDelta::Back);
+        history.step(HostHistoryDelta::Back);
+
+        history.observe("d", 0);
+
+        assert!(!history.can_go_forward());
+        assert_eq!(history.url(), "d");
+        history.step(HostHistoryDelta::Back);
+        assert_eq!(history.url(), "a");
+    }
+
+    #[test]
+    fn the_oldest_entries_fall_off_once_the_stack_is_full() {
+        let urls: Vec<String> = (0..HostHistory::CAPACITY + 10)
+            .map(|n| n.to_string())
+            .collect();
+        let mut history = HostHistory::default();
+        for url in &urls {
+            history.observe(url, 0);
+        }
+
+        assert_eq!(history.entries.len(), HostHistory::CAPACITY);
+        assert_eq!(history.url(), urls.last().unwrap());
+        for _ in 0..HostHistory::CAPACITY {
+            history.step(HostHistoryDelta::Back);
+        }
+        assert_eq!(history.url(), urls[urls.len() - HostHistory::CAPACITY]);
+    }
+
+    #[test]
+    fn a_step_past_either_end_reports_nothing_and_stays_put() {
+        let mut history = HostHistory::walked(&["a"]);
+
+        assert!(history.step(HostHistoryDelta::Back).is_none());
+        assert!(history.step(HostHistoryDelta::Forward).is_none());
+        assert_eq!(history.url(), "a");
+    }
+
+    #[test]
+    fn a_step_names_the_webview_whose_history_moved() {
+        let mut app = App::new();
+        app.add_plugins(bevy::MinimalPlugins)
+            .add_plugins(HostHistoryPlugin);
+        let owner = app.world_mut().spawn(HostHistory::walked(&["a", "b"])).id();
+        let stranger = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(HostHistoryStep {
+            webview: stranger,
+            delta: HostHistoryDelta::Back,
+        });
+        app.world_mut().write_message(HostHistoryStep {
+            webview: owner,
+            delta: HostHistoryDelta::Back,
+        });
+
+        app.update();
+
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<HostHistoryTraversed>>();
+        let mut cursor = messages.get_cursor();
+        let traversed: Vec<_> = cursor.read(messages).collect();
+        assert_eq!(traversed.len(), 1);
+        assert_eq!(traversed[0].webview, owner);
+        assert_eq!(traversed[0].entry.url, "a");
+    }
 }
 
 #[cfg(test)]

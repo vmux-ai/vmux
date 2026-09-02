@@ -1,6 +1,8 @@
 pub mod page_model;
 
 #[cfg(ui)]
+pub mod breadcrumb;
+#[cfg(ui)]
 pub mod explorer;
 #[cfg(ui)]
 pub mod lsp_page;
@@ -9,6 +11,8 @@ pub mod page;
 #[cfg(ui)]
 pub mod page_key;
 
+#[cfg(ui)]
+mod columns;
 #[cfg(ui)]
 mod note;
 

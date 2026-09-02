@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use vmux_wire::{
     CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
     FLAG_UNDERLINE, LinkRange, TermColor, TermCursor, TermLine, TermSelectionRange, TermSpan,
+    command_bar::CommandBarPicker,
 };
 
 pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
@@ -46,6 +47,10 @@ pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
 pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
 pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
+pub const FILE_SHAPE_EVENT: &str = "file_shape";
+pub const FILE_SHAPE_SET_EVENT: &str = "file_shape_set";
+pub const FILE_ENCODING_EVENT: &str = "file_encoding";
+pub const FILE_ENCODING_SET_EVENT: &str = "file_encoding_set";
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
@@ -130,6 +135,7 @@ pub enum FoldGutter {
 #[derive(
     Debug,
     Clone,
+    Default,
     PartialEq,
     Serialize,
     Deserialize,
@@ -141,6 +147,8 @@ pub struct FileLine {
     pub line_no: u32,
     pub fold: FoldGutter,
     pub spans: Vec<StyledSpan>,
+    #[serde(default)]
+    pub indent_levels: u16,
 }
 
 #[derive(
@@ -158,6 +166,119 @@ pub struct FileMetaEvent {
     pub abs_path: String,
     pub language: String,
     pub total_lines: u32,
+    #[serde(default)]
+    pub indent: FileIndent,
+    #[serde(default)]
+    pub line_ending: FileLineEnding,
+    #[serde(default)]
+    pub encoding: FileEncoding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileIndent {
+    pub spaces: bool,
+    pub width: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileLineEnding {
+    #[default]
+    Lf,
+    Crlf,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileEncoding {
+    #[default]
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+    ShiftJis,
+    EucJp,
+    Iso2022Jp,
+    Gbk,
+    Big5,
+    EucKr,
+    Windows1252,
+    Iso8859_1,
+}
+
+impl FileEncoding {
+    pub const ALL: [Self; 12] = [
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16Le,
+        Self::Utf16Be,
+        Self::ShiftJis,
+        Self::EucJp,
+        Self::Iso2022Jp,
+        Self::Gbk,
+        Self::Big5,
+        Self::EucKr,
+        Self::Windows1252,
+        Self::Iso8859_1,
+    ];
+
+    pub fn of_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Utf8Bom => "UTF-8 with BOM",
+            Self::Utf16Le => "UTF-16 LE",
+            Self::Utf16Be => "UTF-16 BE",
+            Self::ShiftJis => "Shift_JIS",
+            Self::EucJp => "EUC-JP",
+            Self::Iso2022Jp => "ISO-2022-JP",
+            Self::Gbk => "GBK",
+            Self::Big5 => "Big5",
+            Self::EucKr => "EUC-KR",
+            Self::Windows1252 => "Windows-1252",
+            Self::Iso8859_1 => "ISO-8859-1",
+        }
+    }
 }
 
 #[derive(
@@ -177,6 +298,8 @@ pub struct FileViewportPatch {
     pub wrap_columns: u16,
     pub layouts: Vec<FileLineLayout>,
     pub lines: Vec<FileLine>,
+    #[serde(default)]
+    pub sticky: Vec<FileLine>,
 }
 
 #[derive(
@@ -406,6 +529,8 @@ pub struct KnowledgeLinkOpen {
 )]
 pub struct FileErrorEvent {
     pub message: String,
+    #[serde(default)]
+    pub undecodable: bool,
 }
 
 #[derive(
@@ -457,6 +582,7 @@ pub struct FileVideoRect {
 )]
 pub struct FileScrollEvent {
     pub top_row: u32,
+    pub needs_rows: bool,
 }
 
 #[derive(
@@ -996,7 +1122,16 @@ pub struct OutlineRow {
     pub name: String,
     pub kind: u8,
     pub line: u32,
+    pub end_line: u32,
     pub depth: u16,
+}
+
+impl OutlineRow {
+    pub const OPEN_END: u32 = u32::MAX;
+
+    pub fn contains(&self, line: u32) -> bool {
+        self.line <= line && line <= self.end_line
+    }
 }
 
 #[derive(
@@ -1032,6 +1167,24 @@ pub struct ExplorerTreeEvent {
 )]
 pub struct ExplorerFocusEvent {
     pub path: String,
+    pub reveal: ExplorerReveal,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ExplorerReveal {
+    Requested,
+    Followed,
 }
 
 #[derive(
@@ -1163,6 +1316,21 @@ pub struct ExplorerRevealCurrent;
 #[derive(
     Debug,
     Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerCollapseAll;
+
+#[derive(
+    Debug,
+    Clone,
     PartialEq,
     Eq,
     Serialize,
@@ -1286,7 +1454,6 @@ pub struct ExplorerGoto {
     rkyv::Deserialize,
 )]
 pub struct ExplorerSearchMatch {
-    pub path: String,
     pub line: u32,
     pub col: u32,
     pub end_col: u32,
@@ -1304,10 +1471,29 @@ pub struct ExplorerSearchMatch {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+pub struct ExplorerSearchFile {
+    pub path: String,
+    pub matches: Vec<ExplorerSearchMatch>,
+    pub capped: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ExplorerSearchEvent {
     pub root: String,
     pub query: String,
-    pub matches: Vec<ExplorerSearchMatch>,
+    pub files: Vec<ExplorerSearchFile>,
+    pub capped: bool,
 }
 
 #[derive(
@@ -1326,6 +1512,25 @@ pub struct ExplorerSearchOpen {
     pub line: u32,
     pub col: u32,
     pub end_col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerSearchRequest {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
 }
 
 #[cfg(test)]
@@ -1361,6 +1566,7 @@ mod file_event_tests {
                 name: "## Install".into(),
                 kind: 15,
                 line: 12,
+                end_line: 40,
                 depth: 0,
             }],
         };
@@ -1387,6 +1593,7 @@ mod file_event_tests {
     #[test]
     fn file_viewport_patch_rkyv_roundtrip() {
         let patch = FileViewportPatch {
+            sticky: Vec::new(),
             first_row: 100,
             total_rows: 4000,
             total_lines: 5000,
@@ -1405,6 +1612,7 @@ mod file_event_tests {
                     bold: false,
                     italic: false,
                 }],
+                indent_levels: 0,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).expect("ser");
@@ -1422,13 +1630,14 @@ mod file_event_tests {
 
     #[test]
     fn file_scroll_and_resize_roundtrip() {
-        let s = FileScrollEvent { top_row: 42 };
+        let s = FileScrollEvent {
+            top_row: 42,
+            needs_rows: true,
+        };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&s).unwrap();
         assert_eq!(
-            rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b)
-                .unwrap()
-                .top_row,
-            42
+            rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b).unwrap(),
+            s
         );
         let r = FileResizeEvent {
             char_height: 16.0,
@@ -1824,7 +2033,6 @@ pub struct FileCursorEvent {
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
-    pub command_line: String,
     pub search: Vec<crate::editor::SelSpan>,
     pub word_highlights: Vec<crate::editor::SelSpan>,
     pub search_total: u32,
@@ -1932,6 +2140,112 @@ pub struct FileKeymapSet {
 }
 
 #[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileShapeEvent {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileShapeSet {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEncodingEvent {
+    pub encoding: FileEncoding,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileEncodingAction {
+    Reopen,
+    Save,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileEncodingSet {
+    pub encoding: FileEncoding,
+    pub action: FileEncodingAction,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileStatusPickerOpen {
+    pub picker: CommandBarPicker,
+}
+
+impl FileStatusPickerOpen {
+    pub const fn of(picker: CommandBarPicker) -> Self {
+        Self { picker }
+    }
+}
+
+#[derive(
     Clone,
     Copy,
     Debug,
@@ -1950,7 +2264,9 @@ pub enum FileKey {
     PanelPrevious,
     PanelChoose,
     PanelDismiss,
-    Find,
+    Find { forward: bool },
+    FindClose,
+    FindInFiles,
 }
 
 #[derive(
@@ -2052,6 +2368,8 @@ pub struct FileFindRequest {
     pub step: bool,
     pub reverse: bool,
     pub done: bool,
+    pub regex: bool,
+    pub forward: bool,
 }
 
 #[derive(
@@ -2388,17 +2706,20 @@ mod tests {
                 line: 3,
                 row: 3,
                 col: 5,
+                char_col: 4,
             },
             carets: vec![
                 CursorPos {
                     line: 3,
                     row: 3,
                     col: 5,
+                    char_col: 4,
                 },
                 CursorPos {
                     line: 4,
                     row: 4,
                     col: 5,
+                    char_col: 4,
                 },
             ],
             selections: vec![SelSpan {
@@ -2411,6 +2732,7 @@ mod tests {
                 line: 3,
                 row: 3,
                 col: 25,
+                char_col: 20,
             },
             source_selections: vec![SelSpan {
                 line: 3,
@@ -2418,7 +2740,6 @@ mod tests {
                 start: 20,
                 end: 25,
             }],
-            command_line: ":wq".into(),
             search: vec![SelSpan {
                 line: 1,
                 row: 1,
