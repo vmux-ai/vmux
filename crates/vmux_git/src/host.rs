@@ -998,7 +998,11 @@ mod tests {
     #[test]
     fn a_path_that_will_not_resolve_is_guessed_once_rather_than_every_call() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let absent = dir.path().join("not-yet").join("file.txt");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&real).expect("create real");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let absent = link.join("not-yet").join("file.txt");
         let mut cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),

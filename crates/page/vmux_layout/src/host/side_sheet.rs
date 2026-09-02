@@ -1,8 +1,8 @@
 use super::Open;
 use crate::settings::LayoutSettings;
+use bevy::prelude::*;
 #[cfg(target_os = "macos")]
-use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{ecs::system::NonSendMarker, window::PrimaryWindow, winit::WINIT_WINDOWS};
 use vmux_flex::prelude::*;
 
 impl Plugin for SideSheetLayoutPlugin {
