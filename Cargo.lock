@@ -10144,7 +10144,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vmux_agent"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "base64 0.22.1",
  "bevy",
@@ -10193,7 +10193,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_browser"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -10244,7 +10244,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_chat"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -10264,7 +10264,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_cli"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -10279,7 +10279,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_client"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "chrono",
  "libc",
@@ -10294,7 +10294,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_clipboard"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -10304,7 +10304,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_command"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10327,7 +10327,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_command_mcp"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "serde_json",
  "vmux_command",
@@ -10336,7 +10336,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_core"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10361,7 +10361,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_desktop"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10430,7 +10430,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_editor"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -10479,7 +10479,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_flex"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "taffy",
@@ -10487,7 +10487,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_git"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10507,7 +10507,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_history"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10526,7 +10526,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_knowledge"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10544,7 +10544,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_layout"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_asset",
@@ -10578,7 +10578,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_macro"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "muda 0.19.2",
  "proc-macro2",
@@ -10588,7 +10588,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_mcp"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -10602,7 +10602,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_mobile"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -10638,7 +10638,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_native"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "base64 0.22.1",
  "dioxus",
@@ -10659,7 +10659,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_profile"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "chrono",
  "libc",
@@ -10676,7 +10676,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_remote"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bytes",
  "quinn",
@@ -10693,7 +10693,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_service"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
@@ -10736,7 +10736,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_session"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -10747,7 +10747,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_setting"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10769,7 +10769,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_space"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10795,7 +10795,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_start"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_app",
@@ -10819,7 +10819,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_team"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_app",
@@ -10842,7 +10842,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_terminal"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -10872,7 +10872,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_ui"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "dioxus",
  "dioxus-primitives",
@@ -10890,7 +10890,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_wire"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "bevy_ecs",
  "bevy_reflect",
