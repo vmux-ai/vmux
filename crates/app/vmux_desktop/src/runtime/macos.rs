@@ -52,7 +52,7 @@ fn activate_primary_window_on_startup(
 }
 
 fn grab_key_window_on_pane_hover(
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
     panes: Query<
         &ComputedNode,
         (
@@ -80,9 +80,12 @@ fn grab_key_window_on_pane_hover(
     if !over_pane {
         return;
     }
-    let Ok(window_entity) = primary_window.single() else {
+    let Ok((window_entity, window)) = primary_window.single() else {
         return;
     };
+    if !window.visible {
+        return;
+    }
     ensure_native_window_active(window_entity);
 }
 
