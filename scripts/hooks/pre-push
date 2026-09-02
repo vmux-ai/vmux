@@ -59,6 +59,7 @@ fi
 # What this push adds, per ref. A branch the remote has not seen yet is
 # measured from where it left main rather than from its first commit.
 changed=""
+ranges=""
 saw_ref=""
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   if [ "$local_sha" = "$ZERO" ]; then
@@ -73,6 +74,8 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   if [ -z "$base" ]; then
     full_gate "no base to compare against"
   fi
+  ranges="$ranges$base $local_sha
+"
   changed="$changed$(git diff --name-only "$base" "$local_sha")
 "
 done
@@ -92,11 +95,39 @@ owners="$(printf '%s' "$meta" | jq -r --arg root "$root/" '
   | "\(.name) \(.manifest_path | ltrimstr($root) | rtrimstr("/Cargo.toml"))"
 ')"
 
+# A release bump rewrites one line per crate and nothing else. Reading the diff
+# is what separates that from a dependency change, which has to gate everything.
+version_only() {
+  local file="$1"
+  local bumped=""
+  local base local_sha line
+  while read -r base local_sha; do
+    if [ -z "$base" ]; then
+      continue
+    fi
+    while IFS= read -r line; do
+      case "$line" in
+        ---*|+++*) continue ;;
+        [+-]'version = "'[0-9]*) bumped="yes" ;;
+        [+-]?*) return 1 ;;
+      esac
+    done < <(git diff "$base" "$local_sha" -- "$file")
+  done <<< "$ranges"
+  [ -n "$bumped" ]
+}
+
 # Longest matching manifest directory owns the file.
 affected=""
 while IFS= read -r file; do
   case "$file" in
     docs/*|*.md|.github/*) continue ;;
+    Casks/*|website/*) continue ;;
+    Cargo.toml|Cargo.lock)
+      if version_only "$file"; then
+        continue
+      fi
+      full_gate "$file changed beyond a version bump"
+      ;;
     patches/*) full_gate "patches/ changed" ;;
   esac
   owner=""
