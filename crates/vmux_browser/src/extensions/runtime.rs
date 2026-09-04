@@ -28,6 +28,24 @@ pub struct PreparedRuntime {
     pub granted_host_permissions: Vec<String>,
 }
 
+#[cfg(test)]
+impl PreparedRuntime {
+    pub(crate) fn fixture(extension_id: &str, runtime_hash: &str) -> Self {
+        Self {
+            extension_id: extension_id.into(),
+            dir: PathBuf::from("current"),
+            runtime_hash: runtime_hash.into(),
+            source_hash: "source-hash".into(),
+            permissions: Vec::new(),
+            optional_permissions: Vec::new(),
+            host_permissions: Vec::new(),
+            optional_host_permissions: Vec::new(),
+            granted_permissions: Vec::new(),
+            granted_host_permissions: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PrepareRuntimeError {
     Corrupt(String),

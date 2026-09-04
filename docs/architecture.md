@@ -321,6 +321,22 @@ A second layer adds least privilege *among* trusted pages: each message type is 
 the pages that may emit it, so a compromised page cannot pivot to another's handlers. The
 full Bevy Remote Protocol is locked to the `debug` page alone.
 
+### Chrome extensions
+
+An installed extension is never handed to CEF as it shipped. Vmux copies the package into a
+generated runtime directory and patches the manifest so the service worker becomes a stable
+`vmux_sw.js` that imports Vmux's bridge ahead of the extension's own worker. The package
+itself stays immutable, so re-installing an extension or changing the bridge is a fresh
+generation rather than a patch stacked on a patch.
+
+That stable entry point has one consequence worth knowing. Chromium decides whether to
+re-fetch a worker by comparing the bytes of its script, and `vmux_sw.js` is three
+`importScripts` lines that never change — so a profile can keep serving the *previous*
+package's worker from its script cache after the extension underneath it has been replaced,
+and that worker then fetches chunks which no longer exist on disk. Vmux therefore
+fingerprints the prepared runtimes and clears the profile's service-worker script cache
+itself whenever that fingerprint moves.
+
 ---
 
 ## The daemon's registries
