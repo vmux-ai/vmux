@@ -211,6 +211,16 @@ the layout page; the entity that survives holds only the state thirty-odd reader
 natively focused — so scrolling an `https://` page costs what Chrome costs. CEF also still
 backs the extension bridge pages, and the windowless path it paints offscreen.
 
+Because the shell draws its own titlebar and resize edges rather than letting AppKit draw
+them, it watches mouse-downs app-wide and turns the ones that land in the drag region into
+a window drag. The trap is that the app owns more windows than the shell: each windowed
+pane is a borderless panel, and Chromium opens its own child windows for autofill, bubbles
+and permission prompts. An event carries coordinates relative to *its* window, so measuring
+a click on one of those against the shell's drag region silently reads a point tens of
+pixels down as a titlebar hit and swallows it into `performWindowDragWithEvent` — an
+autofill suggestion that highlights on hover and does nothing when clicked. Only the window
+that actually wears the chrome may be measured against it.
+
 Dioxus is React-shaped either way — `rsx!` markup, signals and hooks — styled with Tailwind
 and shadcn tokens. The content you open is full Chromium; any React or Vue app renders
 exactly as it would in Chrome.
