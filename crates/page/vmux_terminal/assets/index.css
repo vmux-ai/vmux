@@ -3,39 +3,6 @@
 @source "../src";
 @source ".";
 
-@theme {
-  --font-mono: ui-monospace, "JetBrainsMono NF", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("./fonts/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("./fonts/JetBrainsMonoNerdFontMono-Bold.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("./fonts/JetBrainsMonoNerdFontMono-Italic.woff2") format("woff2");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("./fonts/JetBrainsMonoNerdFontMono-BoldItalic.woff2") format("woff2");
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-}
-
 @layer base {
   :root {
     --term-fg: rgb(205, 214, 244);
@@ -69,7 +36,7 @@
     margin: 0;
     background-color: transparent;
     color: var(--term-fg);
-    font-family: "JetBrainsMono NF", "JetBrainsMono Nerd Font", "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    font-family: var(--font-mono);
   }
 
   #main > * {

@@ -27,6 +27,6 @@ fn main() {
             strip_uncompiled_tailwind_css: true,
         })
         .tailwind_postprocess_after_dx(&["index-dxv", "vmux_page-dxv"])
-        .copy_manifest_dir_to_dist("../page/vmux_terminal/assets/fonts", "assets/fonts")
+        .copy_manifest_dir_to_dist("../vmux_ui/assets/fonts", "assets/fonts")
         .run("vmux_page");
 }

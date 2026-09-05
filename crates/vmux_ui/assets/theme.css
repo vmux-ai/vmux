@@ -98,9 +98,12 @@
   }
 }
 
-@theme inline {
+@theme {
   --font-sans: -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "JetBrainsMono NF", monospace;
+}
 
+@theme inline {
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
