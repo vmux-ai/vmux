@@ -2,11 +2,9 @@ use vmux_core::extension::manifest;
 use vmux_core::extension::store;
 
 use bevy::prelude::Resource;
-use std::path::Path;
 
 use super::runtime::{self, PreparedRuntime};
-
-const STABLE_RUNTIME_MARKER: &str = ".stable-runtime-v1";
+use super::service_worker_cache::ServiceWorkerCache;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
@@ -29,7 +27,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     if index_changed {
         idx.save(&root)?;
     }
-    migrate_service_worker_cache(&vmux_core::profile::profile_dir(), &prepared)?;
+    ServiceWorkerCache::of(&vmux_core::profile::profile_dir()).reconcile(&prepared)?;
     let dirs = prepared
         .iter()
         .map(|item| item.dir.to_string_lossy())
@@ -116,44 +114,6 @@ fn loaded_path(root: &std::path::Path, profile: &str) -> std::path::PathBuf {
     root.join("loaded").join(format!("{profile}.txt"))
 }
 
-fn migrate_service_worker_cache(
-    cef_profile: &Path,
-    prepared: &[PreparedRuntime],
-) -> Result<(), String> {
-    if prepared.is_empty() {
-        return Ok(());
-    }
-    let marker = cef_profile.join("Default").join(STABLE_RUNTIME_MARKER);
-    if marker.exists() {
-        return Ok(());
-    }
-    let service_workers = cef_profile.join("Default").join("Service Worker");
-    if service_workers.exists() {
-        let stale = service_workers.with_file_name(format!(
-            "Service Worker.vmux-stale-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::rename(&service_workers, &stale).map_err(|error| error.to_string())?;
-        let _ = std::thread::Builder::new()
-            .name("extension-cache-cleanup".into())
-            .spawn(move || {
-                let _ = std::fs::remove_dir_all(stale);
-            });
-    }
-    if let Some(parent) = marker.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    std::fs::write(
-        marker,
-        prepared
-            .iter()
-            .map(|runtime| runtime.extension_id.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-    .map_err(|error| error.to_string())
-}
-
 fn migrate_index_permissions(
     root: &std::path::Path,
     index: &mut store::Index,
@@ -194,21 +154,6 @@ fn migrate_index_permissions(
 mod tests {
     use super::*;
 
-    fn prepared_runtime(id: &str) -> PreparedRuntime {
-        PreparedRuntime {
-            extension_id: id.into(),
-            dir: "current".into(),
-            runtime_hash: "runtime-hash".into(),
-            source_hash: "source-hash".into(),
-            permissions: Vec::new(),
-            optional_permissions: Vec::new(),
-            host_permissions: Vec::new(),
-            optional_host_permissions: Vec::new(),
-            granted_permissions: Vec::new(),
-            granted_host_permissions: Vec::new(),
-        }
-    }
-
     fn enabled_entry(id: &str) -> store::ExtEntry {
         let mut profile_enabled = std::collections::BTreeMap::new();
         profile_enabled.insert("personal".to_string(), true);
@@ -240,7 +185,7 @@ mod tests {
                     "source hash mismatch".to_string(),
                 ))
             } else {
-                Ok(prepared_runtime(&entry.id))
+                Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
             }
         })
         .unwrap();
@@ -267,7 +212,7 @@ mod tests {
                     "read-only runtime store".to_string(),
                 ))
             } else {
-                Ok(prepared_runtime(&entry.id))
+                Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
             }
         })
         .unwrap_err();
@@ -277,32 +222,6 @@ mod tests {
             "failed to prepare extension broken: read-only runtime store"
         );
         assert!(entries.iter().all(|entry| entry.enabled_for("personal")));
-    }
-
-    #[test]
-    fn stable_runtime_migration_clears_service_worker_cache_once() {
-        let cef_profile = tempfile::tempdir().unwrap();
-        let service_workers = cef_profile.path().join("Default/Service Worker");
-        std::fs::create_dir_all(&service_workers).unwrap();
-        std::fs::write(service_workers.join("registration"), "stale").unwrap();
-        let prepared = [prepared_runtime("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
-
-        migrate_service_worker_cache(cef_profile.path(), &prepared).unwrap();
-
-        assert!(!service_workers.exists());
-        let marker = cef_profile
-            .path()
-            .join("Default")
-            .join(STABLE_RUNTIME_MARKER);
-        assert_eq!(
-            std::fs::read_to_string(marker).unwrap(),
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
-
-        std::fs::create_dir_all(&service_workers).unwrap();
-        std::fs::write(service_workers.join("registration"), "current").unwrap();
-        migrate_service_worker_cache(cef_profile.path(), &prepared).unwrap();
-        assert!(service_workers.join("registration").exists());
     }
 
     #[test]

@@ -211,6 +211,16 @@ the layout page; the entity that survives holds only the state thirty-odd reader
 natively focused — so scrolling an `https://` page costs what Chrome costs. CEF also still
 backs the extension bridge pages, and the windowless path it paints offscreen.
 
+Because the shell draws its own titlebar and resize edges rather than letting AppKit draw
+them, it watches mouse-downs app-wide and turns the ones that land in the drag region into
+a window drag. The trap is that the app owns more windows than the shell: each windowed
+pane is a borderless panel, and Chromium opens its own child windows for autofill, bubbles
+and permission prompts. An event carries coordinates relative to *its* window, so measuring
+a click on one of those against the shell's drag region silently reads a point tens of
+pixels down as a titlebar hit and swallows it into `performWindowDragWithEvent` — an
+autofill suggestion that highlights on hover and does nothing when clicked. Only the window
+that actually wears the chrome may be measured against it.
+
 Dioxus is React-shaped either way — `rsx!` markup, signals and hooks — styled with Tailwind
 and shadcn tokens. The content you open is full Chromium; any React or Vue app renders
 exactly as it would in Chrome.
@@ -320,6 +330,22 @@ for an arbitrary URL to reach in the first place.
 A second layer adds least privilege *among* trusted pages: each message type is bound to
 the pages that may emit it, so a compromised page cannot pivot to another's handlers. The
 full Bevy Remote Protocol is locked to the `debug` page alone.
+
+### Chrome extensions
+
+An installed extension is never handed to CEF as it shipped. Vmux copies the package into a
+generated runtime directory and patches the manifest so the service worker becomes a stable
+`vmux_sw.js` that imports Vmux's bridge ahead of the extension's own worker. The package
+itself stays immutable, so re-installing an extension or changing the bridge is a fresh
+generation rather than a patch stacked on a patch.
+
+That stable entry point has one consequence worth knowing. Chromium decides whether to
+re-fetch a worker by comparing the bytes of its script, and `vmux_sw.js` is three
+`importScripts` lines that never change — so a profile can keep serving the *previous*
+package's worker from its script cache after the extension underneath it has been replaced,
+and that worker then fetches chunks which no longer exist on disk. Vmux therefore
+fingerprints the prepared runtimes and clears the profile's service-worker script cache
+itself whenever that fingerprint moves.
 
 ---
 
