@@ -88,6 +88,17 @@ pub fn Page() -> Element {
         loading.set(false);
         message.set(String::new());
     });
+    let _picked =
+        use_listener::<GitRepositoryPickedEvent, _>(GIT_REPOSITORY_PICKED_EVENT, move |event| {
+            if event.path.is_empty() {
+                return;
+            }
+            workspace.set(event.path.clone());
+            repository.set(None);
+            loading.set(true);
+            message.set(String::new());
+            GitWorkspace::request(&event.path);
+        });
     let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
         if result.ok {
             message.set(String::new());
@@ -100,6 +111,9 @@ pub fn Page() -> Element {
     let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
         message.set(event.message);
         loading.set(false);
+        if repository().is_none() {
+            GitWorkspace::pick(&workspace());
+        }
     });
     let _changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
         nonce.set(nonce().wrapping_add(1));
@@ -156,6 +170,12 @@ impl GitWorkspace {
             return String::new();
         }
         Path::new(root).join(relative).to_string_lossy().to_string()
+    }
+
+    fn pick(path: &str) {
+        let _ = send(&GitRepositoryPickerRequest {
+            path: path.to_string(),
+        });
     }
 }
 
@@ -696,6 +716,8 @@ fn DiffCard(
 
 #[component]
 fn EmptyRepository(loading: bool, workspace: String, message: String) -> Element {
+    let picker_path = workspace.clone();
+    let picker_icon_path = workspace.clone();
     rsx! {
         main { class: "flex min-h-0 flex-1 items-center justify-center p-8",
             div { class: "w-full max-w-lg text-center",
@@ -708,6 +730,15 @@ fn EmptyRepository(loading: bool, workspace: String, message: String) -> Element
                 }
                 if !message.is_empty() {
                     div { class: "mt-4 rounded-md bg-ansi-1/10 p-3 text-left text-xs text-ansi-1", "{message}" }
+                }
+                if !loading {
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        class: "mt-5 h-9 gap-2 rounded-md px-4 text-sm",
+                        onclick: move |_| GitWorkspace::pick(&picker_path),
+                        TypeIcon { path: picker_icon_path, is_dir: true, class: "h-4 w-4" }
+                        {translate("agent-choose-repository")}
+                    }
                 }
             }
         }

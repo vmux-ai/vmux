@@ -17,8 +17,9 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::host::page::NativelyHosted;
 
 use crate::event::{
-    GIT_CHANGED_EVENT, GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDiscardRequest,
-    GitHunkRequest, GitPushRequest, GitRepositoryRequest, GitStageRequest, GitStatusRequest,
+    GIT_CHANGED_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitChangedEvent, GitCommitRequest,
+    GitDiffRequest, GitDiscardRequest, GitHunkRequest, GitPushRequest, GitRepositoryPickedEvent,
+    GitRepositoryPickerRequest, GitRepositoryRequest, GitStageRequest, GitStatusRequest,
     GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
@@ -74,6 +75,7 @@ impl Plugin for GitPlugin {
             })
             .add_plugins(BinEventEmitterPlugin::<(
                 GitRepositoryRequest,
+                GitRepositoryPickerRequest,
                 GitStatusRequest,
                 GitDiffRequest,
                 GitStageRequest,
@@ -84,6 +86,7 @@ impl Plugin for GitPlugin {
                 GitHunkRequest,
             )>::default())
             .add_observer(on_repository_request)
+            .add_observer(on_repository_picker_request)
             .add_observer(on_status_request)
             .add_observer(on_diff_request)
             .add_observer(on_stage_request)
@@ -97,6 +100,7 @@ impl Plugin for GitPlugin {
                 (
                     drain_git_watch,
                     poll_repo_info_cache,
+                    poll_repository_pickers,
                     sync_repo_info_watches,
                     drain_git_outbox,
                     dispatch_status_jobs,
@@ -126,6 +130,47 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 pub struct GitDiffSource {
     pub content: String,
     pub dirty: bool,
+}
+
+#[derive(Component)]
+struct PendingGitRepositoryPicker {
+    webview: Entity,
+    task: Task<Option<PathBuf>>,
+}
+
+struct GitRepositoryPicker;
+
+impl GitRepositoryPicker {
+    fn initial_directory(path: &Path) -> PathBuf {
+        let mut current = path.to_path_buf();
+        while !current.is_dir() && current.pop() {}
+        if current.is_dir() {
+            return current;
+        }
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    fn task(
+        path: PathBuf,
+        proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) -> Task<Option<PathBuf>> {
+        let initial = Self::initial_directory(&path);
+        IoTaskPool::get().spawn(async move {
+            let selected = rfd::AsyncFileDialog::new()
+                .set_title("Choose Git repository")
+                .set_directory(initial)
+                .pick_folder()
+                .await
+                .map(|folder| folder.path().to_path_buf());
+            if let Some(proxy) = proxy {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
+            selected
+        })
+    }
 }
 
 pub enum GitOutboxItem {
@@ -727,6 +772,45 @@ fn on_repository_request(
     spawn_job(&outbox, webview, JobKind::Repository { path: repo_root });
 }
 
+fn on_repository_picker_request(
+    trigger: On<BinReceive<GitRepositoryPickerRequest>>,
+    pending: Query<&PendingGitRepositoryPicker>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if pending.iter().any(|picker| picker.webview == webview) {
+        return;
+    }
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
+    commands.spawn(PendingGitRepositoryPicker {
+        webview,
+        task: GitRepositoryPicker::task(path, proxy),
+    });
+}
+
+fn poll_repository_pickers(
+    mut pending: Query<(Entity, &mut PendingGitRepositoryPicker)>,
+    mut commands: Commands,
+) {
+    for (entity, mut picker) in &mut pending {
+        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
+            continue;
+        };
+        if let Some(path) = selected {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                picker.webview,
+                GIT_REPOSITORY_PICKED_EVENT,
+                &GitRepositoryPickedEvent {
+                    path: path.to_string_lossy().into_owned(),
+                },
+            ));
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
 fn dispatch_status_jobs(mut jobs: ResMut<GitStatusJobs>, outbox: Res<GitOutbox>) {
     for (repo_root, requests) in jobs.take_ready() {
         spawn_status_batch(&outbox, repo_root, requests);
@@ -964,6 +1048,16 @@ mod tests {
     use super::*;
     use crate::event::GitErrorEvent;
     use crate::host::runner::test_repo;
+
+    #[test]
+    fn repository_picker_starts_at_the_nearest_existing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("projects");
+        std::fs::create_dir(&existing).unwrap();
+        let missing = existing.join("github.com/vmux-ai/vmux");
+
+        assert_eq!(GitRepositoryPicker::initial_directory(&missing), existing);
+    }
 
     #[test]
     fn drain_empties_outbox() {

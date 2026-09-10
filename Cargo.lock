@@ -10505,6 +10505,7 @@ dependencies = [
  "dioxus",
  "libc",
  "notify",
+ "rfd 0.15.4",
  "rkyv",
  "serde",
  "similar",

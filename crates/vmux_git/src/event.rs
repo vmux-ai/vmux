@@ -5,6 +5,7 @@ pub const GIT_DIFF_VIEWPORT_EVENT: &str = "git-diff-viewport";
 pub const GIT_RESULT_EVENT: &str = "git-result";
 pub const GIT_ERROR_EVENT: &str = "git-error";
 pub const GIT_CHANGED_EVENT: &str = "git-changed";
+pub const GIT_REPOSITORY_PICKED_EVENT: &str = "git-repository-picked";
 
 macro_rules! wire {
     ($($item:item)*) => {
@@ -22,6 +23,7 @@ macro_rules! wire {
 wire! {
     pub struct GitStatusRequest { pub path: String }
     pub struct GitRepositoryRequest { pub path: String }
+    pub struct GitRepositoryPickerRequest { pub path: String }
     pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub top_line: u32, pub rows: u32 }
     pub struct GitStageRequest { pub repo_root: String, pub path: String }
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String }
@@ -88,6 +90,7 @@ wire! {
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }
     pub struct GitErrorEvent { pub message: String }
     pub struct GitChangedEvent {}
+    pub struct GitRepositoryPickedEvent { pub path: String }
 }
 
 #[derive(

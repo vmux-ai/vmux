@@ -25,6 +25,7 @@ bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 libc = "0.2"
 notify = { workspace = true }
+rfd = { workspace = true }
 syntect = { workspace = true }
 similar = "2"
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
