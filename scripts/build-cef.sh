@@ -45,25 +45,37 @@ if [[ ! -d "$depot_tools/.git" ]]; then
 fi
 git -C "$depot_tools" checkout --force "$depot_tools_commit"
 
-python3 "$automate" \
-    --download-dir="$BUILD_DIR" \
-    --depot-tools-dir="$depot_tools" \
-    --no-depot-tools-update \
-    --checkout="$cef_commit" \
-    --chromium-checkout="refs/tags/$chromium_version" \
-    --arm64-build \
-    --no-chromium-history \
-    --with-pgo-profiles \
-    --force-config \
-    --force-clean \
-    --no-build \
-    --no-distrib
+if [[ "${CEF_RESUME:-0}" == "1" ]]; then
+    if [[ ! -d "$BUILD_DIR/chromium/src/.git" || ! -d "$BUILD_DIR/chromium/src/cef" ]]; then
+        echo "CEF_RESUME requires an existing Chromium and CEF checkout" >&2
+        exit 1
+    fi
+else
+    python3 "$automate" \
+        --download-dir="$BUILD_DIR" \
+        --depot-tools-dir="$depot_tools" \
+        --no-depot-tools-update \
+        --checkout="$cef_commit" \
+        --chromium-checkout="refs/tags/$chromium_version" \
+        --arm64-build \
+        --no-chromium-history \
+        --with-pgo-profiles \
+        --force-config \
+        --force-clean \
+        --no-build \
+        --no-distrib
+fi
 
 PATH="$depot_tools:$PATH" python3 \
     "$BUILD_DIR/chromium/src/tools/update_pgo_profiles.py" \
     --target mac-arm \
     update \
     --gs-url-base=chromium-optimization-profiles/pgo_profiles
+PATH="$depot_tools:$PATH" python3 \
+    "$BUILD_DIR/chromium/src/v8/tools/builtins-pgo/download_profiles.py" \
+    download \
+    --depot-tools "$depot_tools" \
+    --check-v8-revision
 
 cef_source="$BUILD_DIR/chromium/src/cef"
 chromium_source="$BUILD_DIR/chromium/src"
@@ -95,7 +107,7 @@ python3 "$automate" \
     --force-distrib \
     --minimal-distrib-only \
     --no-debug-build \
-    --build-target=cefsimple \
+    --build-target=cefclient \
     --with-pgo-profiles
 
 source_archive="$(find "$cef_source/binary_distrib" -maxdepth 1 -type f -name 'cef_binary_*_macosarm64_minimal.tar.bz2' -print | sort | tail -1)"
