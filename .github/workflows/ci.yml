@@ -96,7 +96,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
 
       - name: Compute workspace packages (excluding patches)
         id: pkgs
@@ -110,11 +110,7 @@ jobs:
         run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
 
       - name: Install CEF framework
-        run: |
-          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
-            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir --force "$HOME/.local/share"
-          fi
+        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
 
       - name: Clippy
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
@@ -175,14 +171,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
 
       - name: Install CEF framework
-        run: |
-          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
-            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir --force "$HOME/.local/share"
-          fi
+        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
 
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
@@ -207,6 +199,7 @@ jobs:
           filters: |
             code:
               - 'crates/**'
+              - 'cef/**'
               - 'patches/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -214,10 +207,12 @@ jobs:
               - 'rust-toolchain.toml'
               - 'scripts/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/build-cef.yml'
             website:
               - 'website/**'
             macos:
               - 'crates/**'
+              - 'cef/**'
               - 'patches/**'
               - 'packaging/**'
               - 'scripts/**'
@@ -226,6 +221,7 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/build-cef.yml'
               - '.github/workflows/release.yml'
               - '!crates/app/vmux_mobile/**'
               - '!packaging/ios/**'
@@ -595,7 +591,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
 
       - name: Cache tailwindcss
         uses: actions/cache@v5
@@ -609,11 +605,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install CEF framework
-        run: |
-          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
-            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir --force "$HOME/.local/share"
-          fi
+        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
 
       - name: Install dioxus-cli
         run: ./scripts/install-dioxus-cli.sh

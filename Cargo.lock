@@ -905,6 +905,7 @@ dependencies = [
  "bevy",
  "bevy_cef_core",
  "cef",
+ "libloading 0.9.0",
  "objc",
  "raw-window-handle 0.6.2",
  "rkyv",
@@ -10607,7 +10608,6 @@ dependencies = [
  "vmux_client",
  "vmux_command_mcp",
  "vmux_macro",
- "vmux_profile",
 ]
 
 [[package]]

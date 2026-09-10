@@ -1,10 +1,6 @@
 mod files;
 mod keys;
 
-pub use keys::{
-    authorize_key_broker_parent, key_broker_load, key_broker_load_silent, key_broker_store,
-};
-
 use files::FileAttributes;
 use keys::{KeyStore, SilentSystemKeyStore, SystemKeyStore};
 
@@ -68,6 +64,37 @@ pub struct VaultStatus {
     pub github_owners: Vec<String>,
     pub repositories: Vec<VaultRepository>,
     pub error: String,
+}
+
+impl VaultStatus {
+    pub fn agent_json(&self) -> String {
+        let connected = self.initialized && !self.remote.is_empty();
+        let provider = if !connected {
+            None
+        } else if self.remote.contains("github.com") {
+            Some("github")
+        } else if Path::new(&self.remote).is_absolute() {
+            Some("cloud_folder")
+        } else {
+            Some("git")
+        };
+        let status = serde_json::json!({
+            "root": self.root,
+            "connected": connected,
+            "encrypted": self.encrypted,
+            "unlocked": self.unlocked,
+            "recoveryKey": self.recovery_enabled,
+            "automaticBackup": true,
+            "provider": provider,
+            "remote": self.remote,
+            "branch": self.branch,
+            "localChanges": self.dirty,
+            "ahead": self.ahead,
+            "behind": self.behind,
+            "syncNeeded": self.dirty > 0 || self.ahead > 0 || self.behind > 0,
+        });
+        serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2445,6 +2472,34 @@ fn command_success(output: Output) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn agent_status_reports_provider_and_pending_sync() {
+        let status = VaultStatus {
+            root: "/Users/test/.vmux".into(),
+            initialized: true,
+            encrypted: true,
+            unlocked: true,
+            recovery_enabled: true,
+            remote: "https://github.com/vmux-ai/vault.git".into(),
+            branch: "main".into(),
+            dirty: 2,
+            ahead: 1,
+            behind: 0,
+            ..Default::default()
+        };
+        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+
+        assert_eq!(status["connected"], true);
+        assert_eq!(status["encrypted"], true);
+        assert_eq!(status["unlocked"], true);
+        assert_eq!(status["recoveryKey"], true);
+        assert_eq!(status["automaticBackup"], true);
+        assert_eq!(status["provider"], "github");
+        assert_eq!(status["localChanges"], 2);
+        assert_eq!(status["ahead"], 1);
+        assert_eq!(status["syncNeeded"], true);
+    }
 
     #[test]
     fn a_recovery_key_is_committed_only_when_this_process_drew_it() {
