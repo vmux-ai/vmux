@@ -123,7 +123,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
         "source control",
     ],
     icon: Some(vmux_core::BuiltinIcon::GitBranch),
-    command_bar: false,
+    command_bar: true,
 };
 
 #[derive(Component, Clone, Debug, Default)]
