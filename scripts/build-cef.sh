@@ -5,6 +5,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${CEF_BUILD_DIR:-${RUNNER_TEMP:-/tmp}/vmux-cef-build}"
 DIST_DIR="${CEF_DIST_DIR:-$ROOT/cef/dist}"
 
+apply_patch_once() {
+    local repository="$1"
+    local patch="$2"
+    if git -C "$repository" apply --reverse --check "$patch" 2>/dev/null; then
+        return
+    fi
+    git -C "$repository" apply --check "$patch"
+    git -C "$repository" apply "$patch"
+}
+
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     echo "CEF must be built on macOS ARM64" >&2
     exit 1
@@ -56,10 +66,8 @@ if [[ "$compatibility" != "refs/tags/$chromium_version" ]]; then
     exit 1
 fi
 
-git -C "$cef_source" apply --check "$ROOT/cef/patches/cef-safe-storage.patch"
-git -C "$cef_source" apply "$ROOT/cef/patches/cef-safe-storage.patch"
-git -C "$chromium_source" apply --check "$ROOT/cef/patches/chromium-safe-storage.patch"
-git -C "$chromium_source" apply "$ROOT/cef/patches/chromium-safe-storage.patch"
+apply_patch_once "$cef_source" "$ROOT/cef/patches/cef-safe-storage.patch"
+apply_patch_once "$chromium_source" "$ROOT/cef/patches/chromium-safe-storage.patch"
 git -C "$cef_source" diff --check
 git -C "$chromium_source" diff --check
 
