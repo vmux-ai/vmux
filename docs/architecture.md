@@ -91,10 +91,11 @@ the derived key and a distinct `vm1` prefix. The prefix selects the key before d
 unauthenticated CBC trial decryption. Chromium's existing raw-key IPC carries only this
 browser-scoped material to sandboxed browser helpers, never the root or another subsystem's key.
 
-`cef/manifest.toml` pins the CEF and Chromium source revisions, patch revision, release asset, and
-SHA-256 checksum. `.github/workflows/build-cef.yml` builds the macOS ARM64 artifact on the dedicated
-CEF runner, publishes source metadata and provenance, and `scripts/install-cef.sh` verifies both the
-checksum and the custom export before packaging consumes the framework.
+`cef/manifest.toml` pins the CEF, Chromium, and depot_tools source revisions, patch revision,
+release asset, and SHA-256 checksum. `.github/workflows/build-cef.yml` builds the macOS ARM64
+artifact on the dedicated CEF runner, publishes source metadata and provenance, and
+`scripts/install-cef.sh` verifies both the checksum and the custom export before packaging consumes
+the framework.
 
 ### What each link carries
 
