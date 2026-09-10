@@ -99,6 +99,7 @@ pub fn Page() -> Element {
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
+    let git_repo_root = use_signal(String::new);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_refresh_settled = use_signal(|| true);
     let git_branch = use_signal(String::new);
@@ -109,6 +110,7 @@ pub fn Page() -> Element {
     GitStatusFeed {
         path: git_path.into(),
         nonce: git_nonce,
+        repo_root: git_repo_root,
         has_diff: git_has_diff,
         branch: git_branch,
         ahead: git_ahead,
@@ -1243,6 +1245,7 @@ pub fn Page() -> Element {
                 Mode::Text => rsx! {
                     if git_has_diff() {
                         DiffView {
+                            repo_root: git_repo_root,
                             path: git_path,
                             nonce: git_nonce,
                             visible: file_view_mode() == FileViewMode::Diff,

@@ -156,7 +156,11 @@ fn rel(root: &Path, file: &Path) -> String {
 
 pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
     let root = repo_root(file)?;
-    statuses(&root, &[file.to_path_buf()])?
+    status_at(&root, file)
+}
+
+pub fn status_at(root: &Path, file: &Path) -> Result<GitStatusEvent, GitError> {
+    statuses(root, &[file.to_path_buf()])?
         .pop()
         .ok_or_else(|| GitError("missing git status result".into()))
 }
@@ -424,11 +428,14 @@ fn index_text(root: &Path, target: &str) -> Result<String, GitError> {
     if ok { Ok(out) } else { Ok(String::new()) }
 }
 
-pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLine>, GitError> {
-    let root = repo_root(file)?;
-    let target = rel(&root, file);
-    let baseline = index_text(&root, &target)?;
-    let staged = staged_lineset(&root, &target);
+pub fn diff_lines_with_content(
+    root: &Path,
+    file: &Path,
+    content: &str,
+) -> Result<Vec<DiffLine>, GitError> {
+    let target = rel(root, file);
+    let baseline = index_text(root, &target)?;
+    let staged = staged_lineset(root, &target);
     let new_spans = crate::host::highlight::highlight_file(content, file);
     let mut old_no = 1u32;
     let mut new_no = 1u32;
@@ -483,20 +490,19 @@ pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLin
     Ok(lines)
 }
 
-pub fn diff_lines(file: &Path) -> Result<Vec<DiffLine>, GitError> {
-    let root = repo_root(file)?;
-    let target = rel(&root, file);
-    let staged = staged_lineset(&root, &target);
+pub fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
+    let target = rel(root, file);
+    let staged = staged_lineset(root, &target);
 
-    let unstaged = diff_text(&root, &target, false, 100_000)?;
+    let unstaged = diff_text(root, &target, false, 100_000)?;
     if unstaged.trim().is_empty() {
-        if status(file)?.file_status == FileStatus::Untracked {
+        if status_at(root, file)?.file_status == FileStatus::Untracked {
             let content = std::fs::read_to_string(file).unwrap_or_default();
-            return diff_lines_with_content(file, &content);
+            return diff_lines_with_content(root, file, &content);
         }
-        return staged_only_lines(file, &root, &target, &staged);
+        return staged_only_lines(file, root, &target, &staged);
     }
-    let ranges = parse::hunk_ranges(&diff_text(&root, &target, false, 0)?);
+    let ranges = parse::hunk_ranges(&diff_text(root, &target, false, 0)?);
 
     let new_spans = std::fs::read_to_string(file)
         .map(|c| crate::host::highlight::highlight_file(&c, file))
@@ -562,10 +568,9 @@ fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
     }
 }
 
-pub fn apply_hunk(file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let target = rel(&root, file);
-    let diff = diff_text(&root, &target, false, 0)?;
+pub fn apply_hunk(root: &Path, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
+    let target = rel(root, file);
+    let diff = diff_text(root, &target, false, 0)?;
     if diff.trim().is_empty() {
         return Err(GitError("no unstaged changes for this file".into()));
     }
@@ -574,15 +579,14 @@ pub fn apply_hunk(file: &Path, index: u32, accept: bool) -> Result<(), GitError>
         .get(index as usize)
         .ok_or_else(|| GitError("hunk index out of range".into()))?;
     let patch = format!("{header}{body}");
-    git_apply(&root, &patch, !accept)
+    git_apply(root, &patch, !accept)
 }
 
-fn simple(file: &Path, verb: &[&str]) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let target = rel(&root, file);
+fn simple(root: &Path, file: &Path, verb: &[&str]) -> Result<(), GitError> {
+    let target = rel(root, file);
     let mut args: Vec<&str> = verb.to_vec();
     args.push(&target);
-    let (stdout, stderr, ok) = git(&root, &args)?;
+    let (stdout, stderr, ok) = git(root, &args)?;
     if ok {
         Ok(())
     } else {
@@ -590,16 +594,16 @@ fn simple(file: &Path, verb: &[&str]) -> Result<(), GitError> {
     }
 }
 
-pub fn stage(file: &Path) -> Result<(), GitError> {
-    simple(file, &["add", "--"])
+pub fn stage(root: &Path, file: &Path) -> Result<(), GitError> {
+    simple(root, file, &["add", "--"])
 }
 
-pub fn unstage(file: &Path) -> Result<(), GitError> {
-    simple(file, &["restore", "--staged", "--"])
+pub fn unstage(root: &Path, file: &Path) -> Result<(), GitError> {
+    simple(root, file, &["restore", "--staged", "--"])
 }
 
-pub fn discard(file: &Path) -> Result<(), GitError> {
-    simple(file, &["restore", "--"])
+pub fn discard(root: &Path, file: &Path) -> Result<(), GitError> {
+    simple(root, file, &["restore", "--"])
 }
 
 pub fn commit(file: &Path, message: &str) -> Result<(), GitError> {
@@ -786,7 +790,7 @@ mod tests {
         test_repo::write(repo.path(), "a.txt", "two\n");
 
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
     }
 
@@ -848,7 +852,7 @@ mod tests {
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
 
-        let lines = diff_lines(&file).unwrap();
+        let lines = diff_lines(repo.path(), &file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Add)));
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Remove)));
     }
@@ -858,12 +862,43 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "new.txt", "one\ntwo\n");
 
-        let lines = diff_lines(&file).unwrap();
+        let lines = diff_lines(repo.path(), &file).unwrap();
 
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|line| line.kind == DiffKind::Add));
         assert_eq!(lines[0].new_no, Some(1));
         assert_eq!(lines[1].new_no, Some(2));
+    }
+
+    #[test]
+    fn repository_root_keeps_a_changed_nested_repository_as_the_selected_path() {
+        let repo = test_repo::init();
+        let nested = repo.path().join("client");
+        std::fs::create_dir(&nested).unwrap();
+        test_repo::run(&nested, &["init", "-q", "-b", "main"]);
+        test_repo::run(&nested, &["config", "user.email", "t@example.com"]);
+        test_repo::run(&nested, &["config", "user.name", "Test"]);
+        test_repo::write(&nested, "a.txt", "one\n");
+        test_repo::run(&nested, &["add", "a.txt"]);
+        test_repo::run(&nested, &["commit", "-qm", "initial"]);
+        test_repo::run(repo.path(), &["add", "client"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "add client"]);
+        test_repo::write(&nested, "a.txt", "two\n");
+        test_repo::run(&nested, &["add", "a.txt"]);
+        test_repo::run(&nested, &["commit", "-qm", "advance client"]);
+
+        let lines = diff_lines(repo.path(), &nested).unwrap();
+        assert!(!lines.is_empty());
+        assert_eq!(
+            status_at(repo.path(), &nested).unwrap().file_status,
+            FileStatus::Modified
+        );
+
+        stage(repo.path(), &nested).unwrap();
+        assert_eq!(
+            status_at(repo.path(), &nested).unwrap().file_status,
+            FileStatus::Staged
+        );
     }
 
     #[test]
@@ -873,7 +908,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
 
-        let lines = diff_lines_with_content(&file, "one\nchanged\nthree\n").unwrap();
+        let lines = diff_lines_with_content(repo.path(), &file, "one\nchanged\nthree\n").unwrap();
 
         assert!(
             lines
@@ -892,7 +927,7 @@ mod tests {
     fn handles_path_with_spaces_and_metachars() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a b; rm.txt", "one\n");
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
     }
 
@@ -903,8 +938,8 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        stage(&file).unwrap();
-        unstage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
+        unstage(repo.path(), &file).unwrap();
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
     }
 
@@ -915,7 +950,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        discard(&file).unwrap();
+        discard(repo.path(), &file).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
     }
 
@@ -923,7 +958,7 @@ mod tests {
     fn commit_clears_staged_and_advances_head() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
         commit(&file, "add a").unwrap();
         assert_eq!(status(&file).unwrap().staged_count, 0);
         let (log, _, ok) = git(repo.path(), &["log", "--oneline"]).unwrap();
@@ -945,7 +980,7 @@ mod tests {
         test_repo::run(remote.path(), &["init", "-q", "--bare"]);
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
         commit(&file, "init").unwrap();
         test_repo::run(
             repo.path(),
@@ -954,7 +989,7 @@ mod tests {
         test_repo::run(repo.path(), &["push", "-u", "origin", "main"]);
 
         test_repo::write(repo.path(), "a.txt", "two\n");
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
         commit(&file, "second").unwrap();
         push(&file).unwrap();
 
@@ -978,13 +1013,13 @@ mod tests {
             "L1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\n",
         );
 
-        apply_hunk(&file, 0, true).unwrap();
+        apply_hunk(repo.path(), &file, 0, true).unwrap();
         assert_eq!(
             status(&file).unwrap().file_status,
             FileStatus::StagedModified
         );
 
-        apply_hunk(&file, 0, false).unwrap();
+        apply_hunk(repo.path(), &file, 0, false).unwrap();
         let content = std::fs::read_to_string(&file).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.first().copied(), Some("L1"));
@@ -1004,8 +1039,8 @@ mod tests {
             "L1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nL12\n",
         );
 
-        apply_hunk(&file, 0, true).unwrap();
-        let lines = diff_lines(&file).unwrap();
+        apply_hunk(repo.path(), &file, 0, true).unwrap();
+        let lines = diff_lines(repo.path(), &file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Staged)));
         assert!(
             lines
@@ -1022,15 +1057,15 @@ mod tests {
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "X1\nl2\nX3\nl4\nl5\n");
 
-        let hunks: std::collections::HashSet<u32> = diff_lines(&file)
+        let hunks: std::collections::HashSet<u32> = diff_lines(repo.path(), &file)
             .unwrap()
             .iter()
             .filter_map(|l| l.hunk)
             .collect();
         assert_eq!(hunks.len(), 2, "expected 2 separate hunks, got {hunks:?}");
 
-        apply_hunk(&file, 0, true).unwrap();
-        let removes: Vec<_> = diff_lines(&file)
+        apply_hunk(repo.path(), &file, 0, true).unwrap();
+        let removes: Vec<_> = diff_lines(repo.path(), &file)
             .unwrap()
             .into_iter()
             .filter(|l| matches!(l.kind, DiffKind::Remove))
@@ -1050,10 +1085,10 @@ mod tests {
         let work = format!("fn greet() {{\n    B();\n}}\n{filler}fn main() {{\n}}\n");
         test_repo::write(repo.path(), "a.rs", &work);
 
-        apply_hunk(&file, 1, false).unwrap();
+        apply_hunk(repo.path(), &file, 1, false).unwrap();
 
         assert!(std::fs::read_to_string(&file).unwrap().contains("done();"));
-        let after = diff_lines(&file).unwrap();
+        let after = diff_lines(repo.path(), &file).unwrap();
         let removes: Vec<_> = after
             .iter()
             .filter(|l| matches!(l.kind, DiffKind::Remove))
@@ -1070,9 +1105,9 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "L1\nl2\nl3\nl4\nl5\n");
-        stage(&file).unwrap();
+        stage(repo.path(), &file).unwrap();
 
-        let lines = diff_lines(&file).unwrap();
+        let lines = diff_lines(repo.path(), &file).unwrap();
         assert_eq!(lines.len(), 5);
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Staged)));
         assert!(

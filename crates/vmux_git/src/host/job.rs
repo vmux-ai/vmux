@@ -13,18 +13,22 @@ pub enum JobKind {
         dirty: bool,
     },
     Diff {
+        repo_root: PathBuf,
         path: PathBuf,
         top_line: u32,
         rows: u32,
         content: Option<String>,
     },
     Stage {
+        repo_root: PathBuf,
         path: PathBuf,
     },
     Unstage {
+        repo_root: PathBuf,
         path: PathBuf,
     },
     Discard {
+        repo_root: PathBuf,
         path: PathBuf,
     },
     Commit {
@@ -35,6 +39,7 @@ pub enum JobKind {
         path: PathBuf,
     },
     Hunk {
+        repo_root: PathBuf,
         path: PathBuf,
         hunk: u32,
         accept: bool,
@@ -62,25 +67,31 @@ pub fn emit_event_name(e: &Emit) -> &'static str {
     }
 }
 
-fn result_then_status(path: &std::path::Path, action: &str, message: &str) -> Vec<Emit> {
+fn result_then_status(
+    repo_root: &std::path::Path,
+    path: &std::path::Path,
+    action: &str,
+    message: &str,
+) -> Vec<Emit> {
     let result = Emit::Result(GitResultEvent {
         action: action.to_string(),
         ok: true,
         message: message.to_string(),
     });
-    match runner::status(path) {
+    match runner::status_at(repo_root, path) {
         Ok(ev) => vec![result, Emit::Status(ev)],
         Err(e) => vec![result, Emit::Error(GitErrorEvent { message: e.0 })],
     }
 }
 
 fn mutate(
+    repo_root: &std::path::Path,
     path: &std::path::Path,
     action: &str,
-    op: fn(&std::path::Path) -> Result<(), runner::GitError>,
+    op: fn(&std::path::Path, &std::path::Path) -> Result<(), runner::GitError>,
 ) -> Vec<Emit> {
-    match op(path) {
-        Ok(()) => result_then_status(path, action, "ok"),
+    match op(repo_root, path) {
+        Ok(()) => result_then_status(repo_root, path, action, "ok"),
         Err(e) => vec![Emit::Result(GitResultEvent {
             action: action.to_string(),
             ok: false,
@@ -111,7 +122,11 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             }
             Err(e) => vec![Emit::Error(GitErrorEvent { message: e.0 })],
         },
-        JobKind::Diff { path, top_line, .. } if !runner::has_repository(&path) => vec![
+        JobKind::Diff {
+            repo_root,
+            top_line,
+            ..
+        } if !runner::has_repository(&repo_root) => vec![
             Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
             Emit::DiffViewport(GitDiffViewportEvent {
                 first_line: top_line,
@@ -120,14 +135,15 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             }),
         ],
         JobKind::Diff {
+            repo_root,
             path,
             top_line,
             rows,
             content,
         } => match content
             .as_deref()
-            .map(|content| runner::diff_lines_with_content(&path, content))
-            .unwrap_or_else(|| runner::diff_lines(&path))
+            .map(|content| runner::diff_lines_with_content(&repo_root, &path, content))
+            .unwrap_or_else(|| runner::diff_lines(&repo_root, &path))
         {
             Ok(lines) => {
                 let (total, win) = parse::window(&lines, top_line, rows);
@@ -142,11 +158,15 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             }
             Err(e) => vec![Emit::Error(GitErrorEvent { message: e.0 })],
         },
-        JobKind::Stage { path } => mutate(&path, "stage", runner::stage),
-        JobKind::Unstage { path } => mutate(&path, "unstage", runner::unstage),
-        JobKind::Discard { path } => mutate(&path, "discard", runner::discard),
+        JobKind::Stage { repo_root, path } => mutate(&repo_root, &path, "stage", runner::stage),
+        JobKind::Unstage { repo_root, path } => {
+            mutate(&repo_root, &path, "unstage", runner::unstage)
+        }
+        JobKind::Discard { repo_root, path } => {
+            mutate(&repo_root, &path, "discard", runner::discard)
+        }
         JobKind::Commit { path, message } => match runner::commit(&path, &message) {
-            Ok(()) => result_then_status(&path, "commit", "committed"),
+            Ok(()) => result_then_status(&path, &path, "commit", "committed"),
             Err(e) => vec![Emit::Result(GitResultEvent {
                 action: "commit".into(),
                 ok: false,
@@ -154,15 +174,25 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             })],
         },
         JobKind::Push { path } => match runner::push(&path) {
-            Ok(()) => result_then_status(&path, "push", "pushed"),
+            Ok(()) => result_then_status(&path, &path, "push", "pushed"),
             Err(e) => vec![Emit::Result(GitResultEvent {
                 action: "push".into(),
                 ok: false,
                 message: e.0,
             })],
         },
-        JobKind::Hunk { path, hunk, accept } => match runner::apply_hunk(&path, hunk, accept) {
-            Ok(()) => result_then_status(&path, if accept { "accept" } else { "reject" }, "ok"),
+        JobKind::Hunk {
+            repo_root,
+            path,
+            hunk,
+            accept,
+        } => match runner::apply_hunk(&repo_root, &path, hunk, accept) {
+            Ok(()) => result_then_status(
+                &repo_root,
+                &path,
+                if accept { "accept" } else { "reject" },
+                "ok",
+            ),
             Err(e) => vec![Emit::Result(GitResultEvent {
                 action: "hunk".into(),
                 ok: false,
@@ -198,8 +228,9 @@ mod tests {
 
     #[test]
     fn diff_job_emits_meta_then_viewport() {
-        let (_repo, file) = dirty_repo();
+        let (repo, file) = dirty_repo();
         let emits = run_job(JobKind::Diff {
+            repo_root: repo.path().to_path_buf(),
             path: file,
             top_line: 0,
             rows: 50,
@@ -211,8 +242,11 @@ mod tests {
 
     #[test]
     fn stage_job_emits_result_then_fresh_status() {
-        let (_repo, file) = dirty_repo();
-        let emits = run_job(JobKind::Stage { path: file });
+        let (repo, file) = dirty_repo();
+        let emits = run_job(JobKind::Stage {
+            repo_root: repo.path().to_path_buf(),
+            path: file,
+        });
         match emits.as_slice() {
             [Emit::Result(r), Emit::Status(s)] => {
                 assert!(r.ok);
@@ -245,6 +279,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
         let emits = run_job(JobKind::Diff {
+            repo_root: dir.path().to_path_buf(),
             path: file,
             top_line: 0,
             rows: 50,

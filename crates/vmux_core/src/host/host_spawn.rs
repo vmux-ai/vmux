@@ -2,18 +2,32 @@ use bevy::prelude::*;
 use std::collections::HashSet;
 
 #[derive(Resource, Default, Debug, Clone)]
-pub struct HostSpawnRegistry(pub HashSet<String>);
+pub struct HostSpawnRegistry {
+    hosts: HashSet<String>,
+    schemes: HashSet<String>,
+}
 
 impl HostSpawnRegistry {
     pub fn register(&mut self, host: &str) {
-        self.0.insert(host.to_string());
+        self.hosts.insert(host.to_string());
+    }
+
+    pub fn register_scheme(&mut self, scheme: &str) {
+        self.schemes
+            .insert(scheme.trim_end_matches(':').to_string());
     }
 
     pub fn needs_host_spawn(&self, url: &str) -> bool {
         if url.starts_with("file:") {
             return true;
         }
-        vmux_host(url).is_some_and(|host| self.0.contains(host))
+        if url
+            .split_once(':')
+            .is_some_and(|(scheme, _)| self.schemes.contains(scheme))
+        {
+            return true;
+        }
+        vmux_host(url).is_some_and(|host| self.hosts.contains(host))
     }
 }
 
@@ -28,6 +42,13 @@ pub fn register_host_spawn(app: &mut App, host: &'static str) {
     app.world_mut()
         .resource_mut::<HostSpawnRegistry>()
         .register(host);
+}
+
+pub fn register_scheme_spawn(app: &mut App, scheme: &'static str) {
+    app.init_resource::<HostSpawnRegistry>();
+    app.world_mut()
+        .resource_mut::<HostSpawnRegistry>()
+        .register_scheme(scheme);
 }
 
 #[cfg(test)]
@@ -75,7 +96,7 @@ mod tests {
         let mut r = HostSpawnRegistry::default();
         r.register("team");
         r.register("team");
-        assert_eq!(r.0.len(), 1);
+        assert_eq!(r.hosts.len(), 1);
     }
 
     #[test]
@@ -86,5 +107,14 @@ mod tests {
         let reg = app.world().resource::<HostSpawnRegistry>();
         assert!(reg.needs_host_spawn("vmux://spaces/"));
         assert!(reg.needs_host_spawn("vmux://team/"));
+    }
+
+    #[test]
+    fn registered_scheme_matches_repository_urls() {
+        let mut r = HostSpawnRegistry::default();
+        r.register_scheme("git");
+
+        assert!(r.needs_host_spawn("git://Users/me/repo"));
+        assert!(!r.needs_host_spawn("https://example.com"));
     }
 }

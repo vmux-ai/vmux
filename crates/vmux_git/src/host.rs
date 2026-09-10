@@ -29,9 +29,12 @@ impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
             PAGE_MANIFEST,
-            NativelyHosted::page(crate::GIT_PAGE_URL, "Git"),
+            NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),
         ));
+        app.world_mut()
+            .spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
         vmux_core::register_host_spawn(app, "git");
+        vmux_core::register_scheme_spawn(app, "git");
         let (tx, rx) = mpsc::channel();
         let proxy = app
             .world()
@@ -116,7 +119,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
         "source control",
     ],
     icon: Some(vmux_core::BuiltinIcon::GitBranch),
-    command_bar: true,
+    command_bar: false,
 };
 
 #[derive(Component, Clone, Debug, Default)]
@@ -676,10 +679,11 @@ fn on_repository_request(
     trigger: On<BinReceive<GitRepositoryRequest>>,
     outbox: Res<GitOutbox>,
     watch: Option<NonSendMut<GitWatch>>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
-    let path = if let Some(mut watch) = watch {
+    let repo_root = if let Some(mut watch) = watch {
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
@@ -697,9 +701,30 @@ fn on_repository_request(
             }
         }
     } else {
-        path
+        match crate::host::runner::repo_root(&path) {
+            Ok(repo_root) => repo_root,
+            Err(error) => {
+                outbox
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(GitOutboxItem::Events {
+                        webview,
+                        emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                            message: error.0,
+                        })],
+                    });
+                return;
+            }
+        }
     };
-    spawn_job(&outbox, webview, JobKind::Repository { path });
+    if let Ok(mut page) = pages.get_mut(webview)
+        && let Some(url) = crate::GitUrl::from_path(&repo_root)
+        && page.url != url
+    {
+        page.url = url;
+    }
+    spawn_job(&outbox, webview, JobKind::Repository { path: repo_root });
 }
 
 fn dispatch_status_jobs(mut jobs: ResMut<GitStatusJobs>, outbox: Res<GitOutbox>) {
@@ -810,6 +835,7 @@ fn on_diff_request(
         &outbox,
         trigger.event().webview,
         JobKind::Diff {
+            repo_root: p.repo_root.clone().into(),
             path: p.path.clone().into(),
             top_line: p.top_line,
             rows: p.rows,
@@ -827,6 +853,7 @@ fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, outbox: Res<GitOut
         &outbox,
         trigger.event().webview,
         JobKind::Stage {
+            repo_root: trigger.event().payload.repo_root.clone().into(),
             path: trigger.event().payload.path.clone().into(),
         },
     );
@@ -837,6 +864,7 @@ fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, outbox: Res<Gi
         &outbox,
         trigger.event().webview,
         JobKind::Unstage {
+            repo_root: trigger.event().payload.repo_root.clone().into(),
             path: trigger.event().payload.path.clone().into(),
         },
     );
@@ -847,6 +875,7 @@ fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, outbox: Res<Gi
         &outbox,
         trigger.event().webview,
         JobKind::Discard {
+            repo_root: trigger.event().payload.repo_root.clone().into(),
             path: trigger.event().payload.path.clone().into(),
         },
     );
@@ -880,6 +909,7 @@ fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbo
         &outbox,
         trigger.event().webview,
         JobKind::Hunk {
+            repo_root: p.repo_root.clone().into(),
             path: p.path.clone().into(),
             hunk: p.hunk,
             accept: p.accept,

@@ -72,6 +72,11 @@ impl NativelyHosted {
     }
 
     pub fn answers_for(&self, url: &str) -> bool {
+        if let Some(scheme) = self.url.strip_suffix("://") {
+            return url
+                .split_once(':')
+                .is_some_and(|(candidate, _)| candidate == scheme);
+        }
         let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(url)) else {
             return false;
         };
@@ -587,6 +592,15 @@ mod tests {
             manifest.metadata_for("vmux://simulator/ios/27.0").icon,
             crate::PageIcon::Builtin(crate::BuiltinIcon::Smartphone)
         );
+    }
+
+    #[test]
+    fn scheme_page_answers_for_every_path_in_that_scheme() {
+        let hosted = NativelyHosted::subtree("git://", "Git");
+
+        assert!(hosted.answers_for("git://Users/me/repo"));
+        assert!(hosted.answers_for("git:///Users/me/repo"));
+        assert!(!hosted.answers_for("https://example.com"));
     }
 
     #[test]

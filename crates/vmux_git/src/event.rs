@@ -22,13 +22,13 @@ macro_rules! wire {
 wire! {
     pub struct GitStatusRequest { pub path: String }
     pub struct GitRepositoryRequest { pub path: String }
-    pub struct GitDiffRequest { pub path: String, pub top_line: u32, pub rows: u32 }
-    pub struct GitStageRequest { pub path: String }
-    pub struct GitUnstageRequest { pub path: String }
-    pub struct GitDiscardRequest { pub path: String }
+    pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub top_line: u32, pub rows: u32 }
+    pub struct GitStageRequest { pub repo_root: String, pub path: String }
+    pub struct GitUnstageRequest { pub repo_root: String, pub path: String }
+    pub struct GitDiscardRequest { pub repo_root: String, pub path: String }
     pub struct GitCommitRequest { pub path: String, pub message: String }
     pub struct GitPushRequest { pub path: String }
-    pub struct GitHunkRequest { pub path: String, pub hunk: u32, pub accept: bool }
+    pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub hunk: u32, pub accept: bool }
 
     pub struct StyledSpan { pub text: String, pub fg: [u8; 3], pub bold: bool, pub italic: bool }
     pub struct DiffLine {

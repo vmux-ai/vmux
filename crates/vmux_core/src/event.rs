@@ -124,6 +124,7 @@ pub struct PageContextRequest {}
 )]
 pub struct PageContextEvent {
     pub working_directory: String,
+    pub page_url: String,
 }
 
 #[derive(

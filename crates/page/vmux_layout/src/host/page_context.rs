@@ -20,6 +20,7 @@ fn on_page_context_request(
     trigger: On<BinReceive<PageContextRequest>>,
     child_of: Query<&ChildOf>,
     tabs: Query<&Tab>,
+    pages: Query<&vmux_core::PageMetadata>,
     effective_dir: Option<Res<EffectiveStartupDir>>,
     mut commands: Commands,
 ) {
@@ -34,11 +35,16 @@ fn on_page_context_request(
         .or_else(|| std::env::current_dir().ok())
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
+    let page_url = pages
+        .get(trigger.event().webview)
+        .map(|page| page.url.clone())
+        .unwrap_or_default();
     commands.trigger(BinHostEmitEvent::from_rkyv(
         trigger.event().webview,
         PAGE_CONTEXT_EVENT,
         &PageContextEvent {
             working_directory: path,
+            page_url,
         },
     ));
 }

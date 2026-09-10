@@ -71,6 +71,7 @@ fn sign_style(kind: DiffKind) -> &'static str {
 pub struct GitStatusFeed {
     pub path: ReadSignal<String>,
     pub nonce: Signal<u32>,
+    pub repo_root: Signal<String>,
     pub has_diff: Signal<bool>,
     pub branch: Signal<String>,
     pub ahead: Signal<u32>,
@@ -84,6 +85,7 @@ impl GitStatusFeed {
         let Self {
             path,
             mut nonce,
+            mut repo_root,
             mut has_diff,
             mut branch,
             mut ahead,
@@ -94,6 +96,7 @@ impl GitStatusFeed {
 
         let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
             message.set(String::new());
+            repo_root.set(s.repo_root);
             branch.set(s.branch);
             ahead.set(s.ahead);
             behind.set(s.behind);
@@ -218,6 +221,7 @@ pub fn GitFooter(
 
 #[component]
 pub fn DiffView(
+    repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
     nonce: ReadSignal<u32>,
     visible: bool,
@@ -242,11 +246,13 @@ pub fn DiffView(
     });
 
     use_effect(move || {
+        let root = repo_root();
         let p = path();
         let _ = nonce();
-        if !p.is_empty() {
-            let path_changed = *requested_path.peek() != p;
-            requested_path.set(p.clone());
+        if !root.is_empty() && !p.is_empty() {
+            let request_key = format!("{root}\0{p}");
+            let path_changed = *requested_path.peek() != request_key;
+            requested_path.set(request_key);
             if path_changed || lines.peek().is_empty() {
                 loading.set(true);
             }
@@ -256,6 +262,7 @@ pub fn DiffView(
                 expanded.set(Vec::new());
             }
             let _ = send(&GitDiffRequest {
+                repo_root: root,
                 path: p,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -330,7 +337,12 @@ pub fn DiffView(
                                             variant: ButtonVariant::Ghost,
                                             class: "h-auto px-1.5 py-0.5 text-xs text-ansi-2 hover:bg-ansi-2/15 hover:text-ansi-2",
                                             onclick: move |_| {
-                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
+                                                let _ = send(&GitHunkRequest {
+                                                    repo_root: repo_root(),
+                                                    path: path(),
+                                                    hunk: h,
+                                                    accept: true,
+                                                });
                                             },
                                             {translate("git-stage-hunk")}
                                         }
@@ -338,7 +350,12 @@ pub fn DiffView(
                                             variant: ButtonVariant::Ghost,
                                             class: "h-auto px-1.5 py-0.5 text-xs text-ansi-1 hover:bg-ansi-1/15 hover:text-ansi-1",
                                             onclick: move |_| {
-                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
+                                                let _ = send(&GitHunkRequest {
+                                                    repo_root: repo_root(),
+                                                    path: path(),
+                                                    hunk: h,
+                                                    accept: false,
+                                                });
                                             },
                                             {translate("git-revert-hunk")}
                                         }
