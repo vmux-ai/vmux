@@ -1855,12 +1855,12 @@ mod tests {
     fn unavailable_persisted_icons_fall_back_without_resetting_the_store() {
         let body = r#"
         icon: Builtin(Files),
-        icon: Builtin(Project),
-        icon: Builtin(Keyboard),
+        icon: Builtin(LegacyProject),
+        icon: Builtin(LegacyKeyboard),
 "#;
         let (normalized, unknown) = normalized_store_icons(body).expect("unknown icons");
 
-        assert_eq!(unknown, ["Project", "Keyboard"]);
+        assert_eq!(unknown, ["LegacyProject", "LegacyKeyboard"]);
         assert_eq!(
             normalized,
             r#"
@@ -1887,7 +1887,7 @@ mod tests {
         "vmux_header::system::PageMetadata": (
           title: "Projects",
           url: "vmux://projects/",
-          icon: Builtin(Project),
+          icon: Builtin(LegacyProject),
           bg_color: None,
         ),
       },
