@@ -12,100 +12,42 @@ const DEFAULT_TOKEN_LIFETIME_SECS: u64 = 3600;
 const KEYCHAIN_SERVICE: &str = "ai.vmux.mcp";
 
 #[cfg(target_os = "macos")]
-static MCP_CREDENTIAL_BROKER_ACCESS: std::sync::OnceLock<std::sync::Mutex<()>> =
-    std::sync::OnceLock::new();
+struct McpCredentialFile {
+    account: String,
+    file: crate::safe_storage::ProtectedFile,
+}
 
 #[cfg(target_os = "macos")]
-struct McpCredentialBroker(std::path::PathBuf);
-
-#[cfg(target_os = "macos")]
-impl McpCredentialBroker {
-    fn current() -> Option<Self> {
-        let executable = std::env::current_exe().ok()?;
-        Self::candidate(crate::build_profile(), &executable)
-            .filter(|path| path.is_file())
-            .map(Self)
+impl McpCredentialFile {
+    fn new(account: &str) -> Self {
+        let path = crate::application_data_dir()
+            .join("safe-storage")
+            .join("mcp")
+            .join(format!(
+                "{}.bin",
+                crate::safe_storage::encoded_file_name(account)
+            ));
+        Self {
+            account: account.to_string(),
+            file: crate::safe_storage::ProtectedFile::new(path),
+        }
     }
 
-    fn candidate(profile: &str, executable: &std::path::Path) -> Option<std::path::PathBuf> {
-        if profile == "dev" {
-            return None;
-        }
-        Some(executable.parent()?.join("vmux"))
-    }
-
-    fn load(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
-        let output = self.run("load", account, None)?;
-        if output.status.success() {
-            return Ok(Some(output.stdout));
-        }
-        if output.status.code() == Some(2) {
+    fn load(&self) -> Result<Option<McpOauthCredentials>, String> {
+        let Some(envelope) = self.file.read()? else {
             return Ok(None);
-        }
-        Err(Self::error(&output))
+        };
+        let plaintext = crate::safe_storage::SafeStorage::open_mcp(&self.account, &envelope)?;
+        McpOauthCredentials::decode(&plaintext).map(Some)
     }
 
-    fn store(&self, account: &str, bytes: &[u8]) -> Result<(), String> {
-        let output = self.run("store", account, Some(bytes))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        Err(Self::error(&output))
+    fn store(&self, bytes: &[u8]) -> Result<(), String> {
+        let envelope = crate::safe_storage::SafeStorage::seal_mcp(&self.account, bytes)?;
+        self.file.write(&envelope)
     }
 
-    fn remove(&self, account: &str) -> Result<(), String> {
-        let output = self.run("remove", account, None)?;
-        if output.status.success() {
-            return Ok(());
-        }
-        Err(Self::error(&output))
-    }
-
-    fn run(
-        &self,
-        action: &str,
-        account: &str,
-        input: Option<&[u8]>,
-    ) -> Result<std::process::Output, String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-
-        let _access = MCP_CREDENTIAL_BROKER_ACCESS
-            .get_or_init(Default::default)
-            .lock()
-            .map_err(|error| error.to_string())?;
-        let mut command = Command::new(&self.0);
-        command
-            .args(["mcp-credentials", action, "--account", account])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if input.is_none() {
-            return command
-                .output()
-                .map_err(|error| format!("failed to run packaged MCP credential broker: {error}"));
-        }
-        let mut child = command
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("failed to run packaged MCP credential broker: {error}"))?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| "failed to open MCP credential broker input".to_string())?
-            .write_all(input.unwrap_or_default())
-            .map_err(|error| format!("failed to send MCP credentials to broker: {error}"))?;
-        child
-            .wait_with_output()
-            .map_err(|error| format!("failed to wait for MCP credential broker: {error}"))
-    }
-
-    fn error(output: &std::process::Output) -> String {
-        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if error.is_empty() {
-            "MCP credential broker failed".to_string()
-        } else {
-            error
-        }
+    fn remove(&self) -> Result<(), String> {
+        self.file.remove()
     }
 }
 
@@ -229,93 +171,46 @@ impl McpOauthCredentials {
         serde_json::from_slice(bytes).map_err(|error| error.to_string())
     }
 
-    #[doc(hidden)]
-    pub fn authorize_broker_parent() -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        {
-            crate::vault::authorize_key_broker_parent()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            Err("MCP credential broker is only available on macOS".to_string())
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn broker_load(account: &str) -> Result<Option<Vec<u8>>, String> {
-        #[cfg(target_os = "macos")]
-        {
-            Self::load_keychain_account(account)?
-                .map(|credentials| {
-                    serde_json::to_vec(&credentials).map_err(|error| error.to_string())
-                })
-                .transpose()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = account;
-            Err("MCP credential broker is only available on macOS".to_string())
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn broker_store(account: &str, bytes: &[u8]) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        {
-            Self::decode(bytes)?;
-            Self::store_keychain_account(account, bytes)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (account, bytes);
-            Err("MCP credential broker is only available on macOS".to_string())
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn broker_remove(account: &str) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        {
-            Self::remove_keychain_account(account)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = account;
-            Err("MCP credential broker is only available on macOS".to_string())
-        }
+    fn migrate_legacy(
+        credentials: Option<Self>,
+        store: impl FnOnce(&[u8]) -> Result<(), String>,
+    ) -> Result<Option<Self>, String> {
+        let Some(credentials) = credentials else {
+            return Ok(None);
+        };
+        let bytes = serde_json::to_vec(&credentials).map_err(|error| error.to_string())?;
+        store(&bytes)?;
+        Ok(Some(credentials))
     }
 }
 
 #[cfg(target_os = "macos")]
 impl McpOauthCredentials {
     fn load_account(account: &str) -> Result<Option<Self>, String> {
-        if let Some(broker) = McpCredentialBroker::current() {
-            return broker
-                .load(account)?
-                .map(|bytes| Self::decode(&bytes))
-                .transpose();
+        let file = McpCredentialFile::new(account);
+        if let Some(credentials) = file.load()? {
+            return Ok(Some(credentials));
         }
-        Self::load_keychain_account(account)
+        Self::migrate_legacy(Self::load_legacy_keychain_account(account)?, |bytes| {
+            file.store(bytes)
+        })
     }
 
     fn store_account(account: &str, bytes: &[u8]) -> Result<(), String> {
-        if let Some(broker) = McpCredentialBroker::current() {
-            return broker.store(account, bytes);
-        }
-        Self::store_keychain_account(account, bytes)
+        Self::decode(bytes)?;
+        McpCredentialFile::new(account).store(bytes)
     }
 
     fn remove_account(account: &str) -> Result<(), String> {
-        if let Some(broker) = McpCredentialBroker::current() {
-            return broker.remove(account);
-        }
-        Self::remove_keychain_account(account)
+        McpCredentialFile::new(account).remove()?;
+        Self::remove_legacy_keychain_account(account)
     }
 
-    fn load_keychain_account(account: &str) -> Result<Option<Self>, String> {
+    fn load_legacy_keychain_account(account: &str) -> Result<Option<Self>, String> {
         use security_framework::passwords::{PasswordOptions, generic_password};
         use security_framework_sys::base::errSecItemNotFound;
 
+        crate::safe_storage::require_desktop_process()?;
         let options = PasswordOptions::new_generic_password(KEYCHAIN_SERVICE, account);
         match generic_password(options) {
             Ok(bytes) => Self::decode(&bytes).map(Some),
@@ -324,14 +219,10 @@ impl McpOauthCredentials {
         }
     }
 
-    fn store_keychain_account(account: &str, bytes: &[u8]) -> Result<(), String> {
-        security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, account, bytes)
-            .map_err(|error| format!("failed to store MCP credentials: {error}"))
-    }
-
-    fn remove_keychain_account(account: &str) -> Result<(), String> {
+    fn remove_legacy_keychain_account(account: &str) -> Result<(), String> {
         use security_framework_sys::base::errSecItemNotFound;
 
+        crate::safe_storage::require_desktop_process()?;
         match security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, account) {
             Ok(()) => Ok(()),
             Err(error) if error.code() == errSecItemNotFound => Ok(()),
@@ -385,26 +276,18 @@ impl McpOauthCredentials {
     }
 
     fn path(account: &str) -> std::path::PathBuf {
-        crate::profile_dir()
-            .join("mcp-credentials")
-            .join(format!("{}.json", encoded_account(account)))
+        crate::profile_dir().join("mcp-credentials").join(format!(
+            "{}.json",
+            crate::safe_storage::encoded_file_name(account)
+        ))
     }
-}
-
-#[cfg(any(not(target_os = "macos"), test))]
-fn encoded_account(account: &str) -> String {
-    use std::fmt::Write;
-
-    let mut encoded = String::with_capacity(account.len() * 2);
-    for byte in account.as_bytes() {
-        write!(&mut encoded, "{byte:02x}").unwrap();
-    }
-    encoded
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TEST_ACCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn expiry_keeps_tokens_with_more_than_a_minute_left() {
@@ -437,8 +320,14 @@ mod tests {
 
     #[test]
     fn credential_file_names_preserve_distinct_accounts() {
-        assert_ne!(encoded_account("work.dev"), encoded_account("work-dev"));
-        assert_ne!(encoded_account("linear"), encoded_account("linear."));
+        assert_ne!(
+            crate::safe_storage::encoded_file_name("work.dev"),
+            crate::safe_storage::encoded_file_name("work-dev")
+        );
+        assert_ne!(
+            crate::safe_storage::encoded_file_name("linear"),
+            crate::safe_storage::encoded_file_name("linear.")
+        );
     }
 
     #[test]
@@ -455,7 +344,32 @@ mod tests {
     }
 
     #[test]
+    fn legacy_credentials_are_preserved_while_migrating() {
+        let credentials = McpOauthCredentials {
+            token_endpoint: "https://auth.example.com/token".to_string(),
+            client_id: "client".to_string(),
+            client_secret: Some("secret".to_string()),
+            access_token: "access".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: 42,
+            scope: "read write".to_string(),
+            resource: "https://mcp.example.com".to_string(),
+        };
+        let mut migrated = Vec::new();
+
+        let loaded = McpOauthCredentials::migrate_legacy(Some(credentials.clone()), |bytes| {
+            migrated.extend_from_slice(bytes);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(loaded, Some(credentials.clone()));
+        assert_eq!(McpOauthCredentials::decode(&migrated).unwrap(), credentials);
+    }
+
+    #[test]
     fn credential_writes_invalidate_prepared_launches() {
+        let _test = TEST_ACCESS.lock().unwrap();
         let revision = McpOauthCredentials::stable_revision().unwrap();
         assert_eq!(
             McpOauthCredentials::with_revision(revision, || "current").unwrap(),
@@ -481,6 +395,7 @@ mod tests {
 
     #[test]
     fn launch_validation_does_not_wait_for_credential_writes() {
+        let _test = TEST_ACCESS.lock().unwrap();
         let revision = McpOauthCredentials::stable_revision().unwrap();
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (finish_tx, finish_rx) = std::sync::mpsc::channel();
@@ -501,26 +416,5 @@ mod tests {
 
         finish_tx.send(()).unwrap();
         writer.join().unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn packaged_builds_use_the_stable_mcp_credential_broker() {
-        let executable =
-            std::path::Path::new("/Applications/Vmux (abcdef0).app/Contents/MacOS/vmux_desktop");
-
-        assert_eq!(
-            McpCredentialBroker::candidate("local", executable),
-            Some(std::path::PathBuf::from(
-                "/Applications/Vmux (abcdef0).app/Contents/MacOS/vmux"
-            ))
-        );
-        assert_eq!(
-            McpCredentialBroker::candidate("release", executable),
-            Some(std::path::PathBuf::from(
-                "/Applications/Vmux (abcdef0).app/Contents/MacOS/vmux"
-            ))
-        );
-        assert_eq!(McpCredentialBroker::candidate("dev", executable), None);
     }
 }

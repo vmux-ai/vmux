@@ -4,7 +4,6 @@ set -euo pipefail
 
 CARGO_BIN="${CARGO_BIN:-$(command -v cargo 2>/dev/null || echo "${HOME}/.cargo/bin/cargo")}"
 RUSTUP_BIN="${RUSTUP_BIN:-$(command -v rustup 2>/dev/null || echo "${HOME}/.cargo/bin/rustup")}"
-EXPORT_CEF_BIN="${EXPORT_CEF_BIN:-$(command -v export-cef-dir 2>/dev/null || echo "${HOME}/.cargo/bin/export-cef-dir")}"
 DX_BIN="${DX_BIN:-$(command -v dx 2>/dev/null || echo "${HOME}/.cargo/bin/dx")}"
 CARGO_PACKAGER_BIN="${CARGO_PACKAGER_BIN:-$(command -v cargo-packager 2>/dev/null || echo "${HOME}/.cargo/bin/cargo-packager")}"
 BEVY_CEF_BUNDLE_APP_BIN="${BEVY_CEF_BUNDLE_APP_BIN:-$(command -v bevy_cef_bundle_app 2>/dev/null || echo "${HOME}/.cargo/bin/bevy_cef_bundle_app")}"
@@ -30,7 +29,7 @@ pass=0
 fail=0
 warn=0
 current=0
-total=14
+total=13
 
 bar() {
 	printf '%s\n' "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -70,13 +69,6 @@ bar
 printf '\n'
 
 section "CEF & paths"
-if [[ -x "${EXPORT_CEF_BIN}" ]]; then
-	ok_line "export-cef-dir — ${EXPORT_CEF_BIN}"
-else
-	warn_line "export-cef-dir not installed yet (expected before setup-cef)"
-	tip "Run: ${BOLD}make setup-cef${RESET}"
-fi
-
 if [[ ! -d "${HOME}/.local/share" ]]; then
 	bad_line "CEF base dir missing: ${HOME}/.local/share"
 	tip "Run: ${BOLD}mkdir -p \"${HOME}/.local/share\"${RESET}"
@@ -87,10 +79,11 @@ else
 	ok_line "CEF install base is writable — ${HOME}/.local/share"
 fi
 
-if [[ -d "${CEF_FRAMEWORK_DIR}" ]]; then
-	ok_line "CEF framework — ${CEF_FRAMEWORK_DIR}"
+if [[ -x "${CEF_FRAMEWORK_DIR}/Chromium Embedded Framework" ]] && \
+	nm -gU "${CEF_FRAMEWORK_DIR}/Chromium Embedded Framework" | awk '$NF == "_cef_set_os_crypt_keys" { found = 1 } END { exit !found }'; then
+	ok_line "custom CEF framework — ${CEF_FRAMEWORK_DIR}"
 else
-	bad_line "CEF framework missing"
+	bad_line "custom CEF framework missing"
 	tip "Run: ${BOLD}make setup-cef${RESET}"
 fi
 

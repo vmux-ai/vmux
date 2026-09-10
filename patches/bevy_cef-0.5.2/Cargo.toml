@@ -83,6 +83,9 @@ version = "1"
 [target.'cfg(target_os = "macos")'.dependencies.objc]
 version = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies.libloading]
+version = "0.9"
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 priority = 0

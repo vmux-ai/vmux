@@ -1,0 +1,54 @@
+diff --git a/libcef/common/base_impl.cc b/libcef/common/base_impl.cc
+index cc2fc09..d7ba1c0 100644
+--- a/libcef/common/base_impl.cc
++++ b/libcef/common/base_impl.cc
+@@ -2,7 +2,10 @@
+ // 2011 the Chromium Authors. All rights reserved. Use of this source code is
+ // governed by a BSD-style license that can be found in the LICENSE file.
+
++#include <string>
++
+ #include "base/debug/dump_without_crashing.h"
++#include "build/build_config.h"
+ #include "base/logging.h"
+ #include "base/notimplemented.h"
+ #include "base/threading/platform_thread.h"
+@@ -14,12 +17,38 @@
+ #include "cef/include/internal/cef_trace_event_internal.h"
+ #include "cef/libcef/common/api_version_util.h"
+
++#if BUILDFLAG(IS_MAC)
++#include "components/os_crypt/sync/os_crypt.h"
++#endif
++
+ namespace {
+
+ constexpr const char kCategory[] = "cef.client";
+
+ }  // namespace
+
++extern "C" CEF_EXPORT int cef_set_os_crypt_keys(
++    const uint8_t* current_key,
++    size_t current_key_size,
++    const uint8_t* legacy_key,
++    size_t legacy_key_size) {
++#if BUILDFLAG(IS_MAC)
++  if (!current_key || current_key_size != 16 ||
++      (legacy_key_size != 0 && (!legacy_key || legacy_key_size != 16))) {
++    return 0;
++  }
++  std::string keys(reinterpret_cast<const char*>(current_key),
++                   current_key_size);
++  if (legacy_key_size == 16) {
++    keys.append(reinterpret_cast<const char*>(legacy_key), legacy_key_size);
++  }
++  OSCrypt::SetRawEncryptionKey(keys);
++  return 1;
++#else
++  return 0;
++#endif
++}
++
+ CEF_EXPORT void cef_trace_event_instant(const char* /* category */,
+                                         const char* name,
+                                         const char* arg1_name,

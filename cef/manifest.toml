@@ -1,0 +1,8 @@
+cef_version = "148.0.8"
+cef_commit = "18e00ea6d6e4567ab4031efaf04c50e5b2709c29"
+chromium_version = "148.0.7778.96"
+patch_revision = 1
+artifact_repository = "vmux-ai/vmux"
+artifact_tag = "cef-148.0.8-vmux.1"
+artifact_name = "vmux-cef-148.0.8-macos-arm64-r1.tar.gz"
+artifact_sha256 = ""
