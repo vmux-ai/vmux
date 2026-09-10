@@ -42,6 +42,7 @@ python3 "$automate" \
     --chromium-checkout="refs/tags/$chromium_version" \
     --arm64-build \
     --no-chromium-history \
+    --with-pgo-profiles \
     --force-clean \
     --no-build \
     --no-distrib
