@@ -5,6 +5,9 @@ use crate::host::{parse, runner};
 
 #[derive(Debug, Clone)]
 pub enum JobKind {
+    Repository {
+        path: PathBuf,
+    },
     Status {
         path: PathBuf,
         dirty: bool,
@@ -40,6 +43,7 @@ pub enum JobKind {
 
 #[derive(Debug, Clone)]
 pub enum Emit {
+    Repository(GitRepositoryEvent),
     Status(GitStatusEvent),
     DiffMeta(GitDiffMetaEvent),
     DiffViewport(GitDiffViewportEvent),
@@ -49,6 +53,7 @@ pub enum Emit {
 
 pub fn emit_event_name(e: &Emit) -> &'static str {
     match e {
+        Emit::Repository(_) => GIT_REPOSITORY_EVENT,
         Emit::Status(_) => GIT_STATUS_EVENT,
         Emit::DiffMeta(_) => GIT_DIFF_META_EVENT,
         Emit::DiffViewport(_) => GIT_DIFF_VIEWPORT_EVENT,
@@ -86,6 +91,10 @@ fn mutate(
 
 pub fn run_job(job: JobKind) -> Vec<Emit> {
     match job {
+        JobKind::Repository { path } => match GitRepositoryEvent::load(&path) {
+            Ok(event) => vec![Emit::Repository(event)],
+            Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
+        },
         JobKind::Status { path, .. } if !runner::has_repository(&path) => {
             vec![Emit::Status(runner::non_repository_status())]
         }

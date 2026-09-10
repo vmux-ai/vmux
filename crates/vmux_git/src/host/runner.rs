@@ -179,6 +179,121 @@ pub fn file_statuses(
     Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
 }
 
+impl GitCommitEntry {
+    fn recent(root: &Path) -> Result<Vec<Self>, GitError> {
+        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        if !has_head {
+            return Ok(Vec::new());
+        }
+        let (stdout, stderr, ok) = git_read(
+            root,
+            &[
+                "log",
+                "-50",
+                "--date=short",
+                "--format=%H%x00%h%x00%an%x00%ad%x00%s",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut commits = Vec::new();
+        for line in stdout.lines() {
+            let fields = line.split('\0').collect::<Vec<_>>();
+            if fields.len() != 5 {
+                continue;
+            }
+            commits.push(Self {
+                sha: fields[0].to_string(),
+                short_sha: fields[1].to_string(),
+                author: fields[2].to_string(),
+                date: fields[3].to_string(),
+                summary: fields[4].to_string(),
+            });
+        }
+        Ok(commits)
+    }
+}
+
+impl GitBranchEntry {
+    fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
+        let (stdout, stderr, ok) = git_read(
+            root,
+            &[
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)",
+                "refs/heads",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut branches = Vec::new();
+        for line in stdout.lines() {
+            let fields = line.split('\0').collect::<Vec<_>>();
+            if fields.len() != 3 {
+                continue;
+            }
+            branches.push(Self {
+                name: fields[0].to_string(),
+                current: fields[1] == "*",
+                upstream: fields[2].to_string(),
+            });
+        }
+        if branches.is_empty() && !current.is_empty() && current != "(detached)" {
+            branches.push(Self {
+                name: current.to_string(),
+                current: true,
+                upstream: String::new(),
+            });
+        }
+        Ok(branches)
+    }
+}
+
+impl GitRepositoryEvent {
+    pub fn load(path: &Path) -> Result<Self, GitError> {
+        let repo_root = repo_root(path)?;
+        let (stdout, stderr, ok) = git_read(
+            &repo_root,
+            &[
+                "status",
+                "--porcelain=v2",
+                "--branch",
+                "--untracked-files=all",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let parsed = parse::parse_porcelain_v2_statuses(&stdout);
+        let branch = parsed.branch.clone();
+        let upstream = parsed.upstream.clone();
+        let ahead = parsed.ahead;
+        let behind = parsed.behind;
+        let mut files = parsed.into_file_entries();
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        let repo_name = repo_root
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
+        let commits = GitCommitEntry::recent(&repo_root)?;
+        let branches = GitBranchEntry::local(&repo_root, &branch)?;
+        Ok(Self {
+            repo_root: repo_root.to_string_lossy().to_string(),
+            repo_name,
+            branch,
+            upstream,
+            ahead,
+            behind,
+            files,
+            commits,
+            branches,
+        })
+    }
+}
+
 pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
     let (stdout, stderr, ok) = git_read(
         root,
@@ -375,6 +490,10 @@ pub fn diff_lines(file: &Path) -> Result<Vec<DiffLine>, GitError> {
 
     let unstaged = diff_text(&root, &target, false, 100_000)?;
     if unstaged.trim().is_empty() {
+        if status(file)?.file_status == FileStatus::Untracked {
+            let content = std::fs::read_to_string(file).unwrap_or_default();
+            return diff_lines_with_content(file, &content);
+        }
         return staged_only_lines(file, &root, &target, &staged);
     }
     let ranges = parse::hunk_ranges(&diff_text(&root, &target, false, 0)?);
@@ -619,6 +738,46 @@ mod tests {
     }
 
     #[test]
+    fn repository_loads_changes_history_and_branches() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        test_repo::run(repo.path(), &["branch", "feature"]);
+        test_repo::write(repo.path(), "tracked.txt", "two\n");
+        test_repo::write(repo.path(), "untracked.txt", "new\n");
+
+        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+
+        assert_eq!(repository.branch, "main");
+        assert!(
+            repository
+                .files
+                .iter()
+                .any(|entry| entry.path == "tracked.txt" && entry.unstaged)
+        );
+        assert!(
+            repository
+                .files
+                .iter()
+                .any(|entry| entry.path == "untracked.txt" && entry.status == FileStatus::Untracked)
+        );
+        assert_eq!(repository.commits[0].summary, "initial");
+        assert!(
+            repository
+                .branches
+                .iter()
+                .any(|branch| branch.name == "main" && branch.current)
+        );
+        assert!(
+            repository
+                .branches
+                .iter()
+                .any(|branch| branch.name == "feature")
+        );
+    }
+
+    #[test]
     fn status_reports_modified_then_staged() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
@@ -692,6 +851,19 @@ mod tests {
         let lines = diff_lines(&file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Add)));
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Remove)));
+    }
+
+    #[test]
+    fn diff_lines_show_untracked_file_as_additions() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "new.txt", "one\ntwo\n");
+
+        let lines = diff_lines(&file).unwrap();
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|line| line.kind == DiffKind::Add));
+        assert_eq!(lines[0].new_no, Some(1));
+        assert_eq!(lines[1].new_no, Some(2));
     }
 
     #[test]

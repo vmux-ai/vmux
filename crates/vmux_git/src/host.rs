@@ -14,10 +14,12 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_core::host::page::NativelyHosted;
 
 use crate::event::{
     GIT_CHANGED_EVENT, GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDiscardRequest,
-    GitHunkRequest, GitPushRequest, GitStageRequest, GitStatusRequest, GitUnstageRequest,
+    GitHunkRequest, GitPushRequest, GitRepositoryRequest, GitStageRequest, GitStatusRequest,
+    GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
@@ -25,6 +27,11 @@ pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            NativelyHosted::page(crate::GIT_PAGE_URL, "Git"),
+        ));
+        vmux_core::register_host_spawn(app, "git");
         let (tx, rx) = mpsc::channel();
         let proxy = app
             .world()
@@ -63,6 +70,7 @@ impl Plugin for GitPlugin {
                 wake: repo_info_wake,
             })
             .add_plugins(BinEventEmitterPlugin::<(
+                GitRepositoryRequest,
                 GitStatusRequest,
                 GitDiffRequest,
                 GitStageRequest,
@@ -72,6 +80,7 @@ impl Plugin for GitPlugin {
                 GitPushRequest,
                 GitHunkRequest,
             )>::default())
+            .add_observer(on_repository_request)
             .add_observer(on_status_request)
             .add_observer(on_diff_request)
             .add_observer(on_stage_request)
@@ -93,6 +102,22 @@ impl Plugin for GitPlugin {
             );
     }
 }
+
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "git",
+    title: "Git",
+    title_message_id: Some("git-title"),
+    replaces_command: None,
+    keywords: &[
+        "repository",
+        "changes",
+        "commit",
+        "branch",
+        "source control",
+    ],
+    icon: Some(vmux_core::BuiltinIcon::GitBranch),
+    command_bar: true,
+};
 
 #[derive(Component, Clone, Debug, Default)]
 pub struct GitDiffSource {
@@ -647,6 +672,36 @@ fn on_status_request(
     }
 }
 
+fn on_repository_request(
+    trigger: On<BinReceive<GitRepositoryRequest>>,
+    outbox: Res<GitOutbox>,
+    watch: Option<NonSendMut<GitWatch>>,
+) {
+    let webview = trigger.event().webview;
+    let path: PathBuf = trigger.event().payload.path.clone().into();
+    let path = if let Some(mut watch) = watch {
+        match watch.subscribe(webview, &path) {
+            Ok(repo_root) => repo_root,
+            Err(error) => {
+                outbox
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(GitOutboxItem::Events {
+                        webview,
+                        emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                            message: error.0,
+                        })],
+                    });
+                return;
+            }
+        }
+    } else {
+        path
+    };
+    spawn_job(&outbox, webview, JobKind::Repository { path });
+}
+
 fn dispatch_status_jobs(mut jobs: ResMut<GitStatusJobs>, outbox: Res<GitOutbox>) {
     for (repo_root, requests) in jobs.take_ready() {
         spawn_status_batch(&outbox, repo_root, requests);
@@ -836,6 +891,9 @@ fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
     for emit in emits {
         let name = emit_event_name(&emit);
         match emit {
+            Emit::Repository(ev) => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+            }
             Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
             Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
             Emit::DiffViewport(ev) => {

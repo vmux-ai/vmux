@@ -3,25 +3,34 @@ pub use wasm::{BuiltinIconView, LineIconView, PageIconView};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
     AlertCircle,
+    ArrowDown,
+    ArrowUp,
     BookOpen,
     Brain,
     Camera,
+    ChevronDown,
     Clock,
     Copy,
     ExternalLink,
     File,
     FileOutput,
     GitBranch,
+    GitCommit,
     Globe,
     Image,
     Layout,
+    Minus,
     Notebook,
     Package,
     Pencil,
+    Plus,
+    RefreshCw,
+    RotateCcw,
     Search,
     Shield,
     ShieldCheck,
     Terminal,
+    Upload,
     Users,
     Wifi,
     Wrench,
@@ -35,6 +44,8 @@ impl LineIcon {
                 "M12 8v4",
                 "M12 16h.01",
             ],
+            Self::ArrowDown => &["M12 5v14", "m19 12-7 7-7-7"],
+            Self::ArrowUp => &["m5 12 7-7 7 7", "M12 19V5"],
             Self::BookOpen => &[
                 "M12 7v14",
                 "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
@@ -54,6 +65,7 @@ impl LineIcon {
                 "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
                 "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
             ],
+            Self::ChevronDown => &["m6 9 6 6 6-6"],
             Self::Clock => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
             Self::Copy => &[
                 "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",
@@ -80,6 +92,7 @@ impl LineIcon {
                 "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
                 "M6 15c0 3 2 5 5 5h4",
             ],
+            Self::GitCommit => &["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 3v6", "M12 15v6"],
             Self::Globe => &[
                 "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
                 "M2 12h20",
@@ -91,6 +104,7 @@ impl LineIcon {
                 "m21 15-5-5L5 21",
             ],
             Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            Self::Minus => &["M5 12h14"],
             Self::Notebook => &[
                 "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
                 "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
@@ -102,6 +116,14 @@ impl LineIcon {
                 "M12 22V12",
             ],
             Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+            Self::Plus => &["M12 5v14", "M5 12h14"],
+            Self::RefreshCw => &[
+                "M20 11a8.1 8.1 0 0 0-15.5-2",
+                "M4 4v5h5",
+                "M4 13a8.1 8.1 0 0 0 15.5 2",
+                "M20 20v-5h-5",
+            ],
+            Self::RotateCcw => &["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
             Self::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
             Self::Shield => &["M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"],
             Self::ShieldCheck => &[
@@ -109,6 +131,7 @@ impl LineIcon {
                 "m9 12 2 2 4-4",
             ],
             Self::Terminal => &["m4 17 6-6-6-6", "M12 19h8"],
+            Self::Upload => &["m12 3 4 4", "m12 3-4 4", "M12 3v12", "M5 21h14"],
             Self::Users => &[
                 "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
                 "M5 21v-2a7 7 0 0 1 14 0v2",
@@ -219,6 +242,9 @@ mod wasm {
                 path { d: "M10 5h4" }
                 path { d: "M10 18h4" }
             } },
+            BuiltinIcon::GitBranch => {
+                rsx! { LineIconView { icon: LineIcon::GitBranch, class } }
+            }
             BuiltinIcon::Nushell => {
                 rsx! { BrandGlyph { class: class.clone(), d: "M0 16.338h1.25v-5.7c.417-.624 1.205-1.309 2.127-1.309 1.176 0 1.34.64 1.34 2.247v4.762h1.25v-5.685c0-1.458-.67-2.32-2.202-2.32-.923 0-1.964.46-2.59 1.264l-.103-1.1H0Zm10.177-7.842h-1.25v5.698c0 1.46.745 2.307 2.263 2.307.921 0 1.889-.431 2.514-1.22l.104 1.057h1.072V8.496h-1.25v5.773c-.432.67-1.265 1.25-2.129 1.25-.907 0-1.324-.446-1.324-1.458zm8.11-.997-.61.952 5.251 3.229-5.251 3.244.669.922L24 12.32v-1.28z" } }
             }

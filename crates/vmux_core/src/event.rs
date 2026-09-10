@@ -9,6 +9,7 @@ pub use vmux_wire::{
 };
 
 pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
+pub const PAGE_CONTEXT_EVENT: &str = "page_context";
 pub const TERM_KEY_EVENT: &str = "term_key";
 pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
@@ -94,6 +95,36 @@ pub const EXPLORER_GOTO_EVENT: &str = "explorer_goto";
 pub const EXPLORER_SEARCH_EVENT: &str = "explorer_search";
 pub const EXPLORER_SEARCH_OPEN_EVENT: &str = "explorer_search_open";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PageContextRequest {}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PageContextEvent {
+    pub working_directory: String,
+}
 
 #[derive(
     Debug,

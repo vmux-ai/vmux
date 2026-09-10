@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_ui::components::icon::Icon;
+use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
 use crate::view::{DiffViewRow, EditorDiffMarker, diff_view_rows, editor_diff_markers};
@@ -147,16 +148,20 @@ pub fn GitFooter(
                 span {
                     class: "flex min-w-0 max-w-[35%] shrink items-center gap-1.5 text-term-fg",
                     title: "{branch}",
-                    Icon { class: "h-3.5 w-3.5 shrink-0 opacity-80",
-                        line { x1: "6", x2: "6", y1: "3", y2: "15" }
-                        circle { cx: "18", cy: "6", r: "3" }
-                        circle { cx: "6", cy: "18", r: "3" }
-                        path { d: "M18 9a9 9 0 0 1-9 9" }
-                    }
+                    LineIconView { icon: LineIcon::GitBranch, class: "h-3.5 w-3.5 shrink-0 opacity-80" }
                     span { class: "truncate", "{branch}" }
                 }
                 if ahead() > 0 || behind() > 0 {
-                    span { class: "shrink-0 opacity-70", "\u{2191}{ahead} \u{2193}{behind}" }
+                    span { class: "flex shrink-0 items-center gap-2 opacity-70",
+                        span { class: "flex items-center gap-0.5",
+                            LineIconView { icon: LineIcon::ArrowUp, class: "h-3 w-3" }
+                            "{ahead}"
+                        }
+                        span { class: "flex items-center gap-0.5",
+                            LineIconView { icon: LineIcon::ArrowDown, class: "h-3 w-3" }
+                            "{behind}"
+                        }
+                    }
                 }
             }
 
@@ -169,8 +174,9 @@ pub fn GitFooter(
                         value: "{commit_msg}",
                         oninput: move |e| commit_msg.set(e.value()),
                     }
-                    button {
-                        class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10 disabled:opacity-40",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
                         disabled: commit_msg().is_empty(),
                         onclick: move |_| {
                             let m = commit_msg();
@@ -195,11 +201,13 @@ pub fn GitFooter(
             }
 
             if can_push {
-                button {
-                    class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-white/10",
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: path() });
                     },
+                    LineIconView { icon: LineIcon::Upload, class: "h-3 w-3" }
                     {translate("git-push")}
                 }
             }
@@ -318,15 +326,17 @@ pub fn DiffView(
                                 if let Some(h) = ends[i] {
                                     div {
                                         class: "flex items-center justify-end gap-2 border-y border-foreground/[0.05] bg-foreground/[0.02] px-2 py-0.5 pr-6 font-sans text-xs select-none",
-                                        button {
-                                            class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
+                                        Button {
+                                            variant: ButtonVariant::Ghost,
+                                            class: "h-auto px-1.5 py-0.5 text-xs text-ansi-2 hover:bg-ansi-2/15 hover:text-ansi-2",
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
                                             },
                                             {translate("git-stage-hunk")}
                                         }
-                                        button {
-                                            class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
+                                        Button {
+                                            variant: ButtonVariant::Ghost,
+                                            class: "h-auto px-1.5 py-0.5 text-xs text-ansi-1 hover:bg-ansi-1/15 hover:text-ansi-1",
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
                                             },
@@ -351,8 +361,9 @@ pub fn DiffView(
                             div {
                                 key: "gap-{start}-{end}",
                                 class: "border-y border-cyan-400/10 bg-cyan-400/[0.035] font-sans",
-                                button {
-                                    class: "group flex h-7 w-full items-center gap-2 px-2 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
+                                Button {
+                                    variant: ButtonVariant::Ghost,
+                                    class: "group h-7 w-full justify-start gap-2 rounded-none px-2 py-0 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
                                     title: translate_with(
                                         "git-show-unchanged-lines",
                                         &[("count", TranslationValue::Number(hidden as i64))],
@@ -360,15 +371,9 @@ pub fn DiffView(
                                     onclick: move |_| {
                                         expanded.write().push(reveal);
                                     },
-                                    svg {
+                                    LineIconView {
+                                        icon: LineIcon::ChevronDown,
                                         class: if upward { "h-3.5 w-3.5 shrink-0 rotate-180 transition-transform group-hover:-translate-y-0.5" } else { "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5" },
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        path { d: "m6 9 6 6 6-6" }
                                     }
                                     span { "Show {hidden} unchanged lines" }
                                 }

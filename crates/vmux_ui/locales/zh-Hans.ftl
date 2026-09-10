@@ -929,3 +929,21 @@ resume-age-days = { $count } 天前
 resume-age-weeks = { $count } 周前
 resume-age-months = { $count } 个月前
 resume-age-years = { $count } 年前
+
+
+git-title = Git
+git-repository = Repository
+git-changes = Changes
+git-branches = Branches
+git-staged-changes = Staged changes
+git-unstaged-changes = Changes
+git-repository-clean = Working tree clean
+git-select-file = Select a file to inspect its diff
+git-stage = Stage
+git-discard = Discard
+git-recent-commits = Recent commits
+git-no-commits = No commits yet
+git-local-branches = Local branches
+git-no-branches = No local branches
+git-no-upstream = No upstream
+git-no-repository = No Git repository is configured for this tab.

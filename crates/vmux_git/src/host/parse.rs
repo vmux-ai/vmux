@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::event::{DiffKind, DiffLine, FileStatus, StyledSpan};
+use crate::event::{DiffKind, DiffLine, FileStatus, GitFileEntry, StyledSpan};
 
 pub struct ParsedStatus {
     pub branch: String,
@@ -13,11 +13,13 @@ pub struct ParsedStatus {
 
 pub struct ParsedStatuses {
     pub branch: String,
+    pub upstream: String,
     pub ahead: u32,
     pub behind: u32,
     pub has_upstream: bool,
     pub staged_count: u32,
     file_statuses: HashMap<String, FileStatus>,
+    file_entries: Vec<GitFileEntry>,
 }
 
 impl ParsedStatuses {
@@ -30,6 +32,10 @@ impl ParsedStatuses {
 
     pub fn into_file_statuses(self) -> HashMap<String, FileStatus> {
         self.file_statuses
+    }
+
+    pub fn into_file_entries(self) -> Vec<GitFileEntry> {
+        self.file_entries
     }
 }
 
@@ -55,16 +61,19 @@ fn xy_status(xy: &str) -> FileStatus {
 
 pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
     let mut branch = String::new();
+    let mut upstream = String::new();
     let mut ahead = 0u32;
     let mut behind = 0u32;
     let mut has_upstream = false;
     let mut staged_count = 0u32;
     let mut file_statuses = HashMap::new();
+    let mut file_entries = Vec::new();
 
     for line in out.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
-        } else if line.starts_with("# branch.upstream ") {
+        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+            upstream = rest.trim().to_string();
             has_upstream = true;
         } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
             for tok in rest.split_whitespace() {
@@ -80,34 +89,59 @@ pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
                 staged_count += 1;
             }
             let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
-            let path = entry_path(line, kind_tokens)
-                .split('\t')
-                .next()
-                .unwrap_or("");
+            let mut paths = entry_path(line, kind_tokens).split('\t');
+            let path = paths.next().unwrap_or("");
             if !path.is_empty() {
-                file_statuses.insert(path.to_string(), xy_status(xy));
+                let status = xy_status(xy);
+                file_statuses.insert(path.to_string(), status);
+                let mut chars = xy.chars();
+                let staged = chars.next().is_some_and(|value| value != '.');
+                let unstaged = chars.next().is_some_and(|value| value != '.');
+                file_entries.push(GitFileEntry {
+                    path: path.to_string(),
+                    previous_path: paths.next().map(str::to_string),
+                    status,
+                    staged,
+                    unstaged,
+                });
             }
         } else if let Some(rest) = line.strip_prefix("u ") {
             let _ = rest;
             let path = entry_path(line, 10);
             if !path.is_empty() {
                 file_statuses.insert(path.to_string(), FileStatus::Conflicted);
+                file_entries.push(GitFileEntry {
+                    path: path.to_string(),
+                    previous_path: None,
+                    status: FileStatus::Conflicted,
+                    staged: true,
+                    unstaged: true,
+                });
             }
         } else if let Some(path) = line.strip_prefix("? ") {
             let path = path.trim();
             if !path.is_empty() {
                 file_statuses.insert(path.to_string(), FileStatus::Untracked);
+                file_entries.push(GitFileEntry {
+                    path: path.to_string(),
+                    previous_path: None,
+                    status: FileStatus::Untracked,
+                    staged: false,
+                    unstaged: true,
+                });
             }
         }
     }
 
     ParsedStatuses {
         branch,
+        upstream,
         ahead,
         behind,
         has_upstream,
         staged_count,
         file_statuses,
+        file_entries,
     }
 }
 

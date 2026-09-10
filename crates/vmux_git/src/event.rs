@@ -1,4 +1,5 @@
 pub const GIT_STATUS_EVENT: &str = "git-status";
+pub const GIT_REPOSITORY_EVENT: &str = "git-repository";
 pub const GIT_DIFF_META_EVENT: &str = "git-diff-meta";
 pub const GIT_DIFF_VIEWPORT_EVENT: &str = "git-diff-viewport";
 pub const GIT_RESULT_EVENT: &str = "git-result";
@@ -9,7 +10,7 @@ macro_rules! wire {
     ($($item:item)*) => {
         $(
             #[derive(
-                Clone, Debug,
+                Clone, Debug, PartialEq, Eq,
                 serde::Serialize, serde::Deserialize,
                 rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
             )]
@@ -20,6 +21,7 @@ macro_rules! wire {
 
 wire! {
     pub struct GitStatusRequest { pub path: String }
+    pub struct GitRepositoryRequest { pub path: String }
     pub struct GitDiffRequest { pub path: String, pub top_line: u32, pub rows: u32 }
     pub struct GitStageRequest { pub path: String }
     pub struct GitUnstageRequest { pub path: String }
@@ -45,6 +47,40 @@ wire! {
         pub file_status: FileStatus,
         pub staged_count: u32,
         pub repo_root: String,
+    }
+
+    pub struct GitFileEntry {
+        pub path: String,
+        pub previous_path: Option<String>,
+        pub status: FileStatus,
+        pub staged: bool,
+        pub unstaged: bool,
+    }
+
+    pub struct GitCommitEntry {
+        pub sha: String,
+        pub short_sha: String,
+        pub author: String,
+        pub date: String,
+        pub summary: String,
+    }
+
+    pub struct GitBranchEntry {
+        pub name: String,
+        pub current: bool,
+        pub upstream: String,
+    }
+
+    pub struct GitRepositoryEvent {
+        pub repo_root: String,
+        pub repo_name: String,
+        pub branch: String,
+        pub upstream: String,
+        pub ahead: u32,
+        pub behind: u32,
+        pub files: Vec<GitFileEntry>,
+        pub commits: Vec<GitCommitEntry>,
+        pub branches: Vec<GitBranchEntry>,
     }
 
     pub struct GitDiffMetaEvent { pub total_lines: u32 }

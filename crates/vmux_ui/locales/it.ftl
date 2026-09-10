@@ -932,3 +932,21 @@ resume-age-days = { $count } g
 resume-age-weeks = { $count } sett
 resume-age-months = { $count } mesi
 resume-age-years = { $count } a
+
+
+git-title = Git
+git-repository = Repository
+git-changes = Changes
+git-branches = Branches
+git-staged-changes = Staged changes
+git-unstaged-changes = Changes
+git-repository-clean = Working tree clean
+git-select-file = Select a file to inspect its diff
+git-stage = Stage
+git-discard = Discard
+git-recent-commits = Recent commits
+git-no-commits = No commits yet
+git-local-branches = Local branches
+git-no-branches = No local branches
+git-no-upstream = No upstream
+git-no-repository = No Git repository is configured for this tab.
