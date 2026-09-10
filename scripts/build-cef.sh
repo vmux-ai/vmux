@@ -54,6 +54,7 @@ python3 "$automate" \
     --arm64-build \
     --no-chromium-history \
     --with-pgo-profiles \
+    --force-config \
     --force-clean \
     --no-build \
     --no-distrib
