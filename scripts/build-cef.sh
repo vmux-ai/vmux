@@ -59,6 +59,9 @@ python3 "$automate" \
     --no-build \
     --no-distrib
 
+PATH="$depot_tools:$PATH" gclient sync --nohooks --no-history \
+    --revision "src@refs/tags/$chromium_version"
+
 cef_source="$BUILD_DIR/chromium/src/cef"
 chromium_source="$BUILD_DIR/chromium/src"
 compatibility="$(awk -F"'" '/chromium_checkout/{print $4}' "$cef_source/CHROMIUM_BUILD_COMPATIBILITY.txt")"
