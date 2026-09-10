@@ -12,7 +12,8 @@ fi
 
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 available_kib="$(df -Pk "$BUILD_DIR" | awk 'NR == 2 {print $4}')"
-if (( available_kib < 209715200 )); then
+existing_kib="$(du -sk "$BUILD_DIR" | awk '{print $1}')"
+if (( available_kib + existing_kib < 209715200 )); then
     echo "CEF build requires at least 200 GiB free in $BUILD_DIR" >&2
     exit 1
 fi
