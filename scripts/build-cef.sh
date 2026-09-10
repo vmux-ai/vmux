@@ -59,7 +59,9 @@ python3 "$automate" \
     --no-build \
     --no-distrib
 
-DEPOT_TOOLS_UPDATE=0 python3 "$depot_tools/gclient.py" sync --nohooks --no-history \
+DEPOT_TOOLS_UPDATE=0 "$depot_tools/vpython3" \
+    -vpython-spec "$depot_tools/.vpython3" \
+    "$depot_tools/gclient.py" sync --nohooks --no-history \
     --revision "src@refs/tags/$chromium_version"
 
 cef_source="$BUILD_DIR/chromium/src/cef"
