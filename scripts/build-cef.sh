@@ -10,10 +10,8 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     exit 1
 fi
 
-available_kib="$(df -Pk "$BUILD_DIR" 2>/dev/null | awk 'NR == 2 {print $4}')"
-if [[ -z "$available_kib" ]]; then
-    available_kib="$(df -Pk "$(dirname "$BUILD_DIR")" | awk 'NR == 2 {print $4}')"
-fi
+mkdir -p "$BUILD_DIR" "$DIST_DIR"
+available_kib="$(df -Pk "$BUILD_DIR" | awk 'NR == 2 {print $4}')"
 if (( available_kib < 209715200 )); then
     echo "CEF build requires at least 200 GiB free in $BUILD_DIR" >&2
     exit 1
@@ -22,17 +20,24 @@ fi
 cef_version="$("$ROOT/scripts/cef-manifest.sh" cef_version)"
 cef_commit="$("$ROOT/scripts/cef-manifest.sh" cef_commit)"
 chromium_version="$("$ROOT/scripts/cef-manifest.sh" chromium_version)"
+depot_tools_commit="$("$ROOT/scripts/cef-manifest.sh" depot_tools_commit)"
 patch_revision="$("$ROOT/scripts/cef-manifest.sh" patch_revision)"
 artifact_name="$("$ROOT/scripts/cef-manifest.sh" artifact_name)"
 
-mkdir -p "$BUILD_DIR" "$DIST_DIR"
 automate="$BUILD_DIR/automate-git.py"
+depot_tools="$BUILD_DIR/depot_tools"
 curl --retry 5 --retry-delay 2 --retry-max-time 300 -fsSL \
     -o "$automate" \
     "https://raw.githubusercontent.com/chromiumembedded/cef/$cef_commit/tools/automate/automate-git.py"
+if [[ ! -d "$depot_tools/.git" ]]; then
+    git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$depot_tools"
+fi
+git -C "$depot_tools" checkout --force "$depot_tools_commit"
 
 python3 "$automate" \
     --download-dir="$BUILD_DIR" \
+    --depot-tools-dir="$depot_tools" \
+    --no-depot-tools-update \
     --checkout="$cef_commit" \
     --chromium-checkout="refs/tags/$chromium_version" \
     --arm64-build \
@@ -60,6 +65,8 @@ export GN_DEFINES="is_official_build=true"
 export CEF_ARCHIVE_FORMAT="tar.bz2"
 python3 "$automate" \
     --download-dir="$BUILD_DIR" \
+    --depot-tools-dir="$depot_tools" \
+    --no-depot-tools-update \
     --checkout="$cef_commit" \
     --chromium-checkout="refs/tags/$chromium_version" \
     --arm64-build \
@@ -95,10 +102,11 @@ artifact="$DIST_DIR/$artifact_name"
 COPYFILE_DISABLE=1 tar -czf "$artifact" -C "$(dirname "$framework")" "$(basename "$framework")"
 checksum="$(shasum -a 256 "$artifact" | awk '{print $1}')"
 printf '%s  %s\n' "$checksum" "$artifact_name" > "$artifact.sha256"
-printf '{\n  "cef_version": "%s",\n  "cef_commit": "%s",\n  "chromium_version": "%s",\n  "patch_revision": %s,\n  "artifact_sha256": "%s",\n  "repository_commit": "%s",\n  "xcode": "%s"\n}\n' \
+printf '{\n  "cef_version": "%s",\n  "cef_commit": "%s",\n  "chromium_version": "%s",\n  "depot_tools_commit": "%s",\n  "patch_revision": %s,\n  "artifact_sha256": "%s",\n  "repository_commit": "%s",\n  "xcode": "%s"\n}\n' \
     "$cef_version" \
     "$cef_commit" \
     "$chromium_version" \
+    "$depot_tools_commit" \
     "$patch_revision" \
     "$checksum" \
     "$(git -C "$ROOT" rev-parse HEAD)" \
