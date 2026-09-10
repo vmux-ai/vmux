@@ -342,10 +342,55 @@ pub(crate) fn load_space_on_startup(
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading space from {:?}", path);
-        commands.trigger_load(LoadWorld::default_from_file(path));
+        let load = match std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|body| normalized_store_icons(&body))
+        {
+            Some((body, unknown)) => {
+                warn!(?unknown, "Replacing unavailable persisted page icons");
+                LoadWorld::default_from_stream(std::io::Cursor::new(body.into_bytes()))
+            }
+            None => LoadWorld::default_from_file(path),
+        };
+        commands.trigger_load(load);
     } else {
         restore.0 = true;
         commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
+    }
+}
+
+fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
+    let mut normalized = String::with_capacity(body.len());
+    let mut unknown = Vec::new();
+
+    for line in body.split_inclusive('\n') {
+        let (content, newline) = line
+            .strip_suffix('\n')
+            .map(|content| (content, "\n"))
+            .unwrap_or((line, ""));
+        let trimmed = content.trim();
+        let name = trimmed
+            .strip_prefix("icon: Builtin(")
+            .and_then(|value| value.strip_suffix("),"));
+        let Some(name) = name else {
+            normalized.push_str(line);
+            continue;
+        };
+        if ron::from_str::<vmux_core::BuiltinIcon>(name).is_ok() {
+            normalized.push_str(line);
+            continue;
+        }
+        let indent = &content[..content.len() - content.trim_start().len()];
+        normalized.push_str(indent);
+        normalized.push_str("icon: r#None,");
+        normalized.push_str(newline);
+        unknown.push(name.to_string());
+    }
+
+    if unknown.is_empty() {
+        None
+    } else {
+        Some((normalized, unknown))
     }
 }
 
@@ -1804,6 +1849,72 @@ mod tests {
         let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
         let body = store_body_with_key(key);
         assert!(!space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn unavailable_persisted_icons_fall_back_without_resetting_the_store() {
+        let body = r#"
+        icon: Builtin(Files),
+        icon: Builtin(Project),
+        icon: Builtin(Keyboard),
+"#;
+        let (normalized, unknown) = normalized_store_icons(body).expect("unknown icons");
+
+        assert_eq!(unknown, ["Project", "Keyboard"]);
+        assert_eq!(
+            normalized,
+            r#"
+        icon: Builtin(Files),
+        icon: r#None,
+        icon: r#None,
+"#
+        );
+    }
+
+    #[test]
+    fn available_persisted_icons_need_no_migration() {
+        let body = "        icon: Builtin(GitBranch),\n";
+        assert_eq!(normalized_store_icons(body), None);
+    }
+
+    #[test]
+    fn unavailable_persisted_icon_store_loads_after_migration() {
+        let body = r#"(
+  resources: {},
+  entities: {
+    1: (
+      components: {
+        "vmux_header::system::PageMetadata": (
+          title: "Projects",
+          url: "vmux://projects/",
+          icon: Builtin(Project),
+          bg_color: None,
+        ),
+      },
+    ),
+  },
+)
+"#;
+        let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin)
+            .add_observer(load_on_default_event);
+        app.update();
+        app.world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_stream(std::io::Cursor::new(
+                normalized.into_bytes(),
+            )));
+        app.update();
+
+        let metadata = app
+            .world_mut()
+            .query::<&PageMetadata>()
+            .single(app.world())
+            .expect("page metadata loaded");
+        assert_eq!(metadata.icon, vmux_core::PageIcon::None);
+        assert_eq!(metadata.url, "vmux://projects/");
     }
 
     #[test]
