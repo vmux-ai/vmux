@@ -59,13 +59,11 @@ python3 "$automate" \
     --no-build \
     --no-distrib
 
-(
-    cd "$BUILD_DIR/chromium"
-    DEPOT_TOOLS_UPDATE=0 "$depot_tools/vpython3" \
-        -vpython-spec "$depot_tools/.vpython3" \
-        "$depot_tools/gclient.py" sync --nohooks --no-history \
-        --revision "src@refs/tags/$chromium_version"
-)
+PATH="$depot_tools:$PATH" python3 \
+    "$BUILD_DIR/chromium/src/tools/update_pgo_profiles.py" \
+    --target mac-arm \
+    update \
+    --gs-url-base=chromium-optimization-profiles/pgo_profiles
 
 cef_source="$BUILD_DIR/chromium/src/cef"
 chromium_source="$BUILD_DIR/chromium/src"
