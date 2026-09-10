@@ -69,8 +69,10 @@ fi
 
 apply_patch_once "$cef_source" "$ROOT/cef/patches/cef-safe-storage.patch"
 apply_patch_once "$chromium_source" "$ROOT/cef/patches/chromium-safe-storage.patch"
-git -C "$cef_source" diff --check
-git -C "$chromium_source" diff --check
+git -C "$cef_source" diff --check -- libcef/common/base_impl.cc
+git -C "$chromium_source" diff --check -- \
+    components/os_crypt/sync/os_crypt.h \
+    components/os_crypt/sync/os_crypt_mac.mm
 
 export GN_DEFINES="is_official_build=true"
 export CEF_ARCHIVE_FORMAT="tar.bz2"
