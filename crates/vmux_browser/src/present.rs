@@ -452,7 +452,7 @@ pub(crate) fn sync_windowed_frames(
             pane_frames.frames.insert(entity, logical);
         }
         let became_visible = !memory.visible_pages.contains(&entity);
-        let browser_ready = browsers.windowed_view_ready(&entity);
+        let browser_ready = browsers.has_browser(entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
         if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
@@ -1015,21 +1015,19 @@ pub(crate) fn sync_windowed_extension_popups(
             continue;
         }
         let scale = window.resolution.scale_factor();
-        browsers.set_windowed_frame(
-            &entity,
-            bounds.left * scale,
-            bounds.top * scale,
-            bounds.width * scale,
-            bounds.height * scale,
-            scale,
-        );
         browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
         browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
-        if !browsers.windowed_view_ready(&entity) {
+        if !browsers.host_in_child_window(
+            &entity,
+            bounds.left as f64,
+            bounds.top as f64,
+            bounds.width as f64,
+            bounds.height as f64,
+        ) {
             continue;
         }
         browsers.set_windowed_hidden(&entity, false);
-        browsers.raise_windowed_to_front(&entity);
+        browsers.ensure_child_window_key(&entity);
         if presented {
             continue;
         }

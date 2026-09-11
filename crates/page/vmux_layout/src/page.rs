@@ -17,8 +17,8 @@ use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::event::{
     EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest,
-    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupBoundsRequest,
-    ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
+    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
+    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -276,6 +276,7 @@ pub fn Page() -> Element {
 fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
     let current = popup();
     let state = ExtensionPopupState { popup };
+    let placement = ExtensionPopupPlacement::of(current.anchor);
     let reporter = ExtensionPopupBoundsReporter {
         region: use_signal(|| None::<Rc<MountedData>>),
     };
@@ -297,7 +298,7 @@ fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
 
     rsx! {
         div {
-            class: "pointer-events-auto fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm",
+            class: "pointer-events-auto fixed inset-0 z-[1000]",
             tabindex: "-1",
             onmounted: move |event: Event<MountedData>| {
                 let target = event.data();
@@ -313,39 +314,39 @@ fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
             },
             onpointerdown: move |_| state.close(),
             div {
-                class: "glass flex max-h-full max-w-full flex-col overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-2xl backdrop-blur-2xl",
-                style: "width:min(420px,calc(100vw - 32px));height:min(560px,calc(100vh - 48px));",
+                key: "{current.id}",
+                class: "glass absolute overflow-hidden rounded-xl border border-border/80 bg-background shadow-2xl",
+                style: "{placement.style()}",
                 onpointerdown: move |event| event.stop_propagation(),
-                header { class: "flex h-11 shrink-0 items-center gap-2 border-b border-border/70 px-3",
-                    if let Some(icon) = current.icon.as_ref() {
-                        img { class: "size-4 shrink-0 rounded object-contain", src: "{icon}", alt: "" }
-                    } else {
-                        Icon { class: "size-4 shrink-0 text-muted-foreground",
-                            path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
-                        }
-                    }
-                    h2 { class: "min-w-0 flex-1 truncate text-sm font-semibold text-foreground", "{current.name}" }
-                    button {
-                        r#type: "button",
-                        class: "flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
-                        title: translate("common-close"),
-                        aria_label: translate("common-close"),
-                        onclick: move |_| state.close(),
-                        Icon { class: "size-4",
-                            path { d: "M18 6 6 18" }
-                            path { d: "m6 6 12 12" }
-                        }
-                    }
-                }
-                div {
-                    key: "{current.id}",
-                    class: "relative min-h-0 flex-1 overflow-hidden bg-background",
-                    onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
-                    onresize: move |_: Event<ResizeData>| resized.publish(),
-                    div { class: "pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-foreground/[0.035] via-transparent to-primary/[0.06]" }
-                }
+                onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
+                onresize: move |_: Event<ResizeData>| resized.publish(),
+                div { class: "pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-foreground/[0.035] via-transparent to-primary/[0.06]" }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ExtensionPopupPlacement {
+    right: i32,
+    top: i32,
+}
+
+impl ExtensionPopupPlacement {
+    fn of(anchor: ExtensionPopupAnchor) -> Self {
+        Self {
+            right: anchor.right.max(48),
+            top: anchor.bottom.max(40) + 6,
+        }
+    }
+
+    fn style(self) -> String {
+        format!(
+            "right:max(8px,calc(100vw - {}px));top:{}px;width:min(360px,calc(100vw - 16px));height:min(520px,calc(100vh - {}px));",
+            self.right,
+            self.top,
+            self.top + 8
+        )
     }
 }
 
@@ -356,6 +357,11 @@ struct ExtensionPopupState {
 
 impl ExtensionPopupState {
     fn close(mut self) {
+        let _ = send(&LayoutOverlayEvent {
+            id: "extension-popup".to_string(),
+            active: false,
+        });
+        let _ = send(&ExtensionPopupCloseRequest);
         self.popup.set(ExtensionPopupEvent::default());
     }
 }
@@ -2834,28 +2840,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
     rsx! {
         div { class: "relative flex shrink-0 items-center gap-1 pl-1",
             for ext in enabled.iter().filter(|extension| extension.pinned) {
-                {
-                    let id = ext.id.clone();
-                    let name = ext.name.clone();
-                    let icon = ext.icon.clone();
-                    rsx! {
-                        button {
-                            key: "{ext.id}",
-                            r#type: "button",
-                            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-foreground/[0.08]",
-                            title: "{name}",
-                            aria_label: "{name}",
-                            onclick: move |_| { let _ = send(&ExtActionRequest { id: id.clone() }); },
-                            if let Some(icon) = icon.as_ref() {
-                                img { class: "h-4 w-4", src: "{icon}", alt: "" }
-                            } else {
-                                Icon { class: "h-4 w-4",
-                                    path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
-                                }
-                            }
-                        }
-                    }
-                }
+                ExtensionActionButton { key: "{ext.id}", extension: ext.clone() }
             }
             button {
                 r#type: "button",
@@ -2909,6 +2894,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                             for extension in enabled.iter() {
                                 ExtensionMenuRow {
                                     extension: extension.clone(),
+                                    anchor: trigger,
                                     on_close: move |_| menu.close(),
                                 }
                             }
@@ -2930,6 +2916,65 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 }
             }
         }
+    }
+}
+
+#[component]
+fn ExtensionActionButton(extension: Rc<ExtRow>) -> Element {
+    let mounted = use_signal(|| None::<Rc<MountedData>>);
+    let action = ExtensionActionState {
+        id: extension.id.clone(),
+        mounted,
+    };
+
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-foreground/[0.08]",
+            title: "{extension.name}",
+            aria_label: "{extension.name}",
+            onmounted: move |event: Event<MountedData>| {
+                let mut mounted = mounted;
+                mounted.set(Some(event.data()));
+            },
+            onclick: move |_| action.clone().open(),
+            if let Some(icon) = extension.icon.as_ref() {
+                img { class: "h-4 w-4", src: "{icon}", alt: "" }
+            } else {
+                Icon { class: "h-4 w-4",
+                    path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ExtensionActionState {
+    id: String,
+    mounted: Signal<Option<Rc<MountedData>>>,
+}
+
+impl ExtensionActionState {
+    fn open(self) {
+        spawn(async move {
+            let anchor = match self.mounted.peek().clone() {
+                Some(mounted) => mounted
+                    .get_client_rect()
+                    .await
+                    .ok()
+                    .map(|rect| ExtensionPopupAnchor {
+                        right: (rect.origin.x + rect.size.width) as i32,
+                        bottom: (rect.origin.y + rect.size.height) as i32,
+                    })
+                    .unwrap_or_default(),
+                None => ExtensionPopupAnchor::default(),
+            };
+            let _ = send(&ExtActionRequest {
+                id: self.id,
+                anchor,
+            });
+        });
     }
 }
 
@@ -2960,7 +3005,11 @@ impl ExtensionMenuState {
 }
 
 #[component]
-fn ExtensionMenuRow(extension: Rc<ExtRow>, on_close: EventHandler<()>) -> Element {
+fn ExtensionMenuRow(
+    extension: Rc<ExtRow>,
+    anchor: Signal<Option<Rc<MountedData>>>,
+    on_close: EventHandler<()>,
+) -> Element {
     let action_id = extension.id.clone();
     let pin_id = extension.id.clone();
     let pinned = extension.pinned;
@@ -2973,7 +3022,11 @@ fn ExtensionMenuRow(extension: Rc<ExtRow>, on_close: EventHandler<()>) -> Elemen
                 title: "{extension.name}",
                 onclick: move |_| {
                     on_close.call(());
-                    let _ = send(&ExtActionRequest { id: action_id.clone() });
+                    ExtensionActionState {
+                        id: action_id.clone(),
+                        mounted: anchor,
+                    }
+                    .open();
                 },
                 if let Some(icon) = extension.icon.as_ref() {
                     img { class: "size-4 shrink-0 rounded object-contain", src: "{icon}", alt: "" }

@@ -3079,6 +3079,25 @@ pub struct ExtUninstallRequest {
 )]
 pub struct ExtActionRequest {
     pub id: String,
+    pub anchor: ExtensionPopupAnchor,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionPopupAnchor {
+    pub right: i32,
+    pub bottom: i32,
 }
 
 #[derive(
@@ -3097,6 +3116,7 @@ pub struct ExtensionPopupEvent {
     pub id: String,
     pub name: String,
     pub icon: Option<String>,
+    pub anchor: ExtensionPopupAnchor,
 }
 
 #[derive(

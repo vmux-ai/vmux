@@ -514,29 +514,6 @@ impl Browsers {
         self.browsers.contains_key(&webview)
     }
 
-    #[cfg(target_os = "macos")]
-    pub fn windowed_view_ready(&self, webview: &Entity) -> bool {
-        use objc2_app_kit::NSView;
-
-        let Some(browser) = self.browsers.get(webview) else {
-            return false;
-        };
-        if !browser.windowed {
-            return false;
-        }
-        let handle = browser.host.window_handle();
-        if handle.is_null() {
-            return false;
-        }
-        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        unsafe { view.superview() }.is_some() && view.window().is_some()
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn windowed_view_ready(&self, webview: &Entity) -> bool {
-        self.has_browser(*webview)
-    }
-
     #[inline]
     pub fn is_windowed(&self, webview: &Entity) -> Option<bool> {
         self.browsers.get(webview).map(|browser| browser.windowed)

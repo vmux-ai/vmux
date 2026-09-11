@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, JsEmitEventPlugin, Receive,
-    WebviewCommittedNavigationEvent,
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin,
+    Receive, WebviewCommittedNavigationEvent,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
@@ -323,8 +323,8 @@ fn on_uninstall_request(
 
 fn on_action_request(
     trigger: On<BinReceive<ExtActionRequest>>,
-    mut cmd: MessageWriter<AppCommand>,
-    layouts: Query<(), With<LayoutCef>>,
+    layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
+    host_windows: Query<&HostWindow>,
     popups: Query<(Entity, &ExtensionPopup)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -341,31 +341,34 @@ fn on_action_request(
         return;
     };
     let url = format!("chrome-extension://{id}/{popup}");
-    let owner = trigger.event().webview;
-    if layouts.contains(owner) {
-        close_popup(owner, &popups, &browsers, &mut commands);
-        commands
-            .spawn(Browser::new_with_title(&url, &entry.name))
-            .insert((
-                Name::new(format!("Extension popup: {}", entry.name)),
-                WindowOverlay,
-                ExtensionPopup { owner },
-                Visibility::Hidden,
-            ));
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            owner,
-            EXTENSION_POPUP_EVENT,
-            &ExtensionPopupEvent {
-                id,
-                name: entry.name,
-                icon: entry.icon,
-            },
-        ));
+    let source = trigger.event().webview;
+    let source_window = host_windows.get(source).ok().map(|host| host.0);
+    let owner = layouts.iter().find_map(|(layout, host)| {
+        (layout == source || source_window.is_none_or(|window| host.is_some_and(|h| h.0 == window)))
+            .then_some(layout)
+    });
+    let Some(owner) = owner else {
         return;
-    }
-    cmd.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack { url: Some(url) },
-    )));
+    };
+    close_popup(owner, &popups, &browsers, &mut commands);
+    commands
+        .spawn(Browser::new_with_title(&url, &entry.name))
+        .insert((
+            Name::new(format!("Extension popup: {}", entry.name)),
+            WindowOverlay,
+            ExtensionPopup { owner },
+            Visibility::Hidden,
+        ));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        owner,
+        EXTENSION_POPUP_EVENT,
+        &ExtensionPopupEvent {
+            id,
+            name: entry.name,
+            icon: entry.icon,
+            anchor: trigger.event().payload.anchor,
+        },
+    ));
 }
 
 fn on_popup_bounds_request(
@@ -404,7 +407,7 @@ fn close_popup(
         if popup.owner != owner {
             continue;
         }
-        browsers.set_windowed_hidden(&entity, true);
+        browsers.hide_child_window(&entity);
         commands.entity(entity).try_despawn();
     }
 }
