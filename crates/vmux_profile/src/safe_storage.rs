@@ -1,15 +1,14 @@
 #[cfg(target_os = "macos")]
+#[path = "safe_storage_macos.rs"]
 mod macos;
-#[cfg(all(not(target_os = "macos"), test))]
-mod other;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 use std::io::Write;
 #[cfg(any(target_os = "macos", test))]
 use std::num::NonZeroU32;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(any(target_os = "macos", test))]
@@ -37,12 +36,12 @@ const BROWSER_CONTEXT: &[u8] = b"vmux-safe-storage-browser-v1";
 const MCP_CONTEXT: &[u8] = b"vmux-safe-storage-mcp-v1";
 #[cfg(any(target_os = "macos", test))]
 const VAULT_CONTEXT: &[u8] = b"vmux-safe-storage-vault-wrap-v1";
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 const STATE_VERSION: &[u8] = b"1\n";
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 static ROOT_KEY: OnceLock<Mutex<Option<Zeroizing<Vec<u8>>>>> = OnceLock::new();
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 static FILE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(target_os = "macos")]
@@ -54,7 +53,7 @@ pub struct BrowserEncryptionKeys {
 #[cfg(any(target_os = "macos", test))]
 pub struct SafeStorage;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 struct RootKeyStore;
 
 #[cfg(any(target_os = "macos", test))]
@@ -65,7 +64,7 @@ struct SafeStorageCipher {
 #[cfg(any(target_os = "macos", test))]
 struct DerivedKeyLength(usize);
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) struct ProtectedFile {
     path: PathBuf,
 }
@@ -84,18 +83,22 @@ impl SafeStorage {
         Ok(BrowserEncryptionKeys { current, legacy })
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn seal_mcp(account: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
         Self::cipher(true)?.seal(MCP_CONTEXT, &[], account.as_bytes(), plaintext)
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn open_mcp(account: &str, ciphertext: &[u8]) -> Result<Zeroizing<Vec<u8>>, String> {
         Self::cipher(false)?.open(MCP_CONTEXT, &[], account.as_bytes(), ciphertext)
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn wrap_vault_key(vault_id: &str, key: &[u8]) -> Result<Vec<u8>, String> {
         Self::cipher(true)?.seal(VAULT_CONTEXT, vault_id.as_bytes(), vault_id.as_bytes(), key)
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_vault_key(
         vault_id: &str,
         ciphertext: &[u8],
@@ -108,6 +111,7 @@ impl SafeStorage {
         )
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_vault_key_silent(
         vault_id: &str,
         ciphertext: &[u8],
@@ -125,17 +129,19 @@ impl SafeStorage {
             .map(Some)
     }
 
+    #[cfg(target_os = "macos")]
     fn cipher(create: bool) -> Result<SafeStorageCipher, String> {
         let root = Self::root_key(create)?;
         Ok(SafeStorageCipher { root })
     }
 
+    #[cfg(target_os = "macos")]
     fn cipher_silent() -> Result<Option<SafeStorageCipher>, String> {
         Self::root_key_silent().map(|root| root.map(|root| SafeStorageCipher { root }))
     }
 
+    #[cfg(target_os = "macos")]
     fn root_key(create: bool) -> Result<Zeroizing<Vec<u8>>, String> {
-        #[cfg(test)]
         if crate::is_test_session() {
             return Ok(Zeroizing::new(vec![0x56; ROOT_KEY_LENGTH]));
         }
@@ -165,8 +171,8 @@ impl SafeStorage {
         Ok(key)
     }
 
+    #[cfg(target_os = "macos")]
     fn root_key_silent() -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        #[cfg(test)]
         if crate::is_test_session() {
             return Ok(Some(Zeroizing::new(vec![0x56; ROOT_KEY_LENGTH])));
         }
@@ -188,6 +194,7 @@ impl SafeStorage {
         Ok(Some(key))
     }
 
+    #[cfg(target_os = "macos")]
     fn random_key(length: usize) -> Result<Zeroizing<Vec<u8>>, String> {
         use ring::rand::SecureRandom;
 
@@ -215,6 +222,7 @@ impl SafeStorage {
         Ok(Zeroizing::new(key.to_vec()))
     }
 
+    #[cfg(target_os = "macos")]
     fn missing_root_error() -> String {
         "Vmux Safe Storage root key is missing; sign in again and recover encrypted Vaults"
             .to_string()
@@ -316,7 +324,7 @@ impl hkdf::KeyType for DerivedKeyLength {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 impl ProtectedFile {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self { path }
@@ -396,10 +404,10 @@ impl ProtectedFile {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 struct SafeStorageState;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 impl SafeStorageState {
     fn file() -> ProtectedFile {
         ProtectedFile::new(
