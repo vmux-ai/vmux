@@ -65,7 +65,7 @@ default-features = false
 version = "0.5.2"
 
 [dependencies.cef]
-version = "148.2.0"
+version = "152.1.0"
 
 [dependencies.rkyv]
 workspace = true

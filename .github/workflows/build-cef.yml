@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 720
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Build pinned CEF
         id: build
@@ -49,4 +51,4 @@ jobs:
               --notes "Pinned CEF build for vmux. Source and build metadata are attached." \
               --prerelease
           fi
-          gh release upload "$tag" "$ARTIFACT" "$CHECKSUM" "$METADATA" --clobber
+          gh release upload "$tag" "$ARTIFACT" "$CHECKSUM" "$METADATA"

@@ -171,6 +171,7 @@ impl McpOauthCredentials {
         serde_json::from_slice(bytes).map_err(|error| error.to_string())
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn migrate_legacy(
         credentials: Option<Self>,
         store: impl FnOnce(&[u8]) -> Result<(), String>,
@@ -179,7 +180,7 @@ impl McpOauthCredentials {
             return Ok(None);
         };
         let bytes = serde_json::to_vec(&credentials).map_err(|error| error.to_string())?;
-        store(&bytes)?;
+        let _ = store(&bytes);
         Ok(Some(credentials))
     }
 }
@@ -365,6 +366,21 @@ mod tests {
 
         assert_eq!(loaded, Some(credentials.clone()));
         assert_eq!(McpOauthCredentials::decode(&migrated).unwrap(), credentials);
+    }
+
+    #[test]
+    fn legacy_credentials_survive_a_failed_migration_write() {
+        let credentials = McpOauthCredentials {
+            access_token: "access".to_string(),
+            ..McpOauthCredentials::default()
+        };
+
+        let loaded = McpOauthCredentials::migrate_legacy(Some(credentials.clone()), |_| {
+            Err("read-only storage".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(loaded, Some(credentials));
     }
 
     #[test]

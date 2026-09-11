@@ -1,7 +1,9 @@
+use zeroize::Zeroizing;
+
 use super::RootKeyStore;
 
 impl RootKeyStore {
-    pub(super) fn read(_silent: bool) -> Result<Option<Vec<u8>>, String> {
+    pub(super) fn read(_silent: bool) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
         Err("Vmux Safe Storage is only available on macOS".to_string())
     }
 
