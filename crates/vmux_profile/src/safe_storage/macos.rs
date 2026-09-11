@@ -14,13 +14,13 @@ const LEGACY_BROWSER_SERVICE: &str = "Chromium Safe Storage";
 const LEGACY_BROWSER_ACCOUNT: &str = "Chromium";
 
 impl RootKeyStore {
-    pub(super) fn read(silent: bool) -> Result<Option<Vec<u8>>, String> {
+    pub(super) fn read(silent: bool) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
         require_desktop_process()?;
         if silent {
             return Self::read_silent();
         }
         match generic_password(Self::options()) {
-            Ok(payload) => Ok(Some(payload)),
+            Ok(payload) => Ok(Some(Zeroizing::new(payload))),
             Err(error) if error.code() == errSecItemNotFound => Ok(None),
             Err(error) => Err(format!("failed to unlock Vmux Safe Storage: {error}")),
         }
@@ -38,7 +38,10 @@ impl RootKeyStore {
             PasswordOptions::new_generic_password(LEGACY_BROWSER_SERVICE, LEGACY_BROWSER_ACCOUNT);
         options.set_access_synchronized(Some(false));
         match generic_password(options) {
-            Ok(password) => Ok(Some(derive_legacy_browser_key(&password))),
+            Ok(password) => {
+                let password = Zeroizing::new(password);
+                Ok(Some(derive_legacy_browser_key(&password)))
+            }
             Err(error) if error.code() == errSecItemNotFound => Ok(None),
             Err(error) => Err(format!("failed to migrate browser Safe Storage: {error}")),
         }
@@ -51,7 +54,7 @@ impl RootKeyStore {
         options
     }
 
-    fn read_silent() -> Result<Option<Vec<u8>>, String> {
+    fn read_silent() -> Result<Option<Zeroizing<Vec<u8>>>, String> {
         let mut search = ItemSearchOptions::new();
         let results = search
             .class(ItemClass::generic_password())
@@ -64,7 +67,7 @@ impl RootKeyStore {
             return Ok(None);
         };
         Ok(results.into_iter().find_map(|result| match result {
-            SearchResult::Data(payload) => Some(payload),
+            SearchResult::Data(payload) => Some(Zeroizing::new(payload)),
             _ => None,
         }))
     }

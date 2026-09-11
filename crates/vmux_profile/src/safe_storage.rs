@@ -1,50 +1,76 @@
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), test))]
 mod other;
 
+#[cfg(any(target_os = "macos", test))]
 use std::io::Write;
+#[cfg(any(target_os = "macos", test))]
 use std::num::NonZeroU32;
+#[cfg(any(target_os = "macos", test))]
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(any(target_os = "macos", test))]
 use ring::{aead, hkdf, pbkdf2};
+#[cfg(any(target_os = "macos", test))]
 use zeroize::Zeroizing;
 
+#[cfg(any(target_os = "macos", test))]
 const ROOT_KEY_LENGTH: usize = 32;
+#[cfg(any(target_os = "macos", test))]
 const BROWSER_KEY_LENGTH: usize = 16;
+#[cfg(any(target_os = "macos", test))]
 const DATA_KEY_LENGTH: usize = 32;
+#[cfg(any(target_os = "macos", test))]
 const NONCE_LENGTH: usize = 12;
+#[cfg(any(target_os = "macos", test))]
 const ROOT_HEADER: &[u8] = b"vmux-safe-storage-root-v1\0";
+#[cfg(any(target_os = "macos", test))]
 const ENVELOPE_HEADER: &[u8] = b"vmux-safe-storage-envelope-v1\0";
+#[cfg(any(target_os = "macos", test))]
 const HKDF_SALT: &[u8] = b"vmux-safe-storage-hkdf-v1";
+#[cfg(any(target_os = "macos", test))]
 const BROWSER_CONTEXT: &[u8] = b"vmux-safe-storage-browser-v1";
+#[cfg(any(target_os = "macos", test))]
 const MCP_CONTEXT: &[u8] = b"vmux-safe-storage-mcp-v1";
+#[cfg(any(target_os = "macos", test))]
 const VAULT_CONTEXT: &[u8] = b"vmux-safe-storage-vault-wrap-v1";
+#[cfg(any(target_os = "macos", test))]
 const STATE_VERSION: &[u8] = b"1\n";
 
+#[cfg(any(target_os = "macos", test))]
 static ROOT_KEY: OnceLock<Mutex<Option<Zeroizing<Vec<u8>>>>> = OnceLock::new();
+#[cfg(any(target_os = "macos", test))]
 static FILE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+#[cfg(target_os = "macos")]
 pub struct BrowserEncryptionKeys {
     pub current: Zeroizing<Vec<u8>>,
     pub legacy: Option<Zeroizing<Vec<u8>>>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub struct SafeStorage;
 
+#[cfg(any(target_os = "macos", test))]
 struct RootKeyStore;
 
+#[cfg(any(target_os = "macos", test))]
 struct SafeStorageCipher {
     root: Zeroizing<Vec<u8>>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 struct DerivedKeyLength(usize);
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) struct ProtectedFile {
     path: PathBuf,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl SafeStorage {
     #[cfg(target_os = "macos")]
     pub fn browser_keys() -> Result<BrowserEncryptionKeys, String> {
@@ -109,6 +135,7 @@ impl SafeStorage {
     }
 
     fn root_key(create: bool) -> Result<Zeroizing<Vec<u8>>, String> {
+        #[cfg(test)]
         if crate::is_test_session() {
             return Ok(Zeroizing::new(vec![0x56; ROOT_KEY_LENGTH]));
         }
@@ -139,6 +166,7 @@ impl SafeStorage {
     }
 
     fn root_key_silent() -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+        #[cfg(test)]
         if crate::is_test_session() {
             return Ok(Some(Zeroizing::new(vec![0x56; ROOT_KEY_LENGTH])));
         }
@@ -193,6 +221,7 @@ impl SafeStorage {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl SafeStorageCipher {
     fn derive(
         &self,
@@ -280,12 +309,14 @@ impl SafeStorageCipher {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl hkdf::KeyType for DerivedKeyLength {
     fn len(&self) -> usize {
         self.0
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ProtectedFile {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self { path }
@@ -315,9 +346,15 @@ impl ProtectedFile {
             .and_then(|name| name.to_str())
             .unwrap_or("safe-storage");
         let temporary = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), sequence));
-        let result = Self::write_temporary(&temporary, bytes).and_then(|_| {
-            std::fs::rename(&temporary, &self.path).map_err(|error| error.to_string())
-        });
+        let result = Self::write_temporary(&temporary, bytes)
+            .and_then(|_| {
+                std::fs::rename(&temporary, &self.path).map_err(|error| error.to_string())
+            })
+            .and_then(|_| {
+                std::fs::File::open(parent)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|error| error.to_string())
+            });
         if result.is_err() {
             let _ = std::fs::remove_file(&temporary);
         }
@@ -359,8 +396,10 @@ impl ProtectedFile {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 struct SafeStorageState;
 
+#[cfg(any(target_os = "macos", test))]
 impl SafeStorageState {
     fn file() -> ProtectedFile {
         ProtectedFile::new(
@@ -391,6 +430,7 @@ impl SafeStorageState {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn derive_legacy_browser_key(password: &[u8]) -> Zeroizing<Vec<u8>> {
     let mut key = Zeroizing::new(vec![0_u8; BROWSER_KEY_LENGTH]);
     pbkdf2::derive(

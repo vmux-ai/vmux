@@ -1,24 +1,34 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 3e7b547f5..4e90b40bd 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -1119,6 +1119,8 @@ source_set("libcef_static") {
+       "//chrome/app/chrome_main_mac.h",
+       "//chrome/app/chrome_main_mac.mm",
+     ]
++
++    deps += [ "//components/os_crypt/async/browser:keychain_key_provider" ]
+   } else {
+     sources += [
+       "libcef/browser/chrome/chrome_web_contents_view_delegate_cef.cc",
 diff --git a/libcef/common/base_impl.cc b/libcef/common/base_impl.cc
-index cc2fc09..d7ba1c0 100644
+index cc2fc099d..700950a5a 100644
 --- a/libcef/common/base_impl.cc
 +++ b/libcef/common/base_impl.cc
-@@ -2,7 +2,10 @@
- // 2011 the Chromium Authors. All rights reserved. Use of this source code is
+@@ -3,6 +3,7 @@
  // governed by a BSD-style license that can be found in the LICENSE file.
 
-+#include <string>
-+
  #include "base/debug/dump_without_crashing.h"
 +#include "build/build_config.h"
  #include "base/logging.h"
  #include "base/notimplemented.h"
  #include "base/threading/platform_thread.h"
-@@ -14,12 +17,38 @@
+@@ -14,12 +15,35 @@
  #include "cef/include/internal/cef_trace_event_internal.h"
  #include "cef/libcef/common/api_version_util.h"
 
 +#if BUILDFLAG(IS_MAC)
-+#include "components/os_crypt/sync/os_crypt.h"
++#include "components/os_crypt/async/browser/keychain_key_provider.h"
 +#endif
 +
  namespace {
@@ -37,13 +47,10 @@ index cc2fc09..d7ba1c0 100644
 +      (legacy_key_size != 0 && (!legacy_key || legacy_key_size != 16))) {
 +    return 0;
 +  }
-+  std::string keys(reinterpret_cast<const char*>(current_key),
-+                   current_key_size);
-+  if (legacy_key_size == 16) {
-+    keys.append(reinterpret_cast<const char*>(legacy_key), legacy_key_size);
-+  }
-+  OSCrypt::SetRawEncryptionKey(keys);
-+  return 1;
++  return os_crypt_async::KeychainKeyProvider::SetRawEncryptionKeys(
++             current_key, current_key_size, legacy_key, legacy_key_size)
++             ? 1
++             : 0;
 +#else
 +  return 0;
 +#endif

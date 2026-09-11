@@ -96,7 +96,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
 
       - name: Compute workspace packages (excluding patches)
         id: pkgs
@@ -171,7 +171,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
 
       - name: Install CEF framework
         run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh

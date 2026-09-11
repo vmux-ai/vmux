@@ -60,7 +60,7 @@ impl super::DeviceKeys {
         let Some(key) = load_legacy_keychain_key(vault_id, false)? else {
             return Err(LOCKED.to_string());
         };
-        migrate_legacy_key(Some(key), |key| file.store(key))?.ok_or_else(|| LOCKED.to_string())
+        migrate_legacy_key(Some(key), |key| file.store(key)).ok_or_else(|| LOCKED.to_string())
     }
 
     pub(super) fn load_silent(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
@@ -141,12 +141,10 @@ fn load_legacy_keychain_key_silent(vault_id: &str) -> Result<Option<Zeroizing<Ve
 fn migrate_legacy_key(
     key: Option<Zeroizing<Vec<u8>>>,
     store: impl FnOnce(&[u8]) -> Result<(), String>,
-) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    let Some(key) = key else {
-        return Ok(None);
-    };
-    store(&key)?;
-    Ok(Some(key))
+) -> Option<Zeroizing<Vec<u8>>> {
+    let key = key?;
+    let _ = store(&key);
+    Some(key)
 }
 
 #[cfg(test)]
@@ -162,10 +160,19 @@ mod tests {
             migrated.extend_from_slice(key);
             Ok(())
         })
-        .unwrap()
         .unwrap();
 
         assert_eq!(loaded.as_slice(), vec![7_u8; KEY_LEN]);
         assert_eq!(migrated, vec![7_u8; KEY_LEN]);
+    }
+
+    #[test]
+    fn legacy_vault_key_survives_a_failed_migration_write() {
+        let key = Zeroizing::new(vec![7_u8; KEY_LEN]);
+
+        let loaded =
+            migrate_legacy_key(Some(key), |_| Err("read-only storage".to_string())).unwrap();
+
+        assert_eq!(loaded.as_slice(), vec![7_u8; KEY_LEN]);
     }
 }
