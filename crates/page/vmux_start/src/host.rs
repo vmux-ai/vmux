@@ -83,6 +83,7 @@ struct StartPromptContextParams<'w, 's> {
         ),
     >,
     agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
     warmed_branches_for: Local<'s, String>,
 }
 
@@ -265,27 +266,28 @@ struct StartBranchRead {
 }
 
 impl StartBranchRead {
-    fn of(webview: Entity, project: &str) -> Option<Self> {
+    fn of(webview: Entity, project: &str, wake: vmux_core::host::wake::Wake) -> Option<Self> {
         let project = project.trim().to_string();
         if project.is_empty() {
             return None;
         }
         let root = std::path::PathBuf::from(&project);
         let task = IoTaskPool::get().spawn(async move {
-            let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {
-                return Vec::new();
-            };
-            let mut branches = Vec::with_capacity(holders.len());
-            for holder in holders {
-                let checkout = holder.checkout_path();
-                let label = holder.checkout_label();
-                branches.push(vmux_wire::space::ProjectBranch {
-                    branch: holder.branch,
-                    checkout,
-                    label,
-                    insertions: holder.change.insertions,
-                    deletions: holder.change.deletions,
-                });
+            let _wake = wake;
+            let mut branches = Vec::new();
+            if let Ok(holders) = vmux_git::worktree::branch_holders(&root) {
+                branches.reserve(holders.len());
+                for holder in holders {
+                    let checkout = holder.checkout_path();
+                    let label = holder.checkout_label();
+                    branches.push(vmux_wire::space::ProjectBranch {
+                        branch: holder.branch,
+                        checkout,
+                        label,
+                        insertions: holder.change.insertions,
+                        deletions: holder.change.deletions,
+                    });
+                }
             }
             branches
         });
@@ -299,10 +301,14 @@ impl StartBranchRead {
 
 fn on_start_branches_request(
     trigger: On<BinReceive<vmux_wire::command_bar::StartBranchesRequest>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Some(read) = StartBranchRead::of(trigger.event().webview, &trigger.event().payload.project)
-    else {
+    let Some(read) = StartBranchRead::of(
+        trigger.event().webview,
+        &trigger.event().payload.project,
+        vmux_core::host::wake::Wake::of(proxy),
+    ) else {
         return;
     };
     commands.spawn(read);
@@ -501,7 +507,13 @@ fn sync_live_start_pages(
         *prompt_context.warmed_branches_for = project.clone();
     }
     for (e, focus_requested) in targets {
-        if warm_branches && let Some(read) = StartBranchRead::of(e, &project) {
+        if warm_branches
+            && let Some(read) = StartBranchRead::of(
+                e,
+                &project,
+                vmux_core::host::wake::Wake::beside(prompt_context.proxy.as_deref()),
+            )
+        {
             commands.spawn(read);
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(

@@ -340,6 +340,7 @@ pub enum AgentQuery {
     SimulatorControl {
         action: SimulatorAction,
     },
+    VaultStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

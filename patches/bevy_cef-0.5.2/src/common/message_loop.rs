@@ -1,3 +1,4 @@
+use crate::CefOsCryptKeyProvider;
 use crate::RunOnMainThread;
 use crate::common::WebviewSource;
 use bevy::prelude::*;
@@ -14,6 +15,7 @@ pub struct MessageLoopPlugin {
     pub root_cache_path: Option<String>,
     pub locale: String,
     pub accept_language_list: String,
+    pub os_crypt_key_provider: Option<CefOsCryptKeyProvider>,
 }
 
 #[derive(Resource, Default)]
@@ -34,6 +36,9 @@ impl Plugin for MessageLoopPlugin {
 
         #[cfg(target_os = "macos")]
         load_cef_library(app);
+
+        #[cfg(target_os = "macos")]
+        configure_os_crypt(self.os_crypt_key_provider);
 
         let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
         let args = Args::new();
@@ -111,6 +116,60 @@ impl Plugin for MessageLoopPlugin {
         {
             app.insert_non_send(cef_pump_timer::install(rx, 1.0 / 60.0));
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn configure_os_crypt(provider: Option<CefOsCryptKeyProvider>) {
+    let Some(provider) = provider else {
+        return;
+    };
+    let path = cef_framework_binary_path();
+    let library = unsafe { libloading::Library::new(&path) }
+        .unwrap_or_else(|error| panic!("failed to open custom CEF at {}: {error}", path.display()));
+    let setter = unsafe {
+        library.get::<unsafe extern "C" fn(*const u8, usize, *const u8, usize) -> i32>(
+            b"cef_set_os_crypt_keys\0",
+        )
+    };
+    let Ok(setter) = setter else {
+        warn!("custom CEF Safe Storage API unavailable; using legacy browser Keychain storage");
+        return;
+    };
+    let keys =
+        provider().unwrap_or_else(|error| panic!("failed to unlock browser storage: {error}"));
+    let (legacy, legacy_length) = match keys.legacy.as_deref() {
+        Some(key) => (key.as_ptr(), key.len()),
+        None => (std::ptr::null(), 0),
+    };
+    let result = unsafe {
+        setter(
+            keys.current.as_ptr(),
+            keys.current.len(),
+            legacy,
+            legacy_length,
+        )
+    };
+    assert_eq!(result, 1, "custom CEF rejected the browser encryption keys");
+}
+
+#[cfg(target_os = "macos")]
+fn cef_framework_binary_path() -> std::path::PathBuf {
+    #[cfg(feature = "debug")]
+    {
+        return debug_chromium_embedded_framework_dir_path().join("Chromium Embedded Framework");
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Frameworks")
+            .join("Chromium Embedded Framework.framework")
+            .join("Chromium Embedded Framework")
     }
 }
 

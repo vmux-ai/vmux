@@ -1,0 +1,61 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 3e7b547f5..4e90b40bd 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -1119,6 +1119,8 @@ source_set("libcef_static") {
+       "//chrome/app/chrome_main_mac.h",
+       "//chrome/app/chrome_main_mac.mm",
+     ]
++
++    deps += [ "//components/os_crypt/async/browser:keychain_key_provider" ]
+   } else {
+     sources += [
+       "libcef/browser/chrome/chrome_web_contents_view_delegate_cef.cc",
+diff --git a/libcef/common/base_impl.cc b/libcef/common/base_impl.cc
+index cc2fc099d..700950a5a 100644
+--- a/libcef/common/base_impl.cc
++++ b/libcef/common/base_impl.cc
+@@ -3,6 +3,7 @@
+ // governed by a BSD-style license that can be found in the LICENSE file.
+
+ #include "base/debug/dump_without_crashing.h"
++#include "build/build_config.h"
+ #include "base/logging.h"
+ #include "base/notimplemented.h"
+ #include "base/threading/platform_thread.h"
+@@ -14,12 +15,35 @@
+ #include "cef/include/internal/cef_trace_event_internal.h"
+ #include "cef/libcef/common/api_version_util.h"
+
++#if BUILDFLAG(IS_MAC)
++#include "components/os_crypt/async/browser/keychain_key_provider.h"
++#endif
++
+ namespace {
+
+ constexpr const char kCategory[] = "cef.client";
+
+ }  // namespace
+
++extern "C" CEF_EXPORT int cef_set_os_crypt_keys(
++    const uint8_t* current_key,
++    size_t current_key_size,
++    const uint8_t* legacy_key,
++    size_t legacy_key_size) {
++#if BUILDFLAG(IS_MAC)
++  if (!current_key || current_key_size != 16 ||
++      (legacy_key_size != 0 && (!legacy_key || legacy_key_size != 16))) {
++    return 0;
++  }
++  return os_crypt_async::KeychainKeyProvider::SetRawEncryptionKeys(
++             current_key, current_key_size, legacy_key, legacy_key_size)
++             ? 1
++             : 0;
++#else
++  return 0;
++#endif
++}
++
+ CEF_EXPORT void cef_trace_event_instant(const char* /* category */,
+                                         const char* name,
+                                         const char* arg1_name,

@@ -65,7 +65,7 @@ default-features = false
 version = "0.5.2"
 
 [dependencies.cef]
-version = "148.2.0"
+version = "152.1.0"
 
 [dependencies.rkyv]
 workspace = true
@@ -82,6 +82,9 @@ version = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc]
 version = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies.libloading]
+version = "0.9"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

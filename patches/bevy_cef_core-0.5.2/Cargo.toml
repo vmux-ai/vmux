@@ -93,11 +93,11 @@ default-features = false
 optional = true
 
 [dependencies.cef]
-version = "148.2.0"
+version = "152.1.0"
 default-features = false
 
 [dependencies.cef-dll-sys]
-version = "148.2.0"
+version = "152.1.0"
 features = ["sandbox"]
 
 [dependencies.raw-window-handle]

@@ -347,7 +347,7 @@ fn package_builds_cef_helper_separately_without_lto() {
     }
     assert!(core_source.contains("#[cfg(feature = \"browser-process\")]\nmod browser_process;"));
     assert!(helper_manifest.contains("default-features = false"));
-    assert!(helper_manifest.contains("cef = { version = \"148.2.0\", default-features = false }"));
+    assert!(helper_manifest.contains("cef = { version = \"152.1.0\", default-features = false }"));
     assert!(!handler.contains("use bevy::"));
 }
 

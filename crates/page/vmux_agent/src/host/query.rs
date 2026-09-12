@@ -179,6 +179,14 @@ pub(super) fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(listed_spaces.json()),
                 });
             }
+            AgentQuery::VaultStatus => {
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result: AgentQueryResult::Text(
+                        vmux_core::profile::vault::status().agent_json(),
+                    ),
+                });
+            }
             AgentQuery::BookmarkList => {
                 let row = |u: &vmux_core::Uuid, m: &vmux_core::PageMetadata| {
                     serde_json::json!({

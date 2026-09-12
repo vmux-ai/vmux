@@ -179,6 +179,7 @@ impl Plugin for BrowserPlugin {
                     locale: startup_locale,
                     accept_language_list: startup_accept_language_list,
                     embedded_hosts,
+                    os_crypt_key_provider: cef_os_crypt_key_provider(),
                     ..default()
                 },
                 BinEventEmitterPlugin::<(
@@ -244,6 +245,25 @@ fn cef_command_line_config() -> CommandLineConfig {
         switches: vmux_core::profile::cef_keychain_switches().to_vec(),
         switch_values: vec![("disable-features", "BackForwardCache")],
     }
+}
+
+#[cfg(target_os = "macos")]
+fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
+    Some(cef_os_crypt_keys)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn cef_os_crypt_keys() -> Result<bevy_cef::CefOsCryptKeys, String> {
+    let keys = vmux_core::profile::safe_storage::SafeStorage::browser_keys()?;
+    Ok(bevy_cef::CefOsCryptKeys {
+        current: keys.current.to_vec(),
+        legacy: keys.legacy.map(|key| key.to_vec()),
+    })
 }
 
 fn theme_event(settings: &AppSettings) -> ThemeEvent {
