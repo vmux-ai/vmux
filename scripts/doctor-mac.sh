@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CARGO_BIN="${CARGO_BIN:-$(command -v cargo 2>/dev/null || echo "${HOME}/.cargo/bin/cargo")}"
 RUSTUP_BIN="${RUSTUP_BIN:-$(command -v rustup 2>/dev/null || echo "${HOME}/.cargo/bin/rustup")}"
 DX_BIN="${DX_BIN:-$(command -v dx 2>/dev/null || echo "${HOME}/.cargo/bin/dx")}"
@@ -79,11 +80,10 @@ else
 	ok_line "CEF install base is writable — ${HOME}/.local/share"
 fi
 
-if [[ -x "${CEF_FRAMEWORK_DIR}/Chromium Embedded Framework" ]] && \
-	nm -gU "${CEF_FRAMEWORK_DIR}/Chromium Embedded Framework" | awk '$NF == "_cef_set_os_crypt_keys" { found = 1 } END { exit !found }'; then
-	ok_line "custom CEF framework — ${CEF_FRAMEWORK_DIR}"
+if cef_validation="$("$ROOT/scripts/validate-cef.sh" "$CEF_FRAMEWORK_DIR" 2>&1)"; then
+	ok_line "$cef_validation"
 else
-	bad_line "custom CEF framework missing"
+	bad_line "$cef_validation"
 	tip "Run: ${BOLD}make setup-cef${RESET}"
 fi
 

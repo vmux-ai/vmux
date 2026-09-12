@@ -605,7 +605,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install CEF framework
-        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
+        run: ./scripts/install-cef.sh
 
       - name: Install dioxus-cli
         run: ./scripts/install-dioxus-cli.sh

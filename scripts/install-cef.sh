@@ -27,6 +27,12 @@ if [[ "$(uname -m)" != "arm64" ]]; then
     exit 1
 fi
 
+destination="$OUTPUT/Chromium Embedded Framework.framework"
+if "$ROOT/scripts/validate-cef.sh" "$destination" >/dev/null 2>&1; then
+    echo "CEF $("$ROOT/scripts/cef-manifest.sh" cef_version) already installed at $destination"
+    exit 0
+fi
+
 repository="$("$ROOT/scripts/cef-manifest.sh" artifact_repository)"
 tag="$("$ROOT/scripts/cef-manifest.sh" artifact_tag)"
 name="$("$ROOT/scripts/cef-manifest.sh" artifact_name)"
@@ -57,19 +63,13 @@ fi
 mkdir -p "$temporary/extracted"
 tar -xzf "$archive" -C "$temporary/extracted"
 framework="$temporary/extracted/Chromium Embedded Framework.framework"
-binary="$framework/Chromium Embedded Framework"
 
-if [[ ! -x "$binary" ]]; then
-    echo "CEF archive does not contain the expected framework" >&2
-    exit 1
-fi
-if ! nm -gU "$binary" | awk '$NF == "_cef_set_os_crypt_keys" { found = 1 } END { exit !found }'; then
-    echo "CEF archive does not export cef_set_os_crypt_keys" >&2
+if ! "$ROOT/scripts/validate-cef.sh" "$framework"; then
+    echo "CEF archive validation failed" >&2
     exit 1
 fi
 
 mkdir -p "$OUTPUT"
-destination="$OUTPUT/Chromium Embedded Framework.framework"
 rm -rf "$destination"
 mv "$framework" "$destination"
 echo "Installed $name to $destination"
