@@ -403,7 +403,6 @@ pub(crate) fn sync_windowed_frames(
     pane_frames.frames.clear();
     pane_frames.rings.clear();
     pane_frames.all_corners.clear();
-    let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
@@ -451,11 +450,8 @@ pub(crate) fn sync_windowed_frames(
         if let Some(logical) = PaneFrame::of(frame, scale) {
             pane_frames.frames.insert(entity, logical);
         }
-        let became_visible = !memory.visible_pages.contains(&entity);
         let browser_ready = browsers.has_browser(entity);
-        let was_raised = memory.raised_frame.contains_key(&entity);
-        let first_native_frame = browser_ready && !was_raised;
-        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
+        if browser_ready {
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_frame(
@@ -521,10 +517,8 @@ pub(crate) fn sync_windowed_frames(
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = memory.raised_frame.insert(entity, key) != Some(key);
-            if force_raise || changed || became_visible || first_native_frame {
-                browsers.raise_windowed_to_front(&entity);
-            }
+            memory.raised_frame.insert(entity, key);
+            browsers.raise_windowed_to_front(&entity);
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
@@ -543,10 +537,6 @@ pub(crate) fn sync_windowed_frames(
     *last_windowed_pages = current_windowed;
     memory.visible_frames =
         NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
-}
-
-fn windowed_page_needs_reveal(became_visible: bool, browser_ready: bool, was_raised: bool) -> bool {
-    became_visible || (browser_ready && !was_raised)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1461,13 +1451,6 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
-    }
-
-    #[test]
-    fn browser_created_after_layout_visibility_is_revealed_on_its_first_native_frame() {
-        assert!(windowed_page_needs_reveal(false, true, false));
-        assert!(!windowed_page_needs_reveal(false, false, false));
-        assert!(!windowed_page_needs_reveal(false, true, true));
     }
 
     #[test]

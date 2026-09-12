@@ -22,6 +22,7 @@ use vmux_core::event::{
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -1054,6 +1055,7 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
     } else {
         format!("{} → {}", boundary.base_ref, branch)
     };
+    let compact_dir = compact_workspace_path(&boundary.effective_dir);
     rsx! {
         div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2",
@@ -1068,34 +1070,57 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
             div { class: "mt-1.5 flex min-w-0 items-center gap-2 font-mono text-[10px] text-muted-foreground",
                 span { class: "min-w-0 flex-1 truncate", title: "{relation}", "{relation}" }
             }
-            div { class: "mt-2 grid grid-cols-2 gap-1.5 text-[9px]",
-                div { class: "flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/[0.04] px-2 py-1.5 text-muted-foreground",
-                    span { class: "size-1.5 shrink-0 rounded-full bg-amber-400" }
-                    span { class: "min-w-0 flex-1 truncate", {translate("composer-uncommitted-changes")} }
-                    span { class: "font-mono text-foreground", "{boundary.uncommitted}" }
-                }
-                div { class: "flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/[0.04] px-2 py-1.5 text-muted-foreground",
-                    LineIconView { icon: LineIcon::File, class: "size-3 shrink-0".to_string() }
-                    span { class: "min-w-0 flex-1 truncate", {translate("git-status-modified")} }
-                    span { class: "font-mono text-foreground", "{boundary.changed_files}" }
-                }
-                if boundary.ahead > 0 {
-                    div { class: "flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/[0.04] px-2 py-1.5 text-muted-foreground",
-                        span { class: "text-sky-500", "↑" }
-                        span { class: "min-w-0 flex-1 truncate", {translate("composer-commits-ahead")} }
-                        span { class: "font-mono text-foreground", "{boundary.ahead}" }
+            div { class: "mt-2 flex flex-wrap items-center gap-1.5 text-[9px]",
+                if boundary.uncommitted > 0 {
+                    Badge {
+                        class: "gap-1 rounded-full bg-amber-400/10 px-2 py-1 font-medium text-amber-700 ring-1 ring-inset ring-amber-400/20 dark:text-amber-300",
+                        title: translate("composer-uncommitted-changes"),
+                        span { class: "size-1.5 rounded-full bg-amber-400" }
+                        span { class: "font-mono tabular-nums", "{boundary.uncommitted}" }
+                        span { {translate("git-status-modified")} }
                     }
                 }
-                div { class: "flex min-w-0 items-center justify-end gap-2 rounded-md bg-foreground/[0.04] px-2 py-1.5 font-mono",
+                if boundary.changed_files > 0 {
+                    Badge {
+                        class: "gap-1 rounded-full bg-foreground/[0.05] px-2 py-1 text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                        title: translate("git-status-modified"),
+                        LineIconView { icon: LineIcon::File, class: "size-3 shrink-0".to_string() }
+                        span { class: "font-mono tabular-nums text-foreground", "{boundary.changed_files}" }
+                    }
+                }
+                if boundary.ahead > 0 {
+                    Badge {
+                        class: "gap-1 rounded-full bg-primary/10 px-2 py-1 font-mono tabular-nums text-primary ring-1 ring-inset ring-primary/20",
+                        title: translate("composer-commits-ahead"),
+                        "↑{boundary.ahead}"
+                    }
+                }
+                Badge {
+                    class: "gap-1.5 rounded-full bg-foreground/[0.05] px-2 py-1 font-mono tabular-nums ring-1 ring-inset ring-foreground/10",
                     span { class: "text-success", "+{boundary.insertions}" }
                     span { class: "text-destructive", "−{boundary.deletions}" }
                 }
             }
             if !boundary.effective_dir.is_empty() {
-                div { class: "mt-2 truncate font-mono text-[9px] text-muted-foreground/65", title: "{boundary.effective_dir}", "{boundary.effective_dir}" }
+                div { class: "mt-2 flex min-w-0 items-center gap-1.5 text-muted-foreground/65",
+                    BuiltinIconView { icon: vmux_core::BuiltinIcon::Files, class: "size-3 shrink-0".to_string() }
+                    span { class: "min-w-0 truncate font-mono text-[9px]", title: "{boundary.effective_dir}", "{compact_dir}" }
+                }
             }
         }
     }
+}
+
+fn compact_workspace_path(path: &str) -> String {
+    let components = path
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    if components.len() <= 3 {
+        return path.to_string();
+    }
+    format!("…/{}", components[components.len() - 3..].join("/"))
 }
 
 #[component]
