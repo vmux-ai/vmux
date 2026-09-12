@@ -22,9 +22,18 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
     exit 0
 fi
 
+if ! "$ROOT/scripts/validate-cef.sh" "$CEF_FRAMEWORK"; then
+    echo "inject-cef: refusing to bundle an incompatible CEF framework" >&2
+    exit 1
+fi
+
 APP_BUNDLE="$APP_BUNDLE" "$ROOT/scripts/copy-webview-assets.sh"
 
 if [[ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework" ]]; then
+    if ! "$ROOT/scripts/validate-cef.sh" "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework"; then
+        echo "inject-cef: existing app contains an incompatible CEF framework" >&2
+        exit 1
+    fi
     echo "inject-cef: CEF already injected, skipping"
     exit 0
 fi

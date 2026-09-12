@@ -240,7 +240,9 @@ ensure-native-deps:
 		echo "rustup not found at $(RUSTUP_BIN). Install rustup first: https://rustup.rs/"; \
 		exit 1; \
 	fi
-	@if [ ! -d "$(CEF_FRAMEWORK_DIR)" ]; then \
+	@if [ "$$(uname -s)" = Darwin ]; then \
+		CARGO_BIN="$(CARGO_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" ./scripts/install-cef.sh "$$HOME/.local/share"; \
+	elif [ ! -d "$(CEF_FRAMEWORK_DIR)" ]; then \
 		echo "CEF framework not found at $(CEF_FRAMEWORK_DIR). Run: make setup-cef"; \
 		exit 1; \
 	fi
