@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } تبويبات
 }
 spaces-delete = حذف مساحة العمل
+shortcuts-title = اختصارات لوحة المفاتيح
+shortcuts-count = { $count } اختصار
+shortcuts-search = تصفية الاختصارات…
+shortcuts-empty = لا توجد اختصارات مطابقة
+shortcuts-general = عام
+shortcuts-try-title = جرّب اختصارًا
+shortcuts-try-hint = اضغط أي اختصار
+shortcuts-waiting = بانتظار المفتاح التالي…
+shortcuts-triggered = يشغّل: { $action }
+shortcuts-no-match = لا يوجد اختصار يطابق هذه المفاتيح
+shortcuts-clear = إعادة تعيين
 
 team-title = الفريق
 simulator-title = المحاكي
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = الملفات الشخصية
+team-new-profile = ملف شخصي جديد
+team-switch-profile = التبديل إلى { $profile }
+team-edit-profile = تعديل الملف الشخصي
+team-profile-name = اسم الملف الشخصي
 team-just-you = أنت وحدك في مساحة العمل هذه
 team-agents = { $count ->
     [one] أنت ووكيل واحد
@@ -180,7 +196,7 @@ team-you = أنت
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = وكيل
 
-services-title = خدمات الخلفية
+services-title = عمليات Vmux
 services-processes = { $count ->
     [one] عملية واحدة
    *[other] { $count } عمليات
@@ -197,6 +213,7 @@ services-attached = مرفق
 services-kill = إنهاء قسرًا
 services-memory = الذاكرة
 services-size = الحجم
+services-uptime = مدة التشغيل
 services-shell = الصَدفة
 
 error-title = خطأ
@@ -282,6 +299,7 @@ layout-new-stack = طبقة جديدة
 layout-close-tab = إغلاق التبويب
 layout-bookmark = إضافة إلى المفضلة
 layout-pin = تثبيت
+layout-unpin = إلغاء التثبيت
 layout-new-tab = تبويب جديد
 layout-team = الفريق
 
@@ -451,6 +469,8 @@ common-error = خطأ
 common-output = المخرجات
 common-pending = معلّق
 common-current = الحالي
+composer-permissions = الأذونات
+composer-permission-change = تغيير وضع الأذونات
 common-stop = إيقاف
 services-command = خدمة Vmux
 services-uptime-seconds = { $seconds }ث

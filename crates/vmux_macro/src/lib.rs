@@ -543,6 +543,7 @@ fn impl_leaf_shortcuts(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut binding_entries = Vec::new();
     let mut extra_entries = Vec::new();
+    let mut label_entries = Vec::new();
 
     for variant in &data.variants {
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
@@ -599,6 +600,12 @@ fn impl_leaf_shortcuts(
                     "#[shortcut(expand)] requires #[menu(id_template)]",
                 )
             })?;
+            let label_tmpl = menu_props.label_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant,
+                    "#[shortcut(expand)] requires #[menu(label_template)]",
+                )
+            })?;
 
             let valid_dir_names: Vec<String> = dir_variants
                 .iter()
@@ -628,6 +635,7 @@ fn impl_leaf_shortcuts(
                     continue;
                 };
                 let id_str = expand::format_id_template(id_tmpl, dir_variant_str);
+                let label_str = expand::format_label_template(label_tmpl, dir_variant_str);
                 let combo_tokens = parse_key_combo_tokens(key_spec, variant)?;
                 binding_entries.push(quote! {
                     crate::shortcut::Binding {
@@ -636,8 +644,19 @@ fn impl_leaf_shortcuts(
                         when: ::core::option::Option::None,
                     }
                 });
+                label_entries.push(quote! {
+                    (#id_str, ::std::string::String::from(#label_str))
+                });
             }
             continue;
+        }
+
+        if let (Some(menu_id), Some(label)) = (&menu_props.id, &menu_props.label) {
+            let name = label.split('\t').next().unwrap_or(label);
+            let menu_id_str = menu_id.as_str();
+            label_entries.push(quote! {
+                (#menu_id_str, ::std::string::String::from(#name))
+            });
         }
 
         if let (Some(accel), Some(menu_id)) = (&menu_props.accel, &menu_props.id) {
@@ -710,6 +729,10 @@ fn impl_leaf_shortcuts(
                 ::std::vec![#(#binding_entries),*]
             }
 
+            pub fn shortcut_labels() -> ::std::vec::Vec<(&'static str, ::std::string::String)> {
+                ::std::vec![#(#label_entries),*]
+            }
+
             pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {
                 ::std::vec![#(#extra_entries),*]
             }
@@ -723,6 +746,7 @@ fn impl_root_shortcuts(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
     let mut extra_extend_calls = Vec::new();
+    let mut label_extend_calls = Vec::new();
 
     for variant in &data.variants {
         let Fields::Unnamed(fields) = &variant.fields else {
@@ -739,6 +763,7 @@ fn impl_root_shortcuts(
         };
         let inner_ty = &field.ty;
         let var_ident = &variant.ident;
+        let menu_props = MenuProps::from_attrs(&variant.attrs)?;
         extend_calls.push(quote! {
             bindings.extend(<#inner_ty>::default_shortcuts());
         });
@@ -749,6 +774,19 @@ fn impl_root_shortcuts(
                     .map(|(shortcut, child)| (shortcut, #ident::#var_ident(child)))
             );
         });
+        if let Some(label) = menu_props.label {
+            label_extend_calls.push(quote! {
+                labels.extend(
+                    <#inner_ty>::shortcut_labels()
+                        .into_iter()
+                        .map(|(id, name)| (id, ::std::format!("{} > {}", #label, name)))
+                );
+            });
+        } else {
+            label_extend_calls.push(quote! {
+                labels.extend(<#inner_ty>::shortcut_labels());
+            });
+        }
     }
 
     Ok(quote! {
@@ -757,6 +795,12 @@ fn impl_root_shortcuts(
                 let mut bindings = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 bindings
+            }
+
+            pub fn shortcut_labels() -> ::std::vec::Vec<(&'static str, ::std::string::String)> {
+                let mut labels = ::std::vec::Vec::new();
+                #(#label_extend_calls)*
+                labels
             }
 
             pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {

@@ -115,6 +115,12 @@ impl AcpSessionManager {
             .and_then(|handle| handle.shared.model_info_message())
     }
 
+    pub fn mode_info(&self, sid: &str) -> Option<ServiceMessage> {
+        self.sessions
+            .get(sid)
+            .and_then(|handle| handle.shared.mode_info_message())
+    }
+
     pub fn remote_messages(&self, sid: &str) -> Option<Vec<crate::message::Message>> {
         self.sessions
             .get(sid)
@@ -180,11 +186,13 @@ mod tests {
                 text: "x".to_string(),
                 context: None,
                 attachments: Vec::new(),
+                preferred_mode: None,
             }
         ));
         assert!(mgr.subscribe("nope").is_none());
         assert!(mgr.snapshot("nope").is_none());
         assert!(mgr.agent_info("nope").is_none());
         assert!(mgr.model_info("nope").is_none());
+        assert!(mgr.mode_info("nope").is_none());
     }
 }

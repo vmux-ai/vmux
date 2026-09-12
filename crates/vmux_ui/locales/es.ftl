@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } pestañas
 }
 spaces-delete = Eliminar espacio
+shortcuts-title = Atajos de teclado
+shortcuts-count = { $count } atajos
+shortcuts-search = Filtrar atajos…
+shortcuts-empty = No hay atajos coincidentes
+shortcuts-general = General
+shortcuts-try-title = Probar un atajo
+shortcuts-try-hint = Pulsa cualquier atajo
+shortcuts-waiting = Esperando la siguiente tecla…
+shortcuts-triggered = Ejecuta: { $action }
+shortcuts-no-match = Ningún atajo coincide con esas teclas
+shortcuts-clear = Restablecer
 
 team-title = Equipo
 simulator-title = Simulador
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Perfiles
+team-new-profile = Nuevo perfil
+team-switch-profile = Cambiar a { $profile }
+team-edit-profile = Editar perfil
+team-profile-name = Nombre del perfil
 team-just-you = Solo tú en este espacio
 team-agents = { $count ->
     [one] Tú y 1 agente
@@ -180,7 +196,7 @@ team-you = Tú
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agente
 
-services-title = Servicios en segundo plano
+services-title = Procesos de Vmux
 services-processes = { $count ->
     [one] 1 proceso
    *[other] { $count } procesos
@@ -197,6 +213,7 @@ services-attached = adjunto
 services-kill = Forzar cierre
 services-memory = Memoria
 services-size = Tamaño
+services-uptime = Tiempo activo
 services-shell = Shell
 
 error-title = Error
@@ -282,6 +299,7 @@ layout-new-stack = Nueva pila
 layout-close-tab = Cerrar pestaña
 layout-bookmark = Marcador
 layout-pin = Fijar
+layout-unpin = Desfijar
 layout-new-tab = Nueva pestaña
 layout-team = Equipo
 
@@ -451,6 +469,8 @@ common-error = Error
 common-output = Salida
 common-pending = Pendiente
 common-current = actual
+composer-permissions = Permisos
+composer-permission-change = Cambiar modo de permisos
 common-stop = Detener
 services-command = Servicio de Vmux
 services-uptime-seconds = { $seconds } s

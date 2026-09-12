@@ -98,63 +98,97 @@ pub fn Page() -> Element {
     };
 
     let groups = group_by_day(&entries.read(), now_millis());
+    let entry_count = entries.read().len();
 
     rsx! {
-        div { class: "flex flex-col h-screen bg-background text-foreground",
-            header { class: "p-3 border-b border-border flex gap-2 items-center",
-                input {
-                    class: "flex-1 bg-muted px-3 py-2 rounded text-sm outline-none",
-                    placeholder: translate("history-search"),
-                    value: "{query.read()}",
-                    oninput: on_input,
-                }
-                button {
-                    class: "px-3 py-2 text-xs bg-destructive text-destructive-foreground rounded",
-                    onclick: move |_| confirm_open.set(Some(true)),
-                    {translate("history-clear-all")}
+        div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
+            header { class: "flex items-center justify-between border-b border-border px-5 py-4",
+                h1 { class: "text-lg font-semibold tracking-tight", {translate("history-title")} }
+                if entry_count > 0 {
+                    span { class: "flex min-w-7 items-center justify-center rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground",
+                        "{entry_count}"
+                    }
                 }
             }
-            main { class: "flex-1 overflow-y-auto p-3 text-sm",
-                for (label, group) in groups {
-                    div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
-                    for entry in group {
-                        div {
-                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-foreground/[0.04] group cursor-pointer",
-                            onclick: {
-                                let url = entry.url.clone();
-                                move |_| {
-                                    let _ = send(&HistoryOpenRequest {
-                                        url: url.clone(),
-                                        in_new_stack: true,
-                                    });
-                                }
-                            },
-                            span { class: "text-xs text-muted-foreground w-12", "{format_time(entry.visit_created_at)}" }
-                            Favicon {
-                                favicon_url: entry.favicon_url.clone(),
-                                url: entry.url.clone(),
-                                class: "w-4 h-4 shrink-0 rounded-sm object-contain".to_string(),
-                                globe_class: "w-4 h-4 shrink-0 text-muted-foreground".to_string(),
-                            }
-                            span { class: "flex-1 truncate",
-                                if entry.title.is_empty() { "{entry.url}" } else { "{entry.title}" }
-                            }
-                            button {
-                                class: "opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive px-2",
-                                onclick: {
-                                    let url_bits = entry.url_entity_bits;
-                                    move |e: Event<MouseData>| {
-                                        e.stop_propagation();
-                                        let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
-                                        entries.write().retain(|x| x.url_entity_bits != url_bits);
+            main { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5 text-sm",
+                div { class: "mx-auto w-full max-w-4xl",
+                    div { class: "glass mb-6 flex items-center gap-2 rounded-xl border border-border/70 p-2",
+                        svg { class: "ml-1 size-4 shrink-0 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                            circle { cx: "11", cy: "11", r: "7" }
+                            path { d: "m20 20-3.5-3.5" }
+                        }
+                        input {
+                            class: "min-w-0 flex-1 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
+                            placeholder: translate("history-search"),
+                            value: "{query.read()}",
+                            oninput: on_input,
+                        }
+                        button {
+                            class: "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40",
+                            disabled: entry_count == 0,
+                            onclick: move |_| confirm_open.set(Some(true)),
+                            {translate("history-clear-all")}
+                        }
+                    }
+                    for (label, group) in groups {
+                        section { class: "mb-6",
+                            h2 { class: "mb-2 px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", "{label}" }
+                            div { class: "overflow-hidden rounded-xl border border-border bg-card/30",
+                                for entry in group {
+                                    div {
+                                        class: "group flex cursor-pointer items-center gap-3 border-b border-border/70 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.04]",
+                                        onclick: {
+                                            let url = entry.url.clone();
+                                            move |_| {
+                                                let _ = send(&HistoryOpenRequest {
+                                                    url: url.clone(),
+                                                    in_new_stack: true,
+                                                });
+                                            }
+                                        },
+                                        div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
+                                            Favicon {
+                                                favicon_url: entry.favicon_url.clone(),
+                                                url: entry.url.clone(),
+                                                class: "size-4 shrink-0 rounded-sm object-contain".to_string(),
+                                                globe_class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                                            }
+                                        }
+                                        div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
+                                            span { class: "truncate text-sm font-medium text-foreground",
+                                                if entry.title.is_empty() { "{entry.url}" } else { "{entry.title}" }
+                                            }
+                                            if !entry.title.is_empty() && entry.title != entry.url {
+                                                span { class: "truncate text-xs text-muted-foreground", "{entry.url}" }
+                                            }
+                                        }
+                                        span { class: "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70", "{format_time(entry.visit_created_at)}" }
+                                        button {
+                                            class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive",
+                                            aria_label: format!(
+                                                "{}: {}",
+                                                translate("common-remove"),
+                                                if entry.title.is_empty() { entry.url.as_str() } else { entry.title.as_str() },
+                                            ),
+                                            onclick: {
+                                                let url_bits = entry.url_entity_bits;
+                                                move |e: Event<MouseData>| {
+                                                    e.stop_propagation();
+                                                    let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                                    entries.write().retain(|x| x.url_entity_bits != url_bits);
+                                                }
+                                            },
+                                            svg { class: "size-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                                                path { d: "M18 6 6 18M6 6l12 12" }
+                                            }
+                                        }
                                     }
-                                },
-                                "\u{00d7}"
+                                }
                             }
                         }
                     }
+                    div { class: "h-4", onvisible: load_more }
                 }
-                div { class: "h-4", onvisible: load_more }
             }
         }
         AlertDialogRoot {

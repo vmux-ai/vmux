@@ -12,6 +12,7 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::matrix_rain::MatrixLoader;
 use vmux_ui::platform::sleep_ms;
 
 #[component]
@@ -28,6 +29,7 @@ pub fn Page() -> Element {
                 Waiting { route }
             } else {
                 Mirror {
+                    key: "{announced.port}-{announced.capability}",
                     port: announced.port,
                     capability: announced.capability.clone(),
                     device_name: announced.device_name.clone(),
@@ -41,6 +43,7 @@ pub fn Page() -> Element {
 fn Mirror(port: u16, capability: String, device_name: String) -> Element {
     let mut press = use_signal(|| None::<PointerSession>);
     let mut image_size = use_signal(|| None::<(f64, f64)>);
+    let mut image_loaded = use_signal(|| false);
     let mut home_progress = use_signal(|| 0.0f32);
     let mut surface = use_signal(|| None::<Rc<MountedData>>);
     let progress = home_progress();
@@ -55,7 +58,6 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
-
     rsx! {
         div {
             class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8 outline-none",
@@ -132,10 +134,22 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                 };
                 current.cancel().dispatch(home_progress);
             },
-            div { class: "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300",
+            if !image_loaded() {
+                SimulatorLoader { class: "absolute inset-0".to_string() }
+            }
+            div {
+                class: if image_loaded() {
+                    "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-100 transition-opacity"
+                } else {
+                    "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-0"
+                },
                 "{device_name}"
             }
-            div { class: "relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
+            div { class: if image_loaded() {
+                    "relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-100 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity"
+                } else {
+                    "invisible relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0"
+                },
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
@@ -145,6 +159,8 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                         style: image_style,
                         draggable: false,
                         src: "http://127.0.0.1:{port}/{capability}",
+                        onload: move |_| image_loaded.set(true),
+                        onerror: move |_| image_loaded.set(false),
                         onresize: move |event: Event<ResizeData>| {
                             let Ok(size) = event.get_border_box_size() else {
                                 return;
@@ -262,7 +278,21 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
         _ => translate("common-loading"),
     };
     rsx! {
-        div { class: "text-sm text-muted-foreground", "{label}" }
+        MatrixLoader {
+            label,
+            words: vec![translate("simulator-title").to_uppercase()],
+        }
+    }
+}
+
+#[component]
+fn SimulatorLoader(class: String) -> Element {
+    rsx! {
+        MatrixLoader {
+            class,
+            label: translate("common-loading"),
+            words: vec![translate("simulator-title").to_uppercase()],
+        }
     }
 }
 

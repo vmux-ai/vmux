@@ -112,6 +112,22 @@ pub struct PageAgentModelSelectionResult {
 }
 
 #[derive(Message)]
+pub struct PageAgentModeInfo {
+    pub sid: String,
+    pub config_id: String,
+    pub current_mode_id: String,
+    pub modes: Vec<crate::protocol::AcpModeOption>,
+}
+
+#[derive(Message)]
+pub struct PageAgentModeSelectionResult {
+    pub sid: String,
+    pub request_id: u64,
+    pub mode_id: String,
+    pub succeeded: bool,
+}
+
+#[derive(Message)]
 pub struct PageAgentSessionCreated {
     pub sid: String,
     pub acp_session_id: String,

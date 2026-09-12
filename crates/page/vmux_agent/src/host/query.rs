@@ -154,7 +154,7 @@ pub(super) fn handle_agent_queries(
         MessageWriter<vmux_simulator::SimulatorControlRequest>,
         MessageWriter<vmux_simulator::SimulatorScreenshotRequest>,
     ),
-    mut browse: AgentBrowserResolve,
+    (mut browse, tabs): (AgentBrowserResolve, Query<&vmux_layout::tab::Tab>),
 ) {
     let Some(service) = service else { return };
 
@@ -164,6 +164,22 @@ pub(super) fn handle_agent_queries(
                 layout_snapshot_writer.write(vmux_layout::apply::LayoutSnapshotRequest {
                     request_id: request.request_id.0,
                     anchor,
+                });
+            }
+            AgentQuery::WorkingDirectory { anchor } => {
+                let result = if browse.agent_pane(anchor).is_none() {
+                    AgentQueryResult::Error("agent pane not found".to_string())
+                } else if let Some(path) = browse.working_directory(anchor, &tabs) {
+                    AgentQueryResult::Text(path.to_string_lossy().into_owned())
+                } else {
+                    match super::run_terminal::AgentCwd::projects() {
+                        Ok(path) => AgentQueryResult::Text(path.to_string_lossy().into_owned()),
+                        Err(message) => AgentQueryResult::Error(message),
+                    }
+                };
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result,
                 });
             }
             AgentQuery::GetSettings => {

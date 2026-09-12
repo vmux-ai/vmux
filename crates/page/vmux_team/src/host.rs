@@ -1,13 +1,15 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use bevy_ecs::system::SystemParam;
 
 use vmux_agent::AgentRunState;
 use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{
-    TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
+    ProfileRow, TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
 };
 use vmux_core::page::PageReady;
+use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::cef::LayoutCef;
@@ -23,16 +25,22 @@ pub struct TeamPlugin;
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        app.add_systems(Startup, spawn_user_profile)
+        app.add_message::<ProfileSwitchRequested>()
+            .add_systems(Startup, (spawn_user_profile, spawn_profile_labels))
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(Update, answer_list_team)
             .add_plugins(HostedPagePlugin::<Team>::default())
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
-                "team", "layout",
+                "team", "layout", "spaces",
             ]))
             .add_observer(on_team_command)
             .add_observer(reset_team_sent_on_page_ready);
     }
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct ProfileSwitchRequested {
+    pub profile_id: String,
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -57,10 +65,50 @@ impl HostedPage for Team {
 #[derive(Component)]
 struct TeamListSent;
 
+#[derive(SystemParam)]
+struct TeamViews<'w, 's> {
+    pending_layout:
+        Query<'w, 's, Entity, (With<LayoutCef>, With<PageReady>, Without<TeamListSent>)>,
+    sent_layout: Query<'w, 's, Entity, (With<LayoutCef>, With<PageReady>, With<TeamListSent>)>,
+    pending_team: Query<'w, 's, Entity, (With<Team>, With<PageReady>, Without<TeamListSent>)>,
+    sent_team: Query<'w, 's, Entity, (With<Team>, With<PageReady>, With<TeamListSent>)>,
+    pending_spaces: Query<
+        'w,
+        's,
+        Entity,
+        (
+            With<vmux_space::Spaces>,
+            With<PageReady>,
+            Without<TeamListSent>,
+        ),
+    >,
+    sent_spaces: Query<
+        'w,
+        's,
+        Entity,
+        (
+            With<vmux_space::Spaces>,
+            With<PageReady>,
+            With<TeamListSent>,
+        ),
+    >,
+}
+
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
     if vmux_core::profile::is_test_session() {
         identity.insert(vmux_core::team::Tester);
+    }
+}
+
+fn spawn_profile_labels(mut commands: Commands) {
+    let active = vmux_core::profile::active_profile_name();
+    for id in vmux_core::profile::profile_ids() {
+        let name = vmux_core::profile::profile_display_name(&id);
+        let mut entity = commands.spawn((ProfileLabel, ProfileId(id.clone()), Name::new(name)));
+        if id == active {
+            entity.insert(vmux_core::Active);
+        }
     }
 }
 
@@ -201,6 +249,27 @@ fn build_team_members(
     members
 }
 
+fn build_profiles(
+    labels: &Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
+) -> Vec<ProfileRow> {
+    let mut profiles = Vec::new();
+    for (id, name, is_active) in labels {
+        profiles.push(ProfileRow {
+            id: id.0.clone(),
+            name: name.as_str().to_string(),
+            is_active,
+        });
+    }
+    profiles.sort_by(|left, right| {
+        right
+            .is_active
+            .cmp(&left.is_active)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    profiles
+}
+
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
     service: Option<Res<ServiceClient>>,
@@ -251,10 +320,7 @@ fn answer_list_team(
 
 fn emit_team(
     browsers: NonSend<Browsers>,
-    pending_layout: Query<Entity, (With<LayoutCef>, With<PageReady>, Without<TeamListSent>)>,
-    sent_layout: Query<Entity, (With<LayoutCef>, With<PageReady>, With<TeamListSent>)>,
-    pending_team: Query<Entity, (With<Team>, With<PageReady>, Without<TeamListSent>)>,
-    sent_team: Query<Entity, (With<Team>, With<PageReady>, With<TeamListSent>)>,
+    views: TeamViews,
     active_space: Res<ActiveSpaceEntity>,
     active_spaces: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
     user_q: Query<(Entity, &Profile), With<User>>,
@@ -271,17 +337,22 @@ fn emit_team(
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
+    profile_labels: Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
     mut last: Local<std::collections::HashMap<Entity, TeamEvent>>,
     mut commands: Commands,
 ) {
-    for (entity, pending) in pending_layout
+    for (entity, pending) in views
+        .pending_layout
         .iter()
-        .chain(pending_team.iter())
+        .chain(views.pending_team.iter())
+        .chain(views.pending_spaces.iter())
         .map(|entity| (entity, true))
         .chain(
-            sent_layout
+            views
+                .sent_layout
                 .iter()
-                .chain(sent_team.iter())
+                .chain(views.sent_team.iter())
+                .chain(views.sent_spaces.iter())
                 .map(|entity| (entity, false)),
         )
     {
@@ -302,6 +373,7 @@ fn emit_team(
                 &meta_q,
                 &children_q,
             ),
+            profiles: build_profiles(&profile_labels),
         };
         if !pending && last.get(&entity) == Some(&payload) {
             continue;
@@ -317,12 +389,11 @@ fn emit_team(
 
 fn reset_team_sent_on_page_ready(
     trigger: On<BinReceive<PageReady>>,
-    team_views: Query<(), With<Team>>,
-    layout_views: Query<(), With<LayoutCef>>,
+    views: Query<(), Or<(With<Team>, With<LayoutCef>, With<vmux_space::Spaces>)>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if team_views.get(entity).is_err() && layout_views.get(entity).is_err() {
+    if views.get(entity).is_err() {
         return;
     }
     commands.entity(entity).remove::<TeamListSent>();
@@ -355,9 +426,82 @@ fn on_team_command(
     agents: Query<Entity, With<Agent>>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<Space>>,
+    mut space_profiles: Query<&mut vmux_layout::profile::Profile, With<Space>>,
+    mut active_record: Option<ResMut<vmux_space::ActiveSpace>>,
+    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
+    mut profile_labels: Query<
+        (Entity, &ProfileId, &mut Name, Has<vmux_core::Active>),
+        With<ProfileLabel>,
+    >,
     mut commands: Commands,
 ) {
-    if let Some(member_id) = trigger.event().payload.member_id.as_deref() {
+    let event = &trigger.event().payload;
+    match event.command.as_str() {
+        "create_profile" => {
+            let Some(name) = event.profile_name.as_deref() else {
+                return;
+            };
+            let name = name.trim().to_string();
+            match vmux_core::profile::create_profile(&name) {
+                Ok(profile_id) => {
+                    commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
+                    profile_switches.write(ProfileSwitchRequested { profile_id });
+                }
+                Err(error) => bevy::log::warn!("profile create failed: {error}"),
+            }
+            return;
+        }
+        "switch_profile" => {
+            let Some(profile_id) = event.profile_id.as_deref() else {
+                return;
+            };
+            let profile_id = vmux_core::profile::sanitize_profile(profile_id);
+            if profile_id != vmux_core::profile::active_profile_name()
+                && vmux_core::profile::profile_exists(&profile_id)
+            {
+                let found = profile_labels
+                    .iter()
+                    .any(|(_, id, _, _)| id.0 == profile_id);
+                if found {
+                    profile_switches.write(ProfileSwitchRequested { profile_id });
+                }
+            }
+            return;
+        }
+        "update_profile" => {
+            let (Some(profile_id), Some(name)) =
+                (event.profile_id.as_deref(), event.profile_name.as_deref())
+            else {
+                return;
+            };
+            let profile_id = vmux_core::profile::sanitize_profile(profile_id);
+            if let Err(error) = vmux_core::profile::set_profile_display_name(&profile_id, name) {
+                bevy::log::warn!("profile update failed: {error}");
+                return;
+            }
+            let name = name.trim().to_string();
+            for (_, id, mut label, _) in &mut profile_labels {
+                if id.0 == profile_id {
+                    *label = Name::new(name.clone());
+                }
+            }
+            if profile_id == vmux_core::profile::active_profile_name() {
+                for mut profile in &mut space_profiles {
+                    profile.name.clone_from(&name);
+                }
+                if let Some(active) = active_record.as_deref_mut() {
+                    active.record.profile.clone_from(&name);
+                }
+                if let Ok(entity) = user.single() {
+                    commands.entity(entity).insert(Profile::user_named(name));
+                }
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    if let Some(member_id) = event.member_id.as_deref() {
         if let Some(entity) = parse_member_entity(member_id)
             && agents.get(entity).is_ok()
         {
@@ -475,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    fn team_page_open_titles_webview_team() {
+    fn team_page_open_titles_webview_profiles() {
         use vmux_core::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -505,6 +649,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AppCommand>()
             .add_message::<vmux_command::CommandIssued>()
+            .add_message::<ProfileSwitchRequested>()
             .add_observer(on_team_command);
         app
     }
@@ -531,6 +676,8 @@ mod tests {
             payload: TeamCommandEvent {
                 command: "focus".to_string(),
                 member_id: Some(stack.to_bits().to_string()),
+                profile_id: None,
+                profile_name: None,
             },
         });
         app.world_mut().flush();
@@ -551,6 +698,8 @@ mod tests {
             payload: TeamCommandEvent {
                 command: "open".to_string(),
                 member_id: None,
+                profile_id: None,
+                profile_name: None,
             },
         });
         app.world_mut().flush();

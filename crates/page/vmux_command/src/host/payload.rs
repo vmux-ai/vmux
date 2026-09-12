@@ -240,6 +240,7 @@ pub fn command_bar_open_payload(
         search_engines,
         prompt_context: default(),
         agent_models: Vec::new(),
+        agent_modes: Vec::new(),
         target,
         picker: None,
         picks: Vec::new(),

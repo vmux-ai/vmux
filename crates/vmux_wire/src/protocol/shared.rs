@@ -19,6 +19,7 @@ pub enum AgentAction {
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
+        preferred_mode: Option<String>,
     },
     Cancel,
     Approve {

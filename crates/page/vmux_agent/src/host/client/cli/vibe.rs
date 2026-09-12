@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::client::cli::strategy::{
-    CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
+    CliAgentStrategy, CliModelCatalog, ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
@@ -48,6 +48,14 @@ impl CliAgentStrategy for VibeStrategy {
             args.push(sid.to_string());
         }
         args
+    }
+
+    fn model_catalog(&self) -> CliModelCatalog {
+        VibeModels::load()
+    }
+
+    fn model_env(&self, model: &str) -> Vec<(String, String)> {
+        vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
     }
 
     fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)> {
@@ -119,6 +127,79 @@ impl CliAgentStrategy for VibeStrategy {
 
     fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
         load_vibe_transcript(&self.sessions_root(), session_id)
+    }
+}
+
+#[derive(Default, serde::Deserialize)]
+struct VibeConfig {
+    #[serde(default)]
+    active_model: String,
+    #[serde(default)]
+    models: Vec<VibeModel>,
+}
+
+#[derive(serde::Deserialize)]
+struct VibeModel {
+    name: String,
+    #[serde(default)]
+    alias: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    provider: String,
+}
+
+struct VibeModels;
+
+impl VibeModels {
+    fn load() -> CliModelCatalog {
+        Self::from_config(&vibe_home().join("config.toml"))
+    }
+
+    fn from_config(path: &Path) -> CliModelCatalog {
+        let config = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| toml::from_str::<VibeConfig>(&text).ok())
+            .unwrap_or_default();
+        let mut models = Vec::new();
+        for model in config.models {
+            let id = if model.alias.is_empty() {
+                model.name.clone()
+            } else {
+                model.alias
+            };
+            let name = if model.display_name.is_empty() {
+                id.clone()
+            } else {
+                model.display_name
+            };
+            models.push(vmux_wire::room::ModelOptionEntry {
+                id,
+                name,
+                description: model.provider,
+            });
+        }
+        if !config.active_model.is_empty()
+            && !models.iter().any(|model| model.id == config.active_model)
+        {
+            models.insert(
+                0,
+                vmux_wire::room::ModelOptionEntry {
+                    id: config.active_model.clone(),
+                    name: config.active_model.clone(),
+                    description: String::new(),
+                },
+            );
+        }
+        let selected = if config.active_model.is_empty() {
+            models
+                .first()
+                .map(|model| model.id.clone())
+                .unwrap_or_default()
+        } else {
+            config.active_model
+        };
+        CliModelCatalog { selected, models }
     }
 }
 
@@ -463,6 +544,34 @@ fn vibe_latest_message(path: &Path) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn model_catalog_reads_vibe_aliases_and_active_model() {
+        let tmp = unique_tmp("vibe-models");
+        let config = tmp.join("config.toml");
+        std::fs::write(
+            &config,
+            concat!(
+                "active_model = \"opus\"\n",
+                "[[models]]\n",
+                "name = \"claude-opus-5\"\n",
+                "alias = \"opus\"\n",
+                "provider = \"anthropic\"\n"
+            ),
+        )
+        .unwrap();
+
+        let models = VibeModels::from_config(&config);
+
+        assert_eq!(models.selected, "opus");
+        assert_eq!(models.models[0].id, "opus");
+        assert_eq!(models.models[0].description, "anthropic");
+        assert_eq!(
+            VibeStrategy.model_env("opus"),
+            [("VIBE_ACTIVE_MODEL".to_string(), "opus".to_string())]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn build_args_trust_resume_and_test_session_auto_approve() {

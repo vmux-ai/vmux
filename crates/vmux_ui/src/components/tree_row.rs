@@ -57,12 +57,12 @@ impl TreeRowAccent {
     pub fn classes(self) -> &'static str {
         match self {
             Self::Plain => "text-foreground/80 hover:bg-foreground/[0.08]",
-            Self::Active => "bg-cyan-400/12 text-foreground",
+            Self::Active => "bg-primary/12 text-foreground",
             Self::Focus => {
                 "text-foreground/80 ring-1 ring-inset ring-foreground/40 group-focus-within/list:bg-foreground/[0.16] group-focus-within/list:text-foreground group-focus-within/list:ring-0"
             }
             Self::ActiveFocus => {
-                "bg-cyan-400/12 text-foreground ring-1 ring-inset ring-foreground/40 group-focus-within/list:bg-cyan-400/25 group-focus-within/list:ring-0"
+                "bg-primary/12 text-foreground ring-1 ring-inset ring-foreground/40 group-focus-within/list:bg-primary/25 group-focus-within/list:ring-0"
             }
         }
     }

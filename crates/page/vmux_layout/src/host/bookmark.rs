@@ -60,6 +60,10 @@ pub enum BookmarkOp {
         uuid: String,
         folder: Option<String>,
     },
+    ReorderPin {
+        uuid: String,
+        target_uuid: String,
+    },
     AddFolder {
         name: String,
     },
@@ -181,6 +185,7 @@ fn apply_bookmark_ops(
     folder_q: Query<(), With<Folder>>,
     collapsed_q: Query<(), With<Collapsed>>,
     orders: Query<&BookmarkOrder>,
+    pin_orders: Query<(Entity, &Uuid, &BookmarkOrder), With<Pin>>,
     children_q: Query<&Children>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
@@ -298,6 +303,29 @@ fn apply_bookmark_ops(
                     } else {
                         entity_commands.remove::<ChildOf>();
                     }
+                }
+            }
+            BookmarkOp::ReorderPin { uuid, target_uuid } => {
+                let mut pins = pin_orders
+                    .iter()
+                    .map(|(entity, uuid, order)| (entity, uuid.0.clone(), order.0))
+                    .collect::<Vec<_>>();
+                pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
+                let Some(source_index) = pins.iter().position(|(_, id, _)| id == uuid) else {
+                    continue;
+                };
+                let Some(target_index) = pins.iter().position(|(_, id, _)| id == target_uuid)
+                else {
+                    continue;
+                };
+                if source_index == target_index {
+                    continue;
+                }
+                let order_values = pins.iter().map(|(_, _, order)| *order).collect::<Vec<_>>();
+                let moved = pins.remove(source_index);
+                pins.insert(target_index, moved);
+                for ((entity, _, _), order) in pins.into_iter().zip(order_values) {
+                    commands.entity(entity).insert(BookmarkOrder(order));
                 }
             }
             BookmarkOp::AddFolder { name } => {
@@ -573,6 +601,11 @@ fn on_bookmarks_command_emit(
                 });
             }
         }
+        "reorder_pin" => {
+            if let (Some(uuid), Some(target_uuid)) = (e.uuid.clone(), e.target_uuid.clone()) {
+                ops.write(BookmarkOp::ReorderPin { uuid, target_uuid });
+            }
+        }
         "pin" => {
             if let Some(uuid) = e.uuid.clone() {
                 ops.write(BookmarkOp::Pin { uuid });
@@ -723,6 +756,7 @@ mod tests {
                     url: Some("https://a.test".into()),
                     metadata: None,
                     folder: None,
+                    target_uuid: None,
                 },
             });
         let commands: Vec<_> = app
@@ -848,6 +882,32 @@ mod tests {
                 "vmux://projects/",
             ]
         );
+    }
+
+    #[test]
+    fn reorder_pin_moves_source_to_target_slot() {
+        let mut app = test_app();
+        for (uuid, order) in [("a", 2), ("b", 5), ("c", 9)] {
+            app.world_mut()
+                .spawn((Pin, Uuid(uuid.into()), metadata(uuid), BookmarkOrder(order)));
+        }
+
+        send(
+            &mut app,
+            BookmarkOp::ReorderPin {
+                uuid: "a".into(),
+                target_uuid: "c".into(),
+            },
+        );
+
+        let mut pins = app
+            .world_mut()
+            .query_filtered::<(&Uuid, &BookmarkOrder), With<Pin>>()
+            .iter(app.world())
+            .map(|(uuid, order)| (order.0, uuid.0.clone()))
+            .collect::<Vec<_>>();
+        pins.sort();
+        assert_eq!(pins, [(2, "b".into()), (5, "c".into()), (9, "a".into())]);
     }
 
     #[test]

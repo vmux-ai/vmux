@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] 탭 { $count }개
 }
 spaces-delete = 스페이스 삭제
+shortcuts-title = 키보드 단축키
+shortcuts-count = 단축키 { $count }개
+shortcuts-search = 단축키 필터링…
+shortcuts-empty = 일치하는 단축키 없음
+shortcuts-general = 일반
+shortcuts-try-title = 단축키 시험하기
+shortcuts-try-hint = 아무 단축키나 누르세요
+shortcuts-waiting = 다음 키를 기다리는 중…
+shortcuts-triggered = 실행: { $action }
+shortcuts-no-match = 이 키와 일치하는 단축키가 없습니다
+shortcuts-clear = 초기화
 
 team-title = 팀
 simulator-title = 시뮬레이터
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = 프로필
+team-new-profile = 새 프로필
+team-switch-profile = { $profile }(으)로 전환
+team-edit-profile = 프로필 편집
+team-profile-name = 프로필 이름
 team-just-you = 이 스페이스에는 나만 있습니다
 team-agents = { $count ->
     [one] 나와 에이전트 1개
@@ -180,7 +196,7 @@ team-you = 나
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = 에이전트
 
-services-title = 백그라운드 서비스
+services-title = Vmux 프로세스
 services-processes = { $count ->
     [one] 프로세스 1개
    *[other] 프로세스 { $count }개
@@ -197,6 +213,7 @@ services-attached = 연결됨
 services-kill = 강제 종료
 services-memory = 메모리
 services-size = 크기
+services-uptime = 가동 시간
 services-shell = 셸
 
 error-title = 오류
@@ -282,6 +299,7 @@ layout-new-stack = 새 스택
 layout-close-tab = 탭 닫기
 layout-bookmark = 북마크
 layout-pin = 고정
+layout-unpin = 고정 해제
 layout-new-tab = 새 탭
 layout-team = 팀
 
@@ -451,6 +469,8 @@ common-error = 오류
 common-output = 출력
 common-pending = 대기 중
 common-current = 현재
+composer-permissions = 권한
+composer-permission-change = 권한 모드 변경
 common-stop = 중지
 services-command = Vmux 서비스
 services-uptime-seconds = { $seconds }초

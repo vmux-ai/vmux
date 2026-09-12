@@ -516,9 +516,16 @@ fn handle_agent_page_open(
         );
         let default_cwd = match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
-            Ok(None) => space_startup_dir
-                .map(|dir| dir.path)
-                .unwrap_or_else(AgentCwd::process),
+            Ok(None) => match space_startup_dir {
+                Some(dir) => dir.path,
+                None => match AgentCwd::projects() {
+                    Ok(path) => path,
+                    Err(message) => {
+                        commands.entity(entity).insert(PageOpenError { message });
+                        continue;
+                    }
+                },
+            },
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
                 continue;
@@ -1805,7 +1812,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn agent_tab_without_workspace_starts_in_home_without_binding_tab() {
+    pub(crate) fn agent_tab_without_workspace_starts_in_projects_without_binding_tab() {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
@@ -1847,7 +1854,7 @@ mod tests {
             .drain()
             .collect();
         assert_eq!(spawns.len(), 1);
-        assert_eq!(spawns[0].cwd, AgentCwd::process());
+        assert_eq!(spawns[0].cwd, AgentCwd::projects().unwrap());
         assert_eq!(
             spawns[0].initial_prompt.as_deref(),
             Some("Show me something fun in terminal")
@@ -1891,7 +1898,7 @@ mod tests {
         app.update();
 
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
-        assert_eq!(session.cwd, AgentCwd::process());
+        assert_eq!(session.cwd, AgentCwd::projects().unwrap());
         assert_eq!(
             app.world()
                 .get::<vmux_session::PromptQueue>(stack)
@@ -2056,7 +2063,7 @@ mod tests {
                 .get::<vmux_session::AcpSession>(stack)
                 .unwrap()
                 .cwd,
-            AgentCwd::process()
+            AgentCwd::projects().unwrap()
         );
         assert_eq!(
             app.world()

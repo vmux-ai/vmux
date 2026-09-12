@@ -16,9 +16,9 @@ use vmux_ui::platform::{random_index, sleep_ms};
 #[component]
 pub fn UserBubble(
     avatar_name: String,
-    avatar_initials: String,
     avatar_color: String,
     #[props(default)] copy_text: String,
+    #[props(default)] created_at_ms: u64,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -27,16 +27,15 @@ pub fn UserBubble(
         div { class: "chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             Avatar {
                 src: None,
-                fallback: avatar_initials,
+                seed: avatar_name.clone(),
                 background: avatar_color,
                 alt: avatar_name.clone(),
                 class: "mt-0.5 h-8 w-8 text-[10px]".to_string(),
-                seed: Some(avatar_name),
             }
             div { class: "relative min-w-0 max-w-[80%] flex-none pl-8",
                 div { class: "mb-1 text-right text-xs font-semibold text-foreground", "{you}" }
                 div { class: "flex min-w-0 flex-col items-end gap-2 text-left", {children} }
-                MessageMeta { text: copy_text, right: true }
+                MessageMeta { text: copy_text, created_at_ms, right: true }
             }
         }
     }
@@ -46,9 +45,9 @@ pub fn UserBubble(
 pub fn AssistantTurn(
     name: String,
     avatar_src: Option<String>,
-    avatar_fallback: String,
     avatar_background: String,
     #[props(default)] copy_text: String,
+    #[props(default)] created_at_ms: u64,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -56,7 +55,7 @@ pub fn AssistantTurn(
         div { class: "chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             Avatar {
                 src: avatar_src,
-                fallback: avatar_fallback,
+                seed: name.clone(),
                 background: avatar_background,
                 alt: name.clone(),
                 class: "mt-0.5 h-8 w-8 text-[10px]".to_string(),
@@ -64,25 +63,61 @@ pub fn AssistantTurn(
             div { class: "relative min-w-0 flex-1 pr-8",
                 div { class: "mb-1 text-xs font-semibold text-foreground", "{name}" }
                 div { class: "flex min-w-0 flex-col gap-2.5", {children} }
-                MessageMeta { text: copy_text }
+                MessageMeta { text: copy_text, created_at_ms }
             }
         }
     }
 }
 
 #[component]
-fn MessageMeta(text: String, #[props(default)] right: bool) -> Element {
+fn MessageMeta(text: String, created_at_ms: u64, #[props(default)] right: bool) -> Element {
     let alignment = if right {
         "justify-end"
     } else {
         "justify-start"
     };
+    let timestamp = message_timestamp(created_at_ms);
     rsx! {
         div { class: "mt-1 flex h-6 items-center gap-1 {alignment} text-[11px] text-muted-foreground/45",
+            if let Some(timestamp) = timestamp {
+                span { class: "pointer-events-none tabular-nums opacity-0 transition-opacity group-hover:opacity-100", "{timestamp}" }
+            }
             if !text.is_empty() {
                 MessageCopyButton { text }
             }
         }
+    }
+}
+
+fn message_timestamp(created_at_ms: u64) -> Option<String> {
+    if created_at_ms == 0 {
+        return None;
+    }
+    let timestamp = i64::try_from(created_at_ms).ok()?;
+    let utc = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp)?;
+    Some(
+        utc.with_timezone(&chrono::Local)
+            .format("%H:%M")
+            .to_string(),
+    )
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn message_timestamp_is_local_clock_time() {
+        let timestamp = message_timestamp(1_788_979_740_000).expect("timestamp");
+
+        assert_eq!(timestamp.len(), 5);
+        assert_eq!(timestamp.as_bytes()[2], b':');
+        assert!(!timestamp.contains('-'));
+    }
+
+    #[test]
+    fn missing_message_timestamp_stays_hidden() {
+        assert_eq!(message_timestamp(0), None);
     }
 }
 
@@ -111,10 +146,8 @@ pub fn ChatItemRow(
     latest_tool_block: Option<usize>,
     agent_name: String,
     agent_avatar: Option<String>,
-    agent_initial: String,
     agent_color: String,
     user_name: String,
-    user_initials: String,
     user_color: String,
 ) -> Element {
     let key = absolute_index;
@@ -124,13 +157,14 @@ pub fn ChatItemRow(
             text,
             context,
             attachments,
+            created_at_ms,
         } => rsx! {
             UserBubble {
                 key: "{key}",
                 avatar_name: user_name,
-                avatar_initials: user_initials,
                 avatar_color: user_color,
                 copy_text: text.clone(),
+                created_at_ms: *created_at_ms,
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
@@ -172,7 +206,6 @@ pub fn ChatItemRow(
                 latest_tool_index: latest_tool_block,
                 agent_name,
                 agent_avatar,
-                agent_initial,
                 agent_color,
             }
         },
@@ -222,7 +255,6 @@ pub fn TurnView(
     latest_tool_index: Option<usize>,
     agent_name: String,
     agent_avatar: Option<String>,
-    agent_initial: String,
     agent_color: String,
 ) -> Element {
     let key = turn_index;
@@ -293,9 +325,9 @@ pub fn TurnView(
                 AssistantTurn {
                     name: agent_name,
                     avatar_src: agent_avatar,
-                    avatar_fallback: agent_initial,
                     avatar_background: agent_color,
                     copy_text,
+                    created_at_ms: turn.created_at_ms,
                     for item in items {
                         match item {
                             TurnItem::Block((j, block, children)) => rsx! {

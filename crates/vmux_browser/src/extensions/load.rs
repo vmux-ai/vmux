@@ -165,6 +165,7 @@ mod tests {
             icon: None,
             enabled: false,
             profile_enabled,
+            profile_pinned: std::collections::BTreeMap::new(),
             permissions: Vec::new(),
             optional_permissions: Vec::new(),
             host_permissions: Vec::new(),

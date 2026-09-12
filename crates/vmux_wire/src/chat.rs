@@ -63,6 +63,8 @@ pub enum ChatItem {
         context: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<ChatSubmitAttachment>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        created_at_ms: u64,
     },
     Turn(ChatTurn),
 }
@@ -73,6 +75,7 @@ impl ChatItem {
             text: text.into(),
             context: None,
             attachments: Vec::new(),
+            created_at_ms: 0,
         }
     }
 }
@@ -83,6 +86,12 @@ pub struct ChatTurn {
     pub running: bool,
     pub duration_secs: Option<u32>,
     pub step_count: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub created_at_ms: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -285,6 +294,7 @@ mod activity_counts_tests {
             running: false,
             duration_secs: None,
             step_count: 0,
+            created_at_ms: 0,
         })
     }
 
@@ -316,6 +326,7 @@ mod activity_counts_tests {
                 text: "ignored".into(),
                 context: None,
                 attachments: Vec::new(),
+                created_at_ms: 0,
             },
         ];
 

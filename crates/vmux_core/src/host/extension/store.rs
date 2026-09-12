@@ -20,6 +20,8 @@ pub struct ExtEntry {
     #[serde(default)]
     pub profile_enabled: BTreeMap<String, bool>,
     #[serde(default)]
+    pub profile_pinned: BTreeMap<String, bool>,
+    #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(default)]
     pub optional_permissions: Vec<String>,
@@ -364,6 +366,20 @@ impl Index {
         EnableForProfileResult::Updated
     }
 
+    pub fn set_pinned_for(&mut self, profile: &str, id: &str, pinned: bool) -> bool {
+        let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) else {
+            return false;
+        };
+        if !entry.installed_for(profile) {
+            return false;
+        }
+        if entry.pinned_for(profile) == pinned {
+            return false;
+        }
+        entry.profile_pinned.insert(profile.to_string(), pinned);
+        true
+    }
+
     pub fn enabled_ids_for(&self, profile: &str) -> Vec<String> {
         self.entries
             .iter()
@@ -398,6 +414,10 @@ impl ExtEntry {
         self.profile_enabled.get(profile).copied().unwrap_or(false)
     }
 
+    pub fn pinned_for(&self, profile: &str) -> bool {
+        self.profile_pinned.get(profile).copied().unwrap_or(false)
+    }
+
     pub fn grants_for(&self, profile: &str) -> ExtensionGrants {
         self.approved_grants
             .get(profile)
@@ -411,6 +431,19 @@ pub fn update_index<F: FnOnce(&mut Index)>(root: &Path, f: F) -> Result<(), Stri
     let mut idx = Index::load(root)?;
     f(&mut idx);
     idx.save(root)
+}
+
+pub fn update_index_if_changed<T, F>(root: &Path, f: F) -> Result<Option<T>, String>
+where
+    F: FnOnce(&mut Index) -> Option<T>,
+{
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let mut index = Index::load(root)?;
+    let Some(value) = f(&mut index) else {
+        return Ok(None);
+    };
+    index.save(root)?;
+    Ok(Some(value))
 }
 
 pub fn uninstall(root: &Path, id: &str) -> Result<(), String> {
@@ -448,6 +481,7 @@ pub fn uninstall_for_profile(root: &Path, profile: &str, id: &str) -> Result<(),
         return Ok(());
     };
     entry.profile_enabled.remove(profile);
+    entry.profile_pinned.remove(profile);
     entry.approved_grants.remove(profile);
     let remove_package = entry.profile_enabled.is_empty();
     if remove_package {
@@ -483,6 +517,7 @@ mod tests {
             icon: None,
             enabled: false,
             profile_enabled,
+            profile_pinned: BTreeMap::new(),
             permissions: Vec::new(),
             optional_permissions: Vec::new(),
             host_permissions: Vec::new(),
@@ -531,6 +566,16 @@ mod tests {
             dirs[0],
             source_dir(root.path(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "1")
         );
+    }
+
+    #[test]
+    fn pinning_is_scoped_to_the_profile() {
+        let mut idx = Index::default();
+        idx.upsert(entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true));
+
+        assert!(idx.set_pinned_for("personal", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true));
+        assert!(idx.entries[0].pinned_for("personal"));
+        assert!(!idx.entries[0].pinned_for("work"));
     }
 
     #[test]

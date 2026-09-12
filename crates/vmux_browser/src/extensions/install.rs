@@ -72,6 +72,7 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
         icon,
         enabled: false,
         profile_enabled,
+        profile_pinned: std::collections::BTreeMap::new(),
         permissions: m.permissions,
         optional_permissions: m.optional_permissions,
         host_permissions: m.host_permissions,
@@ -88,6 +89,9 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
             upsert_entry
                 .profile_enabled
                 .clone_from(&existing.profile_enabled);
+            upsert_entry
+                .profile_pinned
+                .clone_from(&existing.profile_pinned);
             upsert_entry
                 .profile_enabled
                 .entry(profile.clone())

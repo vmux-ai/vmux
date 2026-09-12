@@ -54,7 +54,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
-            document_url: None,
+            document_url: Some("vmux://start/"),
         }
     }
 
@@ -105,19 +105,14 @@ mod shell_tests {
     use super::*;
 
     fn page() -> NativePage {
-        NativePage::pane("file://", || unreachable!())
-            .titled("Files")
-            .served_from("vmux://files/")
+        NativePage::pane("file://", || unreachable!()).titled("Files")
     }
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
         let html = String::from_utf8(page().shell().into_body()).unwrap();
 
-        assert!(
-            html.contains(r#"new NativeInterpreter("vmux://files", false)"#),
-            "the shell pointed the interpreter somewhere other than the document url"
-        );
+        assert!(html.contains(r#"new NativeInterpreter("vmux://start", false)"#));
         assert!(
             !html.contains(r#"NativeInterpreter("file:"#),
             "no protocol handler answers `file://`, so nothing would reply to a fetch there"

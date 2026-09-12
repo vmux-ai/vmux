@@ -15,10 +15,11 @@ use agent_client_protocol::schema::v1::{
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
     SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, ToolKind, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    SessionConfigSelectOptions, SessionId, SessionModeState, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolKind,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
@@ -48,6 +49,7 @@ pub enum AcpInput {
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
+        preferred_mode: Option<String>,
     },
     Approve {
         call_id: String,
@@ -57,6 +59,11 @@ pub enum AcpInput {
         request_id: u64,
         config_id: String,
         model_id: String,
+    },
+    SetMode {
+        request_id: u64,
+        config_id: String,
+        mode_id: String,
     },
     Cancel,
     Close,
@@ -127,6 +134,7 @@ pub struct AcpShared {
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
+    mode_info: Mutex<Option<AcpModeInfoState>>,
     status: Mutex<AgentRunStatus>,
     approval: Mutex<Option<RemoteApproval>>,
     history_replay: AtomicBool,
@@ -158,6 +166,7 @@ impl AcpShared {
             input_writers,
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
+            mode_info: Mutex::new(None),
             status: Mutex::new(AgentRunStatus::Idle),
             approval: Mutex::new(None),
             history_replay: AtomicBool::new(false),
@@ -232,6 +241,14 @@ impl AcpShared {
 
     pub fn model_info_message(&self) -> Option<ServiceMessage> {
         self.model_info
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|state| state.message(&self.sid))
+    }
+
+    pub fn mode_info_message(&self) -> Option<ServiceMessage> {
+        self.mode_info
             .lock()
             .unwrap()
             .as_ref()
@@ -313,6 +330,81 @@ impl AcpShared {
                 models: Vec::new(),
             }));
         }
+    }
+
+    fn publish_mode_info(
+        &self,
+        config_options: &[SessionConfigOption],
+        modes: Option<&SessionModeState>,
+    ) {
+        let next = mode_info(config_options, modes);
+        let mut current = self.mode_info.lock().unwrap();
+        if *current == next {
+            return;
+        }
+        let removed = current.is_some() && next.is_none();
+        *current = next.clone();
+        drop(current);
+        if let Some(state) = next {
+            self.emit(state.message(&self.sid));
+        } else if removed {
+            self.emit(ServiceMessage::AcpModeInfo {
+                sid: self.sid.clone(),
+                config_id: String::new(),
+                current_mode_id: String::new(),
+                modes: Vec::new(),
+            });
+        }
+    }
+
+    fn publish_mode_config_info(&self, config_options: &[SessionConfigOption]) {
+        let has_mode_config = mode_config(config_options).is_some();
+        let had_mode_config = self
+            .mode_info
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|state| !state.config_id.is_empty());
+        if has_mode_config || had_mode_config {
+            self.publish_mode_info(config_options, None);
+        }
+    }
+
+    fn publish_selected_mode(&self, mode_id: &str) {
+        let mut current = self.mode_info.lock().unwrap();
+        let Some(state) = current.as_mut() else {
+            return;
+        };
+        if !state.modes.iter().any(|mode| mode.id == mode_id) {
+            return;
+        }
+        if state.current_mode_id == mode_id {
+            return;
+        }
+        state.current_mode_id = mode_id.to_string();
+        self.emit(state.message(&self.sid));
+    }
+
+    fn publish_selected_config_mode(
+        &self,
+        config_id: &str,
+        mode_id: &str,
+        config_options: &[SessionConfigOption],
+    ) {
+        let response = mode_info(config_options, None);
+        let mut current = self.mode_info.lock().unwrap();
+        let Some(mut next) = response.or_else(|| current.clone()) else {
+            return;
+        };
+        if next.config_id == config_id && next.modes.iter().any(|mode| mode.id == mode_id) {
+            next.current_mode_id = mode_id.to_string();
+        }
+        if current.as_ref() == Some(&next) {
+            return;
+        }
+        *current = Some(next.clone());
+        drop(current);
+        self.emit(next.message(&self.sid));
     }
 
     fn publish_selected_model(
@@ -406,6 +498,10 @@ fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
     if let SessionUpdate::ConfigOptionUpdate(config) = &update {
         shared.publish_model_info(&config.config_options);
+        shared.publish_mode_config_info(&config.config_options);
+    }
+    if let SessionUpdate::CurrentModeUpdate(mode) = &update {
+        shared.publish_selected_mode(&mode.current_mode_id.to_string());
     }
     let mut projector = shared.projector.lock().unwrap();
     let intents = projector.apply(update);
@@ -486,6 +582,24 @@ struct AcpModelInfoState {
     models: Vec<crate::protocol::AcpModelOption>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcpModeInfoState {
+    config_id: String,
+    current_mode_id: String,
+    modes: Vec<crate::protocol::AcpModeOption>,
+}
+
+impl AcpModeInfoState {
+    fn message(&self, sid: &str) -> ServiceMessage {
+        ServiceMessage::AcpModeInfo {
+            sid: sid.to_string(),
+            config_id: self.config_id.clone(),
+            current_mode_id: self.current_mode_id.clone(),
+            modes: self.modes.clone(),
+        }
+    }
+}
+
 impl AcpModelInfoState {
     fn message(&self, sid: &str) -> ServiceMessage {
         ServiceMessage::Shared(SharedEvent::AcpModelInfo {
@@ -525,6 +639,81 @@ fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoStat
                 id: option.value.to_string(),
                 name: option.name.clone(),
                 description: option.description.clone(),
+            })
+            .collect(),
+    })
+}
+
+fn mode_config(config_options: &[SessionConfigOption]) -> Option<&SessionConfigOption> {
+    let selectable =
+        |config: &&SessionConfigOption| matches!(&config.kind, SessionConfigKind::Select(_));
+    config_options
+        .iter()
+        .filter(selectable)
+        .find(|config| {
+            matches!(
+                config.category.as_ref(),
+                Some(SessionConfigOptionCategory::Mode)
+            )
+        })
+        .or_else(|| {
+            config_options.iter().filter(selectable).find(|config| {
+                config.id.to_string().eq_ignore_ascii_case("mode")
+                    || config.name.trim().eq_ignore_ascii_case("mode")
+            })
+        })
+        .or_else(|| {
+            config_options.iter().filter(selectable).find(|config| {
+                config
+                    .id
+                    .to_string()
+                    .to_ascii_lowercase()
+                    .contains("permission")
+                    || config.name.to_ascii_lowercase().contains("permission")
+            })
+        })
+}
+
+fn mode_info(
+    config_options: &[SessionConfigOption],
+    legacy: Option<&SessionModeState>,
+) -> Option<AcpModeInfoState> {
+    if let Some(config) = mode_config(config_options) {
+        let SessionConfigKind::Select(select) = &config.kind else {
+            return None;
+        };
+        let options = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect::<Vec<_>>(),
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|group| group.options.iter())
+                .collect::<Vec<_>>(),
+            _ => return None,
+        };
+        return Some(AcpModeInfoState {
+            config_id: config.id.to_string(),
+            current_mode_id: select.current_value.to_string(),
+            modes: options
+                .into_iter()
+                .map(|option| crate::protocol::AcpModeOption {
+                    id: option.value.to_string(),
+                    name: option.name.clone(),
+                    description: option.description.clone(),
+                })
+                .collect(),
+        });
+    }
+    let legacy = legacy?;
+    Some(AcpModeInfoState {
+        config_id: String::new(),
+        current_mode_id: legacy.current_mode_id.to_string(),
+        modes: legacy
+            .available_modes
+            .iter()
+            .map(|mode| crate::protocol::AcpModeOption {
+                id: mode.id.to_string(),
+                name: mode.name.clone(),
+                description: mode.description.clone(),
             })
             .collect(),
     })
@@ -577,11 +766,13 @@ fn tool_kind_approval_name(kind: Option<ToolKind>) -> Option<&'static str> {
     }
 }
 
-fn approval_details_from_kind(request: &RequestPermissionRequest) -> Option<(String, String)> {
-    Some((
-        tool_kind_approval_name(request.tool_call.fields.kind)?.to_string(),
-        request_approval_args(request)?,
-    ))
+fn approval_details_from_kind(request: &RequestPermissionRequest) -> (String, String) {
+    (
+        tool_kind_approval_name(request.tool_call.fields.kind)
+            .unwrap_or("Use tool")
+            .to_string(),
+        request_approval_args(request).unwrap_or_else(|| "{}".to_string()),
+    )
 }
 
 async fn resolve_approval_details(
@@ -601,7 +792,7 @@ async fn resolve_approval_details(
             .await
             .is_err()
         {
-            return approval_details_from_kind(request);
+            return Some(approval_details_from_kind(request));
         }
     }
 }
@@ -962,9 +1153,9 @@ pub async fn run(
                             return Err("session/load timed out".to_string());
                         };
                         let response = loaded.map_err(|err| err.to_string())?;
-                        shared.publish_model_info(
-                            response.config_options.as_deref().unwrap_or_default(),
-                        );
+                        let config_options = response.config_options.as_deref().unwrap_or_default();
+                        shared.publish_model_info(config_options);
+                        shared.publish_mode_info(config_options, response.modes.as_ref());
                         Ok(())
                     }
                 })
@@ -993,9 +1184,10 @@ pub async fn run(
                         .await
                         {
                             Ok(Ok(response)) => {
-                                shared.publish_model_info(
-                                    response.config_options.as_deref().unwrap_or_default(),
-                                );
+                                let config_options =
+                                    response.config_options.as_deref().unwrap_or_default();
+                                shared.publish_model_info(config_options);
+                                shared.publish_mode_info(config_options, response.modes.as_ref());
                                 Ok(response.session_id)
                             }
                             Ok(Err(err)) => Err(err.to_string()),
@@ -1034,6 +1226,7 @@ pub async fn run(
                         text,
                         context,
                         attachments,
+                        preferred_mode,
                     } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
                         main_shared
@@ -1054,8 +1247,12 @@ pub async fn run(
                                     .block_task()
                                     .await
                                     .map(|response| {
-                                        shared.publish_model_info(
-                                            response.config_options.as_deref().unwrap_or_default(),
+                                        let config_options =
+                                            response.config_options.as_deref().unwrap_or_default();
+                                        shared.publish_model_info(config_options);
+                                        shared.publish_mode_info(
+                                            config_options,
+                                            response.modes.as_ref(),
                                         );
                                         response.session_id
                                     })
@@ -1076,6 +1273,43 @@ pub async fn run(
                                 sid: main_shared.sid.clone(),
                                 acp_session_id: active_session_id.to_string(),
                             });
+                        }
+                        let available_mode = main_shared.mode_info.lock().unwrap().clone();
+                        if let Some(mode_id) = preferred_mode
+                            && let Some(mode) = available_mode
+                            && mode.current_mode_id != mode_id
+                            && mode.modes.iter().any(|option| option.id == mode_id)
+                        {
+                            if mode.config_id.is_empty() {
+                                match cx
+                                    .send_request(SetSessionModeRequest::new(
+                                        active_session_id.clone(),
+                                        mode_id.clone(),
+                                    ))
+                                    .block_task()
+                                    .await
+                                {
+                                    Ok(_) => main_shared.publish_selected_mode(&mode_id),
+                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
+                                }
+                            } else {
+                                match cx
+                                    .send_request(SetSessionConfigOptionRequest::new(
+                                        active_session_id.clone(),
+                                        mode.config_id.clone(),
+                                        mode_id.clone(),
+                                    ))
+                                    .block_task()
+                                    .await
+                                {
+                                    Ok(response) => main_shared.publish_selected_config_mode(
+                                        &mode.config_id,
+                                        &mode_id,
+                                        &response.config_options,
+                                    ),
+                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
+                                }
+                            }
                         }
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
@@ -1151,6 +1385,64 @@ pub async fn run(
                                 main_shared.emit_status(AgentRunStatus::Errored(format!(
                                     "acp model selection failed: {err}"
                                 )));
+                            }
+                        }
+                    }
+                    AcpInput::SetMode {
+                        request_id,
+                        config_id,
+                        mode_id,
+                    } => {
+                        let Some(sid) = session_id.clone() else {
+                            publish_mode_selection_result(
+                                &main_shared,
+                                request_id,
+                                &mode_id,
+                                false,
+                            );
+                            continue;
+                        };
+                        let result = if config_id.is_empty() {
+                            cx.send_request(SetSessionModeRequest::new(sid, mode_id.clone()))
+                                .block_task()
+                                .await
+                                .map(|_| Vec::new())
+                        } else {
+                            cx.send_request(SetSessionConfigOptionRequest::new(
+                                sid,
+                                config_id.clone(),
+                                mode_id.clone(),
+                            ))
+                            .block_task()
+                            .await
+                            .map(|response| response.config_options)
+                        };
+                        match result {
+                            Ok(config_options) => {
+                                if config_id.is_empty() {
+                                    main_shared.publish_selected_mode(&mode_id);
+                                } else {
+                                    main_shared.publish_selected_config_mode(
+                                        &config_id,
+                                        &mode_id,
+                                        &config_options,
+                                    );
+                                }
+                                publish_mode_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &mode_id,
+                                    true,
+                                );
+                            }
+                            Err(err) => {
+                                publish_mode_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &mode_id,
+                                    false,
+                                );
+                                tracing::warn!(target: "acp", sid = %main_shared.sid, "mode selection failed: {err}");
                             }
                         }
                     }
@@ -1265,6 +1557,20 @@ fn publish_model_selection_result(
         sid: shared.sid.clone(),
         request_id,
         model_id: model_id.to_string(),
+        succeeded,
+    });
+}
+
+fn publish_mode_selection_result(
+    shared: &AcpShared,
+    request_id: u64,
+    mode_id: &str,
+    succeeded: bool,
+) {
+    shared.emit(ServiceMessage::AcpModeSelectionResult {
+        sid: shared.sid.clone(),
+        request_id,
+        mode_id: mode_id.to_string(),
         succeeded,
     });
 }
@@ -1419,7 +1725,8 @@ async fn create_terminal(
         ..
     } = req;
     let env: Vec<(String, String)> = env.into_iter().map(|var| (var.name, var.value)).collect();
-    let cwd = cwd.unwrap_or_else(|| shared.cwd());
+    let session_cwd = shared.cwd();
+    let cwd = cwd.unwrap_or_else(|| session_cwd.clone());
     if !cwd.is_absolute() {
         return Err(format!(
             "acp: terminal cwd must be absolute: {}",
@@ -1432,6 +1739,12 @@ async fn create_terminal(
             cwd.display()
         ));
     }
+    let cwd = resolve_in_cwd(&session_cwd, &cwd).ok_or_else(|| {
+        format!(
+            "acp: terminal cwd is outside session cwd: {}; select the project and wait for user approval first",
+            cwd.display()
+        )
+    })?;
     let cwd = cwd.to_string_lossy().into_owned();
     let id = ProcessId::new();
 
@@ -1815,7 +2128,7 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
-        SessionConfigSelectOption, ToolCall, ToolCallUpdateFields,
+        SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields,
     };
 
     #[test]
@@ -2064,6 +2377,132 @@ mod tests {
 
         assert_eq!(info.config_id, "model");
         assert_eq!(info.current_model_id, "gpt-5");
+    }
+
+    #[test]
+    fn mode_info_reads_legacy_session_modes() {
+        let modes = SessionModeState::new(
+            "ask",
+            vec![
+                SessionMode::new("ask", "Ask"),
+                SessionMode::new("auto", "Auto Allow").description("Approve tool calls"),
+            ],
+        );
+
+        let info = mode_info(&[], Some(&modes)).expect("legacy modes");
+
+        assert!(info.config_id.is_empty());
+        assert_eq!(info.current_mode_id, "ask");
+        assert_eq!(info.modes.len(), 2);
+        assert_eq!(info.modes[1].name, "Auto Allow");
+        assert_eq!(
+            info.modes[1].description.as_deref(),
+            Some("Approve tool calls")
+        );
+    }
+
+    #[test]
+    fn mode_info_prefers_categorized_config_selector() {
+        let legacy = SessionModeState::new("ask", vec![SessionMode::new("ask", "Ask")]);
+        let config = SessionConfigOption::select(
+            "approval",
+            "Permissions",
+            "auto",
+            vec![
+                SessionConfigSelectOption::new("ask", "Ask"),
+                SessionConfigSelectOption::new("auto", "Auto Allow"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Mode);
+
+        let info = mode_info(&[config], Some(&legacy)).expect("mode selector");
+
+        assert_eq!(info.config_id, "approval");
+        assert_eq!(info.current_mode_id, "auto");
+        assert_eq!(info.modes.len(), 2);
+    }
+
+    #[test]
+    fn mode_info_falls_back_to_permission_named_selector() {
+        let config = SessionConfigOption::select(
+            "permission_policy",
+            "Tool permissions",
+            "ask",
+            vec![SessionConfigSelectOption::new("ask", "Ask")],
+        );
+
+        let info = mode_info(&[config], None).expect("permission selector");
+
+        assert_eq!(info.config_id, "permission_policy");
+        assert_eq!(info.current_mode_id, "ask");
+    }
+
+    #[test]
+    fn mode_selection_result_publishes_request_identity() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(2);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        publish_mode_selection_result(&shared, 9, "auto", true);
+
+        match stream_rx.try_recv().expect("selection result") {
+            ServiceMessage::AcpModeSelectionResult {
+                sid,
+                request_id,
+                mode_id,
+                succeeded,
+            } => {
+                assert_eq!(sid, "s1");
+                assert_eq!(request_id, 9);
+                assert_eq!(mode_id, "auto");
+                assert!(succeeded);
+            }
+            other => panic!("expected ACP mode selection result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selected_mode_uses_cached_options_when_set_response_is_empty() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(4);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        let config = SessionConfigOption::select(
+            "approval",
+            "Permissions",
+            "ask",
+            vec![
+                SessionConfigSelectOption::new("ask", "Ask"),
+                SessionConfigSelectOption::new("auto", "Auto Allow"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Mode);
+        shared.publish_mode_info(&[config], None);
+        let _ = stream_rx.try_recv();
+
+        shared.publish_selected_config_mode("approval", "auto", &[]);
+
+        match stream_rx.try_recv().expect("selected mode update") {
+            ServiceMessage::AcpModeInfo {
+                current_mode_id,
+                modes,
+                ..
+            } => {
+                assert_eq!(current_mode_id, "auto");
+                assert_eq!(modes.len(), 2);
+            }
+            other => panic!("expected ACP mode info, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2367,6 +2806,10 @@ mod tests {
         );
 
         assert_eq!(approval_details(&request, &AcpProjector::new()), None);
+        assert_eq!(
+            approval_details_from_kind(&request),
+            ("Use tool".to_string(), "{}".to_string())
+        );
     }
 
     #[test]
@@ -2384,10 +2827,10 @@ mod tests {
 
         assert_eq!(
             approval_details_from_kind(&request),
-            Some((
+            (
                 "Execute command".to_string(),
                 r#"{"command":"echo hi"}"#.to_string(),
-            ))
+            )
         );
     }
 
@@ -2750,19 +3193,26 @@ mod tests {
         assert_eq!(slice_lines(text, Some(10), Some(2)), "");
     }
 
-    fn test_shared(
+    fn test_shared_at(
+        cwd: PathBuf,
         manager: Arc<tokio::sync::Mutex<ProcessManager>>,
     ) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
         let (stream_tx, stream_rx) = broadcast::channel(64);
         let shared = Arc::new(AcpShared::new(
             "s1".to_string(),
-            std::env::temp_dir(),
+            cwd,
             ProcessId::new(),
             stream_tx,
             manager,
             Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
+    }
+
+    fn test_shared(
+        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+    ) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
+        test_shared_at(std::env::temp_dir(), manager)
     }
 
     #[test]
@@ -2998,6 +3448,23 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+        assert!(manager.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_terminal_rejects_cwd_outside_session() {
+        let session = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared_at(session.path().to_path_buf(), manager.clone());
+
+        let result = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh").cwd(outside.path()),
+        )
+        .await;
+
+        assert!(matches!(result, Err(message) if message.contains("outside session cwd")));
         assert!(manager.lock().await.processes.is_empty());
     }
 

@@ -15,24 +15,12 @@
             "vmux://spaces/",
             "vmux://team/",
             "vmux://history/",
+            "vmux://shortcuts/",
             "vmux://extensions/",
             "vmux://lsp/",
             "vmux://settings/",
         ],
-        bookmark_folders: [
-            (
-                name: "Projects",
-                smart: Some(projects),
-            ),
-            (
-                name: "Knowledge",
-                smart: Some(knowledge),
-            ),
-            (
-                name: "Tools",
-                smart: Some(tools),
-            ),
-        ],
+        bookmark_folders: [],
     ),
     layout: (
         window: (

@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vmux_client::protocol::{
     AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
@@ -148,12 +149,23 @@ async fn tool_call_result(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    if name == "read_file" {
+    if normalized_name == "read_file" {
         return read_file_result(&arguments, anchor).await;
     }
 
-    if name == "grep" {
+    if normalized_name == "grep" {
         return grep_result(&arguments, anchor).await;
+    }
+
+    if normalized_name == "open_file" {
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or("open_file.path is required")?;
+        if !Path::new(path).is_absolute() {
+            return Err("open_file.path must be an absolute path".to_string());
+        }
+        scoped_existing_path(anchor, Path::new(path), "open_file").await?;
     }
 
     if normalized_name == "vault_status" {
@@ -204,6 +216,49 @@ fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
     })
 }
 
+async fn agent_working_directory(
+    anchor: Option<vmux_client::protocol::ProcessId>,
+) -> Result<PathBuf, String> {
+    let Some(anchor) = anchor else {
+        return std::env::current_dir()
+            .and_then(|path| path.canonicalize())
+            .map_err(|error| format!("cannot resolve current directory: {error}"));
+    };
+    let connection = vmux_client::client::ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+    match agent_query(&connection, AgentQuery::WorkingDirectory { anchor }).await? {
+        AgentQueryResult::Text(path) => PathBuf::from(path)
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve agent working directory: {error}")),
+        AgentQueryResult::Error(message) => Err(message),
+        _ => Err("unexpected agent working directory response".to_string()),
+    }
+}
+
+fn resolve_scoped_existing_path(scope: &Path, requested: &Path) -> Option<PathBuf> {
+    let path = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        scope.join(requested)
+    };
+    let path = path.canonicalize().ok()?;
+    path.starts_with(scope).then_some(path)
+}
+
+async fn scoped_existing_path(
+    anchor: Option<vmux_client::protocol::ProcessId>,
+    requested: &Path,
+    tool: &str,
+) -> Result<PathBuf, String> {
+    let scope = agent_working_directory(anchor).await?;
+    resolve_scoped_existing_path(&scope, requested).ok_or_else(|| {
+        format!(
+            "{tool}: path is outside the selected project; call select_project and wait for user approval first"
+        )
+    })
+}
+
 async fn read_file_result(
     arguments: &Value,
     anchor: Option<vmux_client::protocol::ProcessId>,
@@ -215,18 +270,21 @@ async fn read_file_result(
     if !std::path::Path::new(path).is_absolute() {
         return Err("read_file.path must be an absolute path".to_string());
     }
+    let path = scoped_existing_path(anchor, Path::new(path), "read_file").await?;
     let offset = opt_u32(arguments, "offset", "read_file")?;
     let limit = opt_usize(arguments, "limit", "read_file")?;
-    let meta = std::fs::metadata(path).map_err(|e| format!("read_file: {e}"))?;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("read_file: {e}"))?;
     if !meta.is_file() {
         return Err("read_file: not a regular file".to_string());
     }
-    let text = read_lines_bounded(path, offset, limit).map_err(|e| format!("read_file: {e}"))?;
+    let path_text = path.to_string_lossy();
+    let text =
+        read_lines_bounded(&path_text, offset, limit).map_err(|e| format!("read_file: {e}"))?;
     if let Some(anchor) = anchor {
         let _ = run_agent_command(
             AgentCommand::FileTouched {
                 anchor,
-                path: path.to_string(),
+                path: path.to_string_lossy().into_owned(),
                 line: offset,
                 col: None,
                 end_col: None,
@@ -250,11 +308,13 @@ async fn grep_result(
         .get("query")
         .and_then(Value::as_str)
         .ok_or("grep.query is required")?;
-    let search_path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+    let requested = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+    let search_path = scoped_existing_path(anchor, Path::new(requested), "grep").await?;
 
     use std::io::{BufRead, Read};
     let mut child = std::process::Command::new("rg")
-        .args(["--json", "--", query, search_path])
+        .args(["--json", "--", query])
+        .arg(&search_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -389,12 +449,10 @@ async fn grep_result(
             })
             .collect::<Vec<_>>();
         if !matches.is_empty() {
-            let root = std::fs::canonicalize(search_path)
-                .unwrap_or_else(|_| std::path::PathBuf::from(search_path));
             let _ = run_agent_command(
                 AgentCommand::FileSearch {
                     anchor,
-                    root: root.to_string_lossy().into_owned(),
+                    root: search_path.to_string_lossy().into_owned(),
                     query: query.to_string(),
                     matches,
                 },
@@ -859,6 +917,21 @@ mod tests {
             "a\nb\nc\nd\ne"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scoped_paths_reject_files_outside_the_selected_project() {
+        let scope = tempfile::tempdir().unwrap();
+        let inside = scope.path().join("inside.txt");
+        std::fs::write(&inside, "inside").unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let scope = scope.path().canonicalize().unwrap();
+
+        assert_eq!(
+            resolve_scoped_existing_path(&scope, &inside),
+            Some(inside.canonicalize().unwrap())
+        );
+        assert_eq!(resolve_scoped_existing_path(&scope, outside.path()), None);
     }
 
     #[test]

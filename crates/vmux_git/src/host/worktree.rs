@@ -61,6 +61,7 @@ impl BranchHolder {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BranchChange {
+    pub changed_files: u32,
     pub insertions: u32,
     pub deletions: u32,
 }
@@ -120,6 +121,7 @@ impl BranchChange {
             let Some(removed) = fields.next() else {
                 continue;
             };
+            total.changed_files += 1;
             total.insertions += added.parse::<u32>().unwrap_or_default();
             total.deletions += removed.parse::<u32>().unwrap_or_default();
         }
@@ -155,6 +157,13 @@ impl BaseRef {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn branch(&self) -> &str {
+        self.0
+            .strip_prefix("refs/remotes/origin/")
+            .or_else(|| self.0.strip_prefix("refs/heads/"))
+            .unwrap_or(&self.0)
     }
 }
 
@@ -579,9 +588,13 @@ pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
 pub struct RepoInfo {
     pub name: String,
     pub branch: String,
+    pub base_ref: String,
     pub is_worktree: bool,
     pub uncommitted: u32,
     pub ahead: u32,
+    pub changed_files: u32,
+    pub insertions: u32,
+    pub deletions: u32,
     pub repo_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
@@ -752,12 +765,26 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
             .to_string_lossy()
             .into_owned()
     });
+    let base = BaseRef::of(&repo_root);
+    let change = if branch.is_empty() {
+        BranchChange::default()
+    } else {
+        base.as_ref()
+            .map(|base| BranchChange::against(&repo_root, base, &repo_root, &branch))
+            .unwrap_or_default()
+    };
     Some(RepoInfo {
         name,
         branch,
+        base_ref: base
+            .map(|base| base.branch().to_string())
+            .unwrap_or_default(),
         is_worktree: git_dir != common_dir,
         uncommitted,
         ahead,
+        changed_files: change.changed_files,
+        insertions: change.insertions,
+        deletions: change.deletions,
         repo_root,
         git_dir,
         common_dir,
@@ -994,6 +1021,7 @@ mod tests {
         commit_initial(repo.path());
         let info = repo_info(repo.path()).expect("is a repo");
         assert_eq!(info.branch, "main");
+        assert_eq!(info.base_ref, "main");
         assert!(!info.is_worktree);
         assert_eq!(info.uncommitted, 0);
         test_repo::write(repo.path(), "dirty.txt", "x\n");
@@ -1064,11 +1092,12 @@ mod tests {
     }
 
     #[test]
-    fn a_numstat_sums_its_files_and_counts_a_binary_as_nothing() {
+    fn a_numstat_counts_files_and_ignores_binary_line_totals() {
         let change = BranchChange::summed("3\t1\tsrc/a.rs\n10\t0\tsrc/b.rs\n-\t-\tlogo.png\n");
 
         assert_eq!(change.insertions, 13);
         assert_eq!(change.deletions, 1);
+        assert_eq!(change.changed_files, 3);
     }
 
     #[test]
@@ -1082,6 +1111,16 @@ mod tests {
         test_repo::run(&wt, &["add", "added.txt", "seed.txt"]);
         test_repo::run(&wt, &["commit", "-qm", "work"]);
 
+        let info = repo_info(&wt).unwrap();
+        assert_eq!(
+            info.project_name(),
+            repo.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(info.base_ref, "main");
+        assert_eq!(info.changed_files, 2);
+        assert_eq!(info.insertions, 3);
+        assert_eq!(info.deletions, 1);
+
         let holders = branch_holders(repo.path()).unwrap();
         let change = |branch: &str| {
             holders
@@ -1094,6 +1133,7 @@ mod tests {
         assert_eq!(
             change("vmux/feat"),
             BranchChange {
+                changed_files: 2,
                 insertions: 3,
                 deletions: 1,
             },
@@ -1123,6 +1163,7 @@ mod tests {
         assert_eq!(
             feat.change,
             BranchChange {
+                changed_files: 1,
                 insertions: 1,
                 deletions: 0,
             },

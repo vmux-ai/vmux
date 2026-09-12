@@ -141,7 +141,7 @@ fn PackageRow(
                     ManagerBadge { tone: ManagerTone::Neutral, "{language}" }
                 }
                 for category in item.categories.iter().take(2) {
-                    ManagerBadge { tone: ManagerTone::Cyan, "{category}" }
+                    ManagerBadge { tone: ManagerTone::Primary, "{category}" }
                 }
             },
             actions: rsx! {

@@ -10,6 +10,7 @@ use vmux_terminal::ServiceMessageSet;
 use crate::events::AgentChoiceSelected;
 use crate::session::AgentSession;
 
+use super::run_terminal::ProjectsDirectory;
 use super::self_command::{ancestor_acp_stack, rebind_acp_workspace};
 
 pub(super) struct WorkspacePlugin;
@@ -129,14 +130,17 @@ fn handle_agent_choice_selected(
 }
 
 pub(crate) fn workspace_picker_task(
+    requested: Option<PathBuf>,
     proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
 ) -> Task<Option<PathBuf>> {
     let wake = proxy.map(|proxy| (**proxy).clone());
-    let projects_dir = vmux_core::profile::projects_dir();
-    let initial_dir = std::fs::create_dir_all(&projects_dir)
-        .ok()
-        .map(|_| projects_dir)
+    let initial_dir = requested
         .filter(|path| path.is_dir())
+        .or_else(|| {
+            ProjectsDirectory::ensure()
+                .ok()
+                .map(ProjectsDirectory::into_path)
+        })
         .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .filter(|path| path.is_dir())
@@ -746,11 +750,13 @@ mod tests {
                 vmux_session::AcpSession {
                     agent_id: "claude".into(),
                     sid: "routing-session".into(),
-                    cwd: AgentCwd::process(),
+                    cwd: AgentCwd::projects().unwrap(),
                     anchor,
                     resume: None,
                 },
-                vmux_core::AgentWorkingDir(AgentCwd::process().to_string_lossy().into_owned()),
+                vmux_core::AgentWorkingDir(
+                    AgentCwd::projects().unwrap().to_string_lossy().into_owned(),
+                ),
                 ChildOf(pane),
             ))
             .id();

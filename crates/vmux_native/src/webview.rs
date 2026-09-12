@@ -100,10 +100,11 @@ impl WebView {
     }
 
     pub fn navigate(&self, page: &'static NativePage, instance: crate::Instance) {
+        let document_changed = self.page.get().document_url() != page.document_url();
         self.page.set(page);
         self.outbox.set_page(page.url);
         self.dom.remount(page.component, instance);
-        if let Err(error) = self.webview.load_url(page.document_url()) {
+        if document_changed && let Err(error) = self.webview.load_url(page.document_url()) {
             error!("vmux_native: navigation failed for {}: {error}", page.url);
         }
     }

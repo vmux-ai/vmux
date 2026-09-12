@@ -5312,7 +5312,7 @@ pub const PROJECTS_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::pag
     title_message_id: Some("layout-projects"),
     replaces_command: None,
     keywords: &["project", "files", "folder", "open"],
-    icon: Some(vmux_core::BuiltinIcon::Files),
+    icon: Some(vmux_core::BuiltinIcon::Project),
     command_bar: true,
 };
 

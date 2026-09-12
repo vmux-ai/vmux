@@ -92,7 +92,7 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
                 if !chunk.text.is_empty() {
                     span {
                         key: "text-{index}",
-                        class: if chunk.selected { "bg-cyan-400/20" } else { "" },
+                        class: if chunk.selected { "bg-primary/20" } else { "" },
                         "{chunk.text}"
                     }
                 }

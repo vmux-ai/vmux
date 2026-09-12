@@ -5,13 +5,14 @@ use std::time::SystemTime;
 use serde_json::{Map, Value};
 
 use crate::client::cli::strategy::{
-    CliAgentStrategy, PromptHistory, ResumableSession, SameProject, lines_skipping_invalid_utf8,
+    CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, SameProject,
+    lines_skipping_invalid_utf8,
 };
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
-const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
+const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
 mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll,\
 mcp__vmux__request_user_choice,mcp__vmux__set_conversation_title,\
 mcp__vmux__select_project,mcp__vmux__create_worktree";
@@ -21,13 +22,13 @@ over). Use the output returned by run directly; call read_terminal only when run
 is still running. Do ALL web access via the vmux browser tools in the user's visible browser: \
 mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
 to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
-built-in web search. Read-only inspection may use the current directory or a known path directly; \
-never call mcp__vmux__select_project or mcp__vmux__create_worktree for requests that only read, \
-show, search, or explain existing files. Before the first mutation in an existing project without a selected project, call \
-mcp__vmux__select_project with its known path or omit it to choose under ~/.vmux/workspace. For a \
+built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
+running project commands, call mcp__vmux__select_project with the known project path or omit it to \
+open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require \
+explicit user approval in the native picker. For a \
 new project, first use mcp__vmux__request_user_choice to offer a concrete suggested path and \
-Choose existing project. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a \
-remote is known and ~/.vmux/workspace/local/<project> otherwise. If creation is selected, use run \
+Choose existing project. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a \
+remote is known and ~/.vmux/projects/local/<project> otherwise. If creation is selected, use run \
 only to create the empty directory, then select that path. vmux will offer Git initialization and \
 use the new project root directly; never call create_worktree for that new project. Do not ask the \
 user to invent a folder location. In a previously existing Git project, immediately before any \
@@ -88,7 +89,7 @@ impl CliAgentStrategy for ClaudeStrategy {
             "--disallowedTools".to_string(),
             DISALLOWED_TOOLS.to_string(),
             "--allowedTools".to_string(),
-            ALLOWED_TOOLS.to_string(),
+            allowed_tools(crate::managed_mcp::load().into_keys()),
             "--append-system-prompt".to_string(),
             vmux_core::knowledge::AgentPrompt::of(RUN_STEER_PROMPT).into_string(),
         ];
@@ -97,6 +98,14 @@ impl CliAgentStrategy for ClaudeStrategy {
             args.push(sid.to_string());
         }
         args
+    }
+
+    fn model_catalog(&self) -> CliModelCatalog {
+        ClaudeModels::load()
+    }
+
+    fn model_args(&self, model: &str) -> Vec<String> {
+        vec!["--model".to_string(), model.to_string()]
     }
 
     fn effort_args(&self, level: &str) -> Vec<String> {
@@ -137,6 +146,81 @@ impl CliAgentStrategy for ClaudeStrategy {
     fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
         load_claude_transcript(&self.sessions_root(), session_id)
     }
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ClaudeSettings {
+    model: Option<String>,
+}
+
+struct ClaudeModels;
+
+impl ClaudeModels {
+    fn load() -> CliModelCatalog {
+        let home = std::env::var("HOME").unwrap_or_default();
+        Self::from_settings(&PathBuf::from(home).join(".claude").join("settings.json"))
+    }
+
+    fn from_settings(path: &Path) -> CliModelCatalog {
+        let configured = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ClaudeSettings>(&bytes).ok())
+            .and_then(|settings| settings.model)
+            .unwrap_or_default();
+        let selected = Self::alias_of(&configured).unwrap_or_else(|| configured.clone());
+        let mut models = ["fable", "opus", "sonnet"]
+            .into_iter()
+            .map(|id| vmux_wire::room::ModelOptionEntry {
+                id: id.to_string(),
+                name: Self::display_name(id),
+                description: String::new(),
+            })
+            .collect::<Vec<_>>();
+        if !selected.is_empty() && !models.iter().any(|model| model.id == selected) {
+            models.insert(
+                0,
+                vmux_wire::room::ModelOptionEntry {
+                    id: selected.clone(),
+                    name: selected.clone(),
+                    description: String::new(),
+                },
+            );
+        }
+        CliModelCatalog {
+            selected: if selected.is_empty() {
+                "sonnet".to_string()
+            } else {
+                selected
+            },
+            models,
+        }
+    }
+
+    fn alias_of(model: &str) -> Option<String> {
+        ["fable", "opus", "sonnet"]
+            .into_iter()
+            .find(|alias| model == *alias || model.contains(&format!("-{alias}-")))
+            .map(str::to_string)
+    }
+
+    fn display_name(id: &str) -> String {
+        let mut chars = id.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().chain(chars).collect(),
+            None => String::new(),
+        }
+    }
+}
+
+fn allowed_tools(servers: impl IntoIterator<Item = String>) -> String {
+    let mut tools = HOST_ALLOWED_TOOLS.to_string();
+    for server in servers {
+        tools.push(',');
+        tools.push_str("mcp__");
+        tools.push_str(&server);
+        tools.push_str("__*");
+    }
+    tools
 }
 
 fn project_dir_name(cwd: &Path) -> String {
@@ -475,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn model_catalog_maps_the_configured_claude_model_to_an_alias() {
+        let tmp = unique_tmp("claude-models");
+        let settings = tmp.join("settings.json");
+        std::fs::write(&settings, r#"{"model":"claude-opus-5"}"#).unwrap();
+
+        let models = ClaudeModels::from_settings(&settings);
+
+        assert_eq!(models.selected, "opus");
+        assert!(models.models.iter().any(|model| model.id == "sonnet"));
+        assert_eq!(ClaudeStrategy.model_args("opus"), ["--model", "opus"]);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn project_dir_name_replaces_slashes_and_dots_with_dashes() {
         assert_eq!(
             project_dir_name(Path::new("/Users/junichi.sugiura/.config/nvim")),
@@ -581,6 +679,15 @@ mod tests {
         let workspace = args[steer + 1].find("mcp__vmux__select_project").unwrap();
         let worktree = args[steer + 1].find("mcp__vmux__create_worktree").unwrap();
         assert!(workspace < worktree);
+    }
+
+    #[test]
+    fn managed_mcp_tools_are_allowed_without_an_interactive_terminal_prompt() {
+        let allowed = allowed_tools(["linear".to_string(), "notion".to_string()]);
+
+        assert!(allowed.contains("mcp__linear__*"));
+        assert!(allowed.contains("mcp__notion__*"));
+        assert!(allowed.contains("mcp__vmux__run"));
     }
 
     #[test]

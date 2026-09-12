@@ -2914,6 +2914,7 @@ mod tests {
 pub const EXTENSIONS_LIST_EVENT: &str = "extensions_list";
 pub const EXT_INSTALL_PROGRESS_EVENT: &str = "ext_install_progress";
 pub const EXT_STATUS_EVENT: &str = "ext_status";
+pub const EXTENSION_POPUP_EVENT: &str = "extension_popup";
 pub const EXTENSIONS_PAGE_URL: &str = "vmux://extensions/";
 
 #[derive(
@@ -2973,6 +2974,8 @@ pub struct ExtRow {
     pub icon: Option<String>,
     pub popup: Option<String>,
     pub enabled: bool,
+    #[serde(default)]
+    pub pinned: bool,
     pub needs_approval: bool,
     pub required_permissions: Vec<String>,
     pub required_host_permissions: Vec<String>,
@@ -3076,6 +3079,94 @@ pub struct ExtUninstallRequest {
 )]
 pub struct ExtActionRequest {
     pub id: String,
+    pub anchor: ExtensionPopupAnchor,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionPopupAnchor {
+    pub right: i32,
+    pub bottom: i32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionPopupEvent {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub anchor: ExtensionPopupAnchor,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionPopupBoundsRequest {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionPopupCloseRequest;
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtPinRequest {
+    pub id: String,
+    pub pinned: bool,
 }
 
 #[derive(

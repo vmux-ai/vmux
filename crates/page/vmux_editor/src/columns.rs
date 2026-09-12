@@ -95,7 +95,7 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                     }
                 },
                 None => rsx! {
-                    div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
+                    div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
                         PreviewPane { preview: (window.preview)() }
                     }
                 },
@@ -105,7 +105,7 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
 }
 
 const PARENT_CLASS: &str = "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 cursor-default transition-colors hover:bg-foreground/[0.04]";
-const PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]";
+const PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--primary)_60%,transparent)]";
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct DirWindow {

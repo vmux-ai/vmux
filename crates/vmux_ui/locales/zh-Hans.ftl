@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } 个标签页
 }
 spaces-delete = 删除工作区
+shortcuts-title = 键盘快捷键
+shortcuts-count = { $count } 个快捷键
+shortcuts-search = 筛选快捷键…
+shortcuts-empty = 没有匹配的快捷键
+shortcuts-general = 常规
+shortcuts-try-title = 试用快捷键
+shortcuts-try-hint = 按下任意快捷键
+shortcuts-waiting = 正在等待下一个按键…
+shortcuts-triggered = 执行：{ $action }
+shortcuts-no-match = 没有快捷键匹配这些按键
+shortcuts-clear = 重置
 
 team-title = 团队
 simulator-title = 模拟器
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = 配置文件
+team-new-profile = 新建配置文件
+team-switch-profile = 切换到 { $profile }
+team-edit-profile = 编辑配置文件
+team-profile-name = 配置文件名称
 team-just-you = 此工作区中只有你
 team-agents = { $count ->
     [one] 你和 1 个 Agent
@@ -180,7 +196,7 @@ team-you = 你
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = 后台服务
+services-title = Vmux 进程
 services-processes = { $count ->
     [one] 1 个进程
    *[other] { $count } 个进程
@@ -197,6 +213,7 @@ services-attached = 已附加
 services-kill = 强制结束
 services-memory = 内存
 services-size = 大小
+services-uptime = 运行时间
 services-shell = Shell
 
 error-title = 错误
@@ -282,6 +299,7 @@ layout-new-stack = 新建层页
 layout-close-tab = 关闭标签页
 layout-bookmark = 收藏
 layout-pin = 固定
+layout-unpin = 取消固定
 layout-new-tab = 新建标签页
 layout-team = 团队
 
@@ -451,6 +469,8 @@ common-error = 错误
 common-output = 输出
 common-pending = 待处理
 common-current = 当前
+composer-permissions = 权限
+composer-permission-change = 更改权限模式
 common-stop = 停止
 services-command = Vmux 服务
 services-uptime-seconds = { $seconds } 秒

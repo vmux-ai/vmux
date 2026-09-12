@@ -52,8 +52,11 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
-fn display_name_path() -> PathBuf {
-    profile_dir().join("display_name")
+fn display_name_path_for(profile: &str) -> PathBuf {
+    shared_data_dir()
+        .join("profiles")
+        .join(profile)
+        .join("display_name")
 }
 
 fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> String {
@@ -67,20 +70,91 @@ fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> Strin
 }
 
 pub fn display_name() -> String {
-    let configured = std::fs::read_to_string(display_name_path()).ok();
-    display_name_from(
-        configured.as_deref(),
-        &active_profile_name(),
-        is_test_session(),
-    )
+    profile_display_name(&active_profile_name())
 }
 
 pub fn set_display_name(name: &str) -> std::io::Result<()> {
-    let path = display_name_path();
+    set_profile_display_name(&active_profile_name(), name)
+}
+
+pub fn profile_display_name(profile: &str) -> String {
+    profile_display_name_in(&shared_data_dir(), profile, is_test_session())
+}
+
+pub fn profile_ids() -> Vec<String> {
+    profile_ids_in(&shared_data_dir(), &active_profile_name())
+}
+
+pub fn profile_exists(profile: &str) -> bool {
+    let profile = sanitize_profile(profile);
+    profile == active_profile_name()
+        || display_name_path_for(&profile)
+            .parent()
+            .is_some_and(|p| p.is_dir())
+}
+
+pub fn create_profile(name: &str) -> std::io::Result<String> {
+    create_profile_in(&shared_data_dir(), name)
+}
+
+pub fn set_profile_display_name(profile: &str, name: &str) -> std::io::Result<()> {
+    let profile = sanitize_profile(profile);
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "profile name cannot be empty",
+        ));
+    }
+    let path = display_name_path_for(&profile);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, name.trim())
+    std::fs::write(path, name)
+}
+
+fn profile_display_name_in(data: &std::path::Path, profile: &str, is_test: bool) -> String {
+    let profile = sanitize_profile(profile);
+    let configured =
+        std::fs::read_to_string(data.join("profiles").join(&profile).join("display_name")).ok();
+    display_name_from(configured.as_deref(), &profile, is_test)
+}
+
+fn profile_ids_in(data: &std::path::Path, active: &str) -> Vec<String> {
+    let root = data.join("profiles");
+    let mut ids = std::collections::BTreeSet::new();
+    ids.insert(active.to_string());
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                ids.insert(sanitize_profile(&entry.file_name().to_string_lossy()));
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+fn create_profile_in(data: &std::path::Path, name: &str) -> std::io::Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "profile name cannot be empty",
+        ));
+    }
+    let base = sanitize_profile(name);
+    let root = data.join("profiles");
+    let mut id = base.clone();
+    for suffix in 2usize.. {
+        if !root.join(&id).exists() {
+            break;
+        }
+        id = format!("{base}-{suffix}");
+    }
+    let dir = root.join(&id);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("display_name"), name)?;
+    Ok(id)
 }
 
 fn data_dir_suffix_for(profile: &str) -> PathBuf {
@@ -375,6 +449,40 @@ mod tests {
         assert_eq!(sanitize_profile("  "), "personal");
         assert_eq!(sanitize_profile("a/b"), "a-b");
         assert_eq!(sanitize_profile("../evil"), "evil");
+    }
+
+    #[test]
+    fn profile_listing_includes_active_and_saved_profile_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("profiles/work")).unwrap();
+        std::fs::write(
+            temp.path().join("profiles/work/display_name"),
+            "Client Work",
+        )
+        .unwrap();
+
+        let profiles = profile_ids_in(temp.path(), "personal");
+
+        assert_eq!(profiles, ["personal", "work"]);
+        assert_eq!(
+            profile_display_name_in(temp.path(), "work", false),
+            "Client Work"
+        );
+    }
+
+    #[test]
+    fn profile_creation_uses_a_unique_safe_id() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("profiles/client-work")).unwrap();
+
+        let created = create_profile_in(temp.path(), "Client Work").unwrap();
+
+        assert_eq!(created, "client-work-2");
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("profiles/client-work-2/display_name"))
+                .unwrap(),
+            "Client Work"
+        );
     }
 
     #[test]

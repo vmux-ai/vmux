@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
+use vmux_wire::protocol::AcpModeOption;
 use vmux_wire::room::ModelOptionEntry;
 use vmux_wire::space::{ProjectBranch, ProjectRow};
 
 use crate::components::agent_menu::{AgentMenu, ComposerAgentOption};
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
+use crate::components::permission_menu::PermissionMenu;
 use crate::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker};
 use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
@@ -28,6 +30,8 @@ pub struct ComposerBarProps {
     pub model: Option<ComposerChip>,
     #[props(default)]
     pub effort: Option<ComposerChip>,
+    #[props(default)]
+    pub permission: Option<ComposerChip>,
     #[props(default)]
     pub project: Option<ComposerChip>,
     #[props(default)]
@@ -162,6 +166,7 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
         agent,
         model,
         effort,
+        permission,
         project,
         branch,
         is_git_repo,
@@ -218,7 +223,16 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                     ahead,
                 }
             }
-            ComposerStatus { status, active_subagents, active_tasks, queued_count }
+            div { class: "flex shrink-0 items-center gap-1",
+                if let Some(chip) = permission {
+                    ComposerChipSlot {
+                        kind: ComposerMenuKind::Permission,
+                        chip,
+                        open: menu.is(ComposerMenuKind::Permission),
+                    }
+                }
+                ComposerStatus { status, active_subagents, active_tasks, queued_count }
+            }
         }
     }
 }
@@ -235,6 +249,8 @@ pub struct ComposerMenusProps {
     #[props(default)]
     pub effort: Option<EffortMenuData>,
     #[props(default)]
+    pub permission: Option<PermissionMenuData>,
+    #[props(default)]
     pub project: Option<ProjectMenuData>,
     #[props(default)]
     pub branch: Option<BranchMenuData>,
@@ -248,6 +264,7 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
         agent,
         model,
         effort,
+        permission,
         project,
         branch,
     } = props;
@@ -296,6 +313,22 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
                     on_select: move |level: String| {
                         menu.close();
                         data.on_select.call(level);
+                    },
+                    on_dismiss: move |()| menu.close(),
+                }
+            }
+        }
+        if menu.is(ComposerMenuKind::Permission) {
+            if let Some(data) = permission {
+                PermissionMenu {
+                    placement,
+                    modes: data.modes,
+                    current_mode_id: data.current_mode_id,
+                    selected: cursor,
+                    on_hover: move |index| menu.point_at(index),
+                    on_select: move |mode: AcpModeOption| {
+                        menu.close();
+                        data.on_select.call(mode);
                     },
                     on_dismiss: move |()| menu.close(),
                 }
@@ -436,6 +469,19 @@ pub fn ComposerChipIcon(kind: ComposerMenuKind) -> Element {
                 path { d: "M12 12l3.5-2" }
             }
         },
+        ComposerMenuKind::Permission => rsx! {
+            svg {
+                class,
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.8",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6l-7-3Z" }
+                path { d: "m9.5 12 1.7 1.7 3.5-3.7" }
+            }
+        },
         ComposerMenuKind::Project => rsx! {
             svg {
                 class,
@@ -522,6 +568,13 @@ pub struct EffortMenuData {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct PermissionMenuData {
+    pub modes: Vec<AcpModeOption>,
+    pub current_mode_id: String,
+    pub on_select: EventHandler<AcpModeOption>,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct ProjectMenuData {
     pub projects: Vec<ProjectRow>,
     pub loaded: bool,
@@ -584,9 +637,13 @@ impl ComposerMenu {
     }
 
     pub fn toggle(&self, kind: ComposerMenuKind) -> bool {
+        self.toggle_at(kind, 0)
+    }
+
+    pub fn toggle_at(&self, kind: ComposerMenuKind, index: usize) -> bool {
         let mut open = self.open;
         let mut cursor = self.cursor;
-        cursor.set(0);
+        cursor.set(index);
         if *open.peek() == Some(kind) {
             open.set(None);
             return false;
@@ -610,6 +667,7 @@ pub enum ComposerMenuKind {
     Agent,
     Model,
     Effort,
+    Permission,
     Project,
     Branch,
 }
@@ -620,6 +678,7 @@ impl ComposerMenuKind {
             Self::Agent => "w-24",
             Self::Model => "w-28",
             Self::Effort => "w-20",
+            Self::Permission => "w-24",
             Self::Project => "w-24",
             Self::Branch => "w-20",
         }
@@ -628,7 +687,7 @@ impl ComposerMenuKind {
     fn label_class(self) -> &'static str {
         match self {
             Self::Branch => "truncate font-mono text-[10px]",
-            Self::Effort => "truncate capitalize",
+            Self::Effort | Self::Permission => "truncate capitalize",
             _ => "truncate",
         }
     }

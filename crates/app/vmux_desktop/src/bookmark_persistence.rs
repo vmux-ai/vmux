@@ -24,6 +24,8 @@ impl Plugin for BookmarkPersistencePlugin {
                 PostUpdate,
                 (
                     migrate_legacy_bookmark_order,
+                    migrate_smart_bookmark_folders,
+                    migrate_shortcut_bookmark_aliases,
                     mark_bookmarks_dirty,
                     autosave_bookmarks,
                 )
@@ -200,6 +202,9 @@ impl<'a> BookmarkDefaults<'a> {
     }
 
     fn key(url: &str) -> String {
+        if let Some(canonical) = vmux_shortcut::ShortcutUrl::canonical(url) {
+            return canonical.trim_end_matches('/').to_ascii_lowercase();
+        }
         url.trim().trim_end_matches('/').to_ascii_lowercase()
     }
 
@@ -340,6 +345,129 @@ fn migrate_legacy_bookmark_order(
     }
 }
 
+fn migrate_smart_bookmark_folders(
+    folders: Query<(Entity, Option<&Children>), With<vmux_core::SmartBookmarkFolder>>,
+    mut offered: ResMut<OfferedBookmarkDefaults>,
+    mut auto: ResMut<BookmarkAutoSave>,
+    mut commands: Commands,
+) {
+    let mut changed = false;
+    for (folder, children) in &folders {
+        if let Some(children) = children {
+            for child in children.iter() {
+                commands.entity(child).remove::<ChildOf>();
+            }
+        }
+        commands.entity(folder).despawn();
+        changed = true;
+    }
+    if !offered.folder_bookmarks.is_empty() {
+        offered.folder_bookmarks.clear();
+        changed = true;
+    }
+    if changed {
+        auto.dirty = true;
+    }
+}
+
+fn migrate_shortcut_bookmark_aliases(
+    items: Query<
+        (
+            Entity,
+            &PageMetadata,
+            Has<Pin>,
+            Has<Bookmark>,
+            Option<&ChildOf>,
+            Option<&BookmarkOrder>,
+        ),
+        Or<(With<Pin>, With<Bookmark>)>,
+    >,
+    mut offered: ResMut<OfferedBookmarkDefaults>,
+    mut auto: ResMut<BookmarkAutoSave>,
+    mut commands: Commands,
+) {
+    let mut changed = false;
+    let mut seen = HashSet::new();
+    let mut normalized_urls = Vec::new();
+    for url in &offered.urls {
+        let normalized = vmux_shortcut::ShortcutUrl::canonical(url)
+            .unwrap_or(url)
+            .to_string();
+        if seen.insert(BookmarkDefaults::key(&normalized)) {
+            normalized_urls.push(normalized);
+        }
+    }
+    if offered.urls != normalized_urls {
+        offered.urls = normalized_urls;
+        changed = true;
+    }
+
+    let mut aliases = items
+        .iter()
+        .filter(|(_, metadata, _, _, _, _)| {
+            vmux_shortcut::ShortcutUrl::canonical(&metadata.url).is_some()
+        })
+        .map(|(entity, metadata, pinned, bookmarked, parent, order)| {
+            (
+                entity,
+                metadata.clone(),
+                pinned,
+                bookmarked,
+                parent.map(ChildOf::parent),
+                order.map_or(u32::MAX, |order| order.0),
+            )
+        })
+        .collect::<Vec<_>>();
+    aliases.sort_by_key(|(entity, _, _, _, _, order)| (*order, entity.to_bits()));
+    let Some((survivor, mut metadata, survivor_pinned, survivor_bookmarked, survivor_parent, _)) =
+        aliases.first().cloned()
+    else {
+        if changed {
+            auto.dirty = true;
+        }
+        return;
+    };
+    let original_metadata = metadata.clone();
+    let original_url = metadata.url.clone();
+    if metadata.title.trim() == original_url.trim() {
+        metadata.title = vmux_shortcut::PAGE_URL.to_string();
+    }
+    if metadata.url != vmux_shortcut::PAGE_URL {
+        metadata.url = vmux_shortcut::PAGE_URL.to_string();
+    }
+    let pinned = aliases.iter().any(|(_, _, pinned, _, _, _)| *pinned);
+    let bookmarked = aliases
+        .iter()
+        .any(|(_, _, _, bookmarked, _, _)| *bookmarked);
+    let parent = aliases.iter().find_map(|(_, _, _, _, parent, _)| *parent);
+    let mut survivor_commands = commands.entity(survivor);
+    if metadata != original_metadata {
+        survivor_commands.insert(metadata);
+        changed = true;
+    }
+    if pinned && !survivor_pinned {
+        survivor_commands.insert(Pin);
+        changed = true;
+    }
+    if bookmarked && !survivor_bookmarked {
+        survivor_commands.insert(Bookmark);
+        changed = true;
+    }
+    if parent != survivor_parent
+        && let Some(parent) = parent
+    {
+        survivor_commands.insert(ChildOf(parent));
+        changed = true;
+    }
+    for (entity, _, _, _, _, _) in aliases.into_iter().skip(1) {
+        commands.entity(entity).despawn();
+        changed = true;
+    }
+    if changed {
+        auto.dirty = true;
+    }
+}
+
 fn mark_bookmarks_dirty(
     mut auto: ResMut<BookmarkAutoSave>,
     changed: Query<
@@ -420,7 +548,7 @@ mod tests {
             PageMetadata {
                 title: "A".into(),
                 url: "https://a.test".into(),
-                icon: vmux_core::icon::PageIcon::default(),
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Smartphone),
                 bg_color: None,
             },
             BookmarkOrder(1),
@@ -460,15 +588,20 @@ mod tests {
 
         let bookmarks = load_app
             .world_mut()
-            .query_filtered::<Entity, With<Bookmark>>()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
             .iter(load_app.world())
-            .count();
+            .cloned()
+            .collect::<Vec<_>>();
         let folders = load_app
             .world_mut()
             .query_filtered::<Entity, With<Folder>>()
             .iter(load_app.world())
             .count();
-        assert_eq!(bookmarks, 1, "bookmark rebuilt");
+        assert_eq!(bookmarks.len(), 1, "bookmark rebuilt");
+        assert_eq!(
+            bookmarks[0].icon,
+            vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Smartphone)
+        );
         assert_eq!(folders, 1, "folder rebuilt");
         let excluded = load_app
             .world_mut()
@@ -505,6 +638,62 @@ mod tests {
 
         assert_eq!(offered.claim_new_urls(&defaults), defaults);
         assert!(offered.claim_new_urls(&defaults).is_empty());
+    }
+
+    #[test]
+    fn shortcut_alias_bookmarks_migrate_to_one_canonical_entry() {
+        let mut app = App::new();
+        app.insert_resource(OfferedBookmarkDefaults {
+            urls: vec!["vmux://cheatsheet/".into(), vmux_shortcut::PAGE_URL.into()],
+            ..default()
+        })
+        .init_resource::<BookmarkAutoSave>()
+        .add_systems(Update, migrate_shortcut_bookmark_aliases);
+        let survivor = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "vmux://cheatsheet/".into(),
+                    url: "vmux://cheatsheet/".into(),
+                    ..default()
+                },
+                BookmarkOrder(2),
+            ))
+            .id();
+        let duplicate = app
+            .world_mut()
+            .spawn((
+                Bookmark,
+                PageMetadata {
+                    title: "Keyboard Shortcuts".into(),
+                    url: vmux_shortcut::PAGE_URL.into(),
+                    ..default()
+                },
+                BookmarkOrder(8),
+            ))
+            .id();
+
+        app.update();
+
+        let entity = app.world().entity(survivor);
+        assert!(entity.contains::<Pin>());
+        assert!(entity.contains::<Bookmark>());
+        assert_eq!(
+            entity.get::<PageMetadata>().unwrap().url,
+            vmux_shortcut::PAGE_URL
+        );
+        assert!(app.world().get_entity(duplicate).is_err());
+        assert_eq!(
+            app.world().resource::<OfferedBookmarkDefaults>().urls,
+            [vmux_shortcut::PAGE_URL]
+        );
+        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
+
+        app.world_mut().resource_mut::<BookmarkAutoSave>().dirty = false;
+        app.update();
+
+        assert!(!app.world().resource::<BookmarkAutoSave>().dirty);
     }
 
     #[test]
@@ -650,45 +839,27 @@ mod tests {
     }
 
     #[test]
-    fn legacy_default_folder_bookmark_becomes_smart_content_without_removing_its_pin() {
-        let mut settings = vmux_setting::AppSettings::embedded();
-        settings.browser.bookmarks.clear();
-        settings.browser.bookmark_folders = vec![vmux_setting::BookmarkFolderSettings {
-            name: "Projects".into(),
-            smart: Some(vmux_core::SmartBookmarkFolder::Projects),
-        }];
+    fn smart_folder_migration_moves_children_to_bookmark_root() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
-            .insert_resource(settings)
             .insert_resource(OfferedBookmarkDefaults {
-                urls: vec!["vmux://projects/".into()],
                 folders: vec!["Projects".into()],
                 folder_bookmarks: vec!["projects\nvmux://projects".into()],
+                ..default()
             })
             .init_resource::<BookmarkAutoSave>()
-            .add_observer(seed_default_bookmarks_after_load);
-        app.world_mut().insert_resource(BookmarkLoadPending);
-        app.world_mut().spawn(vmux_core::page::PageManifest {
-            host: "projects",
-            title: "Projects",
-            title_message_id: None,
-            replaces_command: None,
-            keywords: &[],
-            icon: None,
-            command_bar: true,
-        });
-        let pin = app
+            .add_systems(Update, migrate_smart_bookmark_folders);
+        let bookmark = app
             .world_mut()
             .spawn((
-                Pin,
-                Uuid("project-pin".into()),
+                Bookmark,
+                Uuid("project-bookmark".into()),
                 PageMetadata {
                     title: "Projects".into(),
                     url: "vmux://projects/".into(),
                     ..default()
                 },
-                Bookmark,
                 BookmarkOrder(0),
             ))
             .id();
@@ -699,28 +870,22 @@ mod tests {
                 Uuid("projects-folder".into()),
                 Name::new("Projects"),
                 BookmarkOrder(1),
+                vmux_core::SmartBookmarkFolder::Projects,
             ))
             .id();
-        app.world_mut().entity_mut(pin).insert(ChildOf(folder));
-
-        app.world_mut().trigger(Loaded {
-            entity_map: bevy::ecs::entity::EntityHashMap::default(),
-        });
+        app.world_mut().entity_mut(bookmark).insert(ChildOf(folder));
         app.update();
 
-        assert!(app.world().entity(pin).contains::<Pin>());
-        assert!(!app.world().entity(pin).contains::<Bookmark>());
-        assert!(!app.world().entity(pin).contains::<ChildOf>());
-        assert_eq!(
-            app.world().get::<vmux_core::SmartBookmarkFolder>(folder),
-            Some(&vmux_core::SmartBookmarkFolder::Projects)
-        );
+        assert!(app.world().get_entity(folder).is_err());
+        assert!(app.world().entity(bookmark).contains::<Bookmark>());
+        assert!(!app.world().entity(bookmark).contains::<ChildOf>());
         assert!(
             app.world()
                 .resource::<OfferedBookmarkDefaults>()
                 .folder_bookmarks
                 .is_empty()
         );
+        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
     }
 
     #[test]

@@ -52,6 +52,7 @@ use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
     event::HeaderCommandEvent,
+    overlay::LayoutOverlayActive,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
@@ -134,6 +135,7 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
         ))
         .add_plugins((
+            native_page::NativePagePlugin::in_pane(&native_page::SHORTCUTS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
                 .takes::<vmux_core::PageMetadata>(),
             native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
@@ -364,8 +366,11 @@ fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton
     }
 }
 
-pub(crate) type LayoutPointerCapture =
-    Or<(With<BookmarkContextMenuActive>, With<CommandBarPanelActive>)>;
+pub(crate) type LayoutPointerCapture = Or<(
+    With<BookmarkContextMenuActive>,
+    With<CommandBarPanelActive>,
+    With<LayoutOverlayActive>,
+)>;
 
 fn tab_of(
     start: Entity,
@@ -709,6 +714,9 @@ fn should_emit_update(
 
 fn normalize_vmux_url(url: &str) -> String {
     let url = url.trim();
+    if let Some(canonical) = vmux_shortcut::ShortcutUrl::canonical(url) {
+        return canonical.to_string();
+    }
     if let Some(rest) = url.strip_prefix("vmux://agent")
         && (rest.is_empty() || rest.starts_with('/'))
     {
@@ -834,6 +842,18 @@ mod tests {
         assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://lsp/");
         assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
         assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://lsp/");
+        assert_eq!(
+            normalize_vmux_url("vmux://shortcuts"),
+            vmux_shortcut::PAGE_URL
+        );
+        assert_eq!(
+            normalize_vmux_url("vmux://cheatsheet/"),
+            vmux_shortcut::PAGE_URL
+        );
+        assert_eq!(
+            normalize_vmux_url("vmux://cheetsheet"),
+            vmux_shortcut::PAGE_URL
+        );
         assert_eq!(
             normalize_vmux_url("vmux://sessions/vibe/"),
             "vmux://sessions/vibe/"
@@ -1479,6 +1499,161 @@ mod tests {
                     .values()
                     .any(|pending| pending.request_id == request_id.0),
                 "terminal navigation should wait for its snapshot"
+            );
+        }
+
+        #[test]
+        fn browser_navigate_replaces_the_start_page_stack() {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ConsumerPlugin));
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings());
+
+            let pane = app.world_mut().spawn(Pane).id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt(1),
+                    ChildOf(pane),
+                ))
+                .insert(PageMetadata {
+                    title: "Start".into(),
+                    url: "vmux://start/".into(),
+                    ..default()
+                })
+                .id();
+            app.world_mut().spawn((Browser, ChildOf(stack)));
+            app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+            app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+            app.world_mut()
+                .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
+                .write(vmux_layout::BrowserNavigateRequest {
+                    url: "vmux://terminal/".into(),
+                    pane: None,
+                    request_id: None,
+                    new_stack: false,
+                    profile: None,
+                });
+
+            app.update();
+            app.update();
+
+            let world = app.world_mut();
+            let stacks = world
+                .query_filtered::<Entity, With<vmux_layout::stack::Stack>>()
+                .iter(world)
+                .collect::<Vec<_>>();
+            assert_eq!(stacks, vec![stack]);
+            assert_eq!(
+                world
+                    .query::<&ChildOf>()
+                    .iter(world)
+                    .filter(|child| child.get() == stack)
+                    .count(),
+                1
+            );
+        }
+
+        #[test]
+        fn browser_navigate_replaces_the_start_page_stack_with_a_web_page() {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ConsumerPlugin));
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<CapturedNavigateUrls>()
+                .add_observer(
+                    |trigger: On<bevy_cef::prelude::RequestNavigate>,
+                     mut captured: ResMut<CapturedNavigateUrls>| {
+                        captured.0.push(trigger.url.clone());
+                    },
+                );
+
+            let pane = app.world_mut().spawn(Pane).id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt(1),
+                    ChildOf(pane),
+                ))
+                .insert(PageMetadata {
+                    title: "Start".into(),
+                    url: "vmux://start/".into(),
+                    ..default()
+                })
+                .id();
+            app.world_mut().spawn((Browser, ChildOf(stack)));
+            app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+            app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+            app.world_mut()
+                .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
+                .write(vmux_layout::BrowserNavigateRequest {
+                    url: "https://example.com".into(),
+                    pane: None,
+                    request_id: None,
+                    new_stack: false,
+                    profile: None,
+                });
+
+            app.update();
+            app.update();
+
+            let world = app.world_mut();
+            assert_eq!(
+                world
+                    .query_filtered::<Entity, With<vmux_layout::stack::Stack>>()
+                    .iter(world)
+                    .count(),
+                1
+            );
+            assert!(world.resource::<CapturedNavigateUrls>().0.is_empty());
+        }
+
+        #[test]
+        fn browser_navigate_keeps_the_start_page_for_an_explicit_new_stack() {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ConsumerPlugin));
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings());
+
+            let pane = app.world_mut().spawn(Pane).id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt(1),
+                    ChildOf(pane),
+                ))
+                .insert(PageMetadata {
+                    title: "Start".into(),
+                    url: "vmux://start/".into(),
+                    ..default()
+                })
+                .id();
+            app.world_mut().spawn((Browser, ChildOf(stack)));
+            app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+            app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+            app.world_mut()
+                .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
+                .write(vmux_layout::BrowserNavigateRequest {
+                    url: "vmux://terminal/".into(),
+                    pane: None,
+                    request_id: None,
+                    new_stack: true,
+                    profile: None,
+                });
+
+            app.update();
+            app.update();
+
+            let world = app.world_mut();
+            assert_eq!(
+                world
+                    .query_filtered::<Entity, With<vmux_layout::stack::Stack>>()
+                    .iter(world)
+                    .count(),
+                2
             );
         }
 

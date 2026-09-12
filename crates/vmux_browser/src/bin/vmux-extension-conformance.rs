@@ -562,6 +562,7 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
         icon: parsed.icon,
         enabled: false,
         profile_enabled,
+        profile_pinned: Default::default(),
         permissions: parsed.permissions,
         optional_permissions: parsed.optional_permissions,
         host_permissions: parsed.host_permissions,

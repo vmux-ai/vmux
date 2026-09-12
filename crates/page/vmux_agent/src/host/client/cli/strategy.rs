@@ -8,6 +8,12 @@ use vmux_service::message::Message;
 use crate::McpServerConfig;
 use crate::strategy::AgentStrategy;
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CliModelCatalog {
+    pub selected: String,
+    pub models: Vec<vmux_wire::room::ModelOptionEntry>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResumableSession {
     pub kind: AgentKind,
@@ -106,6 +112,18 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
 pub trait CliAgentStrategy: AgentStrategy {
     fn sessions_root(&self) -> PathBuf;
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
+    fn model_catalog(&self) -> CliModelCatalog {
+        CliModelCatalog::default()
+    }
+
+    fn model_args(&self, _model: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn model_env(&self, _model: &str) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
     fn effort_args(&self, _level: &str) -> Vec<String> {
         Vec::new()
     }

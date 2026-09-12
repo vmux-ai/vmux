@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } вкладок
 }
 spaces-delete = Удалить пространство
+shortcuts-title = Сочетания клавиш
+shortcuts-count = Сочетаний: { $count }
+shortcuts-search = Фильтр сочетаний…
+shortcuts-empty = Нет подходящих сочетаний
+shortcuts-general = Общие
+shortcuts-try-title = Проверить сочетание
+shortcuts-try-hint = Нажмите любое сочетание клавиш
+shortcuts-waiting = Ожидание следующей клавиши…
+shortcuts-triggered = Выполняет: { $action }
+shortcuts-no-match = Нет сочетания для этих клавиш
+shortcuts-clear = Сбросить
 
 team-title = Команда
 simulator-title = Симулятор
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Профили
+team-new-profile = Новый профиль
+team-switch-profile = Переключиться на { $profile }
+team-edit-profile = Изменить профиль
+team-profile-name = Имя профиля
 team-just-you = В этом пространстве только вы
 team-agents = { $count ->
     [one] Вы и 1 агент
@@ -180,7 +196,7 @@ team-you = Вы
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Агент
 
-services-title = Фоновые службы
+services-title = Процессы Vmux
 services-processes = { $count ->
     [one] 1 процесс
    *[other] { $count } процессов
@@ -197,6 +213,7 @@ services-attached = подключено
 services-kill = Завершить принудительно
 services-memory = Память
 services-size = Размер
+services-uptime = Время работы
 services-shell = Оболочка
 
 error-title = Ошибка
@@ -282,6 +299,7 @@ layout-new-stack = Новый слой
 layout-close-tab = Закрыть вкладку
 layout-bookmark = Закладка
 layout-pin = Закрепить
+layout-unpin = Открепить
 layout-new-tab = Новая вкладка
 layout-team = Команда
 
@@ -451,6 +469,8 @@ common-error = Ошибка
 common-output = Вывод
 common-pending = Ожидает
 common-current = текущий
+composer-permissions = Разрешения
+composer-permission-change = Изменить режим разрешений
 common-stop = Остановить
 services-command = Сервис Vmux
 services-uptime-seconds = { $seconds } с

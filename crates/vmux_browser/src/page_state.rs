@@ -11,7 +11,7 @@ use vmux_layout::{
     event::{
         HEADER_HEIGHT_PX, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
         PaneTreeEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TAB_BOUNDARY_EVENT,
-        TABS_EVENT, TabBoundaryEvent, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT,
+        TABS_EVENT, TabBoundary, TabBoundaryEvent, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT,
         UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent, UpdateProgressEvent,
         UpdateReadyEvent,
     },
@@ -453,6 +453,15 @@ fn push_projects_host_emit(
         *listed = Some(rows);
     }
     let mut projects = listed.clone().unwrap_or_default();
+    let mut boundary = projects
+        .iter()
+        .find(|project| project.depth == 0 && project.is_active)
+        .map(|project| TabBoundary {
+            effective_dir: project.path.clone(),
+            source: "project".to_string(),
+            branch: project.branch.clone(),
+            ..Default::default()
+        });
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         for row in &mut projects {
@@ -461,13 +470,28 @@ fn push_projects_host_emit(
             }
             if let Some(info) = cache.get(std::path::Path::new(&row.path)) {
                 row.branch = info.branch.clone();
+                if row.is_active {
+                    let repository = info.project_name();
+                    boundary = Some(TabBoundary {
+                        effective_dir: row.path.clone(),
+                        source: "project".to_string(),
+                        repository,
+                        is_git_repo: true,
+                        is_worktree: info.is_worktree,
+                        branch: info.branch,
+                        base_ref: info.base_ref,
+                        uncommitted: info.uncommitted,
+                        ahead: info.ahead,
+                        changed_files: info.changed_files,
+                        insertions: info.insertions,
+                        deletions: info.deletions,
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
-    let payload = TabBoundaryEvent {
-        boundary: None,
-        projects,
-    };
+    let payload = TabBoundaryEvent { boundary, projects };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     let previous = last.get(&cef_e).map(String::as_str).unwrap_or_default();
     if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
@@ -554,6 +578,9 @@ fn push_bookmarks_host_emit(
 
     let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
     for (_, uuid, name, children, collapsed, smart, order, parent) in folders.iter() {
+        if smart.is_some() {
+            continue;
+        }
         let mut kids = Vec::new();
         if let Some(children) = children {
             for child in children.iter() {
@@ -575,7 +602,6 @@ fn push_bookmarks_host_emit(
                 uuid: uuid.0.clone(),
                 name: name.as_str().to_string(),
                 collapsed,
-                smart: smart.copied(),
                 parent,
                 children: kids.into_iter().map(|(_, row)| row).collect(),
             }),

@@ -121,6 +121,11 @@ pub static HISTORY_PAGE: NativePage =
     NativePage::pane(vmux_history::PAGE_URL, vmux_history::page::Page).titled("History");
 
 #[cfg(target_os = "macos")]
+pub static SHORTCUTS_PAGE: NativePage =
+    NativePage::pane(vmux_shortcut::PAGE_URL, vmux_shortcut::page::Page)
+        .titled("Keyboard Shortcuts");
+
+#[cfg(target_os = "macos")]
 pub static TEAM_PAGE: NativePage =
     NativePage::pane(vmux_core::event::team::TEAM_PAGE_URL, vmux_team::page::Page).titled("Team");
 
@@ -142,15 +147,13 @@ pub static LSP_PAGE: NativePage =
 #[cfg(target_os = "macos")]
 pub static FILES_PAGE: NativePage = NativePage::pane("file://", vmux_editor::page::Page)
     .titled("Files")
-    .owning_subtree()
-    .served_from("vmux://files/");
+    .owning_subtree();
 
 #[cfg(target_os = "macos")]
 pub static PROJECTS_PAGE: NativePage =
     NativePage::pane(vmux_wire::space::PROJECTS_PAGE_URL, vmux_editor::page::Page)
         .titled("Projects")
-        .owning_subtree()
-        .served_from("vmux://files/");
+        .owning_subtree();
 
 #[cfg(target_os = "macos")]
 pub static KNOWLEDGE_PAGE: NativePage = NativePage::pane(
@@ -158,8 +161,7 @@ pub static KNOWLEDGE_PAGE: NativePage = NativePage::pane(
     vmux_editor::page::Page,
 )
 .titled("Knowledge")
-.owning_subtree()
-.served_from("vmux://files/");
+.owning_subtree();
 
 #[cfg(target_os = "macos")]
 pub static TERMINAL_PAGE: NativePage = NativePage::pane(
@@ -271,14 +273,14 @@ mod tests {
             .and_then(|url| url.split('/').next())
             .unwrap();
 
-        assert_eq!(host, vmux_agent::host::chat::PAGE_MANIFEST.host);
+        assert_eq!(host, vmux_start::PAGE_MANIFEST.host);
     }
 
     #[test]
     fn the_editor_still_answers_for_file_urls() {
         assert_eq!(FILES_PAGE.url, "file://");
         assert!(FILES_PAGE.answers_for("file:///Users/me/a.rs"));
-        assert_eq!(FILES_PAGE.document_url(), "vmux://files/");
+        assert_eq!(FILES_PAGE.document_url(), "vmux://start/");
     }
     #[test]
     fn the_vault_claims_the_provider_deep_links_and_nothing_next_door() {

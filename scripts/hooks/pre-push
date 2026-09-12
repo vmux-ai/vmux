@@ -5,7 +5,7 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
 ZERO="0000000000000000000000000000000000000000"
-PHONE_PAGES="vmux_agent vmux_chat vmux_command vmux_editor vmux_history vmux_layout vmux_setting vmux_space vmux_start vmux_team vmux_terminal vmux_ui"
+PHONE_PAGES="vmux_agent vmux_chat vmux_command vmux_editor vmux_history vmux_layout vmux_setting vmux_shortcut vmux_space vmux_start vmux_team vmux_terminal vmux_ui"
 
 meta="$(cargo metadata --no-deps --format-version 1)"
 

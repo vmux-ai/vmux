@@ -32,6 +32,7 @@ impl Plugin for StartPlugin {
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ));
         app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -83,12 +84,13 @@ struct StartPromptContextParams<'w, 's> {
         ),
     >,
     agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
+    agent_modes: Res<'w, vmux_command::snapshot::CommandBarAgentModes>,
     warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContextParams<'_, '_> {
     fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.agent_models.is_changed() {
+        if self.agent_models.is_changed() || self.agent_modes.is_changed() {
             return true;
         }
         let Some(tab) = tab else {
@@ -493,6 +495,7 @@ fn sync_live_start_pages(
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         prompt_context.agent_models.agents.clone(),
+        prompt_context.agent_modes.agents.clone(),
         &locale,
     );
     let project = vmux_ui::launcher::palette::ActiveProject::of(&payload.prompt_context);
@@ -575,6 +578,7 @@ fn on_start_data_request(
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         prompt_context.agent_models.agents.clone(),
+        prompt_context.agent_modes.agents.clone(),
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -605,6 +609,7 @@ fn build_start_payload(
     git_info: Option<&vmux_git::worktree::RepoInfo>,
     projects: Vec<vmux_wire::space::ProjectRow>,
     agent_models: Vec<vmux_wire::command_bar::AgentModels>,
+    agent_modes: Vec<vmux_wire::command_bar::AgentModes>,
     locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
@@ -639,6 +644,7 @@ fn build_start_payload(
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload.prompt_context.projects = projects;
     payload.agent_models = agent_models;
+    payload.agent_modes = agent_modes;
     payload
 }
 
@@ -694,6 +700,7 @@ mod tests {
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(capture_emit);

@@ -588,8 +588,9 @@ fn handle_pane_commands(
         let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
             continue;
         };
+        let active_tab = active_tab_param.get();
         let (_, active_pane_opt, _active_stack_opt) = focused_stack(
-            active_tab_param.get(),
+            active_tab,
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -758,8 +759,29 @@ fn handle_pane_commands(
                     swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
                 }
             }
-            PaneCommand::RotateForward => {}
-            PaneCommand::RotateBackward => {}
+            PaneCommand::RotateForward | PaneCommand::RotateBackward => {
+                let Some(tab) = active_tab else {
+                    continue;
+                };
+                PaneArrangement::rotate(
+                    tab,
+                    pane_cmd == PaneCommand::RotateForward,
+                    &all_children,
+                    &leaf_panes,
+                    &mut commands,
+                );
+            }
+            PaneCommand::MirrorHorizontal | PaneCommand::MirrorVertical => {
+                let Some(tab) = active_tab else {
+                    continue;
+                };
+                let direction = match pane_cmd {
+                    PaneCommand::MirrorHorizontal => PaneSplitDirection::Row,
+                    PaneCommand::MirrorVertical => PaneSplitDirection::Column,
+                    _ => unreachable!(),
+                };
+                PaneArrangement::mirror(tab, direction, &all_children, &split_dir_q, &mut commands);
+            }
             PaneCommand::EqualizeSize => {
                 let Ok(co) = child_of_q.get(active) else {
                     continue;
@@ -875,6 +897,97 @@ fn handle_pane_commands(
                     }
                 }
             }
+        }
+    }
+}
+
+struct PaneArrangement;
+
+impl PaneArrangement {
+    fn rotate(
+        tab: Entity,
+        forward: bool,
+        children: &Query<&Children>,
+        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+        commands: &mut Commands,
+    ) {
+        let mut panes = Vec::new();
+        Self::collect_leaves(tab, children, leaves, &mut panes);
+        if panes.len() <= 1 {
+            return;
+        }
+        let groups = panes
+            .iter()
+            .map(|pane| {
+                children
+                    .get(*pane)
+                    .map(|children| children.iter().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        for group in &groups {
+            for child in group {
+                commands.entity(*child).remove::<ChildOf>();
+            }
+        }
+        for (index, group) in groups.into_iter().enumerate() {
+            let destination = if forward {
+                (index + 1) % panes.len()
+            } else {
+                (index + panes.len() - 1) % panes.len()
+            };
+            for child in group {
+                commands.entity(child).insert(ChildOf(panes[destination]));
+            }
+        }
+    }
+
+    fn mirror(
+        root: Entity,
+        direction: PaneSplitDirection,
+        children: &Query<&Children>,
+        splits: &Query<&PaneSplit>,
+        commands: &mut Commands,
+    ) {
+        let Ok(descendants) = children.get(root) else {
+            return;
+        };
+        let descendants = descendants.iter().collect::<Vec<_>>();
+        for child in descendants {
+            let Ok(split) = splits.get(child) else {
+                continue;
+            };
+            if split.direction == direction
+                && let Ok(split_children) = children.get(child)
+            {
+                let mut reversed = split_children.iter().collect::<Vec<_>>();
+                reversed.reverse();
+                for entity in &reversed {
+                    commands.entity(*entity).remove::<ChildOf>();
+                }
+                for entity in &reversed {
+                    commands.entity(*entity).insert(ChildOf(child));
+                }
+            }
+            Self::mirror(child, direction, children, splits, commands);
+        }
+    }
+
+    fn collect_leaves(
+        root: Entity,
+        children: &Query<&Children>,
+        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+        output: &mut Vec<Entity>,
+    ) {
+        if leaves.contains(root) {
+            output.push(root);
+            return;
+        }
+        let Ok(descendants) = children.get(root) else {
+            return;
+        };
+        for child in descendants.iter() {
+            Self::collect_leaves(child, children, leaves, output);
         }
     }
 }
@@ -2493,6 +2606,7 @@ mod tests {
             FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
         },
     };
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::window::ClosingWindow;
     use vmux_command::{CommandPlugin, WriteAppCommands};
 
@@ -2524,6 +2638,75 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn rotate_moves_each_stack_to_the_next_leaf() {
+        let mut app = App::new();
+        let tab = app.world_mut().spawn_empty().id();
+        let left = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let middle = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let right = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let a = app.world_mut().spawn(ChildOf(left)).id();
+        let b = app.world_mut().spawn(ChildOf(middle)).id();
+        let c = app.world_mut().spawn(ChildOf(right)).id();
+
+        app.world_mut()
+            .run_system_once(
+                move |children: Query<&Children>,
+                      leaves: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+                      mut commands: Commands| {
+                    PaneArrangement::rotate(tab, true, &children, &leaves, &mut commands);
+                },
+            )
+            .unwrap();
+
+        assert_eq!(app.world().get::<ChildOf>(a).unwrap().parent(), middle);
+        assert_eq!(app.world().get::<ChildOf>(b).unwrap().parent(), right);
+        assert_eq!(app.world().get::<ChildOf>(c).unwrap().parent(), left);
+    }
+
+    #[test]
+    fn horizontal_mirror_reverses_only_row_splits() {
+        let mut app = App::new();
+        let tab = app.world_mut().spawn_empty().id();
+        let row = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app.world_mut().spawn((Pane, ChildOf(row))).id();
+        let right = app.world_mut().spawn((Pane, ChildOf(row))).id();
+
+        app.world_mut()
+            .run_system_once(
+                move |children: Query<&Children>,
+                      splits: Query<&PaneSplit>,
+                      mut commands: Commands| {
+                    PaneArrangement::mirror(
+                        tab,
+                        PaneSplitDirection::Row,
+                        &children,
+                        &splits,
+                        &mut commands,
+                    );
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            app.world()
+                .get::<Children>(row)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            [right, left]
+        );
     }
 
     #[test]

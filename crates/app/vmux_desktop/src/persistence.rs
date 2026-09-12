@@ -1298,6 +1298,56 @@ mod tests {
     }
 
     #[test]
+    fn persisted_git_branch_icon_still_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("legacy-git-icon.ron");
+
+        let mut app_save = App::new();
+        app_save
+            .add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .add_observer(save_on_default_event);
+        app_save.world_mut().spawn((
+            Save,
+            PageMetadata {
+                title: "Git".into(),
+                url: "vmux://git/".into(),
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Project),
+                bg_color: None,
+            },
+        ));
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+
+        let current = std::fs::read_to_string(&path).expect("saved store");
+        let legacy = current.replacen("Builtin(Project)", "Builtin(GitBranch)", 1);
+        assert_ne!(legacy, current, "project icon serialized differently");
+        std::fs::write(&path, legacy).expect("legacy store");
+
+        let mut app_load = App::new();
+        app_load
+            .add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin)
+            .add_observer(load_on_default_event);
+        app_load.update();
+        app_load
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        app_load.update();
+
+        let metadata = app_load
+            .world_mut()
+            .query::<&PageMetadata>()
+            .single(app_load.world())
+            .expect("legacy page metadata loaded");
+        assert_eq!(
+            metadata.icon,
+            vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::GitBranch)
+        );
+    }
+
+    #[test]
     fn stack_explorer_visibility_round_trips_through_store() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("store.ron");

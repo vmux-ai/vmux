@@ -1,0 +1,33 @@
+[package]
+name = "vmux_shortcut"
+build = "../../build_cfg.rs"
+description = "The vmux://shortcuts/ keyboard shortcut reference page"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+vmux_core = { path = "../../vmux_core" }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+dioxus = { workspace = true }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
+
+[lints]
+workspace = true

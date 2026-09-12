@@ -111,6 +111,7 @@ mod components {
                     img {
                         class: "{img_class}",
                         src: "{src}",
+                        draggable: "false",
                         onerror: {
                             let key = source_key.clone();
                             move |_| {

@@ -37,7 +37,15 @@ fn process_key_input(
     mut chord_state: ResMut<ChordState>,
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
+    capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
 ) {
+    if capture
+        .as_deref()
+        .is_some_and(|capture| capture.is_active())
+    {
+        chord_state.pending_prefix = None;
+        return;
+    }
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     let current_modifiers = read_current_modifiers(&keyboard);
 

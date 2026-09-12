@@ -3,17 +3,22 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, JsEmitEventPlugin, Receive,
-    WebviewCommittedNavigationEvent,
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin,
+    Receive, WebviewCommittedNavigationEvent,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
+use vmux_core::KeyboardOwner;
 use vmux_core::event::{
-    EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
-    ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
-    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
-    ExtUninstallRequest, ExtensionsEvent,
+    EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT,
+    EXTENSIONS_PAGE_URL, ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase,
+    ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus,
+    ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest,
+    ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
 };
 use vmux_core::extension::store;
+use vmux_core::overlay::WindowOverlay;
+use vmux_flex::prelude::Visibility;
+use vmux_layout::{Browser, LayoutCef};
 
 #[derive(Component, Default)]
 pub struct Extensions;
@@ -41,13 +46,19 @@ impl Plugin for ExtensionsPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtListRequest,
                 ExtActionRequest,
+                ExtPinRequest,
                 ExtOpenManagerRequest,
+                ExtensionPopupBoundsRequest,
+                ExtensionPopupCloseRequest,
             )>::for_hosts(&["extensions", "layout"]))
             .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
             .add_observer(on_list_request)
             .add_observer(on_toggle_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_action_request)
+            .add_observer(on_popup_bounds_request)
+            .add_observer(on_popup_close_request)
+            .add_observer(on_pin_request)
             .add_observer(on_open_manager_request)
             .add_observer(on_browse_store_request)
             .add_observer(on_add_extension)
@@ -62,6 +73,42 @@ impl Plugin for ExtensionsPlugin {
             );
     }
 }
+
+#[derive(Component)]
+pub(crate) struct ExtensionPopup {
+    owner: Entity,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ExtensionPopupBounds {
+    pub(crate) left: f32,
+    pub(crate) top: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+impl ExtensionPopupBounds {
+    fn of(request: &ExtensionPopupBoundsRequest) -> Option<Self> {
+        if !request.left.is_finite()
+            || !request.top.is_finite()
+            || !request.width.is_finite()
+            || !request.height.is_finite()
+            || request.width <= 0.0
+            || request.height <= 0.0
+        {
+            return None;
+        }
+        Some(Self {
+            left: request.left,
+            top: request.top,
+            width: request.width,
+            height: request.height,
+        })
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct ExtensionPopupPresented;
 
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "extensions",
@@ -108,14 +155,18 @@ fn snapshot() -> ExtensionsEvent {
     let profile = vmux_core::profile::active_profile_name();
     let idx = store::Index::load(&root).unwrap_or_default();
     let loaded = super::load::loaded_ids();
+    snapshot_from_index(&idx, &profile, &loaded)
+}
+
+fn snapshot_from_index(idx: &store::Index, profile: &str, loaded: &[String]) -> ExtensionsEvent {
     let extensions = idx
         .entries
         .iter()
-        .filter(|entry| entry.installed_for(&profile))
+        .filter(|entry| entry.installed_for(profile))
         .map(|e| {
-            let enabled = e.enabled_for(&profile);
+            let enabled = e.enabled_for(profile);
             let needs_approval = !e
-                .grants_for(&profile)
+                .grants_for(profile)
                 .covers(&e.permissions, &e.host_permissions);
             ExtRow {
                 id: e.id.clone(),
@@ -124,6 +175,7 @@ fn snapshot() -> ExtensionsEvent {
                 icon: e.icon.clone(),
                 popup: e.popup.clone(),
                 enabled,
+                pinned: e.pinned_for(profile),
                 needs_approval,
                 required_permissions: e.permissions.clone(),
                 required_host_permissions: e.host_permissions.clone(),
@@ -137,14 +189,17 @@ fn snapshot() -> ExtensionsEvent {
         .collect();
     ExtensionsEvent {
         extensions,
-        pending: idx.is_dirty_for(&profile, &loaded),
+        pending: idx.is_dirty_for(profile, loaded),
     }
 }
 
 fn broadcast_list(outbox: &ExtOutbox, subs: &ExtSubscribers) {
-    let ev = snapshot();
+    broadcast_snapshot(outbox, subs, snapshot());
+}
+
+fn broadcast_snapshot(outbox: &ExtOutbox, subs: &ExtSubscribers, event: ExtensionsEvent) {
     for &entity in &subs.0 {
-        push(outbox, entity, OutMsg::List(ev.clone()));
+        push(outbox, entity, OutMsg::List(event.clone()));
     }
 }
 
@@ -268,7 +323,11 @@ fn on_uninstall_request(
 
 fn on_action_request(
     trigger: On<BinReceive<ExtActionRequest>>,
-    mut cmd: MessageWriter<AppCommand>,
+    layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
+    host_windows: Query<&HostWindow>,
+    popups: Query<(Entity, &ExtensionPopup)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
 ) {
     let id = trigger.event().payload.id.clone();
     let idx = store::Index::load(&store::root()).unwrap_or_default();
@@ -281,11 +340,121 @@ fn on_action_request(
     let Some(popup) = entry.popup else {
         return;
     };
-    cmd.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(format!("chrome-extension://{id}/{popup}")),
+    let url = format!("chrome-extension://{id}/{popup}");
+    let source = trigger.event().webview;
+    let source_window = host_windows.get(source).ok().map(|host| host.0);
+    let owner = layouts.iter().find_map(|(layout, host)| {
+        (layout == source || source_window.is_none_or(|window| host.is_some_and(|h| h.0 == window)))
+            .then_some(layout)
+    });
+    let Some(owner) = owner else {
+        return;
+    };
+    close_popup(owner, &popups, &browsers, &mut commands);
+    commands
+        .spawn(Browser::new_with_title(&url, &entry.name))
+        .insert((
+            Name::new(format!("Extension popup: {}", entry.name)),
+            WindowOverlay,
+            ExtensionPopup { owner },
+            Visibility::Hidden,
+        ));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        owner,
+        EXTENSION_POPUP_EVENT,
+        &ExtensionPopupEvent {
+            id,
+            name: entry.name,
+            icon: entry.icon,
+            anchor: trigger.event().payload.anchor,
         },
-    )));
+    ));
+}
+
+fn on_popup_bounds_request(
+    trigger: On<BinReceive<ExtensionPopupBoundsRequest>>,
+    popups: Query<(Entity, &ExtensionPopup)>,
+    mut commands: Commands,
+) {
+    let Some(bounds) = ExtensionPopupBounds::of(&trigger.event().payload) else {
+        return;
+    };
+    for (entity, popup) in &popups {
+        if popup.owner == trigger.event().webview {
+            commands
+                .entity(entity)
+                .insert((bounds, Visibility::Visible, KeyboardOwner));
+        }
+    }
+}
+
+fn on_popup_close_request(
+    trigger: On<BinReceive<ExtensionPopupCloseRequest>>,
+    popups: Query<(Entity, &ExtensionPopup)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    close_popup(trigger.event().webview, &popups, &browsers, &mut commands);
+}
+
+fn close_popup(
+    owner: Entity,
+    popups: &Query<(Entity, &ExtensionPopup)>,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    for (entity, popup) in popups {
+        if popup.owner != owner {
+            continue;
+        }
+        browsers.hide_child_window(&entity);
+        commands.entity(entity).try_despawn();
+    }
+}
+
+fn on_pin_request(
+    trigger: On<BinReceive<ExtPinRequest>>,
+    subs: Res<ExtSubscribers>,
+    outbox: Res<ExtOutbox>,
+) {
+    let request = trigger.event().payload.clone();
+    let recipients = subs.0.iter().copied().collect::<Vec<_>>();
+    let outbox = outbox.clone();
+    std::thread::spawn(move || {
+        let profile = vmux_core::profile::active_profile_name();
+        let loaded = super::load::loaded_ids();
+        let result = store::update_index_if_changed(&store::root(), |index| {
+            index
+                .set_pinned_for(&profile, &request.id, request.pinned)
+                .then(|| snapshot_from_index(index, &profile, &loaded))
+        });
+        match result {
+            Ok(Some(snapshot)) => {
+                for entity in recipients {
+                    push(&outbox, entity, OutMsg::List(snapshot.clone()));
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                bevy::log::warn!(
+                    extension = request.id,
+                    "extension pin update failed: {error}"
+                );
+                for entity in recipients {
+                    push(
+                        &outbox,
+                        entity,
+                        OutMsg::Progress(ExtInstallProgress {
+                            key: request.id.clone(),
+                            phase: ExtInstallPhase::Failed,
+                            pct: None,
+                            message: error.clone(),
+                        }),
+                    );
+                }
+            }
+        }
+    });
 }
 
 fn on_open_manager_request(

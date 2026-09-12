@@ -35,6 +35,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../page/vmux_agent" }
 vmux_chat = { path = "../page/vmux_chat" }
+vmux_shortcut = { path = "../page/vmux_shortcut" }
 vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_editor = { path = "../page/vmux_editor" }

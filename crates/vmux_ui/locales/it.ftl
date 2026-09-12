@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } schede
 }
 spaces-delete = Elimina spazio
+shortcuts-title = Scorciatoie da tastiera
+shortcuts-count = { $count } scorciatoie
+shortcuts-search = Filtra scorciatoie…
+shortcuts-empty = Nessuna scorciatoia corrispondente
+shortcuts-general = Generale
+shortcuts-try-title = Prova una scorciatoia
+shortcuts-try-hint = Premi una scorciatoia
+shortcuts-waiting = In attesa del tasto successivo…
+shortcuts-triggered = Esegue: { $action }
+shortcuts-no-match = Nessuna scorciatoia corrisponde a questi tasti
+shortcuts-clear = Reimposta
 
 team-title = Team
 simulator-title = Simulatore
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profili
+team-new-profile = Nuovo profilo
+team-switch-profile = Passa a { $profile }
+team-edit-profile = Modifica profilo
+team-profile-name = Nome del profilo
 team-just-you = Solo tu in questo spazio
 team-agents = { $count ->
     [one] Tu e 1 agente
@@ -180,7 +196,7 @@ team-you = Tu
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agente
 
-services-title = Servizi in background
+services-title = Processi Vmux
 services-processes = { $count ->
     [one] 1 processo
    *[other] { $count } processi
@@ -197,6 +213,7 @@ services-attached = collegato
 services-kill = Termina
 services-memory = Memoria
 services-size = Dimensione
+services-uptime = Tempo attivo
 services-shell = Shell
 
 error-title = Errore
@@ -282,6 +299,7 @@ layout-new-stack = Nuovo stack
 layout-close-tab = Chiudi scheda
 layout-bookmark = Segnalibro
 layout-pin = Fissa
+layout-unpin = Sblocca
 layout-new-tab = Nuova scheda
 layout-team = Team
 
@@ -451,6 +469,8 @@ common-error = Errore
 common-output = Output
 common-pending = In sospeso
 common-current = attuale
+composer-permissions = Autorizzazioni
+composer-permission-change = Cambia modalità autorizzazioni
 common-stop = Interrompi
 services-command = servizio Vmux
 services-uptime-seconds = { $seconds }s

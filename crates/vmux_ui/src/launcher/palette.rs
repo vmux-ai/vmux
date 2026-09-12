@@ -1,11 +1,13 @@
 use vmux_wire::agent::supports_inline_agent_transition;
 use vmux_wire::chat::SlashCommandEntry;
 use vmux_wire::command_bar::{
-    AgentModels, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry, PathEntry, is_data_uri,
+    AgentModels, AgentModes, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick,
+    CommandBarPicker, CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry,
+    PathEntry, is_data_uri,
 };
 use vmux_wire::open_target::OpenTarget;
 use vmux_wire::prompt_media::ChatAttachment;
+use vmux_wire::protocol::AcpModeOption;
 use vmux_wire::room::ModelOptionEntry;
 use vmux_wire::space::ProjectRow;
 
@@ -451,6 +453,9 @@ pub struct ComposerState {
     pub model_options: Vec<ModelOptionEntry>,
     pub model_agent_key: String,
     pub model_current_id: String,
+    pub permission_modes: Vec<AcpModeOption>,
+    pub permission_agent_key: String,
+    pub permission_current_id: String,
     pub workspace_label: String,
     pub workspace_title: String,
     pub branch_label: String,
@@ -491,18 +496,26 @@ impl ComposerState {
             });
         }
         let models = SelectedAgentModels::of(&state.agent_models, &agent_url);
-        let workspace_label = if context.workspace_name.is_empty() {
-            translate("agent-project-select")
-        } else {
+        let modes = SelectedAgentModes::of(&state.agent_modes, &agent_url);
+        let active_project = context.projects.iter().find(|project| project.is_active);
+        let workspace_label = if let Some(project) = active_project {
+            project.label.clone()
+        } else if !context.workspace_name.is_empty() {
             context.workspace_name.clone()
+        } else {
+            translate("agent-project-select")
         };
-        let workspace_title = if context.cwd.is_empty() {
+        let workspace_path = active_project
+            .map(|project| project.path.as_str())
+            .filter(|path| !path.is_empty())
+            .unwrap_or(&context.cwd);
+        let workspace_title = if workspace_path.is_empty() {
             translate("agent-project-choose")
         } else {
             format!(
                 "{} \u{00b7} {}",
                 translate("agent-project-choose"),
-                context.cwd
+                workspace_path
             )
         };
         let branch_label = if context.branch.is_empty() {
@@ -530,6 +543,9 @@ impl ComposerState {
             model_options: models.map(|row| row.models.clone()).unwrap_or_default(),
             model_agent_key: models.map(|row| row.agent_key.clone()).unwrap_or_default(),
             model_current_id: models.map(|row| row.selected.clone()).unwrap_or_default(),
+            permission_modes: modes.map(|row| row.modes.clone()).unwrap_or_default(),
+            permission_agent_key: modes.map(|row| row.agent_key.clone()).unwrap_or_default(),
+            permission_current_id: modes.map(|row| row.selected.clone()).unwrap_or_default(),
             workspace_label,
             workspace_title,
             branch_label,
@@ -1075,6 +1091,17 @@ impl SelectedAgentModels {
             }
         }
         String::new()
+    }
+}
+
+pub struct SelectedAgentModes;
+
+impl SelectedAgentModes {
+    pub fn of<'a>(rows: &'a [AgentModes], target_url: &str) -> Option<&'a AgentModes> {
+        if target_url.is_empty() {
+            return None;
+        }
+        rows.iter().find(|row| row.url == target_url)
     }
 }
 
@@ -2315,23 +2342,33 @@ mod tests {
 
     #[test]
     fn the_composer_prefers_the_active_project_over_the_working_directory() {
-        let rooted = CommandBarPromptContext {
+        let mut state = Launcher::state();
+        state.prompt_context = CommandBarPromptContext {
             cwd: "/tmp/scratch".into(),
+            workspace_name: "scratch".into(),
             projects: vec![
                 ProjectRow {
                     path: "/work/one".into(),
+                    label: "one".into(),
                     is_active: false,
                     ..ProjectRow::default()
                 },
                 ProjectRow {
                     path: "/work/two".into(),
+                    label: "two".into(),
                     is_active: true,
                     ..ProjectRow::default()
                 },
             ],
             ..CommandBarPromptContext::default()
         };
-        assert_eq!(ActiveProject::of(&rooted), "/work/two");
+        let palette = PaletteState::start(&state, PaletteDraft::typed("fix it"));
+        assert_eq!(palette.composer.project, "/work/two");
+        assert_eq!(palette.composer.workspace_label, "two");
+        assert_eq!(
+            palette.composer.workspace_title,
+            "Choose project · /work/two"
+        );
 
         let unrooted = CommandBarPromptContext {
             cwd: "/tmp/scratch".into(),

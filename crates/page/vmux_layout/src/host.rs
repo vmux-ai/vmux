@@ -9,6 +9,7 @@ pub mod cef;
 pub mod contract;
 pub mod native_open;
 pub mod native_pointer;
+pub mod overlay;
 pub mod overlay_adopt;
 pub mod pane;
 pub mod pending_stack;

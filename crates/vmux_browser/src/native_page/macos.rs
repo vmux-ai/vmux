@@ -383,11 +383,17 @@ impl Placement {
                 .collect(),
             Self::Pane | Self::Modal => {
                 let mut claimed = Vec::new();
-                let mut pages = world
-                    .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>(
-                    );
-                for (entity, meta) in pages.iter(world) {
-                    if page.answers_for(&meta.url) {
+                let mut pages = world.query_filtered::<
+                    (Entity, &PageMetadata, Has<vmux_terminal::Terminal>),
+                    (With<HostsPage>, Without<LayoutCef>),
+                >();
+                for (entity, meta, terminal) in pages.iter(world) {
+                    let url = if terminal {
+                        super::TERMINAL_PAGE.url
+                    } else {
+                        &meta.url
+                    };
+                    if page.answers_for(url) {
                         claimed.push(entity);
                     }
                 }
@@ -648,6 +654,31 @@ mod tests {
 
         let emitted = rx.recv_blocking().unwrap();
         assert_eq!(emitted.host, "sessions");
+    }
+
+    #[test]
+    fn a_cli_terminal_keeps_the_terminal_renderer() {
+        let mut world = bevy::prelude::World::new();
+        let terminal = world
+            .spawn((
+                vmux_core::host::page::HostsPage,
+                vmux_terminal::Terminal,
+                vmux_core::PageMetadata {
+                    url: "vmux://sessions/claude/cli".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        assert_eq!(
+            Placement::Pane.claim(&mut world, &super::super::TERMINAL_PAGE),
+            vec![terminal]
+        );
+        assert!(
+            Placement::Pane
+                .claim(&mut world, &super::super::CHAT_PAGE)
+                .is_empty()
+        );
     }
 
     #[test]

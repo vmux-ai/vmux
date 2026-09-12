@@ -333,6 +333,7 @@ mod tests {
                 icon: None,
                 enabled: true,
                 profile_enabled: Default::default(),
+                profile_pinned: Default::default(),
                 permissions: Vec::new(),
                 optional_permissions: Vec::new(),
                 host_permissions: Vec::new(),

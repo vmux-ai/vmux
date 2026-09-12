@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } tabbladen
 }
 spaces-delete = Werkruimte verwijderen
+shortcuts-title = Sneltoetsen
+shortcuts-count = { $count } sneltoetsen
+shortcuts-search = Sneltoetsen filteren…
+shortcuts-empty = Geen overeenkomende sneltoetsen
+shortcuts-general = Algemeen
+shortcuts-try-title = Probeer een sneltoets
+shortcuts-try-hint = Druk op een sneltoets
+shortcuts-waiting = Wachten op de volgende toets…
+shortcuts-triggered = Voert uit: { $action }
+shortcuts-no-match = Geen sneltoets komt overeen met deze toetsen
+shortcuts-clear = Resetten
 
 team-title = Team
 simulator-title = Simulator
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profielen
+team-new-profile = Nieuw profiel
+team-switch-profile = Overschakelen naar { $profile }
+team-edit-profile = Profiel bewerken
+team-profile-name = Profielnaam
 team-just-you = Alleen jij in deze werkruimte
 team-agents = { $count ->
     [one] Jij en 1 agent
@@ -180,7 +196,7 @@ team-you = Jij
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = Achtergrondservices
+services-title = Vmux-processen
 services-processes = { $count ->
     [one] 1 proces
    *[other] { $count } processen
@@ -197,6 +213,7 @@ services-attached = gekoppeld
 services-kill = Stoppen
 services-memory = Geheugen
 services-size = Grootte
+services-uptime = Actief
 services-shell = Shell
 
 error-title = Fout
@@ -282,6 +299,7 @@ layout-new-stack = Nieuwe stack
 layout-close-tab = Tabblad sluiten
 layout-bookmark = Bladwijzer
 layout-pin = Vastzetten
+layout-unpin = Losmaken
 layout-new-tab = Nieuw tabblad
 layout-team = Team
 
@@ -451,6 +469,8 @@ common-error = Fout
 common-output = Uitvoer
 common-pending = In behandeling
 common-current = huidig
+composer-permissions = Machtigingen
+composer-permission-change = Machtigingsmodus wijzigen
 common-stop = Stop
 services-command = Vmux-service
 services-uptime-seconds = { $seconds }s

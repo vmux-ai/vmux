@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } 個分頁
 }
 spaces-delete = 刪除工作區
+shortcuts-title = 鍵盤快速鍵
+shortcuts-count = { $count } 個快速鍵
+shortcuts-search = 篩選快速鍵…
+shortcuts-empty = 沒有符合的快速鍵
+shortcuts-general = 一般
+shortcuts-try-title = 試用快速鍵
+shortcuts-try-hint = 按下任意快速鍵
+shortcuts-waiting = 正在等待下一個按鍵…
+shortcuts-triggered = 執行：{ $action }
+shortcuts-no-match = 沒有快速鍵符合這些按鍵
+shortcuts-clear = 重設
 
 team-title = 團隊
 simulator-title = 模擬器
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = 設定檔
+team-new-profile = 新增設定檔
+team-switch-profile = 切換到 { $profile }
+team-edit-profile = 編輯設定檔
+team-profile-name = 設定檔名稱
 team-just-you = 這個工作區只有你
 team-agents = { $count ->
     [one] 你和 1 個 Agent
@@ -180,7 +196,7 @@ team-you = 你
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = 背景服務
+services-title = Vmux 程序
 services-processes = { $count ->
     [one] 1 個程序
    *[other] { $count } 個程序
@@ -197,6 +213,7 @@ services-attached = 已附加
 services-kill = 強制終止
 services-memory = 記憶體
 services-size = 大小
+services-uptime = 執行時間
 services-shell = Shell
 
 error-title = 錯誤
@@ -282,6 +299,7 @@ layout-new-stack = 新增 Stack
 layout-close-tab = 關閉分頁
 layout-bookmark = 書籤
 layout-pin = 釘選
+layout-unpin = 取消釘選
 layout-new-tab = 新增分頁
 layout-team = 團隊
 
@@ -451,6 +469,8 @@ common-error = 錯誤
 common-output = 輸出
 common-pending = 待處理
 common-current = 目前
+composer-permissions = 權限
+composer-permission-change = 變更權限模式
 common-stop = 停止
 services-command = Vmux 服務
 services-uptime-seconds = { $seconds } 秒

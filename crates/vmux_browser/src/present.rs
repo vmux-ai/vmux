@@ -5,6 +5,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_command::CommandBar;
 use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
@@ -49,6 +50,7 @@ impl Plugin for PresentPlugin {
                 sync_windowed_layout,
                 sync_windowed_frames,
                 sync_windowed_command_bar,
+                sync_windowed_extension_popups,
                 flush_native_command_bar_pointer_events,
                 apply_repaint_nudge,
                 sync_cef_webview_resize_after_ui,
@@ -401,7 +403,6 @@ pub(crate) fn sync_windowed_frames(
     pane_frames.frames.clear();
     pane_frames.rings.clear();
     pane_frames.all_corners.clear();
-    let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
@@ -449,8 +450,8 @@ pub(crate) fn sync_windowed_frames(
         if let Some(logical) = PaneFrame::of(frame, scale) {
             pane_frames.frames.insert(entity, logical);
         }
-        let became_visible = !memory.visible_pages.contains(&entity);
-        if became_visible {
+        let browser_ready = browsers.has_browser(entity);
+        if browser_ready {
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_frame(
@@ -506,7 +507,7 @@ pub(crate) fn sync_windowed_frames(
             all_corners,
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
-        if browsers.has_browser(entity) {
+        if browser_ready {
             if host_window == focused_window.0 {
                 memory.visible_frames.push(frame);
             }
@@ -516,10 +517,8 @@ pub(crate) fn sync_windowed_frames(
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = memory.raised_frame.insert(entity, key) != Some(key);
-            if force_raise || changed || became_visible {
-                browsers.raise_windowed_to_front(&entity);
-            }
+            memory.raised_frame.insert(entity, key);
+            browsers.raise_windowed_to_front(&entity);
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
@@ -835,7 +834,7 @@ pub(crate) fn sync_windowed_command_bar(
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
-        With<WindowOverlay>,
+        (With<WindowOverlay>, With<CommandBar>),
     >,
     native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
@@ -975,10 +974,65 @@ pub(crate) fn sync_windowed_command_bar(
     }
 }
 
+pub(crate) fn sync_windowed_extension_popups(
+    browsers: NonSend<Browsers>,
+    popups: Query<
+        (
+            Entity,
+            &crate::extensions::ExtensionPopupBounds,
+            Option<&HostWindow>,
+            Has<crate::extensions::ExtensionPopupPresented>,
+        ),
+        (
+            With<crate::extensions::ExtensionPopup>,
+            With<WindowOverlay>,
+            With<WebviewWindowed>,
+        ),
+    >,
+    windows: Query<&Window>,
+    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    mut commands: Commands,
+) {
+    for (entity, bounds, host_window, presented) in &popups {
+        let window_entity = host_window.map(|host| host.0).or(focused_window.0);
+        let Some(window_entity) = window_entity else {
+            continue;
+        };
+        let Ok(window) = windows.get(window_entity) else {
+            continue;
+        };
+        if !browsers.has_browser(entity) {
+            continue;
+        }
+        let scale = window.resolution.scale_factor();
+        browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
+        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
+        if !browsers.host_in_child_window(
+            &entity,
+            bounds.left as f64,
+            bounds.top as f64,
+            bounds.width as f64,
+            bounds.height as f64,
+        ) {
+            continue;
+        }
+        browsers.set_windowed_hidden(&entity, false);
+        browsers.ensure_child_window_key(&entity);
+        if presented {
+            continue;
+        }
+        browsers.set_windowed_focus(&entity, true);
+        browsers.nudge_windowed_repaint(&entity);
+        commands
+            .entity(entity)
+            .insert(crate::extensions::ExtensionPopupPresented);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn flush_native_command_bar_pointer_events(
     browsers: NonSend<Browsers>,
-    modal_q: Query<Entity, (With<WindowOverlay>, With<WebviewWindowed>)>,
+    modal_q: Query<Entity, (With<WindowOverlay>, With<WebviewWindowed>, With<CommandBar>)>,
 ) {
     let Ok(entity) = modal_q.single() else {
         return;

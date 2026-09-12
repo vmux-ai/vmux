@@ -19,5 +19,8 @@ vmux_macro = { path = "../../vmux_macro" }
 vmux_profile = { path = "../../vmux_profile" }
 vmux_client = { path = "../vmux_client" }
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

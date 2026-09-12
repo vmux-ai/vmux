@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } Tabs
 }
 spaces-delete = Space löschen
+shortcuts-title = Tastenkürzel
+shortcuts-count = { $count } Tastenkürzel
+shortcuts-search = Tastenkürzel filtern…
+shortcuts-empty = Keine passenden Tastenkürzel
+shortcuts-general = Allgemein
+shortcuts-try-title = Tastenkürzel ausprobieren
+shortcuts-try-hint = Beliebiges Tastenkürzel drücken
+shortcuts-waiting = Warten auf die nächste Taste…
+shortcuts-triggered = Führt aus: { $action }
+shortcuts-no-match = Kein Tastenkürzel passt zu diesen Tasten
+shortcuts-clear = Zurücksetzen
 
 team-title = Team
 simulator-title = Simulator
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profile
+team-new-profile = Neues Profil
+team-switch-profile = Zu { $profile } wechseln
+team-edit-profile = Profil bearbeiten
+team-profile-name = Profilname
 team-just-you = Nur Sie in diesem Space
 team-agents = { $count ->
     [one] Sie und 1 Agent
@@ -180,7 +196,7 @@ team-you = Sie
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = Hintergrunddienste
+services-title = Vmux-Prozesse
 services-processes = { $count ->
     [one] 1 Prozess
    *[other] { $count } Prozesse
@@ -197,6 +213,7 @@ services-attached = angehängt
 services-kill = Beenden erzwingen
 services-memory = Arbeitsspeicher
 services-size = Größe
+services-uptime = Laufzeit
 services-shell = Shell
 
 error-title = Fehler
@@ -282,6 +299,7 @@ layout-new-stack = Neuer Stack
 layout-close-tab = Tab schließen
 layout-bookmark = Lesezeichen
 layout-pin = Anheften
+layout-unpin = Lösen
 layout-new-tab = Neuer Tab
 layout-team = Team
 
@@ -451,6 +469,8 @@ common-error = Fehler
 common-output = Ausgabe
 common-pending = Ausstehend
 common-current = aktuell
+composer-permissions = Berechtigungen
+composer-permission-change = Berechtigungsmodus ändern
 common-stop = Stoppen
 services-command = Vmux-Dienst
 services-uptime-seconds = { $seconds } s

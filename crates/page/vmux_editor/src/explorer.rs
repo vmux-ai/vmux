@@ -992,7 +992,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                 }
             }
             div { class: "shrink-0 px-2 pb-1",
-                div { class: "flex h-7 items-center gap-1 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10 focus-within:ring-cyan-400/50",
+                div { class: "flex h-7 items-center gap-1 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/50",
                     input {
                         id: SEARCH_INPUT_ID,
                         r#type: "text",
@@ -1174,7 +1174,7 @@ fn SearchHitRow(
             },
             span { class: "w-full truncate font-mono text-[10px]",
                 span { class: "text-muted-foreground", "{span.before}" }
-                span { class: "rounded-sm bg-cyan-400/30 text-foreground", "{span.hit}" }
+                span { class: "rounded-sm bg-primary/30 text-foreground", "{span.hit}" }
                 span { class: "text-muted-foreground", "{span.after}" }
             }
         }
@@ -1498,7 +1498,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                     div {
                                         key: "{it.path}",
                                         class: if active {
-                                            "group flex cursor-default items-center gap-1 bg-cyan-400/12 py-0.5 pl-5 pr-2 text-foreground transition-[background-color,opacity,transform] duration-150"
+                                            "group flex cursor-default items-center gap-1 bg-primary/12 py-0.5 pl-5 pr-2 text-foreground transition-[background-color,opacity,transform] duration-150"
                                         } else {
                                             "group flex cursor-default items-center gap-1 py-0.5 pl-5 pr-2 text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
                                         },
@@ -1514,7 +1514,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                         {rsx! { TypeIcon { path: it.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                         span { class: "truncate", "{it.name}" }
                                         if dirty {
-                                            span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" }
+                                            span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" }
                                         }
                                     }
                                 }
@@ -1526,7 +1526,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                 div {
                     id: "{tree_row_id(&root_path())}",
                     tabindex: "-1",
-                    class: if current_path() == root_path() { "bg-cyan-400/10 outline-none" } else { "outline-none" },
+                    class: if current_path() == root_path() { "bg-primary/10 outline-none" } else { "outline-none" },
                     oncontextmenu: move |e: Event<MouseData>| {
                         e.prevent_default();
                         let coordinates = e.client_coordinates();
@@ -1841,7 +1841,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                             }
                         } else {
                             input {
-                                class: "w-full rounded-md border border-border bg-foreground/[0.04] px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-cyan-400/50",
+                                class: "w-full rounded-md border border-border bg-foreground/[0.04] px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary/50",
                                 autofocus: true,
                                 value: "{draft}",
                                 oninput: move |e| draft.set(e.value()),
@@ -1895,7 +1895,7 @@ pub fn OutlineGlyph(kind: u8) -> Element {
         _ => "\u{25C6}",
     };
     rsx! {
-        span { class: "inline-block w-6 shrink-0 text-center text-[9px] font-semibold text-cyan-600 dark:text-cyan-300/80", "{label}" }
+        span { class: "inline-block w-6 shrink-0 text-center text-[9px] font-semibold text-primary/80", "{label}" }
     }
 }
 

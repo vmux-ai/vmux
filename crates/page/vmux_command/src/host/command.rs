@@ -526,6 +526,18 @@ pub enum PaneCommand {
     )]
     #[shortcut(chord = "Ctrl+g, Alt+o")]
     RotateBackward,
+    #[menu(
+        id = "mirror_panes_horizontal",
+        label = "Mirror Panes Horizontally\t<leader> alt+h"
+    )]
+    #[shortcut(chord = "Ctrl+g, Alt+h")]
+    MirrorHorizontal,
+    #[menu(
+        id = "mirror_panes_vertical",
+        label = "Mirror Panes Vertically\t<leader> alt+v"
+    )]
+    #[shortcut(chord = "Ctrl+g, Alt+v")]
+    MirrorVertical,
     #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
     #[shortcut(chord = "Ctrl+g, =")]
     EqualizeSize,
@@ -927,6 +939,16 @@ mod tests {
             .find(|(id, _, _)| *id == "browser_prev_page")
             .map(|(_, name, _)| name.as_str());
         assert_eq!(back, Some("Browser > Navigation > Back"));
+    }
+
+    #[test]
+    fn shortcut_labels_include_hidden_commands() {
+        let entries = AppCommand::shortcut_labels();
+        let rotate = entries
+            .iter()
+            .find(|(id, _)| *id == "rotate_forward")
+            .map(|(_, name)| name.as_str());
+        assert_eq!(rotate, Some("Layout > Pane > Rotate Forward"));
     }
 
     #[test]

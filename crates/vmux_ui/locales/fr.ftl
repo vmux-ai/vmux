@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } onglets
 }
 spaces-delete = Supprimer l’espace
+shortcuts-title = Raccourcis clavier
+shortcuts-count = { $count } raccourcis
+shortcuts-search = Filtrer les raccourcis…
+shortcuts-empty = Aucun raccourci correspondant
+shortcuts-general = Général
+shortcuts-try-title = Essayer un raccourci
+shortcuts-try-hint = Appuyez sur un raccourci
+shortcuts-waiting = En attente de la touche suivante…
+shortcuts-triggered = Exécute : { $action }
+shortcuts-no-match = Aucun raccourci ne correspond à ces touches
+shortcuts-clear = Réinitialiser
 
 team-title = Équipe
 simulator-title = Simulateur
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profils
+team-new-profile = Nouveau profil
+team-switch-profile = Passer au profil { $profile }
+team-edit-profile = Modifier le profil
+team-profile-name = Nom du profil
 team-just-you = Vous êtes seul dans cet espace
 team-agents = { $count ->
     [one] Vous et 1 agent
@@ -180,7 +196,7 @@ team-you = Vous
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = Services en arrière-plan
+services-title = Processus Vmux
 services-processes = { $count ->
     [one] 1 processus
    *[other] { $count } processus
@@ -197,6 +213,7 @@ services-attached = attaché
 services-kill = Arrêter de force
 services-memory = Mémoire
 services-size = Taille
+services-uptime = Durée
 services-shell = Shell
 
 error-title = Erreur
@@ -282,6 +299,7 @@ layout-new-stack = Nouvelle pile
 layout-close-tab = Fermer l’onglet
 layout-bookmark = Favori
 layout-pin = Épingler
+layout-unpin = Détacher
 layout-new-tab = Nouvel onglet
 layout-team = Équipe
 
@@ -451,6 +469,8 @@ common-error = Erreur
 common-output = Sortie
 common-pending = En attente
 common-current = actuel
+composer-permissions = Autorisations
+composer-permission-change = Modifier le mode d’autorisation
 common-stop = Arrêter
 services-command = Service Vmux
 services-uptime-seconds = { $seconds } s

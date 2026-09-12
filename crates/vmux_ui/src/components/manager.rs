@@ -12,7 +12,7 @@ static NEXT_MANAGER_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 pub enum ManagerTone {
     #[default]
     Neutral,
-    Cyan,
+    Primary,
     Green,
     Amber,
 }
@@ -21,7 +21,7 @@ impl ManagerTone {
     pub fn for_runtime(runtime: &str) -> Self {
         match runtime {
             "native" => Self::Green,
-            "node" => Self::Cyan,
+            "node" => Self::Primary,
             "python" => Self::Amber,
             _ => Self::Neutral,
         }
@@ -32,7 +32,7 @@ impl ManagerTone {
     fn classes(self) -> &'static str {
         match self {
             Self::Neutral => "bg-foreground/[0.06] text-muted-foreground ring-foreground/10",
-            Self::Cyan => "bg-cyan-400/10 text-cyan-700 dark:text-cyan-300 ring-cyan-400/20",
+            Self::Primary => "bg-primary/10 text-primary ring-primary/20",
             Self::Green => "bg-success/10 text-success ring-success/20",
             Self::Amber => "bg-amber-400/10 text-amber-700 dark:text-amber-300 ring-amber-400/20",
         }
@@ -51,9 +51,7 @@ pub enum ManagerButtonVariant {
 impl ManagerButtonVariant {
     fn classes(self) -> &'static str {
         match self {
-            Self::Primary => {
-                "bg-cyan-400/15 text-cyan-700 dark:text-cyan-200 ring-cyan-400/30 hover:bg-cyan-400/25"
-            }
+            Self::Primary => "bg-primary/15 text-primary ring-primary/30 hover:bg-primary/25",
             Self::Secondary => {
                 "bg-foreground/[0.05] text-foreground/80 ring-foreground/10 hover:bg-foreground/[0.09]"
             }
@@ -71,7 +69,7 @@ impl ManagerButtonVariant {
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
         main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(34,211,238,0.05),transparent_60%)] text-foreground font-sans text-sm",
+            class: "flex h-full w-full flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-sans text-sm",
             {children}
         }
     }
@@ -97,7 +95,7 @@ pub fn ManagerHeader(
             }
             input {
                 r#type: "search",
-                class: "mt-3 w-full rounded-xl bg-foreground/[0.04] px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.06] focus:ring-cyan-400/30",
+                class: "mt-3 w-full rounded-xl bg-foreground/[0.04] px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.06] focus:ring-primary/30",
                 placeholder: "{search_placeholder}",
                 value: "{search_value}",
                 oninput: move |event| onsearch.call(event),

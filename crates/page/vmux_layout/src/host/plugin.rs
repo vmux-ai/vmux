@@ -10,6 +10,7 @@ use crate::contract::LayoutContractPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::native_open::NativeOpenPlugin;
+use crate::overlay::LayoutOverlayPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
@@ -56,6 +57,7 @@ impl Plugin for LayoutPlugin {
             .add_observer(mark_webview_page_ready)
             .add_plugins((
                 ProfilePlugin,
+                LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,
                 TabPlugin,

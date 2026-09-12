@@ -74,14 +74,8 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
         &(chat.identity.agent_icon)(),
         &format!("vmux://sessions/{agent}"),
     );
-    let agent_initial = agent_name
-        .chars()
-        .next()
-        .map(|character| character.to_ascii_uppercase().to_string())
-        .unwrap_or_default();
     let agent_color = chat.accent().css;
     let user_name = (chat.user.name)();
-    let user_initials = (chat.user.initials)();
     let user_color = (chat.user.color)();
     rsx! {
         div {
@@ -124,10 +118,8 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         attachment_previews: chat.composer.attachment_previews,
                         agent_name: agent_name.clone(),
                         agent_avatar: agent_avatar.clone(),
-                        agent_initial: agent_initial.clone(),
                         agent_color: agent_color.clone(),
                         user_name: user_name.clone(),
-                        user_initials: user_initials.clone(),
                         user_color: user_color.clone(),
                         latest_tool_block: latest_tool
                             .filter(|(item_index, _)| *item_index == i)

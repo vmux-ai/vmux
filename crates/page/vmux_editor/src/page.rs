@@ -797,7 +797,7 @@ pub fn Page() -> Element {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full min-w-[320px] flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(34,211,238,0.05),transparent_60%)] text-foreground font-mono text-sm leading-normal outline-none",
+            class: "relative flex h-full min-w-[320px] flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-mono text-sm leading-normal outline-none",
             style: "--iw:{indent().width};{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
@@ -1109,14 +1109,14 @@ pub fn Page() -> Element {
                             div {
                                 class: "flex shrink-0 items-center gap-1.5 text-[11px]",
                                 span {
-                                    class: "select-none text-cyan-700 dark:text-cyan-200",
+                                    class: "select-none text-primary",
                                     {translate_with(
                                         "editor-unchanged-previews",
                                         &[("count", TranslationValue::Number(count as i64))],
                                     )}
                                 }
                                 button {
-                                    class: "rounded-full bg-cyan-400/20 px-2 py-0.5 font-medium text-cyan-700 hover:bg-cyan-400/30 dark:text-cyan-100",
+                                    class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
                                     onclick: move |_| {
                                         let _ = send(&FileTidyActionEvent { choice: TidyChoice::Tidy });
                                         tidy_prompt.set(None);
@@ -1183,14 +1183,14 @@ pub fn Page() -> Element {
                         if let Some(m) = media() {
                             match kind {
                                 MediaKind::Image => rsx! {
-                                    img { src: "{m.url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+                                    img { src: "{m.url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20" }
                                 },
                                 MediaKind::Video => rsx! {
                                     video {
                                         src: "{m.url}",
                                         controls: true,
                                         autoplay: false,
-                                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20",
                                     }
                                 },
                                 MediaKind::Audio => rsx! {
@@ -1200,11 +1200,11 @@ pub fn Page() -> Element {
                                     let display = path();
                                     let abs = m.abs_path.clone();
                                     rsx! {
-                                        div { class: "flex flex-col items-center gap-3 rounded-2xl bg-white/[0.03] px-8 py-6 ring-1 ring-inset ring-cyan-400/15 backdrop-blur-2xl",
+                                        div { class: "flex flex-col items-center gap-3 rounded-2xl bg-white/[0.03] px-8 py-6 ring-1 ring-inset ring-primary/15 backdrop-blur-2xl",
                                             span { class: "text-xs uppercase tracking-wide text-foreground/70", "PDF" }
                                             span { class: "max-w-md truncate text-sm text-foreground/90", "{display}" }
                                             button {
-                                                class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-400/25",
+                                                class: "rounded-lg bg-primary/15 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/25",
                                                 onclick: move |_| {
                                                     let _ = send(&FileOpenExternalRequest { path: abs.clone() });
                                                 },
@@ -1609,7 +1609,7 @@ pub fn Page() -> Element {
                                                 rsx! {
                                                     div {
                                                         key: "sel{s.row}:{s.start}:{s.end}",
-                                                        class: "pointer-events-none absolute z-0 bg-cyan-400/20",
+                                                        class: "pointer-events-none absolute z-0 bg-primary/20",
                                                         style: "{style}",
                                                     }
                                                 }
@@ -1690,7 +1690,7 @@ pub fn Page() -> Element {
                                                     + ColumnRuler::new(&hovered, cell).x_of_char(h.col);
                                                 rsx! {
                                                     div {
-                                                        class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        class: "absolute z-30 max-h-64 max-w-2xl overflow-auto rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (bi, b) in h.blocks.iter().enumerate() {
                                                             if b.code {
@@ -1729,7 +1729,7 @@ pub fn Page() -> Element {
                                                         id: CODE_ACTION_ID,
                                                         tabindex: 0,
                                                         autofocus: true,
-                                                        class: "absolute z-50 max-h-56 min-w-64 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground outline-none ring-1 ring-inset ring-cyan-400/30 backdrop-blur-2xl shadow-lg",
+                                                        class: "absolute z-50 max-h-56 min-w-64 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground outline-none ring-1 ring-inset ring-primary/30 backdrop-blur-2xl shadow-lg",
                                                         style: "left:{left}px;top:{top}px;",
                                                         onkeydown: move |e| {
                                                             e.stop_propagation();
@@ -1761,7 +1761,7 @@ pub fn Page() -> Element {
                                                         for (i, title) in titles.iter().enumerate() {
                                                             div {
                                                                 key: "{i}",
-                                                                class: if i == chosen { "cursor-default px-3 py-1 bg-cyan-400/15" } else { "cursor-default px-3 py-1" },
+                                                                class: if i == chosen { "cursor-default px-3 py-1 bg-primary/15" } else { "cursor-default px-3 py-1" },
                                                                 onmousedown: move |e: Event<MouseData>| {
                                                                     e.prevent_default();
                                                                     let _ = send(&FileCodeActionPick { index: i as u32 });
@@ -1786,7 +1786,7 @@ pub fn Page() -> Element {
                                                         autofocus: true,
                                                         spellcheck: false,
                                                         autocomplete: "off",
-                                                        class: "absolute z-50 min-w-32 rounded-md bg-background/95 px-2 py-1 text-xs text-foreground ring-1 ring-inset ring-cyan-400/40 outline-none backdrop-blur-2xl shadow-lg",
+                                                        class: "absolute z-50 min-w-32 rounded-md bg-background/95 px-2 py-1 text-xs text-foreground ring-1 ring-inset ring-primary/40 outline-none backdrop-blur-2xl shadow-lg",
                                                         style: "left:{left}px;top:{top}px;",
                                                         value: "{box_.draft}",
                                                         oninput: move |e| {
@@ -1833,12 +1833,12 @@ pub fn Page() -> Element {
                                                 let left = gutter + ruler.x_of_char(cline, cfrom);
                                                 rsx! {
                                                     div {
-                                                        class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (i, it) in comp_filtered.iter().enumerate() {
                                                             div {
                                                                 key: "{i}",
-                                                                class: if i == comp_sel_clamped { "flex items-center gap-2 px-3 py-1 bg-cyan-400/15" } else { "flex items-center gap-2 px-3 py-1" },
+                                                                class: if i == comp_sel_clamped { "flex items-center gap-2 px-3 py-1 bg-primary/15" } else { "flex items-center gap-2 px-3 py-1" },
                                                                 span { class: "truncate", "{it.label}" }
                                                                 if !it.detail.is_empty() {
                                                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{it.detail}" }
@@ -1862,7 +1862,7 @@ pub fn Page() -> Element {
                     let (icon_class, icon, spinning) = match progress.phase {
                         InstallPhase::Done => ("text-ansi-2", "✓", false),
                         InstallPhase::Failed => ("text-ansi-1", "×", false),
-                        _ => ("text-cyan-400", "", true),
+                        _ => ("text-primary", "", true),
                     };
                     let detail = progress.pct.map_or_else(
                         || progress.message.clone(),
@@ -1872,7 +1872,7 @@ pub fn Page() -> Element {
                         div {
                             class: "pointer-events-none fixed right-4 bottom-14 z-[60] flex min-w-64 max-w-sm items-center gap-3 rounded-xl bg-background/95 px-3 py-2.5 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28)] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
                             if spinning {
-                                span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-cyan-400/25 border-t-cyan-400" }
+                                span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-primary/25 border-t-primary" }
                             } else {
                                 span { class: "grid h-4 w-4 shrink-0 place-items-center text-base font-semibold {icon_class}", "{icon}" }
                             }
@@ -1933,9 +1933,9 @@ pub fn Page() -> Element {
                             div {
                                 key: "{i}",
                                 class: if row.opens_group && i > 0 {
-                                    "mt-1 flex cursor-default items-center gap-6 border-t border-foreground/10 px-3 pt-2 pb-1.5 hover:bg-cyan-400/15"
+                                    "mt-1 flex cursor-default items-center gap-6 border-t border-foreground/10 px-3 pt-2 pb-1.5 hover:bg-primary/15"
                                 } else {
-                                    "flex cursor-default items-center gap-6 px-3 py-1.5 hover:bg-cyan-400/15"
+                                    "flex cursor-default items-center gap-6 px-3 py-1.5 hover:bg-primary/15"
                                 },
                                 onmousedown: move |e: Event<MouseData>| {
                                     e.prevent_default();
@@ -1957,7 +1957,7 @@ pub fn Page() -> Element {
                         div {
                             id: "refs-panel",
                             tabindex: "0",
-                            class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                            class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
                                 e.stop_propagation();
                                 if keys.offer(&e) {
@@ -1991,7 +1991,7 @@ pub fn Page() -> Element {
                                     rsx! {
                                         div {
                                             key: "{i}",
-                                            class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
+                                            class: if i == refs_sel() { "flex gap-2 rounded bg-primary/15 px-2 py-1" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                                             onmousedown: move |e: Event<MouseData>| {
                                                 e.prevent_default();
                                                 let _ = send(&FileGotoRequest {
@@ -2002,7 +2002,7 @@ pub fn Page() -> Element {
                                                 refs_open.set(false);
                                                 focus_file_input();
                                             },
-                                            span { class: "shrink-0 text-cyan-700/80 dark:text-cyan-300/80", "{it.display}" }
+                                            span { class: "shrink-0 text-primary/80", "{it.display}" }
                                             span { class: "truncate text-foreground/60", "{it.preview}" }
                                         }
                                     }
@@ -3171,7 +3171,7 @@ fn ExplorerSidebar(
         }
         div {
             class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-primary/40"
             } else {
                 "pointer-events-none h-full w-0 shrink-0 opacity-0"
             },
@@ -3190,7 +3190,7 @@ fn VimStatus(label: String) -> Element {
     }
     rsx! {
         span {
-            class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
+            class: "-ml-4 flex h-7 shrink-0 items-center bg-primary/20 px-3 text-[10px] font-semibold tracking-wider text-primary",
             "{label}"
         }
     }
@@ -3419,7 +3419,7 @@ fn EditorTab(tab: EditorTabItem) -> Element {
                     close_command.close();
                 },
                 if tab.dirty {
-                    span { class: "h-1.5 w-1.5 rounded-full bg-cyan-300 group-hover:hidden" }
+                    span { class: "h-1.5 w-1.5 rounded-full bg-primary group-hover:hidden" }
                     span { class: "hidden leading-none group-hover:block", "\u{00D7}" }
                 } else {
                     span { class: "leading-none", "\u{00D7}" }
@@ -3988,7 +3988,7 @@ fn NoteBlockView(
                                                     if !chunk.text.is_empty() {
                                                         span {
                                                             key: "text-{chunk_index}",
-                                                            class: if chunk.selected { "bg-cyan-400/20" } else { "" },
+                                                            class: if chunk.selected { "bg-primary/20" } else { "" },
                                                             "{chunk.text}"
                                                         }
                                                     }
@@ -4002,11 +4002,11 @@ fn NoteBlockView(
                     }
                     if comp_open && !comp_filtered.is_empty() {
                         div {
-                            class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
+                            class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg",
                             for (item_index, item) in comp_filtered.iter().enumerate() {
                                 div {
                                     key: "note-completion-{item_index}",
-                                    class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-cyan-400/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
+                                    class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-primary/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
                                     span { class: "truncate", "{item.label}" }
                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
                                 }
@@ -4128,13 +4128,13 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-pub(crate) const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+pub(crate) const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 
 pub(crate) fn row_class(selected: bool) -> String {
     let base =
         "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
     let state = if selected {
-        "bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
+        "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
     } else {
         "text-foreground/75 hover:bg-foreground/[0.05]"
     };
@@ -4257,7 +4257,7 @@ pub(crate) fn PreviewPane(preview: Preview) -> Element {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
         },
         Preview::Image(url) => rsx! {
-            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20" }
         },
         Preview::Video { url, path, native } => {
             if *native {
@@ -4266,7 +4266,7 @@ pub(crate) fn PreviewPane(preview: Preview) -> Element {
                     div {
                         key: "{path}",
                         id: VIDEO_HOST_ID,
-                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-primary/20",
                     }
                 }
             } else {
@@ -4276,7 +4276,7 @@ pub(crate) fn PreviewPane(preview: Preview) -> Element {
                         src: "{url}",
                         controls: true,
                         autoplay: false,
-                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20",
                     }
                 }
             }
@@ -4967,7 +4967,7 @@ fn NativeVideoHost(path: String) -> Element {
         div {
             key: "{path}",
             id: VIDEO_HOST_ID,
-            class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+            class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-primary/20",
             onmounted: move |event: Event<MountedData>| {
                 element.set(Some(event.data()));
                 report.call(());

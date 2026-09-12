@@ -364,7 +364,8 @@ pub fn pkg_status_label(status: LspPkgStatus) -> &'static str {
 
 pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
     match status {
-        LspPkgStatus::Installed | LspPkgStatus::Running => "text-ansi-2",
+        LspPkgStatus::Installed => "text-ansi-2",
+        LspPkgStatus::Running => "text-primary",
         LspPkgStatus::OnPath => "text-ansi-6",
         LspPkgStatus::Installing => "text-ansi-4",
         LspPkgStatus::Outdated => "text-ansi-3",

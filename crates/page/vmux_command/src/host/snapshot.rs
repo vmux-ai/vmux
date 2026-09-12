@@ -13,6 +13,7 @@ impl Plugin for CommandBarSnapshotPlugin {
             .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarProjectRoots>()
             .init_resource::<CommandBarAgentModels>()
+            .init_resource::<CommandBarAgentModes>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
@@ -42,6 +43,11 @@ pub struct CommandBarProjectRoots {
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModels {
     pub agents: Vec<vmux_wire::command_bar::AgentModels>,
+}
+
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarAgentModes {
+    pub agents: Vec<vmux_wire::command_bar::AgentModes>,
 }
 
 #[derive(Resource, Default, Clone, Debug)]
