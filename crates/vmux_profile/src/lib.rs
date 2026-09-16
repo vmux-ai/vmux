@@ -254,7 +254,29 @@ pub fn session_path() -> PathBuf {
 }
 
 pub fn cef_cache_path() -> Option<String> {
-    profile_dir().to_str().map(|s| s.to_owned())
+    cef_cache_path_in(
+        &shared_data_dir(),
+        &active_profile_name(),
+        build_profile(),
+        env!("VMUX_WORKTREE_ID"),
+    )
+    .to_str()
+    .map(str::to_owned)
+}
+
+fn cef_cache_path_in(
+    data: &std::path::Path,
+    profile: &str,
+    build_profile: &str,
+    worktree_id: &str,
+) -> PathBuf {
+    let profile_dir = data.join("profiles").join(profile);
+    if build_profile == "release" {
+        return profile_dir;
+    }
+    profile_dir
+        .join("cef")
+        .join(format!("{build_profile}-{worktree_id}"))
 }
 
 pub fn cef_keychain_switches() -> &'static [&'static str] {
@@ -566,6 +588,32 @@ mod tests {
     #[test]
     fn local_and_release_share_one_space() {
         assert_eq!(data_dir_suffix_for("local"), data_dir_suffix_for("release"));
+    }
+
+    #[test]
+    fn release_keeps_the_shared_cef_profile() {
+        assert_eq!(
+            cef_cache_path_in(
+                std::path::Path::new("/data/Vmux"),
+                "personal",
+                "release",
+                "worktree-a",
+            ),
+            PathBuf::from("/data/Vmux/profiles/personal")
+        );
+    }
+
+    #[test]
+    fn local_cef_profiles_are_isolated_by_worktree() {
+        let data = std::path::Path::new("/data/Vmux");
+        let first = cef_cache_path_in(data, "personal", "local", "worktree-a");
+        let second = cef_cache_path_in(data, "personal", "local", "worktree-b");
+
+        assert_eq!(
+            first,
+            PathBuf::from("/data/Vmux/profiles/personal/cef/local-worktree-a")
+        );
+        assert_ne!(first, second);
     }
 
     #[test]

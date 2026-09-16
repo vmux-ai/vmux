@@ -157,6 +157,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             textOffsetAtPoint(request.element, request.x, request.y).join(','),
         );
         return;
+      case 'runScript':
+        Function(request.script)();
+        return;
     }
     const el = document.getElementById(request.element);
     if (!el) return;

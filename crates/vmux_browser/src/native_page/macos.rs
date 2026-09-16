@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::rc::Rc;
+use std::sync::{Mutex, mpsc};
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
@@ -457,18 +460,21 @@ impl PageEmbedder {
     }
 
     fn embed(&self, entity: Entity, url: &str) -> Embedding {
+        let page_url = Rc::new(RefCell::new(url.to_string()));
         Embedding {
             outbox: Rc::new(PageOutbox {
                 bin_ipc: self.bin_ipc.clone(),
                 webview: entity,
                 host: RefCell::new(embedded_page_host_of(url).unwrap_or_default()),
-                page_url: RefCell::new(url.to_string()),
+                page_url: page_url.clone(),
                 metadata: self.metadata.clone(),
                 waker: self.waker.clone(),
             }),
             assets: Rc::new(PageAssets {
                 requester: self.requester.clone(),
                 waker: self.waker.clone(),
+                page_url,
+                simulator_frames: SimulatorFrameProxy::default(),
             }),
             waker: Rc::new(self.waker.clone()),
         }
@@ -506,7 +512,7 @@ struct PageOutbox {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
     webview: Entity,
     host: RefCell<String>,
-    page_url: RefCell<String>,
+    page_url: Rc<RefCell<String>>,
     metadata: NativePageMetadataSender,
     waker: PageWaker,
 }
@@ -564,10 +570,24 @@ impl vmux_native::Outbox for PageOutbox {
 struct PageAssets {
     requester: Requester,
     waker: PageWaker,
+    page_url: Rc<RefCell<String>>,
+    simulator_frames: SimulatorFrameProxy,
 }
 
 impl vmux_native::Assets for PageAssets {
     fn fetch(&self, url: &str, reply: AssetReply) {
+        match SimulatorFrameRequest::of(url, &self.page_url.borrow()) {
+            Ok(Some(request)) => {
+                self.simulator_frames.fetch(request, reply);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                error!("simulator frame asset rejected url={url}: {error}");
+                reply.fail(error);
+                return;
+            }
+        }
         let uri = asset_load_path_from_request_url(url);
         if uri.is_empty() {
             error!("native_page: vmux:// url maps to no asset path, url={url}");
@@ -602,6 +622,191 @@ impl vmux_native::Assets for PageAssets {
     }
 }
 
+struct SimulatorFrameRequest {
+    port: u16,
+    capability: String,
+    after: u64,
+}
+
+#[derive(Default)]
+struct SimulatorFrameProxy {
+    sender: Mutex<Option<mpsc::Sender<SimulatorFrameJob>>>,
+}
+
+struct SimulatorFrameJob {
+    request: SimulatorFrameRequest,
+    reply: AssetReply,
+}
+
+struct SimulatorFrame {
+    generation: u64,
+    bytes: Vec<u8>,
+}
+
+impl SimulatorFrameProxy {
+    fn fetch(&self, request: SimulatorFrameRequest, reply: AssetReply) {
+        let sender = match self.sender() {
+            Ok(sender) => sender,
+            Err(error) => {
+                reply.fail(&error);
+                return;
+            }
+        };
+        if let Err(error) = sender.send(SimulatorFrameJob { request, reply }) {
+            error.0.reply.fail("simulator frame proxy stopped");
+        }
+    }
+
+    fn sender(&self) -> Result<mpsc::Sender<SimulatorFrameJob>, String> {
+        let mut sender = self
+            .sender
+            .lock()
+            .map_err(|_| "simulator frame proxy lock failed".to_string())?;
+        if let Some(sender) = sender.as_ref() {
+            return Ok(sender.clone());
+        }
+        let (next, receiver) = mpsc::channel::<SimulatorFrameJob>();
+        std::thread::Builder::new()
+            .name("vmux-simulator-frame-proxy".into())
+            .spawn(move || {
+                for job in receiver {
+                    job.run();
+                }
+            })
+            .map_err(|error| format!("could not start simulator frame proxy: {error}"))?;
+        *sender = Some(next.clone());
+        Ok(next)
+    }
+}
+
+impl SimulatorFrameJob {
+    fn run(self) {
+        match self.request.fetch() {
+            Ok(frame) => {
+                let mut body = Vec::with_capacity(8 + frame.bytes.len());
+                body.extend_from_slice(&frame.generation.to_le_bytes());
+                body.extend_from_slice(&frame.bytes);
+                self.reply.respond(200, "application/octet-stream", body);
+            }
+            Err(error) => {
+                error!("simulator frame proxy request failed: {error}");
+                self.reply.fail(&error);
+            }
+        }
+    }
+}
+
+impl SimulatorFrameRequest {
+    const PATH: &'static str = "/__simulator-frame";
+
+    fn of(request_url: &str, page_url: &str) -> Result<Option<Self>, &'static str> {
+        let parsed = url::Url::parse(request_url).map_err(|_| "simulator frame URL is invalid")?;
+        if parsed.path() != Self::PATH {
+            return Ok(None);
+        }
+        if parsed.scheme() != "vmux" {
+            return Err("simulator frame URL is unavailable");
+        }
+        let page = url::Url::parse(page_url).map_err(|_| "simulator page URL is invalid")?;
+        if page.scheme() != "vmux" || page.host_str() != Some("simulator") {
+            return Err("simulator frames are unavailable to this page");
+        }
+        let mut port = None;
+        let mut capability = None;
+        let mut after = None;
+        for (name, value) in parsed.query_pairs() {
+            match name.as_ref() {
+                "port" => port = value.parse().ok(),
+                "capability" => capability = Some(value.into_owned()),
+                "after" => after = value.parse().ok(),
+                _ => {}
+            }
+        }
+        let Some(port) = port else {
+            return Err("simulator frame port is invalid");
+        };
+        if port == 0 {
+            return Err("simulator frame port is invalid");
+        }
+        let Some(capability) = capability else {
+            return Err("simulator frame capability is missing");
+        };
+        if capability.len() != 32 || !capability.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("simulator frame capability is invalid");
+        }
+        Ok(Some(Self {
+            port,
+            capability,
+            after: after.unwrap_or(0),
+        }))
+    }
+
+    fn fetch(self) -> Result<SimulatorFrame, String> {
+        let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.port);
+        let mut socket = TcpStream::connect(address)
+            .map_err(|error| format!("simulator frame connection failed: {error}"))?;
+        socket
+            .set_nodelay(true)
+            .map_err(|error| format!("simulator frame socket setup failed: {error}"))?;
+        let request = format!(
+            "GET /{capability}?after={after} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n",
+            capability = self.capability,
+            after = self.after,
+            port = self.port,
+        );
+        socket
+            .write_all(request.as_bytes())
+            .map_err(|error| format!("simulator frame request failed: {error}"))?;
+        let mut response = Vec::new();
+        socket
+            .read_to_end(&mut response)
+            .map_err(|error| format!("simulator frame response failed: {error}"))?;
+        SimulatorFrame::of(response, self.after)
+    }
+}
+
+impl SimulatorFrame {
+    fn of(response: Vec<u8>, after: u64) -> Result<Self, String> {
+        let header_end = response
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .map(|index| index + 4)
+            .ok_or_else(|| "simulator frame response has no headers".to_string())?;
+        let headers = std::str::from_utf8(&response[..header_end])
+            .map_err(|_| "simulator frame response headers are invalid".to_string())?;
+        let mut lines = headers.lines();
+        let status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|status| status.parse::<u16>().ok())
+            .ok_or_else(|| "simulator frame response status is invalid".to_string())?;
+        if status != 200 {
+            return Err(format!("simulator frame returned {status}"));
+        }
+        let mut generation = None;
+        let mut content_length = None;
+        for line in lines {
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            if name.eq_ignore_ascii_case("x-vmux-generation") {
+                generation = value.trim().parse::<u64>().ok();
+            }
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().ok();
+            }
+        }
+        let bytes = response[header_end..].to_vec();
+        if content_length != Some(bytes.len()) {
+            return Err("simulator frame response length is invalid".to_string());
+        }
+        Ok(Self {
+            generation: generation.unwrap_or(after.wrapping_add(1)),
+            bytes,
+        })
+    }
+}
+
 fn report_waiting(reason: &str) {
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -615,6 +820,7 @@ fn report_waiting(reason: &str) {
 mod tests {
     use super::{
         NativePageMetadataReceiver, NativePageMetadataSender, PageOutbox, Placement, SiblingOrder,
+        SimulatorFrame, SimulatorFrameRequest,
     };
     use bevy::prelude::{App, MinimalPlugins, Update};
 
@@ -644,7 +850,7 @@ mod tests {
             bin_ipc: tx,
             webview: bevy::prelude::Entity::PLACEHOLDER,
             host: std::cell::RefCell::new("start".to_string()),
-            page_url: std::cell::RefCell::new("vmux://start/".to_string()),
+            page_url: std::rc::Rc::new(std::cell::RefCell::new("vmux://start/".to_string())),
             metadata: NativePageMetadataSender(metadata_tx),
             waker: super::PageWaker(None),
         };
@@ -701,7 +907,7 @@ mod tests {
             bin_ipc: async_channel::unbounded().0,
             webview: page,
             host: std::cell::RefCell::new("history".to_string()),
-            page_url: std::cell::RefCell::new("vmux://history/".to_string()),
+            page_url: std::rc::Rc::new(std::cell::RefCell::new("vmux://history/".to_string())),
             metadata: NativePageMetadataSender(metadata_tx),
             waker: super::PageWaker(None),
         };
@@ -715,6 +921,79 @@ mod tests {
         assert_eq!(
             metadata.icon,
             vmux_core::PageIcon::favicon("vmux://history/assets/favicons/history.svg")
+        );
+    }
+
+    #[test]
+    fn simulator_page_accepts_its_frame_request() {
+        let request = SimulatorFrameRequest::of(
+            "vmux://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
+            "vmux://simulator/",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(request.port, 58352);
+        assert_eq!(request.capability, "0123456789abcdef0123456789abcdef");
+        assert_eq!(request.after, 42);
+    }
+
+    #[test]
+    fn simulator_frame_response_preserves_generation_and_body() {
+        let response =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nX-Vmux-Generation: 42\r\n\r\nabc".to_vec();
+
+        let frame = SimulatorFrame::of(response, 41).unwrap();
+
+        assert_eq!(frame.generation, 42);
+        assert_eq!(frame.bytes, b"abc");
+    }
+
+    #[test]
+    fn other_pages_cannot_request_simulator_frames() {
+        let request = SimulatorFrameRequest::of(
+            "vmux://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
+            "vmux://start/",
+        );
+
+        assert_eq!(
+            request.err(),
+            Some("simulator frames are unavailable to this page")
+        );
+    }
+
+    #[test]
+    fn malformed_simulator_frame_requests_are_rejected() {
+        for request_url in [
+            "vmux://simulator/__simulator-frame?port=0&capability=0123456789abcdef0123456789abcdef",
+            "vmux://simulator/__simulator-frame?port=not-a-port&capability=0123456789abcdef0123456789abcdef",
+            "vmux://simulator/__simulator-frame?port=58352&capability=too-short",
+            "https://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef",
+        ] {
+            assert!(
+                SimulatorFrameRequest::of(request_url, "vmux://simulator/").is_err(),
+                "{request_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn normal_assets_are_not_simulator_frame_requests() {
+        assert!(matches!(
+            SimulatorFrameRequest::of("vmux://simulator/assets/index.css", "vmux://simulator/"),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn simulator_frame_requests_use_the_documents_same_origin_host() {
+        assert!(
+            SimulatorFrameRequest::of(
+                "vmux://start/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
+                "vmux://simulator/",
+            )
+            .unwrap()
+            .is_some()
         );
     }
 }

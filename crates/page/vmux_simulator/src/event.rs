@@ -16,6 +16,9 @@ pub struct SimulatorReady {
     pub capability: String,
     pub version: String,
     pub device_name: String,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub frame_stride: u32,
 }
 
 #[derive(

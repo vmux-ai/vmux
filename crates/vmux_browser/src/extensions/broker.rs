@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::RequestNavigate;
 use crossbeam_channel::RecvTimeoutError;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
@@ -11,6 +12,7 @@ use vmux_core::extension::protocol::{
     ExtensionCallerContext,
 };
 
+use super::ExtensionPopup;
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
 use super::model::{ChromeModel, ChromeModelEvent};
@@ -133,6 +135,8 @@ pub fn drain_bridge_requests(
     mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
     mut app_commands: MessageWriter<AppCommand>,
+    popups: Query<(Entity, &ExtensionPopup)>,
+    mut commands: Commands,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
     mut model_events: MessageWriter<ChromeModelEvent>,
@@ -236,7 +240,23 @@ pub fn drain_bridge_requests(
                 }
                 for effect in dispatched.effects {
                     match effect {
-                        WindowEffect::Open(urls) => {
+                        WindowEffect::Open { urls, window_type } => {
+                            let popup = if window_type == "popup" {
+                                popups.iter().find_map(|(entity, popup)| {
+                                    (popup.extension_id == extension_id).then_some(entity)
+                                })
+                            } else {
+                                None
+                            };
+                            let mut urls = urls.into_iter();
+                            if let Some(popup) = popup
+                                && let Some(Some(url)) = urls.next()
+                            {
+                                commands.trigger(RequestNavigate {
+                                    webview: popup,
+                                    url,
+                                });
+                            }
                             for url in urls {
                                 app_commands.write(AppCommand::Browser(BrowserCommand::Open(
                                     OpenCommand::InNewStack { url },
@@ -1166,8 +1186,8 @@ mod tests {
 
         assert!(matches!(
             &dispatched.effects[0],
-            WindowEffect::Open(urls)
-                if urls == &vec![Some(format!(
+            WindowEffect::Open { urls, window_type }
+                if window_type == "normal" && urls == &vec![Some(format!(
                     "chrome-extension://{EXTENSION_ID}/popup/index.html"
                 ))]
         ));

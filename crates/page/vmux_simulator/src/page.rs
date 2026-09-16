@@ -14,6 +14,7 @@ use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::matrix_rain::MatrixLoader;
 use vmux_ui::platform::sleep_ms;
+use vmux_ui::script::PageScript;
 
 #[component]
 pub fn Page() -> Element {
@@ -33,6 +34,8 @@ pub fn Page() -> Element {
                     port: announced.port,
                     capability: announced.capability.clone(),
                     device_name: announced.device_name.clone(),
+                    frame_width: announced.frame_width,
+                    frame_height: announced.frame_height,
                 }
             }
         }
@@ -40,10 +43,15 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn Mirror(port: u16, capability: String, device_name: String) -> Element {
+fn Mirror(
+    port: u16,
+    capability: String,
+    device_name: String,
+    frame_width: u32,
+    frame_height: u32,
+) -> Element {
     let mut press = use_signal(|| None::<PointerSession>);
     let mut image_size = use_signal(|| None::<(f64, f64)>);
-    let mut image_loaded = use_signal(|| false);
     let mut home_progress = use_signal(|| 0.0f32);
     let mut surface = use_signal(|| None::<Rc<MountedData>>);
     let progress = home_progress();
@@ -58,6 +66,15 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
+    let stream = CanvasStream::new(port, capability, frame_width, frame_height);
+    let stream_start = stream.clone();
+    use_effect(move || {
+        PageScript::run(stream_start.start_script());
+    });
+    let stream_stop = stream.clone();
+    use_drop(move || {
+        PageScript::run(stream_stop.stop_script());
+    });
     rsx! {
         div {
             class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8 outline-none",
@@ -134,33 +151,39 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                 };
                 current.cancel().dispatch(home_progress);
             },
-            if !image_loaded() {
-                SimulatorLoader { class: "absolute inset-0".to_string() }
+            SimulatorLoader {
+                id: stream.loader_id.clone(),
+                status_id: stream.status_id.clone(),
+                class: "absolute inset-0".to_string(),
+                label: "Starting simulator stream".to_string(),
             }
             div {
-                class: if image_loaded() {
-                    "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-100 transition-opacity"
-                } else {
-                    "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-0"
-                },
+                id: stream.device_label_id.clone(),
+                class: "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-0 transition-opacity",
                 "{device_name}"
             }
-            div { class: if image_loaded() {
-                    "relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-100 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity"
-                } else {
-                    "invisible relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0"
-                },
+            div {
+                id: stream.phone_id.clone(),
+                class: "invisible relative rounded-[clamp(1.25rem,2.6vw,3.25rem)] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity",
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
-                div { class: "overflow-hidden rounded-[2.8rem] bg-black ring-1 ring-black",
-                    img {
+                div { class: "overflow-hidden rounded-[clamp(1rem,2.2vw,2.8rem)] bg-black ring-1 ring-black",
+                    canvas {
+                        id: "{stream.canvas_id}",
+                        width: "{frame_width}",
+                        height: "{frame_height}",
                         class: "block h-auto max-h-[calc(100vh-5rem)] max-w-[calc(100vw-5rem)] cursor-grab touch-none select-none active:cursor-grabbing",
                         style: image_style,
-                        draggable: false,
-                        src: "http://127.0.0.1:{port}/{capability}",
-                        onload: move |_| image_loaded.set(true),
-                        onerror: move |_| image_loaded.set(false),
+                        onmounted: move |event: Event<MountedData>| {
+                            let target = event.data();
+                            spawn(async move {
+                                let Ok(rect) = target.get_client_rect().await else {
+                                    return;
+                                };
+                                image_size.set(Some((rect.size.width, rect.size.height)));
+                            });
+                        },
                         onresize: move |event: Event<ResizeData>| {
                             let Ok(size) = event.get_border_box_size() else {
                                 return;
@@ -191,6 +214,125 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                 }
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct CanvasStream {
+    canvas_id: String,
+    loader_id: String,
+    status_id: String,
+    phone_id: String,
+    device_label_id: String,
+    port: u16,
+    capability: String,
+    width: u32,
+    height: u32,
+}
+
+impl CanvasStream {
+    fn new(port: u16, capability: String, width: u32, height: u32) -> Self {
+        Self {
+            canvas_id: format!("simulator-stream-{capability}"),
+            loader_id: format!("simulator-loader-{capability}"),
+            status_id: format!("simulator-status-{capability}"),
+            phone_id: format!("simulator-phone-{capability}"),
+            device_label_id: format!("simulator-device-{capability}"),
+            port,
+            capability,
+            width,
+            height,
+        }
+    }
+
+    fn start_script(&self) -> String {
+        format!(
+            r#"
+const key = "{canvas_id}";
+const streams = globalThis.__vmuxSimulatorStreams ??= new Map();
+streams.get(key)?.abort();
+const controller = new AbortController();
+streams.set(key, controller);
+const setStatus = (text) => {{
+  const status = document.getElementById("{status_id}");
+  if (status) status.textContent = text;
+}};
+const reveal = () => {{
+  document.getElementById("{loader_id}")?.classList.add("hidden");
+  const label = document.getElementById("{device_label_id}");
+  label?.classList.remove("opacity-0");
+  label?.classList.add("opacity-100");
+  const phone = document.getElementById("{phone_id}");
+  phone?.classList.remove("invisible", "opacity-0");
+  phone?.classList.add("opacity-100");
+}};
+(async () => {{
+try {{
+  const canvas = document.getElementById(key);
+  const context = canvas?.getContext("2d", {{ alpha: false, desynchronized: true }});
+  if (!canvas || !context) throw new Error("simulator canvas is unavailable");
+  setStatus("Preparing simulator display");
+  setStatus("Connecting to simulator");
+  setStatus("Receiving simulator frames");
+  let generation = 0;
+  let first = true;
+  let stage = "initializing stream";
+  while (!controller.signal.aborted) {{
+    const frameUrl = `/__simulator-frame?port={port}&capability={capability}&after=${{generation}}`;
+    stage = "requesting frame";
+    const response = await fetch(frameUrl, {{ signal: controller.signal, cache: "no-store" }});
+    if (!response.ok) throw new Error(`simulator stream failed: ${{response.status}}`);
+    stage = "reading frame";
+    const payload = new Uint8Array(await response.arrayBuffer());
+    if (payload.length < 9) throw new Error("simulator frame was empty");
+    const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
+    generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
+    stage = "decoding frame";
+    const bitmap = await createImageBitmap(new Blob([payload.subarray(8)], {{ type: "image/jpeg" }}));
+    if (!canvas.isConnected) {{
+      bitmap.close();
+      controller.abort();
+      break;
+    }}
+    context.drawImage(bitmap, 0, 0, {width}, {height});
+    bitmap.close();
+    if (first) {{
+      first = false;
+      reveal();
+    }}
+  }}
+}} catch (error) {{
+  if (!controller.signal.aborted) {{
+    console.error(error);
+    setStatus(`Simulator stream failed while ${{stage}}: ${{error?.message ?? String(error)}}`);
+  }}
+}} finally {{
+  if (streams.get(key) === controller) streams.delete(key);
+}}
+}})();
+"#,
+            canvas_id = self.canvas_id,
+            loader_id = self.loader_id,
+            status_id = self.status_id,
+            phone_id = self.phone_id,
+            device_label_id = self.device_label_id,
+            port = self.port,
+            capability = self.capability,
+            width = self.width,
+            height = self.height,
+        )
+    }
+
+    fn stop_script(&self) -> String {
+        format!(
+            r#"
+const streams = globalThis.__vmuxSimulatorStreams;
+const controller = streams?.get("{}");
+controller?.abort();
+streams?.delete("{}");
+"#,
+            self.canvas_id, self.canvas_id,
+        )
     }
 }
 
@@ -286,12 +428,14 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
 }
 
 #[component]
-fn SimulatorLoader(class: String) -> Element {
+fn SimulatorLoader(id: String, status_id: String, class: String, label: String) -> Element {
     rsx! {
-        MatrixLoader {
-            class,
-            label: translate("common-loading"),
-            words: vec![translate("simulator-title").to_uppercase()],
+        div { id, class: "{class} flex items-center justify-center bg-background",
+            div { class: "flex w-64 flex-col gap-3 rounded-2xl border border-border/70 bg-card/80 p-5 shadow-xl",
+                div { class: "h-3 w-24 rounded-full bg-muted" }
+                div { class: "h-40 rounded-xl bg-muted/60" }
+                div { id: status_id, class: "truncate text-center text-xs text-muted-foreground", "{label}" }
+            }
         }
     }
 }

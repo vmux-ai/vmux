@@ -11,6 +11,13 @@ pub fn emit() {
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo::rustc-env=VMUX_GIT_HASH={hash}");
 
+    let worktree =
+        git_stdout(&["rev-parse", "--show-toplevel"]).unwrap_or_else(|| "unknown".to_string());
+    println!(
+        "cargo::rustc-env=VMUX_WORKTREE_ID={:016x}",
+        stable_hash(&worktree)
+    );
+
     let profile = std::env::var("VMUX_BUILD_PROFILE").unwrap_or_else(|_| {
         match std::env::var("PROFILE").as_deref() {
             Ok("release") => "release".to_string(),
@@ -31,6 +38,15 @@ pub fn emit() {
             println!("cargo::rerun-if-changed={p}");
         }
     }
+}
+
+fn stable_hash(value: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn git_path(rel: &str) -> Option<String> {

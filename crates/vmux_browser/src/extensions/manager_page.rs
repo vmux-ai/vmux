@@ -76,7 +76,8 @@ impl Plugin for ExtensionsPlugin {
 
 #[derive(Component)]
 pub(crate) struct ExtensionPopup {
-    owner: Entity,
+    pub(crate) owner: Entity,
+    pub(crate) extension_id: String,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -356,7 +357,10 @@ fn on_action_request(
         .insert((
             Name::new(format!("Extension popup: {}", entry.name)),
             WindowOverlay,
-            ExtensionPopup { owner },
+            ExtensionPopup {
+                owner,
+                extension_id: id.clone(),
+            },
             Visibility::Hidden,
         ));
     commands.trigger(BinHostEmitEvent::from_rkyv(

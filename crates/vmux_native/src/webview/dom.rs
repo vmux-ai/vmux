@@ -366,6 +366,10 @@ impl PageHost for SurfaceHost {
             element: element_id.to_string(),
         });
     }
+
+    fn run_script(&self, script: String) {
+        self.request(DomRequest::RunScript { script });
+    }
 }
 
 #[cfg(test)]

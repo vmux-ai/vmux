@@ -73,7 +73,10 @@ pub struct HostWindowUpdate {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WindowEffect {
-    Open(Vec<Option<String>>),
+    Open {
+        urls: Vec<Option<String>>,
+        window_type: String,
+    },
     Close {
         tab_ids: Vec<i32>,
         urls: Vec<String>,
@@ -426,7 +429,10 @@ fn create(
     };
     Ok(WindowDispatch {
         result,
-        effects: vec![WindowEffect::Open(open)],
+        effects: vec![WindowEffect::Open {
+            urls: open,
+            window_type: window_type.into(),
+        }],
         events,
     })
 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{FontStyle, Style, ThemeSet};
+use syntect::highlighting::{FontStyle, Style};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_core::event::{FileLine, StyledSpan};
@@ -37,14 +37,6 @@ pub fn set_dark_theme(dark: bool) -> bool {
 
 pub fn is_dark_theme() -> bool {
     DARK_THEME.load(Ordering::Relaxed)
-}
-
-fn theme_name() -> &'static str {
-    if is_dark_theme() {
-        "base16-ocean.dark"
-    } else {
-        "base16-ocean.light"
-    }
 }
 
 pub fn default_theme() -> syntect::highlighting::Theme {
@@ -111,9 +103,7 @@ impl std::fmt::Display for LoadError {
     }
 }
 
-pub struct Highlighter {
-    themes: ThemeSet,
-}
+pub struct Highlighter;
 
 impl Default for Highlighter {
     fn default() -> Self {
@@ -123,9 +113,7 @@ impl Default for Highlighter {
 
 impl Highlighter {
     pub fn new() -> Self {
-        Self {
-            themes: ThemeSet::load_defaults(),
-        }
+        Self
     }
 
     pub fn highlight(&self, content: &str, path: &Path) -> HighlightedFile {
@@ -135,8 +123,8 @@ impl Highlighter {
             .and_then(|e| e.to_str())
             .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
             .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-        let theme = &self.themes.themes[theme_name()];
-        let mut h = HighlightLines::new(syntax, theme);
+        let theme = default_theme();
+        let mut h = HighlightLines::new(syntax, &theme);
 
         let mut lines = Vec::new();
         for (idx, line) in LinesWithEndings::from(content).enumerate() {
@@ -190,8 +178,8 @@ impl Highlighter {
     }
 
     fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
-        let theme = &self.themes.themes[theme_name()];
-        let fg = theme_foreground(theme);
+        let theme = default_theme();
+        let fg = theme_foreground(&theme);
         let lines = LinesWithEndings::from(content)
             .enumerate()
             .map(|(idx, line)| FileLine {

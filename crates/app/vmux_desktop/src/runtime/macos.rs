@@ -473,6 +473,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
         );
+        let event_belongs_to_main_window = event_window_wears_the_window_chrome(ev);
         let button_event = matches!(
             event_type,
             NSEventType::LeftMouseDown
@@ -500,7 +501,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         if pointer_position_changed && let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        if motion {
+        if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {
                 NATIVE_MOUSE_MOVE_WAKE_INTERVAL
             } else {

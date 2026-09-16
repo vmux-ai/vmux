@@ -60,6 +60,7 @@ pub fn MatrixLoader(
     label: String,
     #[props(default)] words: Vec<String>,
     #[props(default = "h-full w-full".to_string())] class: String,
+    #[props(default = DEFAULT_COLUMNS)] columns: usize,
 ) -> Element {
     let words = if words.is_empty() {
         vec!["VMUX".to_string()]
@@ -76,6 +77,7 @@ pub fn MatrixLoader(
                 MatrixRain {
                     accent_rgb: "var(--primary)".to_string(),
                     words,
+                    columns,
                 }
                 div { class: "relative z-10 flex h-full w-full items-center justify-center",
                     div { class: "glass max-w-[min(28rem,calc(100%-3rem))] rounded-2xl px-5 py-3 text-center text-sm font-medium text-foreground ring-1 ring-inset ring-border/70 backdrop-blur-xl",

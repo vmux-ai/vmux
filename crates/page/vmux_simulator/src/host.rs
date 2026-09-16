@@ -51,6 +51,12 @@ impl Plugin for SimulatorPlugin {
             )
             .add_systems(
                 Update,
+                Self::sync_stream_activity
+                    .after(Self::finish_device_attachments)
+                    .after(SimulatorFocusSet),
+            )
+            .add_systems(
+                Update,
                 Self::handle_screenshot_requests.in_set(SimulatorInputSet),
             )
             .add_plugins(input::SimulatorInputPlugin)
@@ -304,6 +310,9 @@ impl SimulatorPlugin {
                         .map(ToString::to_string)
                         .unwrap_or_default(),
                     device_name: device.name.clone(),
+                    frame_width: server.frame_width(),
+                    frame_height: server.frame_height(),
+                    frame_stride: server.frame_stride(),
                 },
                 Err(_) => SimulatorReady::default(),
             };
@@ -332,6 +341,15 @@ impl SimulatorPlugin {
             commands
                 .entity(entity)
                 .insert(SimulatorAnnouncement(payload.clone()));
+        }
+    }
+
+    fn sync_stream_activity(
+        active: Res<ActiveSimulatorView>,
+        streams: Query<(Entity, &StreamServer)>,
+    ) {
+        for (entity, stream) in &streams {
+            stream.set_active(active.0 == Some(entity));
         }
     }
 
@@ -418,7 +436,7 @@ impl AttachedDevice {
         let pixels = device.pixel_size(&axe);
         let hid = HidBroker::start(&axe, &device)
             .map_err(|error| format!("could not start simulator input: {error}"))?;
-        let server = StreamServer::start(&axe, device.clone())
+        let server = StreamServer::start(&axe, device.clone(), pixels)
             .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
         Ok(Self {
             axe,

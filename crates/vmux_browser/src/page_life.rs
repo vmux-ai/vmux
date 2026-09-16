@@ -51,6 +51,7 @@ pub(crate) fn drain_loading_state(
 
 pub(crate) fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
+    extension_popups: Query<(), With<crate::extensions::ExtensionPopup>>,
     child_of_q: Query<&ChildOf>,
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -58,6 +59,13 @@ pub(crate) fn spawn_popup_stacks(
 ) {
     while let Ok(ev) = popup_rx.0.try_recv() {
         if ev.target_url.is_empty() {
+            continue;
+        }
+        if extension_popups.contains(ev.webview) {
+            commands.trigger(RequestNavigate {
+                webview: ev.webview,
+                url: ev.target_url,
+            });
             continue;
         }
         let Ok(stack_co) = child_of_q.get(ev.webview) else {

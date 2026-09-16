@@ -278,7 +278,7 @@ impl StackCloser<'_, '_> {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::stack"]
-#[require(Save)]
+#[require(Save, LastActivatedAt)]
 pub struct Stack {
     pub scroll_x: f32,
     pub scroll_y: f32,
@@ -645,6 +645,14 @@ mod tests {
             .init_resource::<PendingLaunch>()
             .add_systems(Update, handle_close_stack_requests);
         app
+    }
+
+    #[test]
+    fn every_stack_has_an_activation_timestamp() {
+        let mut world = World::new();
+        let stack = world.spawn(Stack::default()).id();
+
+        assert!(world.get::<LastActivatedAt>(stack).is_some());
     }
 
     #[test]

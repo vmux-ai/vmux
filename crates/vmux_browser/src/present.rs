@@ -29,8 +29,8 @@ use vmux_core::KeyboardOwner;
 use vmux_setting::AppSettings;
 
 use crate::{
-    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap, NATIVE_COMMAND_BAR_ROUTE,
-    VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
+    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LayoutPointerCapture, LogoBitmap,
+    NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
 };
 
 #[cfg(target_os = "macos")]
@@ -42,23 +42,42 @@ pub(crate) struct PresentPlugin;
 
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PaneFrames>().add_systems(
-            PostUpdate,
-            (
-                sync_keyboard_target,
-                sync_children_to_ui,
-                sync_windowed_layout,
-                sync_windowed_frames,
-                sync_windowed_command_bar,
-                sync_windowed_extension_popups,
-                flush_native_command_bar_pointer_events,
-                apply_repaint_nudge,
-                sync_cef_webview_resize_after_ui,
-                sync_osr_webview_focus,
+        app.init_resource::<PaneFrames>()
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_keyboard_target,
+                    sync_children_to_ui,
+                    sync_windowed_layout,
+                    sync_windowed_frames,
+                    sync_windowed_command_bar,
+                    sync_windowed_extension_popups,
+                    flush_native_command_bar_pointer_events,
+                    apply_repaint_nudge,
+                    sync_cef_webview_resize_after_ui,
+                    sync_osr_webview_focus,
+                )
+                    .chain()
+                    .after(LayoutSystems::Layout),
             )
-                .chain()
-                .after(LayoutSystems::Layout),
-        );
+            .add_systems(Last, log_windowed_view_state);
+    }
+}
+
+fn log_windowed_view_state(
+    browsers: NonSend<Browsers>,
+    pages: Query<Entity, (With<Browser>, With<WebviewWindowed>, Without<WindowOverlay>)>,
+    mut previous: Local<std::collections::HashMap<Entity, String>>,
+) {
+    for entity in &pages {
+        let Some(state) = browsers.windowed_view_state(&entity) else {
+            continue;
+        };
+        if previous.get(&entity) == Some(&state) {
+            continue;
+        }
+        bevy::log::warn!(?entity, "cef_diagnostic: {state}");
+        previous.insert(entity, state);
     }
 }
 
@@ -88,6 +107,8 @@ pub(crate) struct WindowFrameQueries<'w, 's> {
     pane_rect: Query<'w, 's, &'static ComputedNode, With<Pane>>,
     header_rect: Query<'w, 's, (Entity, &'static ComputedNode), (With<Header>, With<Open>)>,
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
+    stacks: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     all_children: Query<'w, 's, &'static Children>,
     leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
 }
@@ -191,9 +212,9 @@ fn sync_children_to_ui(
     hierarchy: WindowHierarchy,
     pane_rect: Query<&ComputedNode, With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
+    all_children: Query<&Children>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
 ) {
     for (
@@ -243,7 +264,10 @@ fn sync_children_to_ui(
         let under_inactive_tab = parent != glass_entity
             && !is_cef_ui
             && match tab_ancestor(parent, &hierarchy.child_of, &tabs_q) {
-                Some(tab) => !active_tab_q.contains(tab),
+                Some(tab) => {
+                    active_tab_in_space(tab, &hierarchy.child_of, &all_children, &tabs_q)
+                        != Some(tab)
+                }
                 None => false,
             };
 
@@ -269,7 +293,10 @@ fn sync_children_to_ui(
         }
 
         let is_active_stack = if parent != glass_entity && !is_cef_ui {
-            active_stack_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
+            active_candidate(
+                active_stack_in_pane(pane_entity, &pane_children, &tab_ts),
+                parent,
+            )
         } else {
             true
         };
@@ -324,6 +351,33 @@ fn sync_children_to_ui(
             webview_size.0 = dip;
         }
     }
+}
+
+fn active_tab_in_space(
+    tab: Entity,
+    child_of: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> Option<Entity> {
+    let space = child_of.get(tab).ok()?.get();
+    let children = all_children.get(space).ok()?;
+    vmux_layout::stack::active_among(children.iter().filter_map(|entity| tabs.get(entity).ok()))
+}
+
+fn active_candidate(active: Option<Entity>, candidate: Entity) -> bool {
+    active.is_none_or(|active| active == candidate)
+}
+
+fn active_tab_is_visible(
+    tab: Option<Entity>,
+    child_of: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> bool {
+    let Some(tab) = tab else {
+        return true;
+    };
+    active_candidate(active_tab_in_space(tab, child_of, all_children, tabs), tab)
 }
 
 fn windowed_ring_for(
@@ -386,7 +440,13 @@ pub(crate) fn sync_windowed_frames(
     active_panes: Res<vmux_layout::active_panes::ActivePanes>,
     clear_color: Res<vmux_layout::window::WindowBackground>,
     browser_q: Query<
-        (Entity, &Transform, &ComputedNode, &ChildOf),
+        (
+            Entity,
+            &ComputedNode,
+            &ChildOf,
+            Option<&Visibility>,
+            Has<PendingWebviewReveal>,
+        ),
         (
             With<Browser>,
             With<WebviewWindowed>,
@@ -399,19 +459,16 @@ pub(crate) fn sync_windowed_frames(
     mut last_windowed_pages: Local<Vec<Entity>>,
     mut pane_frames: ResMut<PaneFrames>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
+    capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
 ) {
     pane_frames.frames.clear();
     pane_frames.rings.clear();
     pane_frames.all_corners.clear();
+    let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
-    for (entity, tf, self_computed, child_of) in &browser_q {
-        if tf.scale.x <= 1.0e-3 {
-            hidden.push(entity);
-            continue;
-        }
-        visible.push(entity);
+    for (entity, self_computed, child_of, visibility, pending_reveal) in &browser_q {
         let parent = child_of.get();
         let pane_entity = queries
             .hierarchy
@@ -420,6 +477,49 @@ pub(crate) fn sync_windowed_frames(
             .map(|co| co.get())
             .unwrap_or(parent);
         let computed = queries.pane_rect.get(pane_entity).unwrap_or(self_computed);
+        let tab = tab_ancestor(parent, &queries.hierarchy.child_of, &queries.tabs);
+        let tab_active = active_tab_is_visible(
+            tab,
+            &queries.hierarchy.child_of,
+            &queries.all_children,
+            &queries.tabs,
+        );
+        let stack_active = active_candidate(
+            active_stack_in_pane(pane_entity, &queries.pane_children, &queries.stacks),
+            parent,
+        );
+        let focused_stack = focus.stack == Some(parent);
+        let renderable = computed.size.x > 0.0 && computed.size.y > 0.0;
+        let state = (
+            renderable,
+            focused_stack,
+            tab_active,
+            stack_active,
+            pending_reveal,
+        );
+        if memory.visibility_state.get(&entity) != Some(&state) {
+            bevy::log::warn!(
+                ?entity,
+                ?parent,
+                ?pane_entity,
+                ?tab,
+                ?focus.stack,
+                ?computed.size,
+                ?visibility,
+                pending_reveal,
+                renderable,
+                focused_stack,
+                tab_active,
+                stack_active,
+                "cef_visibility"
+            );
+            memory.visibility_state.insert(entity, state);
+        }
+        if !windowed_page_is_visible(renderable, focused_stack, tab_active, stack_active) {
+            hidden.push(entity);
+            continue;
+        }
+        visible.push(entity);
         let host_window = queries.hierarchy.host_of(entity);
         let layout_is_hidden = host_window.is_some_and(|window| layout_hidden.is_hidden(window));
         let header_frame = host_window.and_then(|host_window| {
@@ -431,12 +531,8 @@ pub(crate) fn sync_windowed_frames(
                 }
             })
         });
-        let active_tab = tab_ancestor(parent, &queries.hierarchy.child_of, &queries.tabs);
-        let visible_pane_count = visible_pane_count_for_windowed_sync(
-            active_tab,
-            &queries.all_children,
-            &queries.leaf_panes,
-        );
+        let visible_pane_count =
+            visible_pane_count_for_windowed_sync(tab, &queries.all_children, &queries.leaf_panes);
         let Some(pane_frame) = WindowedFrameRect::of(computed) else {
             continue;
         };
@@ -450,8 +546,11 @@ pub(crate) fn sync_windowed_frames(
         if let Some(logical) = PaneFrame::of(frame, scale) {
             pane_frames.frames.insert(entity, logical);
         }
-        let browser_ready = browsers.has_browser(entity);
-        if browser_ready {
+        let became_visible = !memory.visible_pages.contains(&entity);
+        let browser_ready = browsers.windowed_view_ready(&entity);
+        let was_raised = memory.raised_frame.contains_key(&entity);
+        let first_native_frame = browser_ready && !was_raised;
+        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_frame(
@@ -462,6 +561,7 @@ pub(crate) fn sync_windowed_frames(
             frame.height,
             scale,
         );
+        browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
         let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
         pane_frames.all_corners.insert(entity, all_corners);
         browsers.set_windowed_corner_radius(
@@ -517,8 +617,10 @@ pub(crate) fn sync_windowed_frames(
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            memory.raised_frame.insert(entity, key);
-            browsers.raise_windowed_to_front(&entity);
+            let changed = memory.raised_frame.insert(entity, key) != Some(key);
+            if force_raise || changed || became_visible || first_native_frame {
+                browsers.raise_windowed_to_front(&entity);
+            }
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
@@ -539,6 +641,23 @@ pub(crate) fn sync_windowed_frames(
         NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
 }
 
+fn windowed_page_needs_reveal(became_visible: bool, browser_ready: bool, was_raised: bool) -> bool {
+    became_visible || (browser_ready && !was_raised)
+}
+
+fn windowed_page_is_visible(
+    renderable: bool,
+    focused_stack: bool,
+    tab_active: bool,
+    stack_active: bool,
+) -> bool {
+    renderable && (focused_stack || (tab_active && stack_active))
+}
+
+fn windowed_page_z_position(layout_captures_pointer: bool) -> f64 {
+    if layout_captures_pointer { 0.0 } else { 500.0 }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WindowedFrameRect {
     pub(crate) left: f32,
@@ -552,6 +671,7 @@ pub(crate) struct FrameSyncMemory {
     raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,
+    visibility_state: std::collections::HashMap<Entity, (bool, bool, bool, bool, bool)>,
 }
 
 #[derive(Resource, Default)]
@@ -719,7 +839,7 @@ fn sync_windowed_layout(
         }
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
-        if browsers.has_browser(entity) {
+        if browsers.windowed_view_ready(&entity) {
             let key = (0, 0, w.round() as i32, h.round() as i32);
             let changed = last_raised_frame.insert(entity, key) != Some(key);
             if changed {
@@ -991,8 +1111,16 @@ pub(crate) fn sync_windowed_extension_popups(
     >,
     windows: Query<&Window>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
+    mut resized: MessageReader<WindowResized>,
     mut commands: Commands,
 ) {
+    if resized.read().next().is_some() {
+        for (entity, ..) in &popups {
+            browsers.hide_child_window(&entity);
+            commands.entity(entity).try_despawn();
+        }
+        return;
+    }
     for (entity, bounds, host_window, presented) in &popups {
         let window_entity = host_window.map(|host| host.0).or(focused_window.0);
         let Some(window_entity) = window_entity else {
@@ -1017,7 +1145,6 @@ pub(crate) fn sync_windowed_extension_popups(
             continue;
         }
         browsers.set_windowed_hidden(&entity, false);
-        browsers.ensure_child_window_key(&entity);
         if presented {
             continue;
         }
@@ -1271,8 +1398,10 @@ fn sync_osr_webview_focus(
             if parent_is_stack && let Ok(pane) = child_of_q.get(parent).map(|co| co.get()) {
                 pane_is_leaf = leaf_panes.contains(pane);
                 if pane_is_leaf {
-                    is_active =
-                        active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
+                    is_active = active_candidate(
+                        active_stack_in_pane(pane, &pane_children_q, &tab_ts),
+                        parent,
+                    );
                 }
             }
         }
@@ -1451,6 +1580,38 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
+    }
+
+    #[test]
+    fn browser_created_after_layout_visibility_is_revealed_on_its_first_native_frame() {
+        assert!(windowed_page_needs_reveal(false, true, false));
+        assert!(!windowed_page_needs_reveal(false, false, false));
+        assert!(!windowed_page_needs_reveal(false, true, true));
+    }
+
+    #[test]
+    fn unresolved_stack_focus_keeps_the_candidate_visible() {
+        let candidate = Entity::from_bits(1);
+        let other = Entity::from_bits(2);
+
+        assert!(active_candidate(None, candidate));
+        assert!(active_candidate(Some(candidate), candidate));
+        assert!(!active_candidate(Some(other), candidate));
+    }
+
+    #[test]
+    fn windowed_visibility_uses_layout_state() {
+        assert!(windowed_page_is_visible(true, false, true, true));
+        assert!(windowed_page_is_visible(true, true, false, false));
+        assert!(!windowed_page_is_visible(false, true, true, true));
+        assert!(!windowed_page_is_visible(true, false, false, true));
+        assert!(!windowed_page_is_visible(true, false, true, false));
+    }
+
+    #[test]
+    fn windowed_page_stays_above_layout_until_layout_captures_pointer() {
+        assert_eq!(windowed_page_z_position(false), 500.0);
+        assert_eq!(windowed_page_z_position(true), 0.0);
     }
 
     #[test]

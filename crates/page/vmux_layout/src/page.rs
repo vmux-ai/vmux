@@ -316,12 +316,11 @@ fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
             onpointerdown: move |_| state.close(),
             div {
                 key: "{current.id}",
-                class: "glass absolute overflow-hidden rounded-xl border border-border/80 bg-background shadow-2xl",
+                class: "pointer-events-none absolute",
                 style: "{placement.style()}",
                 onpointerdown: move |event| event.stop_propagation(),
                 onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
                 onresize: move |_: Event<ResizeData>| resized.publish(),
-                div { class: "pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-foreground/[0.035] via-transparent to-primary/[0.06]" }
             }
         }
     }
@@ -337,13 +336,13 @@ impl ExtensionPopupPlacement {
     fn of(anchor: ExtensionPopupAnchor) -> Self {
         Self {
             right: anchor.right.max(48),
-            top: anchor.bottom.max(40) + 6,
+            top: anchor.bottom.max(40) + 14,
         }
     }
 
     fn style(self) -> String {
         format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min(360px,calc(100vw - 16px));height:min(520px,calc(100vh - {}px));",
+            "right:max(8px,calc(100vw - {}px));top:{}px;width:min(360px,calc(100vw - 16px));height:min(600px,calc(100vh - {}px));",
             self.right,
             self.top,
             self.top + 8

@@ -480,7 +480,7 @@ impl Browsers {
             size,
             device_scale,
             windowless_frame_rate: Cell::new(windowless_frame_rate),
-            hidden: Cell::new(false),
+            hidden: Cell::new(windowed),
             last_mouse_move: Cell::new(None),
             last_frame: Cell::new(None),
             last_corner_radius: Cell::new(None),
@@ -517,6 +517,95 @@ impl Browsers {
     #[inline]
     pub fn is_windowed(&self, webview: &Entity) -> Option<bool> {
         self.browsers.get(webview).map(|browser| browser.windowed)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn windowed_view_ready(&self, webview: &Entity) -> bool {
+        self.browsers
+            .get(webview)
+            .is_some_and(|browser| browser.windowed && !browser.host.window_handle().is_null())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn windowed_view_ready(&self, webview: &Entity) -> bool {
+        self.browsers
+            .get(webview)
+            .is_some_and(|browser| browser.windowed)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn windowed_view_state(&self, webview: &Entity) -> Option<String> {
+        use objc2::ClassType;
+        use objc2_app_kit::NSView;
+
+        let browser = self.browsers.get(webview)?;
+        if !browser.windowed {
+            return None;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return Some("handle=null".into());
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let target = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+            .unwrap_or(view);
+        let frame = target.frame();
+        let bounds = target.bounds();
+        let z = target.layer().map(|layer| layer.zPosition());
+        let window = target.window();
+        let window_state = window
+            .as_ref()
+            .map(|window| {
+                format!(
+                    "ptr={:p},visible={},key={},main={}",
+                    &**window,
+                    window.isVisible(),
+                    window.isKeyWindow(),
+                    window.isMainWindow()
+                )
+            })
+            .unwrap_or_else(|| "none".into());
+        let parent = unsafe { target.superview() };
+        let mut sibling_state = String::new();
+        let parent_state = parent
+            .as_ref()
+            .map(|parent| {
+                let subviews = parent.subviews();
+                for index in 0..subviews.count() {
+                    let sibling = subviews.objectAtIndex(index);
+                    let sibling_z = sibling.layer().map(|layer| layer.zPosition());
+                    sibling_state.push_str(&format!(
+                        " {index}:{:p}:hidden={}:z={sibling_z:?}",
+                        &*sibling,
+                        sibling.isHidden()
+                    ));
+                }
+                format!(
+                    "ptr={:p},hidden={},flipped={},subviews={}",
+                    &**parent,
+                    parent.isHidden(),
+                    parent.isFlipped(),
+                    subviews.count()
+                )
+            })
+            .unwrap_or_else(|| "none".into());
+        Some(format!(
+            "cache_hidden={},view={:p},target={:p},hidden={},frame={:?},bounds={:?},z={z:?},window=[{window_state}],parent=[{parent_state}],siblings=[{sibling_state}]",
+            browser.hidden.get(),
+            view,
+            target,
+            target.isHidden(),
+            frame,
+            bounds
+        ))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn windowed_view_state(&self, _: &Entity) -> Option<String> {
+        None
     }
 
     /// `true` when [`Self::emit_event`] can send (main frame exists). If this is `false`,
@@ -1569,6 +1658,12 @@ impl Browsers {
             glass.as_super().setHidden(hidden);
         }
         view.setHidden(hidden);
+        if browser.hidden.replace(hidden) != hidden {
+            browser.host.was_hidden(hidden as _);
+            if !hidden {
+                browser.host.was_resized();
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1659,9 +1754,10 @@ impl Browsers {
                     };
                     objc2::rc::Retained::into_super(panel)
                 };
-                window.setFloatingPanel(true);
+                window.setFloatingPanel(false);
                 window.setBecomesKeyOnlyIfNeeded(false);
-                window.setMovableByWindowBackground(true);
+                window.setMovableByWindowBackground(false);
+                window.setHidesOnDeactivate(true);
                 window.setOpaque(false);
                 window.setBackgroundColor(Some(&NSColor::clearColor()));
                 window.setHasShadow(true);
@@ -1727,9 +1823,6 @@ impl Browsers {
         }
         if !child.isVisible() {
             child.orderFront(None);
-        }
-        if !child.isKeyWindow() {
-            child.makeKeyWindow();
         }
         // The standard buttons are not created until the window is first displayed, so hiding them
         // at construction time is a no-op and they show through the chromeless surface.
