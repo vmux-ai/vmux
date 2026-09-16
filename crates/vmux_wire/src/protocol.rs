@@ -343,6 +343,7 @@ pub enum AgentQuery {
     WorkingDirectory {
         anchor: ProcessId,
     },
+    VaultStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

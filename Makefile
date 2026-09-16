@@ -113,9 +113,7 @@ release: build-release
 	open "target/release/Vmux.app"
 
 setup-cef:
-	@test -n "$(CEF_VERSION)" || { echo "could not resolve cef crate version from Cargo.lock"; exit 1; }
-	"$(CARGO_BIN)" install export-cef-dir@$(CEF_VERSION) --force
-	"$(EXPORT_CEF_BIN)" --force "$$HOME/.local/share"
+	CARGO_BIN="$(CARGO_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" ./scripts/install-cef.sh "$$HOME/.local/share"
 
 install-debug-render-process:
 	CARGO_BIN="$(CARGO_BIN)" CEF_FRAMEWORK_DIR="$(CEF_FRAMEWORK_DIR)" \
@@ -225,7 +223,7 @@ build-website-release: build-website-css
 
 doctor:
 	@chmod +x scripts/doctor-mac.sh
-	@CARGO_BIN="$(CARGO_BIN)" RUSTUP_BIN="$(RUSTUP_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" \
+	@CARGO_BIN="$(CARGO_BIN)" RUSTUP_BIN="$(RUSTUP_BIN)" \
 		DX_BIN="$(DX_BIN)" CARGO_PACKAGER_BIN="$(CARGO_PACKAGER_BIN)" \
 		BEVY_CEF_BUNDLE_APP_BIN="$(BEVY_CEF_BUNDLE_APP_BIN)" CEF_FRAMEWORK_DIR="$(CEF_FRAMEWORK_DIR)" \
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
@@ -242,7 +240,9 @@ ensure-native-deps:
 		echo "rustup not found at $(RUSTUP_BIN). Install rustup first: https://rustup.rs/"; \
 		exit 1; \
 	fi
-	@if [ ! -d "$(CEF_FRAMEWORK_DIR)" ]; then \
+	@if [ "$$(uname -s)" = Darwin ]; then \
+		CARGO_BIN="$(CARGO_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" ./scripts/install-cef.sh "$$HOME/.local/share"; \
+	elif [ ! -d "$(CEF_FRAMEWORK_DIR)" ]; then \
 		echo "CEF framework not found at $(CEF_FRAMEWORK_DIR). Run: make setup-cef"; \
 		exit 1; \
 	fi

@@ -1,0 +1,181 @@
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 5e0f458c31..3045ca8f73 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -1600,7 +1600,18 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+ #endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_LINUX)
+
+ #if BUILDFLAG(IS_MAC)
+-  if (base::FeatureList::IsEnabled(features::kUseKeychainKeyProvider)) {
++  if (os_crypt_async::KeychainKeyProvider::HasRawEncryptionKey()) {
++    if (os_crypt_async::KeychainKeyProvider::HasLegacyRawEncryptionKey()) {
++      providers.emplace_back(std::make_pair(
++          /*precedence=*/10u,
++          std::make_unique<os_crypt_async::KeychainKeyProvider>(
++              os_crypt_async::KeychainKeyProvider::Source::kVmuxLegacy)));
++    }
++    providers.emplace_back(std::make_pair(
++        /*precedence=*/20u,
++        std::make_unique<os_crypt_async::KeychainKeyProvider>(
++            os_crypt_async::KeychainKeyProvider::Source::kVmuxCurrent)));
++  } else if (base::FeatureList::IsEnabled(features::kUseKeychainKeyProvider)) {
+     providers.emplace_back(std::make_pair(
+         /*precedence=*/10u,
+         std::make_unique<os_crypt_async::KeychainKeyProvider>()));
+diff --git a/components/os_crypt/async/browser/keychain_key_provider.h b/components/os_crypt/async/browser/keychain_key_provider.h
+index a019ef4bae..83883b0b4e 100644
+--- a/components/os_crypt/async/browser/keychain_key_provider.h
++++ b/components/os_crypt/async/browser/keychain_key_provider.h
+@@ -5,6 +5,9 @@
+ #ifndef COMPONENTS_OS_CRYPT_ASYNC_BROWSER_KEYCHAIN_KEY_PROVIDER_H_
+ #define COMPONENTS_OS_CRYPT_ASYNC_BROWSER_KEYCHAIN_KEY_PROVIDER_H_
+
++#include <cstddef>
++#include <cstdint>
++
+ #include "base/gtest_prod_util.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/types/expected.h"
+@@ -21,11 +24,25 @@ namespace os_crypt_async {
+ class COMPONENT_EXPORT(OS_CRYPT_ASYNC) KeychainKeyProvider
+     : public KeyProvider {
+  public:
++  enum class Source {
++    kKeychain,
++    kVmuxCurrent,
++    kVmuxLegacy,
++  };
++
+   KeychainKeyProvider();
++  explicit KeychainKeyProvider(Source source);
+   KeychainKeyProvider(const KeychainKeyProvider&) = delete;
+   KeychainKeyProvider& operator=(const KeychainKeyProvider&) = delete;
+   ~KeychainKeyProvider() override;
+
++  static bool SetRawEncryptionKeys(const uint8_t* current_key,
++                                   size_t current_key_size,
++                                   const uint8_t* legacy_key,
++                                   size_t legacy_key_size);
++  static bool HasRawEncryptionKey();
++  static bool HasLegacyRawEncryptionKey();
++
+  private:
+   friend class KeychainKeyProviderCompatTest;
+   FRIEND_TEST_ALL_PREFIXES(KeychainKeyProviderTest, GetKey_Success);
+@@ -40,6 +57,7 @@ class COMPONENT_EXPORT(OS_CRYPT_ASYNC) KeychainKeyProvider
+   void GetKey(KeyCallback callback) override;
+   bool UseForEncryption() override;
+
++  Source source_ = Source::kKeychain;
+   raw_ptr<crypto::apple::KeychainV2> keychain_for_testing_ = nullptr;
+ };
+
+diff --git a/components/os_crypt/async/browser/keychain_key_provider.mm b/components/os_crypt/async/browser/keychain_key_provider.mm
+index 959d6f3664..5c64d8f1a1 100644
+--- a/components/os_crypt/async/browser/keychain_key_provider.mm
++++ b/components/os_crypt/async/browser/keychain_key_provider.mm
+@@ -6,9 +6,11 @@
+
+ #include <array>
+ #include <memory>
++#include <optional>
+
+ #include "base/apple/osstatus_logging.h"
+ #include "base/command_line.h"
++#include "base/containers/span.h"
+ #include "base/functional/bind.h"
+ #include "base/task/thread_pool.h"
+ #include "base/types/expected.h"
+@@ -26,11 +28,24 @@ namespace {
+
+ // These constants are duplicated from the sync backend os_crypt_mac.mm.
+ constexpr char kKeyTag[] = "v10";
++constexpr char kVmuxKeyTag[] = "vm1";
+ constexpr size_t kDerivedKeySize = 16;
+ constexpr auto kSalt =
+     std::to_array<uint8_t>({'s', 'a', 'l', 't', 'y', 's', 'a', 'l', 't'});
+ constexpr size_t kIterations = 1003;
+
++using RawKey = std::array<uint8_t, kDerivedKeySize>;
++
++std::optional<RawKey>& RawEncryptionKey() {
++  static std::optional<RawKey> key;
++  return key;
++}
++
++std::optional<RawKey>& LegacyRawEncryptionKey() {
++  static std::optional<RawKey> key;
++  return key;
++}
++
+ // This function runs on a worker thread and performs blocking Keychain IO.
+ base::expected<Encryptor::Key, KeyProvider::KeyError> GetKeyTask(
+     crypto::SubtlePassKey subtle_passkey,
+@@ -69,13 +84,58 @@ base::expected<Encryptor::Key, KeyProvider::KeyError> GetKeyTask(
+
+ KeychainKeyProvider::KeychainKeyProvider() = default;
+
++KeychainKeyProvider::KeychainKeyProvider(Source source) : source_(source) {}
++
+ KeychainKeyProvider::KeychainKeyProvider(
+     crypto::apple::KeychainV2* keychain_for_testing)
+     : keychain_for_testing_(keychain_for_testing) {}
+
+ KeychainKeyProvider::~KeychainKeyProvider() = default;
+
++bool KeychainKeyProvider::SetRawEncryptionKeys(const uint8_t* current_key,
++                                               size_t current_key_size,
++                                               const uint8_t* legacy_key,
++                                               size_t legacy_key_size) {
++  if (!current_key || current_key_size != kDerivedKeySize ||
++      (legacy_key_size != 0 &&
++       (!legacy_key || legacy_key_size != kDerivedKeySize))) {
++    return false;
++  }
++  RawEncryptionKey().emplace();
++  base::span(*RawEncryptionKey())
++      .copy_from(base::span(current_key, current_key_size));
++  LegacyRawEncryptionKey().reset();
++  if (legacy_key_size != 0) {
++    LegacyRawEncryptionKey().emplace();
++    base::span(*LegacyRawEncryptionKey())
++        .copy_from(base::span(legacy_key, legacy_key_size));
++  }
++  return true;
++}
++
++bool KeychainKeyProvider::HasRawEncryptionKey() {
++  return RawEncryptionKey().has_value();
++}
++
++bool KeychainKeyProvider::HasLegacyRawEncryptionKey() {
++  return LegacyRawEncryptionKey().has_value();
++}
++
+ void KeychainKeyProvider::GetKey(KeyCallback callback) {
++  if (source_ != Source::kKeychain) {
++    const bool current = source_ == Source::kVmuxCurrent;
++    const auto& key = current ? RawEncryptionKey() : LegacyRawEncryptionKey();
++    const char* tag = current ? kVmuxKeyTag : kKeyTag;
++    if (!key) {
++      std::move(callback).Run(
++          tag,
++          base::unexpected(KeyProvider::KeyError::kPermanentlyUnavailable));
++      return;
++    }
++    std::move(callback).Run(
++        tag, Encryptor::Key(*key, mojom::Algorithm::kAES128CBC));
++    return;
++  }
+   // Apple's documentation [1] recommends accessing the keychain on a worker
+   // thread. [1]
+   // https://developer.apple.com/documentation/security/secitemcopymatching%28_%3A_%3A%29#Performance-considerations
+@@ -87,7 +147,7 @@ void KeychainKeyProvider::GetKey(KeyCallback callback) {
+ }
+
+ bool KeychainKeyProvider::UseForEncryption() {
+-  return true;
++  return source_ != Source::kVmuxLegacy;
+ }
+
+ }  // namespace os_crypt_async

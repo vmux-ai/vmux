@@ -1,10 +1,6 @@
 mod files;
 mod keys;
 
-pub use keys::{
-    authorize_key_broker_parent, key_broker_load, key_broker_load_silent, key_broker_store,
-};
-
 use files::FileAttributes;
 use keys::{KeyStore, SilentSystemKeyStore, SystemKeyStore};
 
@@ -68,6 +64,90 @@ pub struct VaultStatus {
     pub github_owners: Vec<String>,
     pub repositories: Vec<VaultRepository>,
     pub error: String,
+}
+
+impl VaultStatus {
+    pub fn agent_json(&self) -> String {
+        let remote = self.sanitized_remote();
+        let connected = self.initialized && remote.is_some();
+        let provider = if !connected {
+            None
+        } else {
+            remote.as_deref().map(Self::provider)
+        };
+        let mut status = serde_json::json!({
+            "root": self.root,
+            "connected": connected,
+            "encrypted": self.encrypted,
+            "unlocked": self.unlocked,
+            "recoveryKey": self.recovery_enabled,
+            "automaticBackup": true,
+            "provider": provider,
+            "branch": self.branch,
+            "localChanges": self.dirty,
+            "ahead": self.ahead,
+            "behind": self.behind,
+            "syncNeeded": self.dirty > 0 || self.ahead > 0 || self.behind > 0,
+        });
+        if let Some(remote) = remote {
+            status["remote"] = serde_json::Value::String(remote);
+        }
+        serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string())
+    }
+
+    fn sanitized_remote(&self) -> Option<String> {
+        if self.remote.is_empty() {
+            return None;
+        }
+        let Ok(mut remote) = url::Url::parse(&self.remote) else {
+            if self.remote.contains("://") {
+                return None;
+            }
+            return Some(self.remote.clone());
+        };
+        if remote.username().is_empty() && remote.password().is_none() {
+            return Some(self.remote.clone());
+        }
+        if remote.set_username("").is_err() || remote.set_password(None).is_err() {
+            return None;
+        }
+        Some(remote.to_string())
+    }
+
+    fn provider(remote: &str) -> &'static str {
+        if Path::new(remote).is_absolute() {
+            return "cloud_folder";
+        }
+        if Self::is_github_remote(remote) {
+            return "github";
+        }
+        "git"
+    }
+
+    fn is_github_remote(remote: &str) -> bool {
+        if let Ok(remote) = url::Url::parse(remote) {
+            return remote
+                .host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case("github.com"));
+        }
+        if remote.contains("://") {
+            return false;
+        }
+        let Some((authority, path)) = remote.split_once(':') else {
+            return false;
+        };
+        if authority.is_empty()
+            || path.is_empty()
+            || authority.contains('/')
+            || authority.contains('\\')
+        {
+            return false;
+        }
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        host.eq_ignore_ascii_case("github.com")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2445,6 +2525,81 @@ fn command_success(output: Output) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn agent_status_reports_provider_and_pending_sync() {
+        let status = VaultStatus {
+            root: "/Users/test/.vmux".into(),
+            initialized: true,
+            encrypted: true,
+            unlocked: true,
+            recovery_enabled: true,
+            remote: "https://github.com/vmux-ai/vault.git".into(),
+            branch: "main".into(),
+            dirty: 2,
+            ahead: 1,
+            behind: 0,
+            ..Default::default()
+        };
+        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+
+        assert_eq!(status["connected"], true);
+        assert_eq!(status["encrypted"], true);
+        assert_eq!(status["unlocked"], true);
+        assert_eq!(status["recoveryKey"], true);
+        assert_eq!(status["automaticBackup"], true);
+        assert_eq!(status["provider"], "github");
+        assert_eq!(status["remote"], "https://github.com/vmux-ai/vault.git");
+        assert_eq!(status["localChanges"], 2);
+        assert_eq!(status["ahead"], 1);
+        assert_eq!(status["syncNeeded"], true);
+    }
+
+    #[test]
+    fn agent_status_matches_github_hosts_exactly() {
+        for (remote, provider) in [
+            ("git@github.com:vmux-ai/vault.git", "github"),
+            ("https://notgithub.com/vmux-ai/vault.git", "git"),
+            ("/Volumes/github.com/vault.git", "cloud_folder"),
+        ] {
+            let status = VaultStatus {
+                initialized: true,
+                remote: remote.to_string(),
+                ..VaultStatus::default()
+            };
+            let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+
+            assert_eq!(status["provider"], provider);
+        }
+    }
+
+    #[test]
+    fn agent_status_removes_remote_url_credentials() {
+        let status = VaultStatus {
+            initialized: true,
+            remote: "https://user:secret@github.com/vmux-ai/vault.git".to_string(),
+            ..VaultStatus::default()
+        };
+        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+
+        assert_eq!(status["provider"], "github");
+        assert_eq!(status["remote"], "https://github.com/vmux-ai/vault.git");
+        assert!(!status.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn agent_status_omits_an_unparseable_remote_url() {
+        let status = VaultStatus {
+            initialized: true,
+            remote: "https://user:secret@[".to_string(),
+            ..VaultStatus::default()
+        };
+        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+
+        assert_eq!(status["connected"], false);
+        assert!(status.get("remote").is_none());
+        assert!(!status.to_string().contains("secret"));
+    }
 
     #[test]
     fn a_recovery_key_is_committed_only_when_this_process_drew_it() {

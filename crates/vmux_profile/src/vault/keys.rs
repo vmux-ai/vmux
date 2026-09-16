@@ -1,7 +1,5 @@
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(any(target_os = "macos", test))]
-mod native;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
@@ -65,26 +63,6 @@ impl KeyStore for SilentSystemKeyStore {
     fn store(&self, _vault_id: &str, _key: &[u8]) -> Result<(), String> {
         Err(LOCKED.to_string())
     }
-}
-
-#[doc(hidden)]
-pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
-    DeviceKeys::broker_load(vault_id)
-}
-
-#[doc(hidden)]
-pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> {
-    DeviceKeys::broker_load_silent(vault_id)
-}
-
-#[doc(hidden)]
-pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
-    DeviceKeys::broker_store(vault_id, encoded_key)
-}
-
-#[doc(hidden)]
-pub fn authorize_key_broker_parent() -> Result<(), String> {
-    DeviceKeys::authorize_broker_parent()
 }
 
 fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
