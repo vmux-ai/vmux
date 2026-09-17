@@ -253,15 +253,12 @@ impl FileView {
     ) {
         let previous = std::mem::replace(&mut self.path, path);
         manager.close(&previous);
-        let url = url::Url::from_file_path(&self.path)
-            .map(|u| u.to_string())
-            .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()));
         metadata.title = self
             .path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| self.path.to_string_lossy().to_string());
-        metadata.url = url;
+        metadata.url = self.url_after_navigation(&metadata.url);
         viewport.top_row = top_line;
         commands.queue(move |world: &mut World| {
             let Ok(mut entity) = world.get_entity_mut(entity) else {
@@ -280,6 +277,17 @@ impl FileView {
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LspOpened>()
             .remove::<crate::lsp::manager::LintRan>();
+    }
+
+    fn url_after_navigation(&self, current: &str) -> String {
+        if current.trim_end_matches('/')
+            == vmux_core::knowledge::KNOWLEDGE_PAGE_URL.trim_end_matches('/')
+        {
+            return vmux_core::knowledge::KNOWLEDGE_PAGE_URL.to_string();
+        }
+        url::Url::from_file_path(&self.path)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()))
     }
 }
 
@@ -6448,7 +6456,8 @@ mod page_open_tests {
                 crate::lsp::LspOutbox::default(),
                 crate::lsp::server_request::ServerEvents::default().sender(),
             ))
-            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain());
+            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain())
+            .add_observer(on_file_open);
         app
     }
 
@@ -6519,6 +6528,25 @@ mod page_open_tests {
                 .unwrap()
                 .open_editors
                 .clone()
+        }
+
+        fn url(&self, page: Entity) -> String {
+            self.app
+                .world()
+                .get::<PageMetadata>(page)
+                .unwrap()
+                .url
+                .clone()
+        }
+
+        fn select(&mut self, page: Entity, path: &Path) {
+            self.app.world_mut().trigger(BinReceive {
+                webview: page,
+                payload: FileOpenEvent {
+                    path: path.to_string_lossy().into_owned(),
+                },
+            });
+            self.app.update();
         }
     }
 
@@ -6597,6 +6625,16 @@ mod page_open_tests {
             stack.open_editors(page),
             vec![PathBuf::from("/etc/hostname"), PathBuf::from("/etc/hosts")]
         );
+    }
+
+    #[test]
+    fn selecting_a_note_keeps_the_knowledge_page_identity() {
+        let mut stack = EditorStack::showing(vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
+        let page = stack.page();
+
+        stack.select(page, Path::new("/tmp/note.md"));
+
+        assert_eq!(stack.url(page), vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
     }
 
     #[test]
