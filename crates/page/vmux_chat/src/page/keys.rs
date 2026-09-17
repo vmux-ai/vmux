@@ -39,6 +39,9 @@ impl ChatKeys {
         if self.answered_by_number(&event) {
             return;
         }
+        if self.moves_list_locally(&event) {
+            return;
+        }
         if self.submits_prompt(&event) {
             return;
         }
@@ -49,10 +52,25 @@ impl ChatKeys {
         if self.answered_by_number(&event) {
             return;
         }
+        if self.moves_list_locally(&event) {
+            return;
+        }
         self.hand_over(&event);
         if event.default_action_enabled() {
             self.type_into_draft(&event);
         }
+    }
+
+    fn moves_list_locally(&self, event: &KeyboardEvent) -> bool {
+        if ChatList::of(self.chat).is_none() {
+            return false;
+        }
+        let Some(direction) = MenuDirection::of(&event.data()) else {
+            return false;
+        };
+        event.prevent_default();
+        self.move_list(direction);
+        true
     }
 
     fn hand_over(&self, event: &KeyboardEvent) {

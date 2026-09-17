@@ -278,7 +278,7 @@ fn CrumbMenuNotice(label: String) -> Element {
 }
 
 const CRUMB_ITEM_CLASS: &str = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
-const CRUMB_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md bg-cyan-400/12 px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
+const CRUMB_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md bg-primary/12 px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.08]";
 
 #[derive(Clone, Copy)]
 struct CrumbMenus {

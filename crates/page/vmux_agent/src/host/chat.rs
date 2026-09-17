@@ -1,6 +1,6 @@
 mod key;
 mod media;
-mod model;
+pub(crate) mod model;
 mod prompt;
 mod resume;
 mod tab;

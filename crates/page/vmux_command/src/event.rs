@@ -23,6 +23,8 @@ pub struct BookmarksCommandEvent {
     pub metadata: Option<PageMetadata>,
     #[serde(default)]
     pub folder: Option<String>,
+    #[serde(default)]
+    pub target_uuid: Option<String>,
 }
 
 #[cfg(host)]

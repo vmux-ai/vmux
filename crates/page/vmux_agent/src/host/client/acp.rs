@@ -25,6 +25,8 @@ impl Plugin for AcpAgentPlugin {
             .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
             .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
             .add_message::<vmux_service::agent_events::PageAgentModelSelectionResult>()
+            .add_message::<vmux_service::agent_events::PageAgentModeInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentModeSelectionResult>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
@@ -37,7 +39,13 @@ impl Plugin for AcpAgentPlugin {
                     receive_catalog,
                     apply_acp_agent_info,
                     apply_acp_workspace_changed,
-                    (apply_acp_model_info, apply_acp_model_selection_result).chain(),
+                    (
+                        apply_acp_model_info,
+                        apply_acp_model_selection_result,
+                        apply_acp_mode_info,
+                        apply_acp_mode_selection_result,
+                    )
+                        .chain(),
                     apply_acp_session_created,
                     apply_acp_terminal_created,
                 ),
@@ -49,7 +57,7 @@ impl Plugin for AcpAgentPlugin {
 
 const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected project. Read-only inspection may use the current directory or a known path immediately. Never call select_project or create_worktree for requests that only read, show, search, or explain existing files. Before the first edit, write, test, build, or other mutation in an existing project, call select_project with its known path or without a path to open the project picker rooted at ~/.vmux/workspace. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/workspace, or choose an existing project. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/workspace/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab starts in ~/.vmux/projects and has no selected project. Before accessing project files or running project commands, call select_project with the known project path or without a path to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require explicit user approval in the native picker. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/projects, or choose an existing project. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may use the current directory without selecting a project.";
 const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Project activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected project before inspecting, editing, testing, or running it.";
 const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected project is a Git repository, but this tab is not isolated. Reading and inspection are allowed without a worktree. Never call create_worktree for requests that only read, show, search, or explain existing files. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
 
@@ -118,6 +126,37 @@ pub struct AcpModelState {
 pub(crate) struct PendingAcpModelSelection {
     pub request_id: u64,
     pub model_id: String,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct AcpModeState {
+    pub config_id: String,
+    pub current_mode_id: String,
+    pub(crate) pending: Option<PendingAcpModeSelection>,
+    pub modes: Vec<vmux_service::protocol::AcpModeOption>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PendingAcpModeSelection {
+    pub request_id: u64,
+    pub mode_id: String,
+}
+
+impl AcpModeState {
+    pub fn display_mode_id(&self) -> &str {
+        self.pending
+            .as_ref()
+            .map(|pending| pending.mode_id.as_str())
+            .unwrap_or(&self.current_mode_id)
+    }
+
+    pub fn current_name(&self) -> &str {
+        self.modes
+            .iter()
+            .find(|mode| mode.id == self.display_mode_id())
+            .map(|mode| mode.name.as_str())
+            .unwrap_or_else(|| self.display_mode_id())
+    }
 }
 
 impl AcpModelState {
@@ -396,6 +435,62 @@ fn apply_acp_model_selection_result(
             {
                 if event.succeeded {
                     state.current_model_id.clone_from(&event.model_id);
+                }
+                state.pending = None;
+            }
+        }
+    }
+}
+
+fn apply_acp_mode_info(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentModeInfo>,
+    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModeState>)>,
+    mut commands: Commands,
+) {
+    for event in reader.read() {
+        for (entity, session, current) in &mut sessions {
+            if session.sid != event.sid {
+                continue;
+            }
+            if event.modes.is_empty() {
+                if current.is_some() {
+                    commands.entity(entity).remove::<AcpModeState>();
+                }
+                continue;
+            }
+            if let Some(mut current) = current {
+                let pending = current.pending.take();
+                *current = AcpModeState {
+                    config_id: event.config_id.clone(),
+                    current_mode_id: event.current_mode_id.clone(),
+                    pending,
+                    modes: event.modes.clone(),
+                };
+            } else {
+                commands.entity(entity).insert(AcpModeState {
+                    config_id: event.config_id.clone(),
+                    current_mode_id: event.current_mode_id.clone(),
+                    pending: None,
+                    modes: event.modes.clone(),
+                });
+            }
+        }
+    }
+}
+
+fn apply_acp_mode_selection_result(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentModeSelectionResult>,
+    mut sessions: Query<(&AcpSession, &mut AcpModeState)>,
+) {
+    for event in reader.read() {
+        for (session, mut state) in &mut sessions {
+            if session.sid == event.sid
+                && state.pending.as_ref().is_some_and(|pending| {
+                    pending.request_id == event.request_id && pending.mode_id == event.mode_id
+                })
+            {
+                if event.succeeded {
+                    state.current_mode_id.clone_from(&event.mode_id);
                 }
                 state.pending = None;
             }
@@ -1101,6 +1196,7 @@ fn send_acp_input(
     workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
+    modes: Option<Res<crate::chat::model::AgentModeSelections>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
@@ -1134,11 +1230,16 @@ fn send_acp_input(
             &repositories_needing_worktrees,
         );
         let context = acp_prompt_context(handoff, workspace_state);
-        service.0.send(ClientMessage::agent_input(
+        let preferred_mode = modes
+            .as_deref()
+            .map(|modes| modes.selected_for(&session.agent_id).to_string())
+            .filter(|mode| !mode.is_empty());
+        service.0.send(ClientMessage::agent_input_with_mode(
             session.sid.clone(),
             text,
             context,
             prompt.attachments,
+            preferred_mode,
         ));
         *state = AgentRunState::Streaming;
     }
@@ -1232,19 +1333,19 @@ mod tests {
     }
 
     #[test]
-    fn unbound_workspace_context_allows_reading_before_project_setup() {
+    fn unbound_workspace_context_requires_project_selection_before_file_access() {
         let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
-        assert!(context.contains("Read-only inspection"));
-        assert!(context.contains("Never call select_project or create_worktree"));
+        assert!(context.contains("Before accessing project files"));
         assert!(context.contains("select_project"));
         assert!(context.contains("request_user_choice"));
-        assert!(context.contains("~/.vmux/workspace/<remote-host>"));
-        assert!(context.contains("~/.vmux/workspace/local/<project>"));
+        assert!(context.contains("explicit user approval"));
+        assert!(context.contains("~/.vmux/projects/<remote-host>"));
+        assert!(context.contains("~/.vmux/projects/local/<project>"));
         assert!(context.contains("create the empty directory"));
         assert!(context.contains("use the new project root directly"));
         assert!(context.contains("Do not search the user's home directory"));
-        assert!(context.contains("project picker"));
+        assert!(context.contains("open the picker"));
     }
 
     #[test]
@@ -1724,6 +1825,86 @@ mod tests {
         app.update();
         let state = app.world().get::<AcpModelState>(entity).unwrap();
         assert_eq!(state.current_model_id, "fable");
+        assert!(state.pending.is_none());
+    }
+
+    #[test]
+    fn mode_results_preserve_latest_pending_selection() {
+        use vmux_service::agent_events::{PageAgentModeInfo, PageAgentModeSelectionResult};
+        use vmux_service::protocol::AcpModeOption;
+
+        let modes = vec![
+            AcpModeOption {
+                id: "ask".into(),
+                name: "Ask".into(),
+                description: None,
+            },
+            AcpModeOption {
+                id: "auto".into(),
+                name: "Auto Allow".into(),
+                description: None,
+            },
+        ];
+        let mut app = App::new();
+        app.add_message::<PageAgentModeInfo>()
+            .add_message::<PageAgentModeSelectionResult>()
+            .add_systems(
+                Update,
+                (apply_acp_mode_info, apply_acp_mode_selection_result).chain(),
+            );
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AcpModeState {
+                    config_id: String::new(),
+                    current_mode_id: "ask".into(),
+                    pending: Some(PendingAcpModeSelection {
+                        request_id: 2,
+                        mode_id: "auto".into(),
+                    }),
+                    modes: modes.clone(),
+                },
+            ))
+            .id();
+
+        app.world_mut().write_message(PageAgentModeInfo {
+            sid: "s1".into(),
+            config_id: String::new(),
+            current_mode_id: "ask".into(),
+            modes,
+        });
+        app.world_mut().write_message(PageAgentModeSelectionResult {
+            sid: "s1".into(),
+            request_id: 1,
+            mode_id: "auto".into(),
+            succeeded: false,
+        });
+        app.update();
+
+        let state = app.world().get::<AcpModeState>(entity).unwrap();
+        assert_eq!(state.display_mode_id(), "auto");
+        assert_eq!(
+            state.pending.as_ref().map(|pending| pending.request_id),
+            Some(2)
+        );
+
+        app.world_mut().write_message(PageAgentModeSelectionResult {
+            sid: "s1".into(),
+            request_id: 2,
+            mode_id: "auto".into(),
+            succeeded: true,
+        });
+        app.update();
+
+        let state = app.world().get::<AcpModeState>(entity).unwrap();
+        assert_eq!(state.current_mode_id, "auto");
         assert!(state.pending.is_none());
     }
 

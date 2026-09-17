@@ -3,7 +3,8 @@ use crate::page::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
-    BranchMenuData, ComposerMenuKind, ComposerMenus, EffortMenuData, ProjectMenuData,
+    BranchMenuData, ComposerMenuKind, ComposerMenus, EffortMenuData, PermissionMenuData,
+    ProjectMenuData,
 };
 use vmux_ui::components::model_menu::ModelMenu;
 use vmux_ui::components::project_picker::ProjectPick;
@@ -16,6 +17,7 @@ pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
         ComposerMenus {
             menu: chat.menu,
             effort: Some(menus.effort),
+            permission: Some(menus.permission),
             project: Some(menus.project),
             branch: Some(menus.branch),
         }
@@ -25,6 +27,7 @@ pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
 #[derive(Clone)]
 pub(crate) struct ChatMenuSet {
     effort: EffortMenuData,
+    permission: PermissionMenuData,
     project: ProjectMenuData,
     branch: BranchMenuData,
 }
@@ -46,6 +49,13 @@ impl ChatMenuSet {
                 focus_prompt_end(PROMPT_INPUT_ID);
             }),
         };
+        let permission = PermissionMenuData {
+            modes: (chat.permissions.modes)(),
+            current_mode_id: (chat.permissions.current_mode_id)(),
+            on_select: EventHandler::new(move |mode: vmux_wire::protocol::AcpModeOption| {
+                chat.select_mode(mode.id)
+            }),
+        };
         let project = ProjectMenuData {
             projects: context.projects.clone(),
             loaded: (chat.projects.loaded)(),
@@ -64,6 +74,7 @@ impl ChatMenuSet {
 
         Self {
             effort,
+            permission,
             project,
             branch,
         }
@@ -73,6 +84,7 @@ impl ChatMenuSet {
         match kind {
             ComposerMenuKind::Agent | ComposerMenuKind::Model => 0,
             ComposerMenuKind::Effort => self.effort.levels.len() + 1,
+            ComposerMenuKind::Permission => self.permission.modes.len(),
             ComposerMenuKind::Project => self.roots().len() + 1,
             ComposerMenuKind::Branch => self.branch.branches.len(),
         }
@@ -90,6 +102,12 @@ impl ChatMenuSet {
                     return false;
                 };
                 self.effort.on_select.call(level.clone());
+            }
+            ComposerMenuKind::Permission => {
+                let Some(mode) = self.permission.modes.get(index) else {
+                    return false;
+                };
+                self.permission.on_select.call(mode.clone());
             }
             ComposerMenuKind::Project => {
                 let roots = self.roots();

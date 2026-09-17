@@ -23,6 +23,7 @@ impl Plugin for ProcessesMonitorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ServiceProcessList>()
             .init_resource::<ProcessUsage>()
+            .init_resource::<VmuxProcessList>()
             .init_resource::<SysinfoState>()
             .insert_resource(ProcessesPollTimer(Timer::from_seconds(
                 1.0,
@@ -77,6 +78,19 @@ pub struct Usage {
 
 #[derive(Resource, Default)]
 pub struct ProcessUsage(pub HashMap<u32, Usage>);
+
+#[derive(Clone, Debug, PartialEq)]
+struct VmuxProcess {
+    shell: String,
+    cwd: String,
+    pid: u32,
+    uptime_secs: u64,
+    cpu_percent: f32,
+    mem_bytes: u64,
+}
+
+#[derive(Resource, Default)]
+struct VmuxProcessList(Vec<VmuxProcess>);
 
 struct ProcSample {
     parent: Option<u32>,
@@ -150,6 +164,7 @@ fn sample_process_usage(
     process_list: Res<ServiceProcessList>,
     mut sys: ResMut<SysinfoState>,
     mut usage: ResMut<ProcessUsage>,
+    mut vmux_processes: ResMut<VmuxProcessList>,
 ) {
     if monitors.is_empty() {
         return;
@@ -159,8 +174,15 @@ fn sample_process_usage(
         return;
     }
 
-    sys.0
-        .refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    sys.0.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::nothing()
+            .with_memory()
+            .with_cpu()
+            .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
+            .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
+    );
 
     let procs: HashMap<u32, ProcSample> = sys
         .0
@@ -183,37 +205,99 @@ fn sample_process_usage(
         map.insert(info.pid, subtree_usage(info.pid, &procs));
     }
     usage.0 = map;
+
+    let mut found = Vec::new();
+    for (pid, process) in sys.0.processes() {
+        let name = process.name().to_string_lossy().into_owned();
+        let executable = process
+            .exe()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !is_vmux_process(&name, &executable) {
+            continue;
+        }
+        found.push(VmuxProcess {
+            shell: if executable.is_empty() {
+                name
+            } else {
+                executable
+            },
+            cwd: process
+                .cwd()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            pid: pid.as_u32(),
+            uptime_secs: process.run_time(),
+            cpu_percent: process.cpu_usage(),
+            mem_bytes: process.memory(),
+        });
+    }
+    found.sort_by_key(|process| process.pid);
+    vmux_processes.0 = found;
+}
+
+fn is_vmux_process(name: &str, executable: &str) -> bool {
+    if name.to_ascii_lowercase().contains("vmux") {
+        return true;
+    }
+    let executable_name = executable.rsplit('/').next().unwrap_or(executable);
+    executable_name.to_ascii_lowercase().contains("vmux")
 }
 
 fn build_process_entries(
     processes: &[vmux_service::protocol::ProcessInfo],
     usage: &ProcessUsage,
     attached_ids: &std::collections::HashSet<String>,
+    vmux_processes: &[VmuxProcess],
 ) -> Vec<ProcessEntry> {
-    processes
+    let managed_pids = processes
         .iter()
-        .map(|info| {
-            let u = usage.0.get(&info.pid).copied().unwrap_or_default();
-            ProcessEntry {
-                id: info.id.to_string(),
-                shell: info.shell.clone(),
-                cwd: info.cwd.clone(),
-                cols: info.cols,
-                rows: info.rows,
-                pid: info.pid,
-                uptime_secs: info.created_at_secs,
-                cpu_percent: u.cpu_percent,
-                mem_bytes: u.mem_bytes,
-                attached: attached_ids.contains(&info.id.to_string()),
-                preview_lines: Vec::new(),
-            }
-        })
-        .collect()
+        .map(|process| process.pid)
+        .collect::<std::collections::HashSet<_>>();
+    let mut entries = Vec::with_capacity(processes.len() + vmux_processes.len());
+    for info in processes {
+        let usage = usage.0.get(&info.pid).copied().unwrap_or_default();
+        entries.push(ProcessEntry {
+            id: info.id.to_string(),
+            managed: true,
+            shell: info.shell.clone(),
+            cwd: info.cwd.clone(),
+            cols: info.cols,
+            rows: info.rows,
+            pid: info.pid,
+            uptime_secs: info.created_at_secs,
+            cpu_percent: usage.cpu_percent,
+            mem_bytes: usage.mem_bytes,
+            attached: attached_ids.contains(&info.id.to_string()),
+            preview_lines: Vec::new(),
+        });
+    }
+    for process in vmux_processes {
+        if managed_pids.contains(&process.pid) {
+            continue;
+        }
+        entries.push(ProcessEntry {
+            id: format!("system:{}", process.pid),
+            managed: false,
+            shell: process.shell.clone(),
+            cwd: process.cwd.clone(),
+            cols: 0,
+            rows: 0,
+            pid: process.pid,
+            uptime_secs: process.uptime_secs,
+            cpu_percent: process.cpu_percent,
+            mem_bytes: process.mem_bytes,
+            attached: false,
+            preview_lines: Vec::new(),
+        });
+    }
+    entries
 }
 
 fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     usage: Res<ProcessUsage>,
+    vmux_processes: Res<VmuxProcessList>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
@@ -222,7 +306,10 @@ fn broadcast_to_monitors(
     mut commands: Commands,
 ) {
     if monitors.is_empty()
-        || !(process_list.is_changed() || usage.is_changed() || !claimed.is_empty())
+        || !(process_list.is_changed()
+            || usage.is_changed()
+            || vmux_processes.is_changed()
+            || !claimed.is_empty())
     {
         return;
     }
@@ -232,7 +319,12 @@ fn broadcast_to_monitors(
     let attached_ids: std::collections::HashSet<String> =
         terminal_pids.iter().map(|pid| pid.to_string()).collect();
 
-    let processes = build_process_entries(&process_list.processes, &usage, &attached_ids);
+    let processes = build_process_entries(
+        &process_list.processes,
+        &usage,
+        &attached_ids,
+        &vmux_processes.0,
+    );
 
     let event = ProcessesListEvent {
         connected,
@@ -458,7 +550,7 @@ mod tests {
                 mem_bytes: 332 * 1024 * 1024,
             },
         );
-        let entries = build_process_entries(&[process_info(id)], &usage, &Default::default());
+        let entries = build_process_entries(&[process_info(id)], &usage, &Default::default(), &[]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].pid, 42);
         assert_eq!(entries[0].cpu_percent, 12.5);
@@ -472,8 +564,52 @@ mod tests {
             &[process_info(process_id(1))],
             &ProcessUsage::default(),
             &Default::default(),
+            &[],
         );
         assert_eq!(entries[0].cpu_percent, 0.0);
         assert_eq!(entries[0].mem_bytes, 0);
+    }
+
+    #[test]
+    fn build_entries_includes_unmanaged_vmux_processes_without_duplicates() {
+        let process = VmuxProcess {
+            shell: "/Applications/Vmux.app/Contents/MacOS/vmux_desktop".to_string(),
+            cwd: "/tmp".to_string(),
+            pid: 42,
+            uptime_secs: 10,
+            cpu_percent: 3.0,
+            mem_bytes: 1024,
+        };
+        let entries = build_process_entries(
+            &[],
+            &ProcessUsage::default(),
+            &Default::default(),
+            std::slice::from_ref(&process),
+        );
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].managed);
+        assert_eq!(entries[0].pid, 42);
+
+        let entries = build_process_entries(
+            &[process_info(process_id(1))],
+            &ProcessUsage::default(),
+            &Default::default(),
+            &[process],
+        );
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].managed);
+    }
+
+    #[test]
+    fn vmux_process_match_uses_process_or_executable_name() {
+        assert!(is_vmux_process("vmux_desktop Helper", ""));
+        assert!(is_vmux_process(
+            "helper",
+            "/Applications/Vmux.app/Contents/MacOS/vmux_service"
+        ));
+        assert!(!is_vmux_process(
+            "codex",
+            "/Users/test/.vmux/projects/repo/codex"
+        ));
     }
 }

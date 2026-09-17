@@ -315,6 +315,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             menu,
             agent: Some(chips.agent),
             model: chips.model,
+            permission: chips.permission,
             project: Some(chips.project),
             branch: chips.branch,
             is_git_repo: composer.is_git_repo,
@@ -329,6 +330,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             placement: PromptPopupPlacement::Downward,
             agent: Some(menus.agent.clone()),
             model: Some(menus.model.clone()),
+            permission: Some(menus.permission.clone()),
             project: Some(menus.project.clone()),
             branch: Some(menus.branch.clone()),
         }
@@ -713,6 +715,7 @@ fn BookmarkButton() -> Element {
                     url: None,
                     metadata: None,
                     folder: None,
+                    target_uuid: None,
                 });
             },
             Icon { class: "h-4 w-4",

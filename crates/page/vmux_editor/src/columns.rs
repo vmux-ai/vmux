@@ -51,7 +51,6 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                 for (i, e) in window.entries().into_iter().enumerate() {
                     {
                         let entry = e.clone();
-                        let opened = e.clone();
                         rsx! {
                             div {
                                 key: "{e.path}",
@@ -62,7 +61,6 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                                     event.stop_propagation();
                                     clicks.row(Column::Current(i), entry.clone(), event.client_coordinates());
                                 },
-                                ondoubleclick: move |_| window.open(&opened),
                                 EntryVisual { entry: e.clone(), thumb: thumbs.get(&e.path).cloned() }
                                 span { class: "truncate text-xs", "{e.name}" }
                             }
@@ -95,7 +93,7 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                     }
                 },
                 None => rsx! {
-                    div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
+                    div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
                         PreviewPane { preview: (window.preview)() }
                     }
                 },
@@ -105,7 +103,7 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
 }
 
 const PARENT_CLASS: &str = "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 cursor-default transition-colors hover:bg-foreground/[0.04]";
-const PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]";
+const PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--primary)_60%,transparent)]";
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct DirWindow {
@@ -257,21 +255,22 @@ impl DirClick {
         if self.take_open(at) {
             return;
         }
-        let shifted = match column {
+        match column {
             Column::Current(index) => {
                 self.window.select(index, entry.path.clone());
-                false
             }
-            Column::Parent => self.window.ascend(entry.path.clone()),
-            Column::Child => self.window.descend(entry.path.clone()),
-        };
-        if shifted {
-            self.pending.set(Some(PendingOpen {
-                entry,
-                at: now_millis(),
-                origin: (at.x, at.y),
-            }));
+            Column::Parent => {
+                self.window.ascend(entry.path.clone());
+            }
+            Column::Child => {
+                self.window.descend(entry.path.clone());
+            }
         }
+        self.pending.set(Some(PendingOpen {
+            entry,
+            at: now_millis(),
+            origin: (at.x, at.y),
+        }));
     }
 
     fn pane(mut self, at: ClientPoint) {

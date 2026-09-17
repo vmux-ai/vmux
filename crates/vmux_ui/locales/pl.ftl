@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } kart
 }
 spaces-delete = Usuń przestrzeń
+shortcuts-title = Skróty klawiaturowe
+shortcuts-count = Skróty: { $count }
+shortcuts-search = Filtruj skróty…
+shortcuts-empty = Brak pasujących skrótów
+shortcuts-general = Ogólne
+shortcuts-try-title = Wypróbuj skrót
+shortcuts-try-hint = Naciśnij dowolny skrót
+shortcuts-waiting = Oczekiwanie na następny klawisz…
+shortcuts-triggered = Uruchamia: { $action }
+shortcuts-no-match = Żaden skrót nie pasuje do tych klawiszy
+shortcuts-clear = Resetuj
 
 team-title = Zespół
 simulator-title = Symulator
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profile
+team-new-profile = Nowy profil
+team-switch-profile = Przełącz na { $profile }
+team-edit-profile = Edytuj profil
+team-profile-name = Nazwa profilu
 team-just-you = W tej przestrzeni jesteś tylko Ty
 team-agents = { $count ->
     [one] Ty i 1 agent
@@ -180,7 +196,7 @@ team-you = Ty
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = Usługi w tle
+services-title = Procesy Vmux
 services-processes = { $count ->
     [one] 1 proces
    *[other] { $count } procesów
@@ -197,6 +213,7 @@ services-attached = podłączone
 services-kill = Zakończ
 services-memory = Pamięć
 services-size = Rozmiar
+services-uptime = Czas działania
 services-shell = Powłoka
 
 error-title = Błąd
@@ -282,6 +299,7 @@ layout-new-stack = Nowy stos
 layout-close-tab = Zamknij kartę
 layout-bookmark = Zakładka
 layout-pin = Przypnij
+layout-unpin = Odepnij
 layout-new-tab = Nowa karta
 layout-team = Zespół
 
@@ -451,6 +469,8 @@ common-error = Błąd
 common-output = Wynik
 common-pending = Oczekuje
 common-current = bieżący
+composer-permissions = Uprawnienia
+composer-permission-change = Zmień tryb uprawnień
 common-stop = Zatrzymaj
 services-command = Usługa Vmux
 services-uptime-seconds = { $seconds } s
@@ -488,6 +508,11 @@ command-select-pane-up = Układ > Panel > Wybierz panel wyżej
 command-select-pane-down = Układ > Panel > Wybierz panel niżej
 command-swap-pane-prev = Układ > Panel > Zamień z poprzednim panelem
 command-swap-pane-next = Układ > Panel > Zamień z następnym panelem
+command-rotate-forward = Układ > Panel > Obróć panele do przodu
+command-rotate-backward = Układ > Panel > Obróć panele do tyłu
+command-mirror-panes = Układ > Panel > Odbij panele
+command-mirror-panes-horizontal = Układ > Panel > Odbij panele poziomo
+command-mirror-panes-vertical = Układ > Panel > Odbij panele pionowo
 command-equalize-pane-size = Układ > Panel > Wyrównaj rozmiary paneli
 command-resize-pane-left = Układ > Panel > Zmień rozmiar panelu w lewo
 command-resize-pane-right = Układ > Panel > Zmień rozmiar panelu w prawo

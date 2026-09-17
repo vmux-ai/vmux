@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } вкладок
 }
 spaces-delete = Видалити простір
+shortcuts-title = Комбінації клавіш
+shortcuts-count = Комбінацій: { $count }
+shortcuts-search = Фільтрувати комбінації…
+shortcuts-empty = Немає відповідних комбінацій
+shortcuts-general = Загальні
+shortcuts-try-title = Перевірити комбінацію
+shortcuts-try-hint = Натисніть будь-яке сполучення клавіш
+shortcuts-waiting = Очікування наступної клавіші…
+shortcuts-triggered = Виконує: { $action }
+shortcuts-no-match = Немає комбінації для цих клавіш
+shortcuts-clear = Скинути
 
 team-title = Команда
 simulator-title = Симулятор
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Профілі
+team-new-profile = Новий профіль
+team-switch-profile = Перемкнутися на { $profile }
+team-edit-profile = Редагувати профіль
+team-profile-name = Назва профілю
 team-just-you = У цьому просторі лише ви
 team-agents = { $count ->
     [one] Ви й 1 агент
@@ -180,7 +196,7 @@ team-you = Ви
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Агент
 
-services-title = Фонові служби
+services-title = Процеси Vmux
 services-processes = { $count ->
     [one] 1 процес
    *[other] { $count } процесів
@@ -197,6 +213,7 @@ services-attached = приєднано
 services-kill = Примусово завершити
 services-memory = Пам’ять
 services-size = Розмір
+services-uptime = Час роботи
 services-shell = Оболонка
 
 error-title = Помилка
@@ -282,6 +299,7 @@ layout-new-stack = Новий стек
 layout-close-tab = Закрити вкладку
 layout-bookmark = Закладка
 layout-pin = Закріпити
+layout-unpin = Відкріпити
 layout-new-tab = Нова вкладка
 layout-team = Команда
 
@@ -451,6 +469,8 @@ common-error = Помилка
 common-output = Вивід
 common-pending = Очікує
 common-current = поточний
+composer-permissions = Дозволи
+composer-permission-change = Змінити режим дозволів
 common-stop = Зупинити
 services-command = Сервіс Vmux
 services-uptime-seconds = { $seconds } с
@@ -488,6 +508,11 @@ command-select-pane-up = Макет > Панель > Вибрати панель
 command-select-pane-down = Макет > Панель > Вибрати панель унизу
 command-swap-pane-prev = Макет > Панель > Поміняти з попередньою панеллю
 command-swap-pane-next = Макет > Панель > Поміняти з наступною панеллю
+command-rotate-forward = Макет > Панель > Обернути панелі вперед
+command-rotate-backward = Макет > Панель > Обернути панелі назад
+command-mirror-panes = Макет > Панель > Віддзеркалити панелі
+command-mirror-panes-horizontal = Макет > Панель > Віддзеркалити панелі горизонтально
+command-mirror-panes-vertical = Макет > Панель > Віддзеркалити панелі вертикально
 command-equalize-pane-size = Макет > Панель > Вирівняти розмір панелей
 command-resize-pane-left = Макет > Панель > Змінити розмір панелі ліворуч
 command-resize-pane-right = Макет > Панель > Змінити розмір панелі праворуч

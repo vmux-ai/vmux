@@ -16,3 +16,4 @@ mod template;
 pub(crate) mod windows;
 
 pub use manager_page::ExtensionsPlugin;
+pub(crate) use manager_page::{ExtensionPopup, ExtensionPopupBounds, ExtensionPopupPresented};

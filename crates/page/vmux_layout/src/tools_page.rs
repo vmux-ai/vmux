@@ -290,7 +290,7 @@ fn status_dot_class(status: ToolStatus) -> &'static str {
         ToolStatus::Outdated => "bg-amber-500",
         ToolStatus::Conflict | ToolStatus::Failed => "bg-rose-500",
         ToolStatus::Missing => "bg-muted-foreground/40",
-        ToolStatus::Available => "bg-cyan-500/70",
+        ToolStatus::Available => "bg-primary/70",
     }
 }
 

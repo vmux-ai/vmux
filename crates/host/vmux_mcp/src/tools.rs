@@ -341,7 +341,8 @@ placement. Omit `direction` so vmux focuses an already-open matching file first,
 the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute \
 filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; \
 directories show a listing. direction is an override for a forced adjacent open: \
-right|left|top|bottom. focus defaults false."
+right|left|top|bottom. focus defaults false. The path must be inside the selected project; call \
+select_project first to request access elsewhere."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -361,8 +362,9 @@ fn read_file_definition() -> ToolDefinition {
         name: "read_file".into(),
         description: "Read a local file and show it in the vmux editor through auto placement, \
 preferring an existing file page/bucket. Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
-via run (that dumps into a terminal). path is an absolute filesystem path. offset is the 1-based line \
-to start at; limit is the number of lines (default: the whole file)."
+via run (that dumps into a terminal). path is an absolute filesystem path inside the selected \
+project; call select_project first to request access elsewhere. offset is the 1-based line to start \
+at; limit is the number of lines (default: the whole file)."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -383,7 +385,8 @@ fn grep_definition() -> ToolDefinition {
         description: "Search files with ripgrep and open each matching file in the vmux editor \
 through auto placement, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
 run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
-regex; path is an absolute directory or file to search (default: the current working directory)."
+regex; path is a directory or file inside the selected project (default: the selected project). \
+Call select_project first to request access elsewhere."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -469,7 +472,7 @@ fn create_worktree_definition() -> ToolDefinition {
 fn select_project_definition() -> ToolDefinition {
     ToolDefinition {
         name: "select_project".into(),
-        description: "Select an existing project before the first edit, write, test, build, or other project mutation. Never call for requests that only read, show, search, or explain existing files. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/workspace. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/workspace/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses that new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."
+        description: "Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -484,7 +487,7 @@ fn select_project_definition() -> ToolDefinition {
 fn request_user_choice_definition() -> ToolDefinition {
     ToolDefinition {
         name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/workspace path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
+        description: "Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/projects path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -2284,11 +2287,7 @@ mod tests {
                 .description
                 .contains("Never call for requests that only read")
         );
-        assert!(
-            select_definition
-                .description
-                .contains("Never call for requests that only read")
-        );
+        assert!(select_definition.description.contains("before accessing"));
         assert!(
             select_definition
                 .description
@@ -2307,12 +2306,12 @@ mod tests {
         assert!(
             select_definition
                 .description
-                .contains("~/.vmux/workspace/<remote-host>")
+                .contains("~/.vmux/projects/<remote-host>")
         );
         assert!(
             select_definition
                 .description
-                .contains("~/.vmux/workspace/local/<project>")
+                .contains("~/.vmux/projects/local/<project>")
         );
         assert!(select_definition.description.contains("empty directory"));
         assert!(
@@ -2325,7 +2324,7 @@ mod tests {
                 .description
                 .contains("returns immediately")
         );
-        assert!(choice_definition.description.contains("~/.vmux/workspace"));
+        assert!(choice_definition.description.contains("~/.vmux/projects"));
         assert!(choice_definition.description.contains("Ctrl+N/Ctrl+P"));
         let choose =
             dispatch_with_anchor("select_project", serde_json::json!({}), Some(anchor)).unwrap();

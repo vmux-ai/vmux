@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
-const INPUT: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background px-3 py-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors placeholder:text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none disabled:cursor-not-allowed dark:bg-[color-mix(in_oklab,#FFFFFF26_30%,transparent)] dark:shadow-[inset_0_0_0_1px_var(--primary)] dark:hover:bg-[color-mix(in_oklab,#FFFFFF26_50%,transparent)]";
+const INPUT: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background px-3 py-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors placeholder:text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--primary)] disabled:cursor-not-allowed dark:bg-[color-mix(in_oklab,#FFFFFF26_30%,transparent)] dark:hover:bg-[color-mix(in_oklab,#FFFFFF26_50%,transparent)]";
 
 #[component]
 pub fn Input(

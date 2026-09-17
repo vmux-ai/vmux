@@ -60,7 +60,7 @@ fn activity_icon(
     session: Option<&AgentSession>,
 ) -> Option<PageIcon> {
     let running = matches!(state, AgentRunState::Streaming);
-    let page = group_turns_tail(&[], &messages.0, &[], running, TAIL_ITEMS);
+    let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAIL_ITEMS);
     let activity = ActivityIcon::current(&page.items, state.status())?;
     let provider = session
         .map(|session| session.provider.as_str())

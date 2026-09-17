@@ -10233,6 +10233,7 @@ dependencies = [
  "vmux_native",
  "vmux_service",
  "vmux_setting",
+ "vmux_shortcut",
  "vmux_simulator",
  "vmux_space",
  "vmux_start",
@@ -10250,6 +10251,7 @@ version = "0.0.34"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
+ "chrono",
  "dioxus",
  "dioxus-primitives",
  "pulldown-cmark",
@@ -10425,6 +10427,7 @@ dependencies = [
  "vmux_layout",
  "vmux_service",
  "vmux_setting",
+ "vmux_shortcut",
  "vmux_simulator",
  "vmux_space",
  "vmux_start",
@@ -10599,6 +10602,7 @@ dependencies = [
  "base64 0.22.1",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "vmux_client",
  "vmux_command_mcp",
@@ -10777,6 +10781,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_shortcut"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "rkyv",
+ "serde",
+ "vmux_command",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_ui",
+]
+
+[[package]]
 name = "vmux_simulator"
 version = "0.0.34"
 dependencies = [
@@ -10784,6 +10804,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
+ "image",
  "libc",
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",

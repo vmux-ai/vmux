@@ -99,13 +99,19 @@ impl WebView {
         })
     }
 
-    pub fn navigate(&self, page: &'static NativePage, instance: crate::Instance) {
+    pub fn navigate(&self, page: &'static NativePage, instance: crate::Instance) -> bool {
+        let current = self.page.get();
+        let document_changed = current.document_url() != page.document_url();
+        let remounted = !current.preserves_dom_for(page);
         self.page.set(page);
         self.outbox.set_page(page.url);
-        self.dom.remount(page.component, instance);
-        if let Err(error) = self.webview.load_url(page.document_url()) {
+        if remounted {
+            self.dom.remount(page.component, instance);
+        }
+        if document_changed && let Err(error) = self.webview.load_url(page.document_url()) {
             error!("vmux_native: navigation failed for {}: {error}", page.url);
         }
+        remounted
     }
 
     pub fn set_bounds(&self, bounds: wry::Rect) {

@@ -362,7 +362,7 @@ jobs:
       - name: Check the pages that ship on the phone
         run: |
           cargo check --locked --target aarch64-apple-ios \
-            -p vmux_agent -p vmux_chat -p vmux_command -p vmux_editor -p vmux_history \
+            -p vmux_agent -p vmux_chat -p vmux_command -p vmux_editor -p vmux_history -p vmux_shortcut \
             -p vmux_layout -p vmux_setting -p vmux_space -p vmux_start -p vmux_team \
             -p vmux_terminal -p vmux_ui
 

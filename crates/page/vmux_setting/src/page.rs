@@ -83,7 +83,7 @@ pub fn Page() -> Element {
                     }
                     input {
                         r#type: "search",
-                        class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-cyan-400/40",
+                        class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-primary/40",
                         placeholder: "{search_placeholder}",
                         value: "{search}",
                         oninput: move |event: FormEvent| search.set(event.value()),

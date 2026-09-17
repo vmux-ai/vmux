@@ -20,7 +20,47 @@ pub struct AgentSession {
 }
 
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
+#[require(AgentMessageTimes)]
 pub struct AgentMessages(pub Vec<Message>);
+
+#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AgentMessageTimes(pub Vec<u64>);
+
+impl AgentMessageTimes {
+    pub fn reconcile(&mut self, before: &[Message], after: &[Message]) {
+        let mut stable = before
+            .iter()
+            .zip(after)
+            .take_while(|(left, right)| left == right)
+            .count();
+        if stable < self.0.len()
+            && stable + 1 == before.len()
+            && before
+                .get(stable)
+                .zip(after.get(stable))
+                .is_some_and(|(left, right)| Self::same_in_progress_message(left, right))
+        {
+            stable += 1;
+        }
+        self.0.truncate(stable);
+        let observed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.0.resize(after.len(), observed_at);
+    }
+
+    fn same_in_progress_message(left: &Message, right: &Message) -> bool {
+        match (left, right) {
+            (Message::Assistant { .. }, Message::Assistant { .. }) => true,
+            (
+                Message::ToolResult { call_id: left, .. },
+                Message::ToolResult { call_id: right, .. },
+            ) => left == right,
+            _ => left == right,
+        }
+    }
+}
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentConversationTitle(pub String);
@@ -171,6 +211,29 @@ mod tests {
         let _ = AgentMessages::default();
         let _ = AgentApprovalPolicy::default();
         let _ = PromptQueue::default();
+    }
+
+    #[test]
+    fn streamed_assistant_message_keeps_its_first_observed_time() {
+        let before = vec![
+            Message::user("question"),
+            Message::Assistant {
+                blocks: vec![vmux_wire::room::AssistantBlock::Text("part".into())],
+            },
+        ];
+        let after = vec![
+            Message::user("question"),
+            Message::Assistant {
+                blocks: vec![vmux_wire::room::AssistantBlock::Text(
+                    "partial answer".into(),
+                )],
+            },
+        ];
+        let mut times = AgentMessageTimes(vec![10, 20]);
+
+        times.reconcile(&before, &after);
+
+        assert_eq!(times.0, [10, 20]);
     }
 
     #[test]

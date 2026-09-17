@@ -122,7 +122,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     title_message_id: Some("layout-knowledge"),
     replaces_command: None,
     keywords: &["knowledge", "notes", "markdown"],
-    icon: Some(vmux_core::BuiltinIcon::Files),
+    icon: Some(vmux_core::BuiltinIcon::Brain),
     command_bar: true,
 };
 

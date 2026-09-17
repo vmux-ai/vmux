@@ -165,11 +165,27 @@ spaces-tabs = { $count ->
    *[other] { $count } abas
 }
 spaces-delete = Excluir espaço
+shortcuts-title = Atalhos de teclado
+shortcuts-count = { $count } atalhos
+shortcuts-search = Filtrar atalhos…
+shortcuts-empty = Nenhum atalho correspondente
+shortcuts-general = Geral
+shortcuts-try-title = Testar um atalho
+shortcuts-try-hint = Pressione qualquer atalho
+shortcuts-waiting = Aguardando a próxima tecla…
+shortcuts-triggered = Executa: { $action }
+shortcuts-no-match = Nenhum atalho corresponde a essas teclas
+shortcuts-clear = Redefinir
 
 team-title = Equipe
 simulator-title = Simulador
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Perfis
+team-new-profile = Novo perfil
+team-switch-profile = Mudar para { $profile }
+team-edit-profile = Editar perfil
+team-profile-name = Nome do perfil
 team-just-you = Só você neste espaço
 team-agents = { $count ->
     [one] Você e 1 agente
@@ -180,7 +196,7 @@ team-you = Você
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agente
 
-services-title = Serviços em segundo plano
+services-title = Processos do Vmux
 services-processes = { $count ->
     [one] 1 processo
    *[other] { $count } processos
@@ -197,6 +213,7 @@ services-attached = anexado
 services-kill = Forçar encerramento
 services-memory = Memória
 services-size = Tamanho
+services-uptime = Tempo ativo
 services-shell = Shell
 
 error-title = Erro
@@ -282,6 +299,7 @@ layout-new-stack = Nova pilha
 layout-close-tab = Fechar aba
 layout-bookmark = Favorito
 layout-pin = Fixar
+layout-unpin = Desafixar
 layout-new-tab = Nova aba
 layout-team = Equipe
 
@@ -451,6 +469,8 @@ common-error = Erro
 common-output = Saída
 common-pending = Pendente
 common-current = atual
+composer-permissions = Permissões
+composer-permission-change = Alterar modo de permissão
 common-stop = Parar
 services-command = serviço do Vmux
 services-uptime-seconds = { $seconds }s
@@ -488,6 +508,11 @@ command-select-pane-up = Layout > Painel > Selecionar painel acima
 command-select-pane-down = Layout > Painel > Selecionar painel abaixo
 command-swap-pane-prev = Layout > Painel > Trocar com painel anterior
 command-swap-pane-next = Layout > Painel > Trocar com próximo painel
+command-rotate-forward = Layout > Painel > Girar painéis para frente
+command-rotate-backward = Layout > Painel > Girar painéis para trás
+command-mirror-panes = Layout > Painel > Espelhar painéis
+command-mirror-panes-horizontal = Layout > Painel > Espelhar painéis horizontalmente
+command-mirror-panes-vertical = Layout > Painel > Espelhar painéis verticalmente
 command-equalize-pane-size = Layout > Painel > Igualar tamanho dos painéis
 command-resize-pane-left = Layout > Painel > Redimensionar painel à esquerda
 command-resize-pane-right = Layout > Painel > Redimensionar painel à direita

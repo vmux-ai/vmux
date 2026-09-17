@@ -39,6 +39,9 @@ pub(crate) enum DomRequest {
     CaretToEnd {
         element: String,
     },
+    RunScript {
+        script: String,
+    },
     RevealElement {
         elements: Vec<String>,
         block: &'static str,
@@ -189,6 +192,9 @@ mod tests {
             DomRequest::PlaceCaret {
                 element: "e".into(),
                 byte: 0,
+            },
+            DomRequest::RunScript {
+                script: "return;".into(),
             },
         ];
 

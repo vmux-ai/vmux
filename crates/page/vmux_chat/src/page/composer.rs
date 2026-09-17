@@ -100,6 +100,7 @@ fn ComposerFooter(chat: Chat) -> Element {
             menu: chat.menu,
             model: chat.model_chip(),
             effort: chat.effort_chip(),
+            permission: chat.permission_chip(),
             project: chat.project_chip(),
             branch: chat.branch_chip(),
             is_git_repo: context.is_git_repo,

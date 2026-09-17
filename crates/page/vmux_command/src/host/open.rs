@@ -39,11 +39,11 @@ pub enum OpenCommand {
         left = "Super+Shift+H"
     )]
     #[shortcut(
-        chord = "Ctrl+g, %",
+        chord = "Ctrl+b, %",
         variant = "InPane { direction: PaneDirection::Right, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack, url: None }"
     )]
     #[shortcut(
-        chord = "Ctrl+g, \"",
+        chord = "Ctrl+b, \"",
         variant = "InPane { direction: PaneDirection::Bottom, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack, url: None }"
     )]
     #[mcp(skip)]
@@ -59,6 +59,7 @@ pub enum OpenCommand {
     },
 
     #[menu(id = "open_in_new_tab", label = "Open in New Tab", accel = "super+t")]
+    #[shortcut(chord = "Ctrl+b, c")]
     #[mcp(
         description = "Open a page in a brand-new Tab within the current Space. Tabs are the workspace-tab strip (one level above panes); creating one gives the user a fresh layout container."
     )]

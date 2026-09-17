@@ -31,6 +31,7 @@ pub struct ProcessesListEvent {
 )]
 pub struct ProcessEntry {
     pub id: String,
+    pub managed: bool,
     pub shell: String,
     pub cwd: String,
     pub cols: u16,

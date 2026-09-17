@@ -195,14 +195,13 @@ fn on_touch(
     };
     match touch.phase {
         SimulatorTouchPhase::Down => {
-            if session.dragging
-                && let Some(previous) = session.last
-            {
+            if let Some(previous) = session.last {
                 hid.dispatch(HidRequest::up(previous));
             }
             session.start = Some(point);
             session.last = Some(point);
             session.dragging = false;
+            hid.dispatch(HidRequest::down(point));
         }
         SimulatorTouchPhase::Move => {
             let Some(start) = session.start else {
@@ -210,7 +209,6 @@ fn on_touch(
             };
             let distance = ((point.0 - start.0).powi(2) + (point.1 - start.1).powi(2)).sqrt();
             if !session.dragging && distance >= DRAG_THRESHOLD {
-                hid.dispatch(HidRequest::down(start));
                 session.dragging = true;
             }
             session.last = Some(point);
@@ -219,26 +217,26 @@ fn on_touch(
             }
         }
         SimulatorTouchPhase::Up => {
-            let Some(start) = session.start.take() else {
+            if session.start.take().is_none() {
                 return;
-            };
-            session.last = None;
-            if session.dragging {
-                hid.dispatch(HidRequest::up(point));
-            } else {
-                hid.dispatch(HidRequest::tap(start));
             }
+            session.last = None;
+            hid.dispatch(HidRequest::up(point));
             session.dragging = false;
         }
         SimulatorTouchPhase::Cancel => {
             session.start = None;
-            if session.dragging
-                && let Some(last) = session.last.take()
-            {
+            if let Some(last) = session.last.take() {
                 hid.dispatch(HidRequest::up(last));
             }
             session.last = None;
             session.dragging = false;
+        }
+        SimulatorTouchPhase::Tap => {
+            session.start = None;
+            session.last = None;
+            session.dragging = false;
+            hid.dispatch(HidRequest::tap(point));
         }
     }
 }

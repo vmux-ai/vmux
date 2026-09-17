@@ -19,8 +19,8 @@ use super::command::requested_focus_for_origin;
 use super::follow::file_touch_url;
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegions, PagerEnv, PendingRunTerminalSpawn,
-    PendingRunTerminalSpawns, RunCommand, RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes,
-    RunTerminalCandidate,
+    PendingRunTerminalSpawns, ProjectsDirectory, RunCommand, RunPlacementPolicy, RunTerminal,
+    RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
     AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceAction, PendingWorkspacePicker,
@@ -746,14 +746,21 @@ pub(super) fn handle_agent_self_commands(
                             && let Ok(selected) = Path::new(path).canonicalize()
                             && selected.is_dir()
                         {
+                            let trusted = ProjectsDirectory::ensure()
+                                .is_ok_and(|projects| projects.contains(&selected));
+                            let task = if trusted {
+                                workspace_path_task(selected, workspace_picker.proxy.as_deref())
+                            } else {
+                                workspace_picker_task(
+                                    Some(selected),
+                                    workspace_picker.proxy.as_deref(),
+                                )
+                            };
                             commands.spawn(PendingWorkspacePicker {
                                 tab_entity,
                                 agent_entity,
                                 session_entity,
-                                task: workspace_path_task(
-                                    selected,
-                                    workspace_picker.proxy.as_deref(),
-                                ),
+                                task,
                             });
                             AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         } else {
@@ -761,7 +768,10 @@ pub(super) fn handle_agent_self_commands(
                                 tab_entity,
                                 agent_entity,
                                 session_entity,
-                                task: workspace_picker_task(workspace_picker.proxy.as_deref()),
+                                task: workspace_picker_task(
+                                    None,
+                                    workspace_picker.proxy.as_deref(),
+                                ),
                             });
                             AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         }

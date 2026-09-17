@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 pub enum BuiltinIcon {
     Terminal,
     Files,
+    Project,
+    Brain,
     Server,
     Settings,
     Clock,
@@ -31,6 +33,8 @@ pub enum BuiltinIcon {
     Hammer,
     Vault,
     Smartphone,
+    Keyboard,
+    GitBranch,
 }
 
 impl BuiltinIcon {
@@ -147,5 +151,13 @@ mod tests {
                 PageIcon::Builtin(expected)
             );
         }
+    }
+
+    #[test]
+    fn persisted_git_page_icon_remains_loadable() {
+        assert_eq!(
+            serde_json::from_str::<PageIcon>(r#"{"Builtin":"GitBranch"}"#).unwrap(),
+            PageIcon::Builtin(BuiltinIcon::GitBranch)
+        );
     }
 }

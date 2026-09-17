@@ -7,7 +7,7 @@ pub mod variant;
 
 pub use acp::AcpSession;
 pub use session::{
-    AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
-    QueuedPrompt, approval_tool_key, provisional_conversation_title,
+    AgentApprovalPolicy, AgentConversationTitle, AgentMessageTimes, AgentMessages, AgentSession,
+    PromptQueue, QueuedPrompt, approval_tool_key, provisional_conversation_title,
 };
 pub use variant::AgentVariant;

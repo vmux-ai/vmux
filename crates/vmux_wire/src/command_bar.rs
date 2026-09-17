@@ -141,6 +141,8 @@ pub struct CommandBarOpenEvent {
     pub prompt_context: CommandBarPromptContext,
     #[serde(default)]
     pub agent_models: Vec<AgentModels>,
+    #[serde(default)]
+    pub agent_modes: Vec<AgentModes>,
     pub target: Option<crate::open_target::OpenTarget>,
     #[serde(default)]
     pub picker: Option<CommandBarPicker>,
@@ -600,6 +602,24 @@ pub struct AgentModels {
     Clone,
     Debug,
     Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentModes {
+    pub agent_key: String,
+    pub url: String,
+    pub selected: String,
+    pub modes: Vec<crate::protocol::AcpModeOption>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -609,6 +629,21 @@ pub struct AgentModels {
 pub struct StartSelectModel {
     pub agent_key: String,
     pub model_id: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartSelectMode {
+    pub agent_key: String,
+    pub mode_id: String,
 }
 
 impl CommandBarActionEvent {

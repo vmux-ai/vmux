@@ -15,7 +15,8 @@ impl Plugin for RelaunchPlugin {
             bevy_cef::prelude::JsEmitEventPlugin::<PageRelaunchRequest>::default(),
         ))
         .add_observer(on_restart_request)
-        .add_observer(on_page_relaunch);
+        .add_observer(on_page_relaunch)
+        .add_systems(Update, switch_profile);
     }
 }
 
@@ -28,46 +29,76 @@ fn relaunch_plan(
     exe: &std::path::Path,
     pid: u32,
     dyld_library_path: Option<&str>,
+    profile: Option<&str>,
 ) -> Vec<std::ffi::OsString> {
     let app_bundle = exe
         .ancestors()
         .nth(3)
         .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("app"));
-    match app_bundle {
-        Some(app) => vec![
+    match (app_bundle, dyld_library_path, profile) {
+        (Some(app), _, Some(profile)) => vec![
+            "-c".into(),
+            format!(
+                "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; open --env \"$2\" \"$1\""
+            )
+            .into(),
+            "vmux-relauncher".into(),
+            app.as_os_str().into(),
+            format!("VMUX_PROFILE={profile}").into(),
+        ],
+        (Some(app), _, None) => vec![
             "-c".into(),
             format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; open \"$1\"").into(),
             "vmux-relauncher".into(),
             app.as_os_str().into(),
         ],
-        None => match dyld_library_path {
-            Some(dyld) if !dyld.is_empty() => vec![
-                "-c".into(),
-                format!(
-                    "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; DYLD_LIBRARY_PATH=\"$2\" \"$1\""
-                )
-                .into(),
-                "vmux-relauncher".into(),
-                exe.as_os_str().into(),
-                dyld.into(),
-            ],
-            _ => vec![
-                "-c".into(),
-                format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; \"$1\"").into(),
-                "vmux-relauncher".into(),
-                exe.as_os_str().into(),
-            ],
-        },
+        (None, Some(dyld), Some(profile)) if !dyld.is_empty() => vec![
+            "-c".into(),
+            format!(
+                "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; DYLD_LIBRARY_PATH=\"$2\" VMUX_PROFILE=\"$3\" \"$1\""
+            )
+            .into(),
+            "vmux-relauncher".into(),
+            exe.as_os_str().into(),
+            dyld.into(),
+            profile.into(),
+        ],
+        (None, _, Some(profile)) => vec![
+            "-c".into(),
+            format!(
+                "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; VMUX_PROFILE=\"$2\" \"$1\""
+            )
+            .into(),
+            "vmux-relauncher".into(),
+            exe.as_os_str().into(),
+            profile.into(),
+        ],
+        (None, Some(dyld), None) if !dyld.is_empty() => vec![
+            "-c".into(),
+            format!(
+                "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; DYLD_LIBRARY_PATH=\"$2\" \"$1\""
+            )
+            .into(),
+            "vmux-relauncher".into(),
+            exe.as_os_str().into(),
+            dyld.into(),
+        ],
+        (None, _, None) => vec![
+            "-c".into(),
+            format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; \"$1\"").into(),
+            "vmux-relauncher".into(),
+            exe.as_os_str().into(),
+        ],
     }
 }
 
-fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
+fn relaunch_now(exit: &mut MessageWriter<AppExit>, profile: Option<&str>) {
     let Ok(exe) = std::env::current_exe() else {
         bevy::log::error!("restart requested but current_exe() is unavailable");
         return;
     };
     let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
-    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref());
+    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref(), profile);
     if let Err(error) = std::process::Command::new("sh").args(&args).spawn() {
         bevy::log::error!("failed to spawn relauncher: {error}");
         return;
@@ -76,17 +107,73 @@ fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
     exit.write(AppExit::Success);
 }
 
+fn profile_launch_plan(
+    exe: &std::path::Path,
+    dyld_library_path: Option<&str>,
+    profile: &str,
+) -> Vec<std::ffi::OsString> {
+    let app_bundle = exe
+        .ancestors()
+        .nth(3)
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("app"));
+    match (app_bundle, dyld_library_path) {
+        (Some(app), _) => vec![
+            "-c".into(),
+            "open -n --env \"$2\" \"$1\"".into(),
+            "vmux-profile-launcher".into(),
+            app.as_os_str().into(),
+            format!("VMUX_PROFILE={profile}").into(),
+        ],
+        (None, Some(dyld)) if !dyld.is_empty() => vec![
+            "-c".into(),
+            "DYLD_LIBRARY_PATH=\"$2\" VMUX_PROFILE=\"$3\" \"$1\"".into(),
+            "vmux-profile-launcher".into(),
+            exe.as_os_str().into(),
+            dyld.into(),
+            profile.into(),
+        ],
+        (None, _) => vec![
+            "-c".into(),
+            "VMUX_PROFILE=\"$2\" \"$1\"".into(),
+            "vmux-profile-launcher".into(),
+            exe.as_os_str().into(),
+            profile.into(),
+        ],
+    }
+}
+
+fn launch_profile(profile: &str) {
+    let Ok(exe) = std::env::current_exe() else {
+        bevy::log::error!("profile launch requested but current_exe() is unavailable");
+        return;
+    };
+    let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
+    let args = profile_launch_plan(&exe, dyld.as_deref(), profile);
+    if let Err(error) = std::process::Command::new("sh").args(&args).spawn() {
+        bevy::log::error!("failed to launch profile: {error}");
+        return;
+    }
+    bevy::log::info!(profile, "launched profile window");
+}
+
 fn on_restart_request(
     _trigger: On<BinReceive<RestartRequestEvent>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    relaunch_now(&mut exit);
+    relaunch_now(&mut exit, None);
 }
 
 fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
     if trigger.payload.channel == "vmux-relaunch" {
-        relaunch_now(&mut exit);
+        relaunch_now(&mut exit, None);
     }
+}
+
+fn switch_profile(mut requests: MessageReader<vmux_team::ProfileSwitchRequested>) {
+    let Some(request) = requests.read().last() else {
+        return;
+    };
+    launch_profile(&request.profile_id);
 }
 
 #[cfg(test)]
@@ -96,7 +183,7 @@ mod tests {
     #[test]
     fn relaunch_plan_opens_app_bundle() {
         let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
-        let args = relaunch_plan(exe, 4242, None);
+        let args = relaunch_plan(exe, 4242, None, None);
         assert_eq!(args[0], "-c");
         assert!(args[1].to_string_lossy().contains("kill -0 4242"));
         assert!(args[1].to_string_lossy().contains("open \"$1\""));
@@ -106,7 +193,7 @@ mod tests {
     #[test]
     fn relaunch_plan_reexecs_bare_binary_in_dev_with_dyld() {
         let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
-        let args = relaunch_plan(exe, 7, Some("/rust/lib:/tmp/target/debug/deps"));
+        let args = relaunch_plan(exe, 7, Some("/rust/lib:/tmp/target/debug/deps"), None);
         let script = args[1].to_string_lossy();
         assert!(script.contains("kill -0 7"));
         assert!(script.contains("DYLD_LIBRARY_PATH=\"$2\" \"$1\""));
@@ -118,7 +205,7 @@ mod tests {
     #[test]
     fn relaunch_plan_reexecs_bare_binary_without_empty_dyld() {
         let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
-        let args = relaunch_plan(exe, 8, Some(""));
+        let args = relaunch_plan(exe, 8, Some(""), None);
         let script = args[1].to_string_lossy();
         assert!(!script.contains("DYLD_LIBRARY_PATH"));
         assert!(script.contains("\"$1\""));
@@ -129,11 +216,36 @@ mod tests {
     #[test]
     fn relaunch_plan_keeps_shell_syntax_out_of_script() {
         let exe = std::path::Path::new("/tmp/$(touch vmux-injected)");
-        let args = relaunch_plan(exe, 9, Some("`touch vmux-dyld-injected`"));
+        let args = relaunch_plan(exe, 9, Some("`touch vmux-dyld-injected`"), None);
         let script = args[1].to_string_lossy();
         assert!(!script.contains("vmux-injected"));
         assert!(!script.contains("vmux-dyld-injected"));
         assert_eq!(args[3], "/tmp/$(touch vmux-injected)");
         assert_eq!(args[4], "`touch vmux-dyld-injected`");
+    }
+
+    #[test]
+    fn relaunch_plan_passes_the_selected_profile() {
+        let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
+        let args = relaunch_plan(exe, 10, None, Some("client-work"));
+
+        assert!(
+            args[1]
+                .to_string_lossy()
+                .contains("open --env \"$2\" \"$1\"")
+        );
+        assert_eq!(args[3], "/Applications/Vmux.app");
+        assert_eq!(args[4], "VMUX_PROFILE=client-work");
+    }
+
+    #[test]
+    fn profile_launch_plan_opens_a_new_app_instance_without_waiting_for_exit() {
+        let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
+        let args = profile_launch_plan(exe, None, "client-work");
+
+        assert_eq!(args[1], "open -n --env \"$2\" \"$1\"");
+        assert!(!args[1].to_string_lossy().contains("kill -0"));
+        assert_eq!(args[3], "/Applications/Vmux.app");
+        assert_eq!(args[4], "VMUX_PROFILE=client-work");
     }
 }

@@ -15,7 +15,6 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
         &[("agent", TranslationValue::String(&name))],
     );
     let user_name = (chat.user.name)();
-    let user_initials = (chat.user.initials)();
     let user_color = (chat.user.color)();
     rsx! {
         header { class: "session-chat-header relative z-10 flex min-w-0 items-center gap-3 bg-transparent px-3 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5",
@@ -23,11 +22,10 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
             div { class: "relative h-8 w-12 shrink-0",
                 Avatar {
                     src: None,
-                    fallback: user_initials,
+                    seed: user_name.clone(),
                     background: user_color,
                     alt: user_name.clone(),
                     class: "absolute left-0 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900".to_string(),
-                    seed: Some(user_name),
                 }
                 AgentAvatar { chat, size_class: "absolute left-5 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900" }
             }
@@ -54,12 +52,6 @@ pub(super) fn AgentAvatar(chat: Chat, size_class: String) -> Element {
         &(chat.identity.agent_icon)(),
         &format!("vmux://sessions/{agent}"),
     );
-    let initial: String = chat
-        .header_name()
-        .chars()
-        .next()
-        .map(|c| c.to_ascii_uppercase().to_string())
-        .unwrap_or_default();
     let fallback = if accent.is_empty() {
         "#6366f1"
     } else {
@@ -68,7 +60,7 @@ pub(super) fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     rsx! {
         Avatar {
             src,
-            fallback: initial,
+            seed: chat.header_name(),
             background: fallback,
             alt: chat.header_name(),
             class: size_class,
@@ -80,17 +72,15 @@ pub(super) fn AgentAvatar(chat: Chat, size_class: String) -> Element {
 pub(super) fn AgentBanner(chat: Chat) -> Element {
     let name = chat.header_name();
     let user_name = (chat.user.name)();
-    let user_initials = (chat.user.initials)();
     let user_color = (chat.user.color)();
     rsx! {
         div { class: "flex items-center -space-x-2",
             Avatar {
                 src: None,
-                fallback: user_initials,
+                seed: user_name.clone(),
                 background: user_color,
                 alt: user_name.clone(),
                 class: "h-10 w-10 border-2 border-zinc-100 text-xs dark:border-zinc-900".to_string(),
-                seed: Some(user_name),
             }
             AgentAvatar { chat, size_class: "h-10 w-10 border-2 border-zinc-100 text-xs dark:border-zinc-900" }
         }

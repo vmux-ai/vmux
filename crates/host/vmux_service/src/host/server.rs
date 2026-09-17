@@ -105,6 +105,7 @@ async fn route_agent_input(
     text: String,
     context: Option<String>,
     attachments: Vec<AgentAttachment>,
+    preferred_mode: Option<String>,
 ) {
     let acp = acp_manager.lock().await;
     if acp.contains(&sid) {
@@ -114,6 +115,7 @@ async fn route_agent_input(
                 text,
                 context,
                 attachments,
+                preferred_mode,
             },
         );
         return;
@@ -894,6 +896,7 @@ async fn handle_client(
                         text,
                         context,
                         attachments,
+                        preferred_mode,
                     },
             }) => {
                 route_agent_input(
@@ -903,6 +906,7 @@ async fn handle_client(
                     text,
                     context,
                     attachments,
+                    preferred_mode,
                 )
                 .await;
             }
@@ -931,6 +935,22 @@ async fn handle_client(
                         request_id,
                         config_id,
                         model_id,
+                    },
+                );
+            }
+
+            ClientMessage::AcpSetMode {
+                sid,
+                request_id,
+                config_id,
+                mode_id,
+            } => {
+                acp_manager.lock().await.input(
+                    &sid,
+                    crate::acp::AcpInput::SetMode {
+                        request_id,
+                        config_id,
+                        mode_id,
                     },
                 );
             }
@@ -1045,6 +1065,10 @@ async fn handle_client(
                     if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
                         let mut w = writer.lock().await;
                         write_message!(&mut *w, &model_info)?;
+                    }
+                    if let Some(mode_info) = acp_manager.lock().await.mode_info(&sid) {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &mode_info)?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();

@@ -37,6 +37,7 @@ impl Team {
     fn project(members: Res<Members>, mut team: ResMut<Team>) {
         team.0 = TeamEvent {
             members: members.0.clone(),
+            profiles: Vec::new(),
         };
     }
 

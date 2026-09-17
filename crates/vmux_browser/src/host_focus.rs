@@ -29,7 +29,8 @@ impl Plugin for HostFocusPlugin {
                 (compute_host_focus_intent, apply_windowed_host_focus)
                     .chain()
                     .after(crate::present::sync_windowed_frames)
-                    .after(crate::present::sync_windowed_command_bar),
+                    .after(crate::present::sync_windowed_command_bar)
+                    .after(crate::present::sync_windowed_extension_popups),
             )
             .add_plugins(platform::HostFocusPlatformPlugin);
     }

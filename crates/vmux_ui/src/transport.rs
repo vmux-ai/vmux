@@ -30,6 +30,9 @@ pub trait PageHost {
     fn place_caret(&self, _element_id: &str, _byte: usize) {}
 
     fn caret_to_end(&self, _element_id: &str) {}
+
+    fn run_script(&self, _script: String) {}
+
     fn event_field_selection(&self, _element_id: &str) -> (usize, usize) {
         (0, 0)
     }
@@ -118,6 +121,11 @@ impl Host {
     pub(crate) fn caret_to_end(id: &str) {
         let _ = Self::with_installed(|host| host.caret_to_end(id));
     }
+
+    pub(crate) fn run_script(script: String) {
+        let _ = Self::with_installed(|host| host.run_script(script));
+    }
+
     #[cfg(ui)]
     pub(crate) fn toggle_media(id: &str) {
         let _ = Self::with_installed(|host| host.toggle_media(id));

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_core::{
     CreatedAt, LastVisitedAt, PageMetadata, TransitionType, Url, Visit, VisitCount, VisitedUrl,
-    now_millis,
+    now_millis, page::PageReady,
 };
 
 pub struct HistorySpawnPlugin;
@@ -9,7 +9,10 @@ pub struct HistorySpawnPlugin;
 impl Plugin for HistorySpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_systems(Update, (spawn_visits, record_requested_visits).chain());
+            .add_systems(
+                Update,
+                (spawn_visits, record_requested_visits, record_vmux_pages).chain(),
+            );
     }
 }
 
@@ -170,6 +173,34 @@ pub(crate) fn record_requested_visits(
     }
 }
 
+fn record_vmux_pages(
+    pages: Query<&PageMetadata, (Added<PageReady>, Without<Url>)>,
+    mut commands: Commands,
+    mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
+) {
+    let now = now_millis();
+    for page in &pages {
+        if !recordable_vmux_url(&page.url) {
+            continue;
+        }
+        record_visit(
+            &mut commands,
+            &mut urls,
+            &page.url,
+            &page.title,
+            TransitionType::Typed,
+            now,
+        );
+    }
+}
+
+fn recordable_vmux_url(url: &str) -> bool {
+    url.starts_with("vmux://")
+        && !url.starts_with("vmux://history")
+        && !url.starts_with("vmux://layout")
+        && !url.starts_with("vmux://command-bar")
+}
+
 #[cfg(test)]
 mod system_tests {
     use super::*;
@@ -301,11 +332,49 @@ mod system_tests {
     }
 
     #[test]
-    fn vmux_scheme_skipped() {
+    fn committed_vmux_navigation_is_skipped_for_page_ready_recording() {
         let mut app = app();
         send(&mut app, "vmux://history", CefTransitionCore::Link, false);
         app.update();
         assert_eq!(app.world_mut().query::<&Url>().iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn ready_vmux_page_is_recorded_but_history_shell_is_not() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_systems(Update, record_vmux_pages);
+        app.world_mut().spawn((
+            PageMetadata {
+                url: "vmux://team/".into(),
+                title: "Team".into(),
+                ..default()
+            },
+            PageReady {},
+        ));
+        app.world_mut().spawn((
+            PageMetadata {
+                url: "vmux://history/".into(),
+                title: "History".into(),
+                ..default()
+            },
+            PageReady {},
+        ));
+
+        app.update();
+
+        let urls: Vec<_> = app
+            .world_mut()
+            .query::<(&Url, &PageMetadata)>()
+            .iter(app.world())
+            .map(|(_, metadata)| metadata.url.clone())
+            .collect();
+        assert_eq!(urls, ["vmux://team/"]);
+        assert_eq!(
+            app.world_mut().query::<&Visit>().iter(app.world()).count(),
+            1
+        );
     }
 
     #[test]

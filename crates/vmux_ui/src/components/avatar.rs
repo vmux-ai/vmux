@@ -9,24 +9,21 @@ const GENERATED_AVATAR_COLORS: [&str; 6] = [
 #[component]
 pub fn Avatar(
     src: Option<String>,
-    fallback: String,
+    seed: String,
     background: String,
     #[props(default)] alt: String,
     #[props(default)] class: String,
-    #[props(default)] seed: Option<String>,
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
-    let generated = seed
-        .as_deref()
-        .filter(|seed| !seed.is_empty())
-        .map(|seed| GeneratedAvatar::of(seed, &background));
+    let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
+    let generated = GeneratedAvatar::of(avatar_seed, &background);
     rsx! {
         div {
             class,
             style: "--avatar-background:{background}",
             if let Some(src) = src {
                 img { class: "size-full object-cover", src, alt }
-            } else if let Some(generated) = generated {
+            } else {
                 svg {
                     class: "size-full",
                     view_box: "0 0 36 36",
@@ -70,8 +67,6 @@ pub fn Avatar(
                         }
                     }
                 }
-            } else {
-                "{fallback}"
             }
         }
     }

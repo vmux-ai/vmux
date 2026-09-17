@@ -221,15 +221,18 @@ impl Agents {
 impl Log {
     pub fn chat_items(&self, live_turn: &str, running: bool) -> Vec<ChatItem> {
         let mut messages = Vec::with_capacity(self.events.len() + 1);
+        let mut timestamps = Vec::with_capacity(self.events.len() + 1);
         for event in &self.events {
             messages.push(event.message.clone());
+            timestamps.push(event.created_at_ms);
         }
         if !live_turn.is_empty() {
             messages.push(RoomMessage::Assistant {
                 blocks: vec![AssistantBlock::Text(live_turn.to_string())],
             });
+            timestamps.push(0);
         }
-        group_turns_tail(&[], &messages, &[], running, usize::MAX).items
+        group_turns_tail(&[], &messages, &timestamps, &[], running, usize::MAX).items
     }
 }
 
@@ -387,10 +390,27 @@ mod tests {
             panic!("expected a turn");
         };
         assert!(turn.running);
+        assert_eq!(turn.created_at_ms, 1);
         assert_eq!(
             turn.blocks.last(),
             Some(&ChatBlock::Text("partial".to_string()))
         );
+    }
+
+    #[test]
+    fn live_turn_without_an_agent_event_has_no_timestamp() {
+        let log = Log {
+            room_id: None,
+            through_seq: 0,
+            events: RoomEvent::from_messages("s", 100, &[RoomMessage::user("hello")]),
+        };
+
+        let items = log.chat_items("partial", true);
+
+        assert!(matches!(
+            &items[1],
+            ChatItem::Turn(turn) if turn.created_at_ms == 0
+        ));
     }
 
     #[test]

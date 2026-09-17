@@ -51,7 +51,6 @@ pub enum FileKeyCommand {
     #[default]
     #[menu(id = "file_toggle_explorer", label = "Toggle Explorer", hidden)]
     #[shortcut(direct = "Super+b", when = "files")]
-    #[shortcut(direct = "Ctrl+b", when = "files")]
     ToggleExplorer,
     #[menu(id = "file_reveal_in_explorer", label = "Reveal In Explorer", hidden)]
     #[shortcut(direct = "Super+Shift+e", when = "files")]
@@ -209,7 +208,7 @@ pub enum LayoutCommand {
 pub enum StackCommand {
     #[default]
     #[menu(id = "stack_close", label = "Close Stack", accel = "super+w")]
-    #[shortcut(chord = "Ctrl+g, x")]
+    #[shortcut(chord = "Ctrl+b, Shift+x")]
     Close,
     #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]
     #[shortcut(direct = "Super+Shift+J")]
@@ -229,7 +228,7 @@ pub enum StackCommand {
     #[shortcut(direct = "Ctrl+Shift+T")]
     Reopen,
     #[menu(id = "stack_duplicate", label = "Duplicate Stack\t<leader> d", hidden)]
-    #[shortcut(chord = "Ctrl+g, d")]
+    #[shortcut(chord = "Ctrl+b, d")]
     Duplicate,
 
     #[menu(
@@ -237,13 +236,13 @@ pub enum StackCommand {
         label = "Move Stack to Pane\t<leader> !",
         hidden
     )]
-    #[shortcut(chord = "Ctrl+g, !")]
+    #[shortcut(chord = "Ctrl+b, !")]
     MoveToPane,
     #[menu(id = "stack_swap_prev", label = "Move Stack Left\t<leader> <")]
-    #[shortcut(chord = "Ctrl+g, <")]
+    #[shortcut(chord = "Ctrl+b, <")]
     SwapPrev,
     #[menu(id = "stack_swap_next", label = "Move Stack Right\t<leader> >")]
-    #[shortcut(chord = "Ctrl+g, >")]
+    #[shortcut(chord = "Ctrl+b, >")]
     SwapNext,
 }
 
@@ -262,7 +261,7 @@ pub enum TerminalCommand {
     #[menu(id = "terminal_clear", label = "Clear Terminal")]
     Clear,
     #[menu(id = "terminal_copy_mode", label = "Visual Mode\t<leader> [", hidden)]
-    #[shortcut(chord = "Ctrl+g, [")]
+    #[shortcut(chord = "Ctrl+b, [")]
     CopyMode,
 }
 
@@ -449,7 +448,7 @@ pub enum BookmarkCommand {
 pub enum SpaceCommand {
     #[default]
     #[menu(id = "space_open", label = "Spaces\t<leader> s")]
-    #[shortcut(chord = "Ctrl+g, s")]
+    #[shortcut(chord = "Ctrl+b, s")]
     Open,
     #[menu(id = "space_next", label = "Next Space", hidden)]
     #[shortcut(direct = "ArrowDown", when = "spaces")]
@@ -487,62 +486,88 @@ impl SpaceCommand {
 pub enum PaneCommand {
     #[default]
     #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
-    #[shortcut(chord = "Ctrl+g, o")]
+    #[shortcut(chord = "Ctrl+b, o")]
     Toggle,
-    #[menu(id = "close_pane", label = "Close Pane")]
+    #[menu(id = "close_pane", label = "Close Pane\t<leader> x")]
+    #[shortcut(chord = "Ctrl+b, x")]
     Close,
     #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z", hidden)]
-    #[shortcut(chord = "Ctrl+g, z")]
+    #[shortcut(chord = "Ctrl+b, z")]
     Zoom,
     #[menu(id = "select_pane_left", label = "Select Left Pane\t<leader> h")]
-    #[shortcut(chord = "Ctrl+g, h")]
+    #[shortcut(chord = "Ctrl+b, h")]
+    #[shortcut(chord = "Ctrl+b, ArrowLeft")]
     SelectLeft,
     #[menu(id = "select_pane_right", label = "Select Right Pane\t<leader> l")]
-    #[shortcut(chord = "Ctrl+g, l")]
+    #[shortcut(chord = "Ctrl+b, l")]
+    #[shortcut(chord = "Ctrl+b, ArrowRight")]
     SelectRight,
     #[menu(id = "select_pane_up", label = "Select Up Pane\t<leader> k")]
-    #[shortcut(chord = "Ctrl+g, k")]
+    #[shortcut(chord = "Ctrl+b, k")]
+    #[shortcut(chord = "Ctrl+b, ArrowUp")]
     SelectUp,
     #[menu(id = "select_pane_down", label = "Select Down Pane\t<leader> j")]
-    #[shortcut(chord = "Ctrl+g, j")]
+    #[shortcut(chord = "Ctrl+b, j")]
+    #[shortcut(chord = "Ctrl+b, ArrowDown")]
     SelectDown,
     #[menu(id = "swap_pane_prev", label = "Swap Pane Previous\t<leader> {")]
-    #[shortcut(chord = "Ctrl+g, {")]
+    #[shortcut(chord = "Ctrl+b, {")]
     SwapPrev,
     #[menu(id = "swap_pane_next", label = "Swap Pane Next\t<leader> }")]
-    #[shortcut(chord = "Ctrl+g, }")]
+    #[shortcut(chord = "Ctrl+b, }")]
     SwapNext,
-    #[menu(
-        id = "rotate_forward",
-        label = "Rotate Forward\t<leader> ctrl+o",
-        hidden
-    )]
-    #[shortcut(chord = "Ctrl+g, Ctrl+o")]
+    #[menu(id = "rotate_forward", label = "Rotate Forward\t<leader> r", hidden)]
+    #[shortcut(chord = "Ctrl+b, r")]
+    #[shortcut(chord = "Ctrl+b, Ctrl+o")]
     RotateForward,
     #[menu(
         id = "rotate_backward",
-        label = "Rotate Backward\t<leader> alt+o",
+        label = "Rotate Backward\t<leader> shift+r",
         hidden
     )]
-    #[shortcut(chord = "Ctrl+g, Alt+o")]
+    #[shortcut(chord = "Ctrl+b, Shift+r")]
+    #[shortcut(chord = "Ctrl+b, Alt+o")]
     RotateBackward,
-    #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
-    #[shortcut(chord = "Ctrl+g, =")]
+    #[menu(id = "mirror_panes", label = "Mirror Panes\t<leader> m")]
+    #[shortcut(chord = "Ctrl+b, m")]
+    Mirror,
+    #[menu(
+        id = "mirror_panes_horizontal",
+        label = "Mirror Panes Horizontally\t<leader> alt+h"
+    )]
+    #[shortcut(chord = "Ctrl+b, Alt+h")]
+    MirrorHorizontal,
+    #[menu(
+        id = "mirror_panes_vertical",
+        label = "Mirror Panes Vertically\t<leader> alt+v"
+    )]
+    #[shortcut(chord = "Ctrl+b, Alt+v")]
+    MirrorVertical,
+    #[menu(
+        id = "equalize_pane_size",
+        label = "Equalize Pane Size\t<leader> shift+e"
+    )]
+    #[shortcut(chord = "Ctrl+b, Shift+e")]
+    #[shortcut(chord = "Ctrl+b, =")]
     EqualizeSize,
     #[menu(id = "resize_pane_left", label = "Resize Pane Left\t<leader> alt+left")]
-    #[shortcut(chord = "Ctrl+g, Alt+ArrowLeft")]
+    #[shortcut(chord = "Ctrl+b, Ctrl+ArrowLeft")]
+    #[shortcut(chord = "Ctrl+b, Alt+ArrowLeft")]
     ResizeLeft,
     #[menu(
         id = "resize_pane_right",
         label = "Resize Pane Right\t<leader> alt+right"
     )]
-    #[shortcut(chord = "Ctrl+g, Alt+ArrowRight")]
+    #[shortcut(chord = "Ctrl+b, Ctrl+ArrowRight")]
+    #[shortcut(chord = "Ctrl+b, Alt+ArrowRight")]
     ResizeRight,
     #[menu(id = "resize_pane_up", label = "Resize Pane Up\t<leader> alt+up")]
-    #[shortcut(chord = "Ctrl+g, Alt+ArrowUp")]
+    #[shortcut(chord = "Ctrl+b, Ctrl+ArrowUp")]
+    #[shortcut(chord = "Ctrl+b, Alt+ArrowUp")]
     ResizeUp,
     #[menu(id = "resize_pane_down", label = "Resize Pane Down\t<leader> alt+down")]
-    #[shortcut(chord = "Ctrl+g, Alt+ArrowDown")]
+    #[shortcut(chord = "Ctrl+b, Ctrl+ArrowDown")]
+    #[shortcut(chord = "Ctrl+b, Alt+ArrowDown")]
     ResizeDown,
 }
 
@@ -551,6 +576,7 @@ pub enum PaneCommand {
 pub enum TabCommand {
     #[default]
     #[menu(id = "close_tab", label = "Close Tab")]
+    #[shortcut(chord = "Ctrl+b, &")]
     Close,
     #[menu(id = "new_task", label = "New Task…")]
     New,
@@ -558,13 +584,16 @@ pub enum TabCommand {
     #[shortcut(direct = "Super+Shift+L")]
     #[shortcut(direct = "Super+Alt+ArrowRight")]
     #[shortcut(direct = "Super+Shift+BracketRight")]
+    #[shortcut(chord = "Ctrl+b, n")]
     Next,
     #[menu(id = "prev_tab", label = "Previous Tab", accel = "super+shift+[")]
     #[shortcut(direct = "Super+Shift+H")]
     #[shortcut(direct = "Super+Alt+ArrowLeft")]
     #[shortcut(direct = "Super+Shift+BracketLeft")]
+    #[shortcut(chord = "Ctrl+b, p")]
     Previous,
     #[menu(id = "rename_tab", label = "Rename Tab")]
+    #[shortcut(chord = "Ctrl+b, Comma")]
     Rename,
     #[menu(id = "tab_select_1", label = "Select Tab 1", accel = "super+1")]
     SelectIndex1,
@@ -821,7 +850,7 @@ mod tests {
             copy_mode,
             Some(Shortcut::Chord(
                 KeyCombo {
-                    key: KeyCode::KeyG,
+                    key: KeyCode::KeyB,
                     modifiers: Modifiers {
                         ctrl: true,
                         ..Default::default()
@@ -836,10 +865,10 @@ mod tests {
     }
 
     #[test]
-    fn leader_x_closes_stack_like_command_w() {
+    fn tmux_close_chords_target_the_pane_and_stack_separately() {
         let leader_x = Shortcut::Chord(
             KeyCombo {
-                key: KeyCode::KeyG,
+                key: KeyCode::KeyB,
                 modifiers: Modifiers {
                     ctrl: true,
                     ..Default::default()
@@ -856,6 +885,30 @@ mod tests {
             .map(|binding| binding.command)
             .collect();
 
+        assert_eq!(ids, vec!["close_pane".to_string()]);
+
+        let leader_shift_x = Shortcut::Chord(
+            KeyCombo {
+                key: KeyCode::KeyB,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+            },
+            KeyCombo {
+                key: KeyCode::KeyX,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            },
+        );
+        let ids: Vec<String> = AppCommand::default_shortcuts()
+            .into_iter()
+            .filter(|binding| binding.shortcut == leader_shift_x)
+            .map(|binding| binding.command)
+            .collect();
+
         assert_eq!(ids, vec!["stack_close".to_string()]);
         assert_eq!(
             AppCommand::from_menu_id("stack_close"),
@@ -863,6 +916,35 @@ mod tests {
                 StackCommand::Close
             )))
         );
+    }
+
+    #[test]
+    fn tmux_rotate_and_mirror_chords_resolve() {
+        let chord = |key| {
+            Shortcut::Chord(
+                KeyCombo {
+                    key: KeyCode::KeyB,
+                    modifiers: Modifiers {
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                },
+                KeyCombo {
+                    key,
+                    modifiers: Modifiers::default(),
+                },
+            )
+        };
+        let bindings = AppCommand::default_shortcuts();
+        let command_for = |shortcut| {
+            bindings
+                .iter()
+                .find(|binding| binding.shortcut == shortcut)
+                .map(|binding| binding.command.as_str())
+        };
+
+        assert_eq!(command_for(chord(KeyCode::KeyR)), Some("rotate_forward"));
+        assert_eq!(command_for(chord(KeyCode::KeyM)), Some("mirror_panes"));
     }
 
     #[test]
@@ -927,6 +1009,16 @@ mod tests {
             .find(|(id, _, _)| *id == "browser_prev_page")
             .map(|(_, name, _)| name.as_str());
         assert_eq!(back, Some("Browser > Navigation > Back"));
+    }
+
+    #[test]
+    fn shortcut_labels_include_hidden_commands() {
+        let entries = AppCommand::shortcut_labels();
+        let rotate = entries
+            .iter()
+            .find(|(id, _)| *id == "rotate_forward")
+            .map(|(_, name)| name.as_str());
+        assert_eq!(rotate, Some("Layout > Pane > Rotate Forward"));
     }
 
     #[test]

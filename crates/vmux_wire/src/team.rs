@@ -15,6 +15,26 @@ pub const TEAM_EVENT: &str = "team";
 )]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,
+    #[serde(default)]
+    pub profiles: Vec<ProfileRow>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProfileRow {
+    pub id: String,
+    pub name: String,
+    pub is_active: bool,
 }
 
 #[derive(
@@ -64,6 +84,10 @@ pub struct TeamCommandEvent {
     pub command: String,
     #[serde(default)]
     pub member_id: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub profile_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -104,6 +128,11 @@ mod tests {
                 is_running: false,
                 is_done_unseen: true,
             }],
+            profiles: vec![ProfileRow {
+                id: "personal".to_string(),
+                name: "Personal".to_string(),
+                is_active: true,
+            }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
@@ -116,6 +145,8 @@ mod tests {
         let original = TeamCommandEvent {
             command: "activate".to_string(),
             member_id: Some("42".to_string()),
+            profile_id: None,
+            profile_name: None,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =

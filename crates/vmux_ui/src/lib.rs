@@ -48,6 +48,8 @@ pub mod media;
 
 pub mod scroll;
 
+pub mod script;
+
 #[cfg(ui)]
 pub mod text_run;
 

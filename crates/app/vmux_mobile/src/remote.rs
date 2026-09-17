@@ -128,6 +128,7 @@ impl Api {
                 text: request.text.clone(),
                 context: None,
                 attachments: request.attachments.clone(),
+                preferred_mode: None,
             },
         );
         self.applied(self.quic.request(message).await)

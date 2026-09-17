@@ -11,8 +11,8 @@ pub fn StartBackdrop() -> Element {
     rsx! {
         div { class: "pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden md:block",
             div { class: "absolute left-1/2 top-[16%] h-[36rem] w-[36rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/15" }
-            div { class: "absolute left-[12%] top-1/3 h-80 w-80 rounded-full blur-[130px] dark:bg-cyan-400/10" }
-            div { class: "absolute right-[12%] top-1/4 h-80 w-80 rounded-full blur-[130px] dark:bg-violet-500/12" }
+            div { class: "absolute left-[12%] top-1/3 h-80 w-80 rounded-full blur-[130px] dark:bg-primary/10" }
+            div { class: "absolute right-[12%] top-1/4 h-80 w-80 rounded-full blur-[130px] dark:bg-primary/12" }
             div { class: "absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-transparent to-transparent dark:from-black/40" }
         }
     }

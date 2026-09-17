@@ -204,7 +204,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
             subtitle: format!("v{}", item.version),
             meta: rsx! {
                 ManagerBadge {
-                    tone: if item.enabled { ManagerTone::Green } else { ManagerTone::Neutral },
+                    tone: if item.enabled { ManagerTone::Primary } else { ManagerTone::Neutral },
                     if item.enabled { {translate("extensions-on")} } else { {translate("extensions-off")} }
                 }
             },

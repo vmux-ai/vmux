@@ -6,29 +6,41 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Component)]
 pub struct StreamServer {
     port: u16,
     capability: String,
+    layout: BgraFrameLayout,
     stop: Arc<AtomicBool>,
     frames: Option<Arc<EncodedFrameExchange>>,
     capture: Option<Arc<Mutex<Child>>>,
+    active: AtomicBool,
 }
 
 impl StreamServer {
-    const FPS: &'static str = "30";
-    const JPEG_QUALITY: &'static str = "95";
+    const FRAME_INTERVAL: Duration = Duration::from_millis(67);
+    const JPEG_QUALITY: u8 = 90;
     const SCALE: &'static str = "0.5";
 
-    pub fn start(axe: &Axe, device: SimulatorDevice) -> io::Result<Self> {
+    pub fn start(
+        axe: &Axe,
+        device: SimulatorDevice,
+        pixels: Option<(u32, u32)>,
+    ) -> io::Result<Self> {
         let axe = axe.path().to_path_buf();
+        let layout = BgraFrameLayout::of(pixels.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "simulator pixel size is unavailable",
+            )
+        })?)?;
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let capability = uuid::Uuid::new_v4().simple().to_string();
-        let shared = Self::shared_stream(&axe, &device);
+        let shared = Self::shared_stream(&axe, &device, layout);
         let stream = shared.as_ref().map(|(stream, _)| stream.clone());
         let frames = stream.as_ref().map(|stream| stream.frames.clone());
         let capture = shared.map(|(_, capture)| capture);
@@ -37,16 +49,7 @@ impl StreamServer {
         let listener_capability = capability.clone();
         let listener_thread = std::thread::Builder::new()
             .name("vmux-simulator-stream".into())
-            .spawn(move || {
-                Self::accept_loop(
-                    listener,
-                    axe,
-                    device,
-                    stream,
-                    listener_capability,
-                    listener_stop,
-                )
-            });
+            .spawn(move || Self::accept_loop(listener, stream, listener_capability, listener_stop));
         if let Err(error) = listener_thread {
             stop.store(true, Ordering::Release);
             if let Some(frames) = &frames {
@@ -60,9 +63,11 @@ impl StreamServer {
         Ok(Self {
             port,
             capability,
+            layout,
             stop,
             frames,
             capture,
+            active: AtomicBool::new(true),
         })
     }
 
@@ -74,10 +79,39 @@ impl StreamServer {
         &self.capability
     }
 
+    pub fn frame_width(&self) -> u32 {
+        self.layout.width
+    }
+
+    pub fn frame_height(&self) -> u32 {
+        self.layout.height
+    }
+
+    pub fn frame_stride(&self) -> u32 {
+        self.layout.stride
+    }
+
+    pub fn set_active(&self, active: bool) {
+        if self.active.swap(active, Ordering::AcqRel) == active {
+            return;
+        }
+        let Some(capture) = &self.capture else {
+            return;
+        };
+        let Ok(child) = capture.lock() else {
+            return;
+        };
+        let Ok(pid) = i32::try_from(child.id()) else {
+            return;
+        };
+        let signal = if active { libc::SIGCONT } else { libc::SIGSTOP };
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+
     fn accept_loop(
         listener: TcpListener,
-        axe: PathBuf,
-        device: SimulatorDevice,
         stream: Option<SharedStream>,
         capability: String,
         stop: Arc<AtomicBool>,
@@ -94,41 +128,42 @@ impl StreamServer {
                     return;
                 }
             };
-            let device = device.clone();
-            let axe = axe.clone();
+            if let Err(error) = socket.set_nonblocking(false) {
+                warn!("simulator stream socket could not become blocking: {error}");
+                continue;
+            }
             let stream = stream.clone();
             let capability = capability.clone();
             let spawned = std::thread::Builder::new()
                 .name("vmux-simulator-pipe".into())
-                .spawn(move || Self::pipe(socket, axe, device, stream, &capability));
+                .spawn(move || Self::pipe(socket, stream, &capability));
             if spawned.is_err() {
                 warn!("could not spawn a stream thread");
             }
         }
     }
 
-    fn pipe(
-        mut socket: TcpStream,
-        axe: PathBuf,
-        device: SimulatorDevice,
-        stream: Option<SharedStream>,
-        capability: &str,
-    ) {
-        if Self::read_request(&mut socket, capability).is_err() {
-            return;
-        }
+    fn pipe(mut socket: TcpStream, stream: Option<SharedStream>, capability: &str) {
+        let after = match Self::read_request(&mut socket, capability) {
+            Ok(StreamRequest::Frames { after }) => after,
+            Ok(StreamRequest::Preflight) => {
+                let _ = Self::write_preflight(&mut socket);
+                return;
+            }
+            Err(_) => return,
+        };
         let Some(stream) = stream else {
-            Self::pipe_live_mjpeg(socket, axe, device);
             return;
         };
-        Self::write_mjpeg(socket, stream);
+        Self::write_bgra(socket, stream, after);
     }
 
     fn shared_stream(
         axe: &PathBuf,
         device: &SimulatorDevice,
+        layout: BgraFrameLayout,
     ) -> Option<(SharedStream, Arc<Mutex<Child>>)> {
-        let (child, stdout) = Self::spawn_mjpeg(axe, device)?;
+        let (child, stdout) = Self::spawn_bgra(axe, device)?;
         let capture = Arc::new(Mutex::new(child));
         let frames = Arc::new(EncodedFrameExchange::default());
         let published = frames.clone();
@@ -136,7 +171,7 @@ impl StreamServer {
         let reader = std::thread::Builder::new()
             .name("vmux-simulator-capture".into())
             .spawn(move || {
-                Self::read_mjpeg(stdout, published);
+                Self::read_bgra(stdout, published, layout, Self::FRAME_INTERVAL);
                 Self::stop_capture(&reader_capture);
             });
         if reader.is_err() {
@@ -147,12 +182,10 @@ impl StreamServer {
         Some((SharedStream { frames }, capture))
     }
 
-    fn spawn_mjpeg(axe: &PathBuf, device: &SimulatorDevice) -> Option<(Child, ChildStdout)> {
+    fn spawn_bgra(axe: &PathBuf, device: &SimulatorDevice) -> Option<(Child, ChildStdout)> {
         let mut child = std::process::Command::new(axe)
             .args(["stream-video", "--udid", &device.udid])
-            .args(["--format", "mjpeg"])
-            .args(["--fps", Self::FPS])
-            .args(["--quality", Self::JPEG_QUALITY])
+            .args(["--format", "bgra"])
             .args(["--scale", Self::SCALE])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -162,46 +195,46 @@ impl StreamServer {
         Some((child, stdout))
     }
 
-    fn read_mjpeg(mut stdout: ChildStdout, frames: Arc<EncodedFrameExchange>) {
-        let mut parser = MjpegFrames::default();
-        let mut chunk = [0; 64 * 1024];
+    fn read_bgra(
+        mut stdout: ChildStdout,
+        frames: Arc<EncodedFrameExchange>,
+        layout: BgraFrameLayout,
+        interval: Duration,
+    ) {
+        let mut frame = vec![0; layout.frame_bytes];
+        let mut published_at = Instant::now() - interval;
         loop {
-            let count = match stdout.read(&mut chunk) {
-                Ok(0) | Err(_) => {
-                    frames.close();
-                    return;
-                }
-                Ok(count) => count,
-            };
-            let parsed = match parser.push(&chunk[..count]) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    warn!("simulator MJPEG stream failed: {error}");
-                    frames.close();
-                    return;
-                }
-            };
-            for frame in parsed {
-                frames.replace(frame);
-            }
-        }
-    }
-
-    fn write_mjpeg(mut socket: TcpStream, stream: SharedStream) {
-        let _ = socket.set_nodelay(true);
-        if Self::write_header(&mut socket).is_err() {
-            return;
-        }
-        let mut generation = 0;
-        while let Some((next_generation, encoded)) = stream.frames.after(generation) {
-            generation = next_generation;
-            if Self::write_frame(&mut socket, &encoded).is_err() {
+            if stdout.read_exact(&mut frame).is_err() {
+                frames.close();
                 return;
             }
+            let now = Instant::now();
+            if now.duration_since(published_at) < interval {
+                continue;
+            }
+            let Ok(encoded) = layout.jpeg(&frame, Self::JPEG_QUALITY) else {
+                frames.close();
+                return;
+            };
+            frames.replace(encoded);
+            published_at = now;
         }
     }
 
-    fn read_request(socket: &mut TcpStream, capability: &str) -> io::Result<()> {
+    fn write_bgra(mut socket: TcpStream, stream: SharedStream, after: u64) {
+        let _ = socket.set_nodelay(true);
+        let Some((generation, frame)) = stream.frames.after(after) else {
+            return;
+        };
+        if Self::write_header(&mut socket, frame.len(), generation).is_err() {
+            return;
+        }
+        if let Err(error) = socket.write_all(&frame) {
+            warn!("simulator frame write failed: {error}");
+        }
+    }
+
+    fn read_request(socket: &mut TcpStream, capability: &str) -> io::Result<StreamRequest> {
         socket.set_read_timeout(Some(Duration::from_secs(2)))?;
         let mut request = Vec::with_capacity(1024);
         let mut chunk = [0; 1024];
@@ -219,64 +252,35 @@ impl StreamServer {
             }
         }
         socket.set_read_timeout(None)?;
-        if !Self::request_has_capability(&request, capability) {
+        let Some(request) = StreamRequest::of(&request, capability) else {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "simulator stream capability is missing or invalid",
             ));
-        }
-        Ok(())
+        };
+        Ok(request)
     }
 
+    #[cfg(test)]
     fn request_has_capability(request: &[u8], capability: &str) -> bool {
-        let expected_11 = format!("GET /{capability} HTTP/1.1\r\n");
-        let expected_10 = format!("GET /{capability} HTTP/1.0\r\n");
-        request.starts_with(expected_11.as_bytes()) || request.starts_with(expected_10.as_bytes())
+        StreamRequest::of(request, capability).is_some()
     }
 
-    fn write_header(socket: &mut TcpStream) -> io::Result<()> {
+    fn write_preflight(socket: &mut TcpStream) -> io::Result<()> {
         socket.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=vmuxframe\r\nCache-Control: no-store\r\n\r\n",
+            b"HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 86400\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )
     }
 
-    fn write_frame(socket: &mut TcpStream, encoded: &[u8]) -> io::Result<()> {
-        let header = format!(
-            "--vmuxframe\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
-            encoded.len()
-        );
-        socket.write_all(header.as_bytes())?;
-        socket.write_all(encoded)?;
-        socket.write_all(b"\r\n")
-    }
-
-    fn pipe_live_mjpeg(mut socket: TcpStream, axe: PathBuf, device: SimulatorDevice) {
-        let Some((mut child, mut stdout)) = Self::spawn_mjpeg(&axe, &device) else {
-            return;
-        };
-        if Self::write_header(&mut socket).is_err() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return;
-        }
-        let mut parser = MjpegFrames::default();
-        let mut chunk = [0; 64 * 1024];
-        'stream: loop {
-            let count = match stdout.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(count) => count,
-            };
-            let Ok(frames) = parser.push(&chunk[..count]) else {
-                break;
-            };
-            for frame in frames {
-                if Self::write_frame(&mut socket, &frame).is_err() {
-                    break 'stream;
-                }
-            }
-        }
-        let _ = child.kill();
-        let _ = child.wait();
+    fn write_header(
+        socket: &mut impl Write,
+        frame_bytes: usize,
+        generation: u64,
+    ) -> io::Result<()> {
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Expose-Headers: X-Vmux-Generation\r\nCache-Control: no-store\r\nContent-Length: {frame_bytes}\r\nX-Vmux-Generation: {generation}\r\nConnection: close\r\n\r\n"
+        )
     }
 
     fn stop_capture(capture: &Mutex<Child>) {
@@ -285,6 +289,46 @@ impl StreamServer {
         };
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamRequest {
+    Frames { after: u64 },
+    Preflight,
+}
+
+impl StreamRequest {
+    fn of(request: &[u8], capability: &str) -> Option<Self> {
+        let expected_path = format!("/{capability}");
+        let line = request.split(|byte| *byte == b'\n').next()?;
+        let line = std::str::from_utf8(line).ok()?.trim_end_matches('\r');
+        let mut parts = line.split_whitespace();
+        let method = parts.next()?;
+        let target = parts.next()?;
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
+        if path != expected_path {
+            return None;
+        }
+        match method {
+            "GET" => Some(Self::Frames {
+                after: Self::after_generation(query),
+            }),
+            "OPTIONS" => Some(Self::Preflight),
+            _ => None,
+        }
+    }
+
+    fn after_generation(query: &str) -> u64 {
+        for field in query.split('&') {
+            let Some(value) = field.strip_prefix("after=") else {
+                continue;
+            };
+            if let Ok(generation) = value.parse() {
+                return generation;
+            }
+        }
+        0
     }
 }
 
@@ -300,53 +344,92 @@ impl Drop for StreamServer {
     }
 }
 
-#[derive(Default)]
-struct MjpegFrames {
-    bytes: Vec<u8>,
+#[derive(Clone, Copy)]
+struct BgraFrameLayout {
+    width: u32,
+    height: u32,
+    stride: u32,
+    frame_bytes: usize,
 }
 
-impl MjpegFrames {
-    const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
-
-    fn push(&mut self, chunk: &[u8]) -> io::Result<Vec<Vec<u8>>> {
-        self.bytes.extend_from_slice(chunk);
-        let mut frames = Vec::new();
-        loop {
-            let Some(start) = Self::marker(&self.bytes, [0xff, 0xd8]) else {
-                if self.bytes.len() > Self::MAX_FRAME_BYTES {
-                    self.bytes.clear();
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "simulator MJPEG stream has no frame start",
-                    ));
-                }
-                if self.bytes.last() == Some(&0xff) {
-                    self.bytes.drain(..self.bytes.len() - 1);
-                } else {
-                    self.bytes.clear();
-                }
-                return Ok(frames);
-            };
-            if start > 0 {
-                self.bytes.drain(..start);
-            }
-            let Some(end) = Self::marker(&self.bytes[2..], [0xff, 0xd9]) else {
-                if self.bytes.len() > Self::MAX_FRAME_BYTES {
-                    self.bytes.clear();
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "simulator MJPEG frame is too large",
-                    ));
-                }
-                return Ok(frames);
-            };
-            let end = end + 4;
-            frames.push(self.bytes.drain(..end).collect());
+impl BgraFrameLayout {
+    fn of((source_width, source_height): (u32, u32)) -> io::Result<Self> {
+        let width = source_width / 2;
+        let height = source_height / 2;
+        let row_bytes = width.checked_mul(4).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "simulator frame width is invalid",
+            )
+        })?;
+        let stride = row_bytes
+            .checked_add(63)
+            .map(|value| value & !63)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "simulator frame stride is invalid",
+                )
+            })?;
+        let frame_bytes = stride
+            .checked_mul(height)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "simulator frame size is invalid",
+                )
+            })?;
+        if width == 0 || height == 0 || frame_bytes == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "simulator frame size is empty",
+            ));
         }
+        Ok(Self {
+            width,
+            height,
+            stride,
+            frame_bytes,
+        })
     }
 
-    fn marker(bytes: &[u8], marker: [u8; 2]) -> Option<usize> {
-        bytes.windows(2).position(|window| window == marker)
+    fn jpeg(self, bgra: &[u8], quality: u8) -> io::Result<Vec<u8>> {
+        if bgra.len() != self.frame_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "simulator BGRA frame size is invalid",
+            ));
+        }
+        let pixel_count = self
+            .width
+            .checked_mul(self.height)
+            .and_then(|value| value.checked_mul(3))
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "simulator RGB frame size is invalid",
+                )
+            })?;
+        let mut rgb = Vec::with_capacity(pixel_count);
+        let row_pixels = usize::try_from(self.width).unwrap_or_default();
+        let stride = usize::try_from(self.stride).unwrap_or_default();
+        for row in bgra.chunks_exact(stride) {
+            for pixel in row[..row_pixels * 4].chunks_exact(4) {
+                rgb.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+            }
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
+            .encode(
+                &rgb,
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(io::Error::other)?;
+        Ok(jpeg)
     }
 }
 
@@ -405,18 +488,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mjpeg_frames_survive_chunk_boundaries() {
-        let mut parser = MjpegFrames::default();
+    fn bgra_layout_matches_core_video_stride_alignment() {
+        let layout = BgraFrameLayout::of((1206, 2622)).unwrap();
 
-        assert!(parser.push(&[9, 0xff]).unwrap().is_empty());
-        assert!(parser.push(&[0xd8, 1, 2, 0xff]).unwrap().is_empty());
-        assert_eq!(
-            parser.push(&[0xd9, 0xff, 0xd8, 3, 0xff, 0xd9]).unwrap(),
-            [
-                vec![0xff, 0xd8, 1, 2, 0xff, 0xd9],
-                vec![0xff, 0xd8, 3, 0xff, 0xd9]
-            ]
-        );
+        assert_eq!(layout.width, 603);
+        assert_eq!(layout.height, 1311);
+        assert_eq!(layout.stride, 2432);
+        assert_eq!(layout.frame_bytes, 3_188_352);
+    }
+
+    #[test]
+    fn bgra_frames_encode_as_bounded_jpeg_images() {
+        let layout = BgraFrameLayout::of((120, 240)).unwrap();
+        let mut bgra = vec![0; layout.frame_bytes];
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[30, 20, 10, 255]);
+        }
+
+        let jpeg = layout.jpeg(&bgra, 75).unwrap();
+        let decoded = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg).unwrap();
+
+        assert_eq!(decoded.width(), layout.width);
+        assert_eq!(decoded.height(), layout.height);
+        assert!(jpeg.len() < layout.frame_bytes);
     }
 
     #[test]
@@ -433,6 +527,13 @@ mod tests {
             b"GET /secret-extra HTTP/1.1\r\nHost: localhost\r\n\r\n",
             "secret"
         ));
+        assert_eq!(
+            StreamRequest::of(
+                b"OPTIONS /secret HTTP/1.1\r\nAccess-Control-Request-Private-Network: true\r\n\r\n",
+                "secret"
+            ),
+            Some(StreamRequest::Preflight)
+        );
     }
 
     #[test]
@@ -444,5 +545,24 @@ mod tests {
         let (_, second) = frames.after(0).expect("second client");
 
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn a_frame_response_is_bounded_so_webviews_do_not_buffer_forever() {
+        let mut response = Vec::new();
+        StreamServer::write_header(&mut response, 3, 7).unwrap();
+
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.contains("Content-Length: 3\r\n"));
+        assert!(response.contains("X-Vmux-Generation: 7\r\n"));
+        assert!(!response.contains("Transfer-Encoding"));
+    }
+
+    #[test]
+    fn a_frame_request_carries_the_generation_it_has_already_drawn() {
+        assert_eq!(
+            StreamRequest::of(b"GET /secret?after=42 HTTP/1.1\r\n\r\n", "secret"),
+            Some(StreamRequest::Frames { after: 42 })
+        );
     }
 }

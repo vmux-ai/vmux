@@ -340,6 +340,9 @@ pub enum AgentQuery {
     SimulatorControl {
         action: SimulatorAction,
     },
+    WorkingDirectory {
+        anchor: ProcessId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -655,6 +658,12 @@ pub enum ClientMessage {
         managed_mcp_servers: Vec<ManagedMcpServer>,
         effort: Option<String>,
     },
+    AcpSetMode {
+        sid: String,
+        request_id: u64,
+        config_id: String,
+        mode_id: String,
+    },
     Status,
     RebindAcpWorkspace {
         sid: String,
@@ -676,6 +685,26 @@ impl ClientMessage {
                 text,
                 context,
                 attachments,
+                preferred_mode: None,
+            },
+        )
+        .into()
+    }
+
+    pub fn agent_input_with_mode(
+        sid: String,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+        preferred_mode: Option<String>,
+    ) -> Self {
+        SharedMessage::agent(
+            sid,
+            AgentAction::Input {
+                text,
+                context,
+                attachments,
+                preferred_mode,
             },
         )
         .into()
@@ -902,10 +931,39 @@ pub enum ServiceMessage {
         succeeded: bool,
     },
     Shared(SharedEvent),
+    AcpModeInfo {
+        sid: String,
+        config_id: String,
+        current_mode_id: String,
+        modes: Vec<AcpModeOption>,
+    },
+    AcpModeSelectionResult {
+        sid: String,
+        request_id: u64,
+        mode_id: String,
+        succeeded: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AcpModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AcpModeOption {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
@@ -1139,6 +1197,18 @@ mod tests {
         let recovered: AgentQuery =
             rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(recovered, AgentQuery::ReadLayout { anchor: None });
+    }
+
+    #[test]
+    fn agent_query_working_directory_rkyv_round_trip() {
+        let query = AgentQuery::WorkingDirectory {
+            anchor: ProcessId::new(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
+        let recovered: AgentQuery =
+            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(recovered, query);
     }
 
     #[test]
@@ -1633,6 +1703,7 @@ mod tests {
                     text: "hi".into(),
                     context: Some("prior conversation".into()),
                     attachments: Vec::new(),
+                    preferred_mode: None,
                 },
             )),
             ClientMessage::Shared(SharedMessage::agent(
@@ -1646,6 +1717,7 @@ mod tests {
                         mime_type: "image/png".into(),
                         size: 42,
                     }],
+                    preferred_mode: Some("auto".into()),
                 },
             )),
             ClientMessage::AcpSetModel {
@@ -1713,8 +1785,8 @@ mod tests {
             ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: AgentAction::Input { text, context, attachments },
-            }) if sid == "s" && text == "hi" && context.is_none() && attachments.is_empty()
+                action: AgentAction::Input { text, context, attachments, preferred_mode },
+            }) if sid == "s" && text == "hi" && context.is_none() && attachments.is_empty() && preferred_mode.is_none()
         ));
         assert!(matches!(
             ClientMessage::agent_input(

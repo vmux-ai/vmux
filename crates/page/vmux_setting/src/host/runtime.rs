@@ -733,7 +733,7 @@ impl Default for ShortcutSettings {
 
 fn default_leader() -> KeyComboDef {
     KeyComboDef {
-        key: "g".to_string(),
+        key: "b".to_string(),
         ctrl: true,
         shift: false,
         alt: false,
@@ -1892,6 +1892,7 @@ mod tests {
                 "vmux://spaces/",
                 "vmux://team/",
                 "vmux://history/",
+                "vmux://shortcuts/",
                 "vmux://extensions/",
                 "vmux://lsp/",
                 "vmux://settings/",
@@ -1900,28 +1901,10 @@ mod tests {
     }
 
     #[test]
-    fn embedded_settings_offer_starter_bookmark_folders() {
+    fn embedded_settings_use_page_pins_instead_of_starter_folders() {
         let settings = load_embedded_settings();
-        let folders = settings
-            .browser
-            .bookmark_folders
-            .iter()
-            .map(|folder| folder.name.as_str())
-            .collect::<Vec<_>>();
 
-        assert_eq!(folders, ["Projects", "Knowledge", "Tools"]);
-        assert_eq!(
-            settings.browser.bookmark_folders[0].smart,
-            Some(vmux_core::SmartBookmarkFolder::Projects)
-        );
-        assert_eq!(
-            settings.browser.bookmark_folders[1].smart,
-            Some(vmux_core::SmartBookmarkFolder::Knowledge)
-        );
-        assert_eq!(
-            settings.browser.bookmark_folders[2].smart,
-            Some(vmux_core::SmartBookmarkFolder::Tools)
-        );
+        assert!(settings.browser.bookmark_folders.is_empty());
     }
 
     #[test]
@@ -2488,10 +2471,13 @@ mod tests {
                 serde_json::json!("https://x.example"),
             )
             .unwrap();
-        assert!(ron.contains("browser"));
-        assert!(ron.contains("https://x.example"));
-        assert!(!ron.contains("shortcuts"));
-        assert!(!ron.contains("themes"));
+        let sparse: PartialAppSettings = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(&ron)
+            .unwrap();
+        assert_eq!(sparse.browser.unwrap().startup_url, "https://x.example");
+        assert!(sparse.shortcuts.is_none());
+        assert!(sparse.terminal.is_none());
         let reloaded = parse_settings(&ron).unwrap();
         assert_eq!(reloaded.browser.startup_url, "https://x.example");
         assert_eq!(reloaded.shortcuts.leader.key, "b");
@@ -2608,6 +2594,46 @@ mod tests {
             None,
             "leader c is rebound from new stack to new tab"
         );
+    }
+
+    #[test]
+    fn embedded_settings_bind_tmux_layout_parity_to_leader() {
+        let settings = load_embedded_settings();
+        let has = |command: &str, key: &str, ctrl: bool, shift: bool, alt: bool| {
+            settings.shortcuts.bindings.iter().any(|entry| {
+                let ShortcutDef::Leader(combo) = &entry.binding else {
+                    return false;
+                };
+                entry.command == command
+                    && combo.key == key
+                    && combo.ctrl == ctrl
+                    && combo.shift == shift
+                    && combo.alt == alt
+            })
+        };
+
+        for (command, key, ctrl, shift, alt) in [
+            ("open_in_pane_right", "%", false, false, false),
+            ("open_in_pane_bottom", "\"", false, false, false),
+            ("close_pane", "x", false, false, false),
+            ("toggle_pane", "o", false, false, false),
+            ("zoom_pane", "z", false, false, false),
+            ("swap_pane_prev", "{", false, false, false),
+            ("swap_pane_next", "}", false, false, false),
+            ("rotate_forward", "r", false, false, false),
+            ("rotate_backward", "r", false, true, false),
+            ("rotate_forward", "o", true, false, false),
+            ("rotate_backward", "o", false, false, true),
+            ("mirror_panes", "m", false, false, false),
+            ("equalize_pane_size", "e", false, true, false),
+            ("resize_pane_left", "ArrowLeft", true, false, false),
+            ("resize_pane_right", "ArrowRight", false, false, true),
+        ] {
+            assert!(
+                has(command, key, ctrl, shift, alt),
+                "missing <leader> {key} binding for {command}"
+            );
+        }
     }
 
     #[test]

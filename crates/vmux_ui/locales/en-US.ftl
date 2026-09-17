@@ -20,6 +20,8 @@ common-error = Error
 common-output = Output
 common-pending = Pending
 common-current = current
+composer-permissions = Permissions
+composer-permission-change = Change permission mode
 common-stop = Stop
 common-enable = Enable
 common-disable = Disable
@@ -178,11 +180,27 @@ spaces-tabs = { $count ->
    *[other] { $count } tabs
 }
 spaces-delete = Delete space
+shortcuts-title = Keyboard Shortcuts
+shortcuts-count = { $count } shortcuts
+shortcuts-search = Filter shortcuts…
+shortcuts-empty = No matching shortcuts
+shortcuts-general = General
+shortcuts-try-title = Try a shortcut
+shortcuts-try-hint = Press any shortcut
+shortcuts-waiting = Waiting for the next key…
+shortcuts-triggered = Runs: { $action }
+shortcuts-no-match = No shortcut matches those keys
+shortcuts-clear = Reset
 
 team-title = Team
 simulator-title = Simulator
 simulator-waiting-device = { $device } · iOS { $version }
 simulator-waiting-version = iOS { $version }
+team-profiles = Profiles
+team-new-profile = New profile
+team-switch-profile = Switch to { $profile }
+team-edit-profile = Edit profile
+team-profile-name = Profile name
 team-just-you = Just you in this space
 team-agents = { $count ->
     [one] You and 1 agent
@@ -193,7 +211,7 @@ team-you = You
 agent-chat-subtitle = { team-you } · { $agent }
 team-agent = Agent
 
-services-title = Background Services
+services-title = Vmux Processes
 services-processes = { $count ->
     [one] 1 process
    *[other] { $count } processes
@@ -210,6 +228,7 @@ services-attached = attached
 services-kill = Kill
 services-memory = Memory
 services-size = Size
+services-uptime = Uptime
 services-shell = Shell
 services-command = Vmux service
 services-uptime-seconds = { $seconds }s
@@ -307,6 +326,7 @@ layout-new-stack = New Stack
 layout-close-tab = Close tab
 layout-bookmark = Bookmark
 layout-pin = Pin
+layout-unpin = Unpin
 layout-new-tab = New tab
 layout-team = Team
 
@@ -368,6 +388,11 @@ command-select-pane-up = Layout > Pane > Select Up Pane
 command-select-pane-down = Layout > Pane > Select Down Pane
 command-swap-pane-prev = Layout > Pane > Swap Pane Previous
 command-swap-pane-next = Layout > Pane > Swap Pane Next
+command-rotate-forward = Layout > Pane > Rotate Panes Forward
+command-rotate-backward = Layout > Pane > Rotate Panes Backward
+command-mirror-panes = Layout > Pane > Mirror Panes
+command-mirror-panes-horizontal = Layout > Pane > Mirror Panes Horizontally
+command-mirror-panes-vertical = Layout > Pane > Mirror Panes Vertically
 command-equalize-pane-size = Layout > Pane > Equalize Pane Size
 command-resize-pane-left = Layout > Pane > Resize Pane Left
 command-resize-pane-right = Layout > Pane > Resize Pane Right

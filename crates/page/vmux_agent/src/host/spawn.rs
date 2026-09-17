@@ -209,6 +209,7 @@ pub(super) fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
+    models: Option<Res<crate::chat::model::AgentModelSelections>>,
     exec_override: Option<Res<AgentExecutableOverride>>,
     children_q: Query<&Children>,
     mut metadata: Query<&mut PageMetadata>,
@@ -235,6 +236,10 @@ pub(super) fn handle_spawn_agent_requests(
         let process_id = ProcessId::new();
         let effort_key = format!("cli:{}", req.kind.as_url_segment());
         let effort = settings.agent.effort_for(&effort_key).map(str::to_string);
+        let model = models
+            .as_deref()
+            .map(|models| models.selected_for(&effort_key).to_string())
+            .filter(|model| !model.is_empty());
         if let Ok(mut metadata) = metadata.get_mut(req.stack) {
             metadata.url = crate::AgentUrl::Cli {
                 kind: req.kind,
@@ -260,6 +265,7 @@ pub(super) fn handle_spawn_agent_requests(
                 &exe_path,
                 process_id,
                 effort.as_deref(),
+                model.as_deref(),
             );
             if let Some(wake) = wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);

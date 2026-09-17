@@ -1,6 +1,6 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-cyan-400/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
+        "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-primary/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
     } else {
         "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
     }
@@ -94,7 +94,7 @@ mod tests {
     fn selected_result_item_uses_accent_full_row_background() {
         let class = result_item_class(true);
 
-        assert!(class.contains("bg-cyan-400/12"));
+        assert!(class.contains("bg-primary/12"));
         assert!(class.contains("text-foreground"));
         assert!(class.contains("w-full"));
         assert!(!class.contains("bg-white/10"));

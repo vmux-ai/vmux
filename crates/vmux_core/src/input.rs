@@ -8,6 +8,8 @@ impl KeyStrokePlugin {
     pub const SENDERS: &'static [&'static str] = &[
         "terminal",
         "files",
+        "projects",
+        "knowledge",
         "command-bar",
         "layout",
         "agent",

@@ -66,6 +66,18 @@ impl AgentBrowserResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
+    pub(crate) fn working_directory(
+        &self,
+        anchor: vmux_service::protocol::ProcessId,
+        tabs: &Query<&vmux_layout::tab::Tab>,
+    ) -> Option<std::path::PathBuf> {
+        let pane = self.agent_pane(anchor)?;
+        let path = vmux_layout::tab::ancestor_tab_startup_dir(pane, &self.child_of, tabs)?;
+        vmux_setting::StartupDir::from_tab(&path)
+            .ok()
+            .map(|dir| dir.path)
+    }
+
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
         let (entity, _, _) = self
             .agent_terms
@@ -138,6 +150,7 @@ impl AgentBrowserResolve<'_, '_> {
 mod tests {
     use super::*;
     use crate::host::test_support::spawn_stack_in_pane;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_layout::pane::PaneSplit;
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;
@@ -190,6 +203,45 @@ mod tests {
         ));
         app.insert_resource(BrowserPaneClaimInput { anchor });
         (app, anchor, split)
+    }
+
+    #[test]
+    pub(crate) fn agent_working_directory_comes_from_its_tab() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin));
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Project".into(),
+                startup_dir: Some(cwd.path().to_string_lossy().into_owned()),
+            })
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((
+            Terminal,
+            anchor,
+            AgentSession {
+                kind: AgentKind::Codex,
+            },
+            ChildOf(stack),
+        ));
+
+        let resolved = app
+            .world_mut()
+            .run_system_once(
+                move |resolve: AgentBrowserResolve, tabs: Query<&vmux_layout::tab::Tab>| {
+                    resolve.working_directory(anchor, &tabs)
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resolved, Some(cwd.path().canonicalize().unwrap()));
     }
 
     #[test]

@@ -46,7 +46,8 @@ async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedRes
             text,
             context,
             attachments,
-        } => prompt(state, sid, text, context, attachments).await,
+            preferred_mode,
+        } => prompt(state, sid, text, context, attachments, preferred_mode).await,
 
         AgentAction::Cancel => push_input(state, sid, AcpInput::Cancel, SessionInput::Cancel).await,
 
@@ -122,6 +123,7 @@ async fn prompt(
     text: String,
     context: Option<String>,
     attachments: Vec<vmux_wire::protocol::AgentAttachment>,
+    preferred_mode: Option<String>,
 ) -> SharedResponse {
     if text.trim().is_empty() || text.len() > MAX_PROMPT_BYTES {
         return SharedResponse::Failed(SharedFailure::Invalid);
@@ -136,6 +138,7 @@ async fn prompt(
             text: text.clone(),
             context: context.clone(),
             attachments: attachments.clone(),
+            preferred_mode,
         },
         SessionInput::User { text, attachments },
     )
@@ -205,6 +208,7 @@ mod tests {
                 text: "x".repeat(length),
                 context: None,
                 attachments: Vec::new(),
+                preferred_mode: None,
             },
         )
     }
@@ -238,6 +242,7 @@ mod tests {
                     text: "   ".into(),
                     context: None,
                     attachments: Vec::new(),
+                    preferred_mode: None,
                 },
             ),
         )

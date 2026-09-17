@@ -9,11 +9,11 @@ use dioxus_primitives::select::{
 
 const SELECT_ROOT: &str = "relative";
 
-const SELECT_TRIGGER: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background py-2 pl-3 pr-4 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors dark:bg-card dark:shadow-[inset_0_0_0_1px_var(--primary)] hover:bg-accent hover:text-foreground focus-visible:outline-none data-[disabled=true]:cursor-not-allowed";
+const SELECT_TRIGGER: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background py-2 pl-3 pr-4 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors dark:bg-card hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--primary)] data-[state=open]:shadow-[inset_0_0_0_1px_var(--primary)] data-[disabled=true]:cursor-not-allowed";
 
 const SELECT_LIST: &str = "absolute left-0 top-full z-[1000] mt-1 min-w-full origin-top rounded-lg border-0 bg-background p-1 opacity-0 shadow-[inset_0_0_0_1px_var(--border)] will-change-[transform,opacity] data-[state=closed]:pointer-events-none data-[state=closed]:animate-[dx-fade-zoom-out_150ms_ease-in_forwards] data-[state=open]:pointer-events-auto data-[state=open]:animate-[dx-fade-zoom-in_150ms_ease-out_forwards] dark:bg-muted dark:shadow-[inset_0_0_0_1px_var(--primary)]";
 
-const SELECT_OPTION: &str = "flex cursor-pointer items-center justify-between rounded-[calc(0.5rem-0.25rem)] px-3 py-2 text-sm hover:bg-accent hover:text-foreground focus-visible:outline-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:text-muted-foreground dark:hover:bg-primary dark:hover:text-foreground";
+const SELECT_OPTION: &str = "flex cursor-pointer items-center justify-between rounded-[calc(0.5rem-0.25rem)] px-3 py-2 text-sm hover:bg-accent hover:text-foreground focus-visible:outline-none data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary data-[disabled=true]:cursor-not-allowed data-[disabled=true]:text-muted-foreground dark:hover:bg-primary dark:hover:text-foreground";
 
 #[component]
 pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element {

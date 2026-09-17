@@ -1,14 +1,18 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::process::{Command, Stdio};
+use std::sync::{OnceLock, mpsc};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::client::cli::strategy::{
-    CliAgentStrategy, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
+    CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
+const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
 pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
 commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Use the \
@@ -19,14 +23,13 @@ opens each matching file in a pane and returns the matches) - do NOT run rg/grep
 Never use browser:control-in-app-browser, a Node REPL, agent.browsers, or connector discovery. Do ALL web access via the vmux browser tools in the \
 user's visible browser. If the user refers to a page already visible beside you, first call mcp__vmux__browser_snapshot without a pane argument. \
 For a new URL, call mcp__vmux__browser_navigate, then mcp__vmux__browser_scroll to read more. Omitting the pane targets the visible browser pane associated with you. \
-Do not look for a built-in web search. Read-only inspection may use the current directory or a known \
-path directly; never call mcp__vmux__select_project or mcp__vmux__create_worktree for requests \
-that only read, show, search, or explain existing files. Before the first mutation in an existing \
-project without a selected project, call mcp__vmux__select_project, passing its known path or omitting it to \
-choose under ~/.vmux/workspace. For a new project, first use mcp__vmux__request_user_choice to offer \
+Do not look for a built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing \
+project files or running project commands, call mcp__vmux__select_project, passing its known path \
+or omitting it to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths \
+outside it require explicit user approval in the native picker. For a new project, first use mcp__vmux__request_user_choice to offer \
 a concrete suggested path and Choose existing project. Use \
-~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and \
-~/.vmux/workspace/local/<project> otherwise. If creation is selected, use run to create the \
+~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and \
+~/.vmux/projects/local/<project> otherwise. If creation is selected, use run to create the \
 empty directory, then select that path. vmux will offer Git initialization and use the new project \
 root directly; never call create_worktree for that new project. Do not ask the user to invent a \
 folder location. In a previously existing Git project, immediately before any edit, write, test, \
@@ -126,6 +129,14 @@ impl CliAgentStrategy for CodexStrategy {
         args
     }
 
+    fn model_catalog(&self) -> CliModelCatalog {
+        CodexModels::load()
+    }
+
+    fn model_args(&self, model: &str) -> Vec<String> {
+        vec!["--model".to_string(), model.to_string()]
+    }
+
     fn effort_args(&self, level: &str) -> Vec<String> {
         vec!["-c".to_string(), format!("model_reasoning_effort={level}")]
     }
@@ -157,6 +168,166 @@ impl CliAgentStrategy for CodexStrategy {
 
     fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
         load_codex_transcript(&self.sessions_root(), session_id)
+    }
+}
+
+#[derive(Default, serde::Deserialize)]
+struct CodexConfig {
+    model: Option<String>,
+    model_catalog_json: Option<PathBuf>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct CodexModelFile {
+    models: Vec<CodexModel>,
+}
+
+#[derive(serde::Deserialize)]
+struct CodexModel {
+    slug: String,
+    display_name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    visibility: String,
+}
+
+struct CodexModels;
+
+impl CodexModels {
+    fn load() -> CliModelCatalog {
+        let home = std::env::var("CODEX_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                PathBuf::from(home).join(".codex")
+            });
+        Self::from_config(&home.join("config.toml"))
+    }
+
+    fn from_config(path: &Path) -> CliModelCatalog {
+        Self::from_config_with_fallback(path, Self::bundled_catalog)
+    }
+
+    fn from_config_with_fallback(
+        path: &Path,
+        fallback: impl FnOnce() -> Vec<vmux_wire::room::ModelOptionEntry>,
+    ) -> CliModelCatalog {
+        let config = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| toml::from_str::<CodexConfig>(&text).ok())
+            .unwrap_or_default();
+        let mut models = config
+            .model_catalog_json
+            .as_deref()
+            .and_then(Self::read_catalog)
+            .filter(|models| !models.is_empty())
+            .unwrap_or_else(fallback);
+        let selected = config.model.unwrap_or_default();
+        if !selected.is_empty() && !models.iter().any(|model| model.id == selected) {
+            models.insert(
+                0,
+                vmux_wire::room::ModelOptionEntry {
+                    id: selected.clone(),
+                    name: selected.clone(),
+                    description: String::new(),
+                },
+            );
+        }
+        let selected = if selected.is_empty() {
+            models
+                .first()
+                .map(|model| model.id.clone())
+                .unwrap_or_default()
+        } else {
+            selected
+        };
+        CliModelCatalog { selected, models }
+    }
+
+    fn bundled_catalog() -> Vec<vmux_wire::room::ModelOptionEntry> {
+        static CATALOG: OnceLock<Vec<vmux_wire::room::ModelOptionEntry>> = OnceLock::new();
+        CATALOG.get_or_init(Self::discover_bundled_catalog).clone()
+    }
+
+    fn discover_bundled_catalog() -> Vec<vmux_wire::room::ModelOptionEntry> {
+        let Some(codex) = crate::exec::find_executable("codex") else {
+            return Vec::new();
+        };
+        let mut command = Command::new(codex);
+        command.args([
+            "-c",
+            "model_catalog_json=null",
+            "debug",
+            "models",
+            "--bundled",
+        ]);
+        Self::run_catalog_command(command, MODEL_DISCOVERY_TIMEOUT)
+    }
+
+    fn run_catalog_command(
+        mut command: Command,
+        timeout: Duration,
+    ) -> Vec<vmux_wire::room::ModelOptionEntry> {
+        let Ok(mut child) = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else {
+            return Vec::new();
+        };
+        let Some(mut stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Vec::new();
+        };
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = sender.send(stdout.read_to_end(&mut bytes).map(|_| bytes));
+        });
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) | Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+            }
+        };
+        let Some(status) = status else {
+            return Vec::new();
+        };
+        if !status.success() {
+            return Vec::new();
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Ok(Ok(bytes)) = receiver.recv_timeout(remaining) else {
+            return Vec::new();
+        };
+        Self::parse_catalog(&bytes).unwrap_or_default()
+    }
+
+    fn read_catalog(path: &Path) -> Option<Vec<vmux_wire::room::ModelOptionEntry>> {
+        let bytes = std::fs::read(path).ok()?;
+        Self::parse_catalog(&bytes)
+    }
+
+    fn parse_catalog(bytes: &[u8]) -> Option<Vec<vmux_wire::room::ModelOptionEntry>> {
+        let catalog = serde_json::from_slice::<CodexModelFile>(bytes).ok()?;
+        Some(
+            catalog
+                .models
+                .into_iter()
+                .filter(|model| model.visibility.is_empty() || model.visibility == "list")
+                .map(|model| vmux_wire::room::ModelOptionEntry {
+                    id: model.slug,
+                    name: model.display_name,
+                    description: model.description,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -668,6 +839,95 @@ mod tests {
             r#"{{"timestamp":"2026-04-30T11:41:00.170Z","type":"session_meta","payload":{{"id":"{id}","timestamp":"2026-04-30T09:56:21.846Z","cwd":"{cwd}"}}}}"#
         );
         std::fs::write(dir.join(file), format!("{line}\n")).unwrap();
+    }
+
+    #[test]
+    fn model_catalog_reads_the_configured_codex_catalog() {
+        let tmp = unique_tmp("codex-models");
+        let catalog = tmp.join("models.json");
+        std::fs::write(
+            &catalog,
+            r#"{"models":[{"slug":"gpt-next","display_name":"GPT Next","description":"Fast"}]}"#,
+        )
+        .unwrap();
+        let config = tmp.join("config.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "model = \"gpt-next\"\nmodel_catalog_json = {:?}\n",
+                catalog.to_string_lossy()
+            ),
+        )
+        .unwrap();
+
+        let models = CodexModels::from_config(&config);
+
+        assert_eq!(models.selected, "gpt-next");
+        assert_eq!(models.models[0].name, "GPT Next");
+        assert_eq!(
+            CodexStrategy.model_args("gpt-next"),
+            ["--model", "gpt-next"]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn model_catalog_uses_bundled_models_without_configured_fields() {
+        let tmp = unique_tmp("codex-model-fallback");
+        let config = tmp.join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let fallback = || {
+            CodexModels::parse_catalog(
+                br#"{"models":[{"slug":"gpt-bundled","display_name":"GPT Bundled","description":"Built in","visibility":"list"},{"slug":"review-only","display_name":"Review","visibility":"hide"}]}"#,
+            )
+            .unwrap()
+        };
+
+        let models = CodexModels::from_config_with_fallback(&config, fallback);
+
+        assert_eq!(models.selected, "gpt-bundled");
+        assert_eq!(models.models.len(), 1);
+        assert_eq!(models.models[0].name, "GPT Bundled");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn model_catalog_uses_bundled_models_when_configured_catalog_is_empty() {
+        let tmp = unique_tmp("codex-model-empty-catalog");
+        let catalog = tmp.join("models.json");
+        std::fs::write(&catalog, r#"{"models":[]}"#).unwrap();
+        let config = tmp.join("config.toml");
+        std::fs::write(
+            &config,
+            format!("model_catalog_json = {:?}\n", catalog.to_string_lossy()),
+        )
+        .unwrap();
+        let fallback = || {
+            vec![vmux_wire::room::ModelOptionEntry {
+                id: "gpt-bundled".to_string(),
+                name: "GPT Bundled".to_string(),
+                description: String::new(),
+            }]
+        };
+
+        let models = CodexModels::from_config_with_fallback(&config, fallback);
+
+        assert_eq!(models.selected, "gpt-bundled");
+        assert_eq!(models.models.len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_model_discovery_has_a_bounded_wait() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 5"]);
+        let started = Instant::now();
+
+        let models = CodexModels::run_catalog_command(command, Duration::from_millis(20));
+
+        assert!(models.is_empty());
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

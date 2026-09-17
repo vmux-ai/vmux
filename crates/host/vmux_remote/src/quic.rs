@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::DeviceId;
 
-pub const ALPN: &[u8] = b"vmux/2";
+pub const ALPN: &[u8] = b"vmux/4";
 
 pub const PROBE_ALPN: &[u8] = b"vmux-probe/1";
 

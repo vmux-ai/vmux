@@ -20,7 +20,7 @@ pub const PROMPT_MENU_INDENT: &str = "pl-8";
 pub struct PromptMenuRow;
 
 impl PromptMenuRow {
-    const CURSOR: &'static str = "bg-cyan-400/12 shadow-[inset_2px_0_0_0_rgb(34,211,238)]";
+    const CURSOR: &'static str = "bg-primary/12 shadow-[inset_2px_0_0_0_var(--primary)]";
 
     pub fn class(at_cursor: bool) -> String {
         match at_cursor {

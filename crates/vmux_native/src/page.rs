@@ -5,6 +5,7 @@ pub struct NativePage {
     pub reports_title: bool,
     pub favicon: bool,
     pub component: crate::PageComponent,
+    pub dom_group: Option<&'static str>,
     pub root_id: &'static str,
     pub root_class: &'static str,
     pub head: &'static str,
@@ -17,6 +18,12 @@ pub struct NativePage {
 impl NativePage {
     pub fn answers_for(&self, url: &str) -> bool {
         url == self.url || (self.owns_subtree && url.starts_with(self.url))
+    }
+
+    pub fn preserves_dom_for(&self, next: &Self) -> bool {
+        self.document_url() == next.document_url()
+            && self.dom_group.is_some()
+            && self.dom_group == next.dom_group
     }
 
     pub fn document_url(&self) -> &'static str {
@@ -41,6 +48,7 @@ impl NativePage {
             reports_title: true,
             favicon: true,
             component,
+            dom_group: None,
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             head: r#"<base href="/"/>
@@ -54,7 +62,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
-            document_url: None,
+            document_url: Some("vmux://start/"),
         }
     }
 
@@ -70,6 +78,11 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
     pub const fn preserving_host_title(mut self) -> Self {
         self.reports_title = false;
+        self
+    }
+
+    pub const fn sharing_dom(mut self, group: &'static str) -> Self {
+        self.dom_group = Some(group);
         self
     }
 }
@@ -105,19 +118,14 @@ mod shell_tests {
     use super::*;
 
     fn page() -> NativePage {
-        NativePage::pane("file://", || unreachable!())
-            .titled("Files")
-            .served_from("vmux://files/")
+        NativePage::pane("file://", || unreachable!()).titled("Files")
     }
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
         let html = String::from_utf8(page().shell().into_body()).unwrap();
 
-        assert!(
-            html.contains(r#"new NativeInterpreter("vmux://files", false)"#),
-            "the shell pointed the interpreter somewhere other than the document url"
-        );
+        assert!(html.contains(r#"new NativeInterpreter("vmux://start", false)"#));
         assert!(
             !html.contains(r#"NativeInterpreter("file:"#),
             "no protocol handler answers `file://`, so nothing would reply to a fetch there"
@@ -143,13 +151,18 @@ mod shell_tests {
 mod tests {
     use super::*;
 
+    fn first() -> dioxus_core::Element {
+        dioxus_core::VNode::empty()
+    }
+
+    fn second() -> dioxus_core::Element {
+        dioxus_core::VNode::empty()
+    }
+
     #[test]
     fn a_subtree_page_answers_below_its_url_without_reaching_a_sibling() {
-        fn nowhere() -> dioxus_core::Element {
-            dioxus_core::VNode::empty()
-        }
-        let list = NativePage::pane("vmux://agents/", nowhere).titled("Agents");
-        let chat = NativePage::pane("vmux://sessions/", nowhere)
+        let list = NativePage::pane("vmux://agents/", first).titled("Agents");
+        let chat = NativePage::pane("vmux://sessions/", first)
             .titled("Sessions")
             .owning_subtree();
 
@@ -158,5 +171,27 @@ mod tests {
         assert!(!chat.answers_for("vmux://agents/"));
         assert!(list.answers_for("vmux://agents/"));
         assert!(!list.answers_for("vmux://agents/anything"));
+    }
+
+    #[test]
+    fn a_logical_route_change_preserves_the_matching_document_dom() {
+        let directory = NativePage::pane("vmux://knowledge/", first).sharing_dom("editor");
+        let file = NativePage::pane("file://", second).sharing_dom("editor");
+
+        assert!(directory.preserves_dom_for(&file));
+    }
+
+    #[test]
+    fn an_unshared_group_or_document_change_replaces_the_dom() {
+        let current = NativePage::pane("vmux://knowledge/", first).sharing_dom("editor");
+        let unshared = NativePage::pane("file://", first);
+        let other_group = NativePage::pane("file://", first).sharing_dom("other");
+        let document_changed = NativePage::pane("file://", first)
+            .served_from("vmux://files/")
+            .sharing_dom("editor");
+
+        assert!(!current.preserves_dom_for(&unshared));
+        assert!(!current.preserves_dom_for(&other_group));
+        assert!(!current.preserves_dom_for(&document_changed));
     }
 }

@@ -12,7 +12,9 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::matrix_rain::MatrixLoader;
 use vmux_ui::platform::sleep_ms;
+use vmux_ui::script::PageScript;
 
 #[component]
 pub fn Page() -> Element {
@@ -28,9 +30,12 @@ pub fn Page() -> Element {
                 Waiting { route }
             } else {
                 Mirror {
+                    key: "{announced.port}-{announced.capability}",
                     port: announced.port,
                     capability: announced.capability.clone(),
                     device_name: announced.device_name.clone(),
+                    frame_width: announced.frame_width,
+                    frame_height: announced.frame_height,
                 }
             }
         }
@@ -38,7 +43,13 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn Mirror(port: u16, capability: String, device_name: String) -> Element {
+fn Mirror(
+    port: u16,
+    capability: String,
+    device_name: String,
+    frame_width: u32,
+    frame_height: u32,
+) -> Element {
     let mut press = use_signal(|| None::<PointerSession>);
     let mut image_size = use_signal(|| None::<(f64, f64)>);
     let mut home_progress = use_signal(|| 0.0f32);
@@ -55,7 +66,20 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
-
+    let rendered_width = image_size()
+        .map(|size| size.0)
+        .unwrap_or(f64::from(frame_width));
+    let phone_style = format!("border-radius:{:.2}px;", (rendered_width * 0.145).max(8.0));
+    let screen_style = format!("border-radius:{:.2}px;", (rendered_width * 0.13).max(7.0));
+    let stream = CanvasStream::new(port, capability, frame_width, frame_height);
+    let stream_start = stream.clone();
+    use_effect(move || {
+        PageScript::run(stream_start.start_script());
+    });
+    let stream_stop = stream.clone();
+    use_drop(move || {
+        PageScript::run(stream_stop.stop_script());
+    });
     rsx! {
         div {
             class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8 outline-none",
@@ -132,19 +156,42 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                 };
                 current.cancel().dispatch(home_progress);
             },
-            div { class: "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300",
+            SimulatorLoader {
+                id: stream.loader_id.clone(),
+                status_id: stream.status_id.clone(),
+                class: "absolute inset-0".to_string(),
+                label: "Starting simulator stream".to_string(),
+            }
+            div {
+                id: stream.device_label_id.clone(),
+                class: "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-0 transition-opacity",
                 "{device_name}"
             }
-            div { class: "relative rounded-[3.25rem] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
+            div {
+                id: stream.phone_id.clone(),
+                class: "invisible relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity",
+                style: phone_style,
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
-                div { class: "overflow-hidden rounded-[2.8rem] bg-black ring-1 ring-black",
-                    img {
+                div {
+                    class: "overflow-hidden bg-black ring-1 ring-black",
+                    style: screen_style,
+                    canvas {
+                        id: "{stream.canvas_id}",
+                        width: "{frame_width}",
+                        height: "{frame_height}",
                         class: "block h-auto max-h-[calc(100vh-5rem)] max-w-[calc(100vw-5rem)] cursor-grab touch-none select-none active:cursor-grabbing",
                         style: image_style,
-                        draggable: false,
-                        src: "http://127.0.0.1:{port}/{capability}",
+                        onmounted: move |event: Event<MountedData>| {
+                            let target = event.data();
+                            spawn(async move {
+                                let Ok(rect) = target.get_client_rect().await else {
+                                    return;
+                                };
+                                image_size.set(Some((rect.size.width, rect.size.height)));
+                            });
+                        },
                         onresize: move |event: Event<ResizeData>| {
                             let Ok(size) = event.get_border_box_size() else {
                                 return;
@@ -175,6 +222,125 @@ fn Mirror(port: u16, capability: String, device_name: String) -> Element {
                 }
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct CanvasStream {
+    canvas_id: String,
+    loader_id: String,
+    status_id: String,
+    phone_id: String,
+    device_label_id: String,
+    port: u16,
+    capability: String,
+    width: u32,
+    height: u32,
+}
+
+impl CanvasStream {
+    fn new(port: u16, capability: String, width: u32, height: u32) -> Self {
+        Self {
+            canvas_id: format!("simulator-stream-{capability}"),
+            loader_id: format!("simulator-loader-{capability}"),
+            status_id: format!("simulator-status-{capability}"),
+            phone_id: format!("simulator-phone-{capability}"),
+            device_label_id: format!("simulator-device-{capability}"),
+            port,
+            capability,
+            width,
+            height,
+        }
+    }
+
+    fn start_script(&self) -> String {
+        format!(
+            r#"
+const key = "{canvas_id}";
+const streams = globalThis.__vmuxSimulatorStreams ??= new Map();
+streams.get(key)?.abort();
+const controller = new AbortController();
+streams.set(key, controller);
+const setStatus = (text) => {{
+  const status = document.getElementById("{status_id}");
+  if (status) status.textContent = text;
+}};
+const reveal = () => {{
+  document.getElementById("{loader_id}")?.classList.add("hidden");
+  const label = document.getElementById("{device_label_id}");
+  label?.classList.remove("opacity-0");
+  label?.classList.add("opacity-100");
+  const phone = document.getElementById("{phone_id}");
+  phone?.classList.remove("invisible", "opacity-0");
+  phone?.classList.add("opacity-100");
+}};
+(async () => {{
+try {{
+  const canvas = document.getElementById(key);
+  const context = canvas?.getContext("2d", {{ alpha: false, desynchronized: true }});
+  if (!canvas || !context) throw new Error("simulator canvas is unavailable");
+  setStatus("Preparing simulator display");
+  setStatus("Connecting to simulator");
+  setStatus("Receiving simulator frames");
+  let generation = 0;
+  let first = true;
+  let stage = "initializing stream";
+  while (!controller.signal.aborted) {{
+    const frameUrl = `/__simulator-frame?port={port}&capability={capability}&after=${{generation}}`;
+    stage = "requesting frame";
+    const response = await fetch(frameUrl, {{ signal: controller.signal, cache: "no-store" }});
+    if (!response.ok) throw new Error(`simulator stream failed: ${{response.status}}`);
+    stage = "reading frame";
+    const payload = new Uint8Array(await response.arrayBuffer());
+    if (payload.length < 9) throw new Error("simulator frame was empty");
+    const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
+    generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
+    stage = "decoding frame";
+    const bitmap = await createImageBitmap(new Blob([payload.subarray(8)], {{ type: "image/jpeg" }}));
+    if (!canvas.isConnected) {{
+      bitmap.close();
+      controller.abort();
+      break;
+    }}
+    context.drawImage(bitmap, 0, 0, {width}, {height});
+    bitmap.close();
+    if (first) {{
+      first = false;
+      reveal();
+    }}
+  }}
+}} catch (error) {{
+  if (!controller.signal.aborted) {{
+    console.error(error);
+    setStatus(`Simulator stream failed while ${{stage}}: ${{error?.message ?? String(error)}}`);
+  }}
+}} finally {{
+  if (streams.get(key) === controller) streams.delete(key);
+}}
+}})();
+"#,
+            canvas_id = self.canvas_id,
+            loader_id = self.loader_id,
+            status_id = self.status_id,
+            phone_id = self.phone_id,
+            device_label_id = self.device_label_id,
+            port = self.port,
+            capability = self.capability,
+            width = self.width,
+            height = self.height,
+        )
+    }
+
+    fn stop_script(&self) -> String {
+        format!(
+            r#"
+const streams = globalThis.__vmuxSimulatorStreams;
+const controller = streams?.get("{}");
+controller?.abort();
+streams?.delete("{}");
+"#,
+            self.canvas_id, self.canvas_id,
+        )
     }
 }
 
@@ -262,7 +428,23 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
         _ => translate("common-loading"),
     };
     rsx! {
-        div { class: "text-sm text-muted-foreground", "{label}" }
+        MatrixLoader {
+            label,
+            words: vec![translate("simulator-title").to_uppercase()],
+        }
+    }
+}
+
+#[component]
+fn SimulatorLoader(id: String, status_id: String, class: String, label: String) -> Element {
+    rsx! {
+        div { id, class: "{class} flex items-center justify-center bg-background",
+            div { class: "flex w-64 flex-col gap-3 rounded-2xl border border-border/70 bg-card/80 p-5 shadow-xl",
+                div { class: "h-3 w-24 rounded-full bg-muted" }
+                div { class: "h-40 rounded-xl bg-muted/60" }
+                div { id: status_id, class: "truncate text-center text-xs text-muted-foreground", "{label}" }
+            }
+        }
     }
 }
 
@@ -272,10 +454,16 @@ struct PointerSession {
     size: (f64, f64),
     start: (f32, f32),
     last: (f32, f32),
+    home_candidate: bool,
     home: bool,
+    touch_started: bool,
 }
 
 impl PointerSession {
+    const HOME_ACTIVATION_DISTANCE: f32 = 0.03;
+    const HOME_COMPLETION_DISTANCE: f32 = 0.08;
+    const HOME_START_Y: f32 = 0.88;
+
     fn start(
         event: &Event<PointerData>,
         size: (f64, f64),
@@ -284,15 +472,19 @@ impl PointerSession {
         let local = event.element_coordinates();
         let origin = (client.x - local.x, client.y - local.y);
         let point = Self::fraction((client.x, client.y), origin, size)?;
-        let home = point.1 >= 0.94;
+        let home_candidate = point.1 >= Self::HOME_START_Y;
         let session = Self {
             origin,
             size,
             start: point,
             last: point,
-            home,
+            home_candidate,
+            home: false,
+            touch_started: !home_candidate,
         };
-        let touch = (!home).then(|| session.touch(SimulatorTouchPhase::Down));
+        let touch = session
+            .touch_started
+            .then(|| session.touch(SimulatorTouchPhase::Down));
         Some((session, touch))
     }
 
@@ -302,7 +494,22 @@ impl PointerSession {
             return None;
         }
         self.last = point;
-        let touch = (!self.home).then(|| self.touch(SimulatorTouchPhase::Move));
+        if !self.home && self.activates_home() {
+            self.home = true;
+            return Some((self, None));
+        }
+        if self.home_candidate && self.rejects_home() {
+            self.home_candidate = false;
+            self.home = false;
+            self.touch_started = true;
+            return Some((
+                self,
+                Some(Self::touch_at(self.start, SimulatorTouchPhase::Down)),
+            ));
+        }
+        let touch = self
+            .touch_started
+            .then(|| self.touch(SimulatorTouchPhase::Move));
         Some((self, touch))
     }
 
@@ -311,6 +518,9 @@ impl PointerSession {
             self.last = point;
         }
         if !self.home {
+            if !self.touch_started {
+                return PointerRelease::Touch(Self::touch_at(self.start, SimulatorTouchPhase::Tap));
+            }
             return PointerRelease::Touch(self.touch(SimulatorTouchPhase::Up));
         }
         if self.completes_home() {
@@ -321,7 +531,7 @@ impl PointerSession {
     }
 
     fn cancel(self) -> PointerRelease {
-        if self.home {
+        if self.home || !self.touch_started {
             PointerRelease::None
         } else {
             PointerRelease::Touch(self.touch(SimulatorTouchPhase::Cancel))
@@ -329,10 +539,14 @@ impl PointerSession {
     }
 
     fn touch(self, phase: SimulatorTouchPhase) -> SimulatorTouch {
+        Self::touch_at(self.last, phase)
+    }
+
+    fn touch_at(point: (f32, f32), phase: SimulatorTouchPhase) -> SimulatorTouch {
         SimulatorTouch {
             phase,
-            x: self.last.0,
-            y: self.last.1,
+            x: point.0,
+            y: point.1,
         }
     }
 
@@ -350,7 +564,26 @@ impl PointerSession {
     fn completes_home(self) -> bool {
         let dx = self.last.0 - self.start.0;
         let dy = self.last.1 - self.start.1;
-        dy < -0.1 && dy.abs() > dx.abs()
+        dy < -Self::HOME_COMPLETION_DISTANCE && dy.abs() > dx.abs()
+    }
+
+    fn activates_home(self) -> bool {
+        if !self.home_candidate {
+            return false;
+        }
+        let dx = self.last.0 - self.start.0;
+        let dy = self.last.1 - self.start.1;
+        dy < -Self::HOME_ACTIVATION_DISTANCE && dy.abs() > dx.abs()
+    }
+
+    fn rejects_home(self) -> bool {
+        if !self.home_candidate {
+            return false;
+        }
+        let dx = self.last.0 - self.start.0;
+        let dy = self.last.1 - self.start.1;
+        let distance = (dx.powi(2) + dy.powi(2)).sqrt();
+        distance >= Self::HOME_ACTIVATION_DISTANCE && (dy >= 0.0 || dx.abs() >= dy.abs())
     }
 
     fn fraction(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) -> Option<(f32, f32)> {
@@ -387,5 +620,44 @@ impl PointerRelease {
             }
             Self::None => home_progress.set(0.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_rejected_home_gesture_finishes_its_fallback_touch() {
+        let session = PointerSession {
+            origin: (0.0, 0.0),
+            size: (100.0, 100.0),
+            start: (0.5, 0.95),
+            last: (0.5, 0.95),
+            home_candidate: true,
+            home: false,
+            touch_started: false,
+        };
+        let (session, touch) = session
+            .move_to(ClientPoint::new(50.0, 90.0))
+            .expect("home activation");
+        assert!(session.home);
+        assert!(touch.is_none());
+
+        let (session, touch) = session
+            .move_to(ClientPoint::new(70.0, 90.0))
+            .expect("fallback touch");
+        assert!(!session.home);
+        assert_eq!(
+            touch.map(|touch| touch.phase),
+            Some(SimulatorTouchPhase::Down)
+        );
+        assert!(matches!(
+            session.release_at(ClientPoint::new(70.0, 90.0)),
+            PointerRelease::Touch(SimulatorTouch {
+                phase: SimulatorTouchPhase::Up,
+                ..
+            })
+        ));
     }
 }

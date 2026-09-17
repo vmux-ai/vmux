@@ -29,6 +29,7 @@ pub(crate) fn build_agent_launch(
     exe_path: &Path,
     anchor: vmux_core::ProcessId,
     effort: Option<&str>,
+    model: Option<&str>,
 ) -> Result<PreparedAgentLaunch, String> {
     let strategy = strategies
         .get_cli(kind)
@@ -49,9 +50,15 @@ pub(crate) fn build_agent_launch(
             Some(level) => strategy.effort_args(level),
             None => Vec::new(),
         };
+        if let Some(model) = model.filter(|model| !model.is_empty()) {
+            args.extend(strategy.model_args(model));
+        }
         args.extend(strategy.build_args(&mcp_cfg, session_id));
         let mut env: Vec<(String, String)> = std::env::vars().collect();
         env.extend(strategy.build_env(&mcp_cfg));
+        if let Some(model) = model.filter(|model| !model.is_empty()) {
+            env.extend(strategy.model_env(model));
+        }
         env.push(("VMUX_ANCHOR".to_string(), anchor.to_string()));
         if vmux_core::profile::mcp_credentials::McpOauthCredentials::revision() != mcp_revision {
             continue;

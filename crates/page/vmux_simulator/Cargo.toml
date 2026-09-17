@@ -24,6 +24,7 @@ vmux_wire = { path = "../../vmux_wire" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libc = "0.2"
 serde_json = { workspace = true }
 

@@ -17,7 +17,9 @@ use vmux_service::agent_events::{
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
-use vmux_session::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
+use vmux_session::{
+    AgentApprovalPolicy, AgentMessageTimes, AgentMessages, AgentSession, PromptQueue,
+};
 
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
@@ -191,6 +193,7 @@ fn consume_page_agent_stream(
     mut q: Query<(
         Entity,
         &mut AgentMessages,
+        &mut AgentMessageTimes,
         &mut AgentRunState,
         &mut PromptQueue,
         Option<&AgentSession>,
@@ -205,7 +208,7 @@ fn consume_page_agent_stream(
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
         .iter()
-        .filter_map(|(e, _, _, _, page, acp, _, _, _)| {
+        .filter_map(|(e, _, _, _, _, page, acp, _, _, _)| {
             let sid = page
                 .map(|s| s.sid.clone())
                 .or_else(|| acp.map(|s| s.sid.clone()))?;
@@ -223,13 +226,14 @@ fn consume_page_agent_stream(
     }
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
-            && let Ok((_, mut messages, _, _, _, _, _, _, imported)) = q.get_mut(entity)
+            && let Ok((_, mut messages, mut times, _, _, _, _, _, _, imported)) = q.get_mut(entity)
             && let Ok(mut parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
             sanitize_replayed_messages(
                 &mut parsed,
                 imported.and_then(|imported| imported.first_prompt.as_deref()),
             );
+            times.reconcile(&messages.0, &parsed);
             messages.0 = parsed;
         }
     }
@@ -238,7 +242,7 @@ fn consume_page_agent_stream(
             warn!(sid = %status.sid, "dropping a run status no stack claims");
         }
         if let Some(&entity) = by_sid.get(&status.sid)
-            && let Ok((_, _, mut state, mut queue, _, _, _, mut pending, _)) = q.get_mut(entity)
+            && let Ok((_, _, _, mut state, mut queue, _, _, _, mut pending, _)) = q.get_mut(entity)
         {
             let was_streaming = matches!(*state, AgentRunState::Streaming);
             match &status.status {
@@ -281,7 +285,7 @@ fn consume_page_agent_stream(
         };
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
-        if let Ok((_, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
+        if let Ok((_, _, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
             let auto_allowed = service.is_some()
                 && acp.is_some()
                 && policy.is_some_and(|policy| policy.allows(&approval.name));
@@ -304,7 +308,7 @@ fn consume_page_agent_stream(
         let Some(&entity) = by_sid.get(&resolved.sid) else {
             continue;
         };
-        if let Ok((_, _, mut state, _, _, _, _, _, _)) = q.get_mut(entity)
+        if let Ok((_, _, _, mut state, _, _, _, _, _, _)) = q.get_mut(entity)
             && matches!(
                 &*state,
                 AgentRunState::AwaitingApproval { call_id, .. }

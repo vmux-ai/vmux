@@ -14,6 +14,10 @@ impl WebView {
     pub fn order_among_siblings(&self, order: SiblingOrder) {
         let wk = self.webview.webview();
         let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setZPosition(sibling_z_position(order));
+        }
         let Some(parent) = (unsafe { view.superview() }) else {
             return;
         };
@@ -114,6 +118,24 @@ impl WebView {
         if !window.makeFirstResponder(Some(view)) {
             warn!("vmux_native: the window refused first responder, this page cannot be typed in");
         }
+    }
+}
+
+fn sibling_z_position(order: SiblingOrder) -> f64 {
+    match order {
+        SiblingOrder::Front => 500.0,
+        SiblingOrder::Back => 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_order_removes_the_layout_layer_override() {
+        assert_eq!(sibling_z_position(SiblingOrder::Back), 0.0);
+        assert_eq!(sibling_z_position(SiblingOrder::Front), 500.0);
     }
 }
 
