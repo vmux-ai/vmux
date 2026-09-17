@@ -265,6 +265,7 @@ struct RepoInfoCacheEntry {
     loaded: bool,
     dirty: bool,
     watched: bool,
+    idle_syncs: u8,
     pending: Option<Task<Option<crate::host::worktree::RepoInfo>>>,
     ignore_events_until: Option<Instant>,
 }
@@ -342,9 +343,11 @@ impl RepoInfoCache {
                 loaded: false,
                 dirty: true,
                 watched: false,
+                idle_syncs: 0,
                 pending: None,
                 ignore_events_until: None,
             });
+        entry.idle_syncs = 0;
         Self::poll_and_refresh(&path, entry, wake);
         entry.info.clone()
     }
@@ -360,6 +363,7 @@ impl RepoInfoCache {
             entry.info = info;
             entry.loaded = true;
             entry.watched = false;
+            entry.idle_syncs = 0;
             entry.pending = None;
             entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
         }
@@ -394,6 +398,26 @@ impl RepoInfoCache {
         if let Some(entry) = self.entries.get_mut(path) {
             entry.dirty = true;
         }
+    }
+
+    fn inactive_paths(&mut self) -> Vec<PathBuf> {
+        let mut inactive = Vec::new();
+        for (path, entry) in &mut self.entries {
+            if entry.pending.is_some() {
+                continue;
+            }
+            entry.idle_syncs = entry.idle_syncs.saturating_add(1);
+            if entry.idle_syncs > 1 {
+                inactive.push(path.clone());
+            }
+        }
+        inactive
+    }
+
+    fn remove(&mut self, path: &Path) {
+        self.entries.remove(path);
+        self.canonical.retain(|_, canonical| canonical != path);
+        self.guessed.remove(path);
     }
 }
 
@@ -609,6 +633,15 @@ impl GitWatch {
             {
                 let _ = self.watcher.unwatch(&target.path);
             }
+        }
+    }
+
+    fn evict_inactive_repo_info(&mut self, repo_info: &mut RepoInfoCache) {
+        for path in repo_info.inactive_paths() {
+            if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
+                self.release_targets(&targets);
+            }
+            repo_info.remove(&path);
         }
     }
 
@@ -944,8 +977,12 @@ fn sync_repo_info_watches(
     mut repo_info: ResMut<RepoInfoCache>,
 ) {
     let Some(mut watch) = watch else {
+        for path in repo_info.inactive_paths() {
+            repo_info.remove(&path);
+        }
         return;
     };
+    watch.evict_inactive_repo_info(&mut repo_info);
     let paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
@@ -1263,6 +1300,65 @@ mod tests {
     }
 
     #[test]
+    fn inactive_repo_info_entries_release_their_watch_targets() {
+        let active_repo = test_repo::init();
+        let stale_repo = test_repo::init();
+        let active_path = canon(active_repo.path());
+        let stale_path = canon(stale_repo.path());
+        let active_info = crate::host::worktree::repo_info(&active_path).unwrap();
+        let stale_info = crate::host::worktree::repo_info(&stale_path).unwrap();
+        let stale_targets = repo_info_watch_targets(&stale_path, Some(&stale_info));
+        let mut cache = RepoInfoCache {
+            entries: HashMap::from([
+                (
+                    active_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(active_info.clone()),
+                        loaded: true,
+                        dirty: false,
+                        watched: true,
+                        idle_syncs: 0,
+                        pending: None,
+                        ignore_events_until: None,
+                    },
+                ),
+                (
+                    stale_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(stale_info.clone()),
+                        loaded: true,
+                        dirty: false,
+                        watched: true,
+                        idle_syncs: 0,
+                        pending: None,
+                        ignore_events_until: None,
+                    },
+                ),
+            ]),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            wake: None,
+        };
+        let mut watch = GitWatch::test();
+        assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
+        assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
+
+        assert!(cache.get(&active_path).is_some());
+        watch.evict_inactive_repo_info(&mut cache);
+        assert!(cache.get(&active_path).is_some());
+        watch.evict_inactive_repo_info(&mut cache);
+
+        assert!(cache.entries.contains_key(&active_path));
+        assert!(!cache.entries.contains_key(&stale_path));
+        assert!(!watch.repo_info_subscriptions.contains_key(&stale_path));
+        assert!(
+            stale_targets
+                .iter()
+                .all(|target| !watch.watch_references.contains_key(target))
+        );
+    }
+
+    #[test]
     fn watch_target_matching_respects_recursion() {
         let root = canon(Path::new("/tmp/vmux-git-watch"));
         let direct = GitWatchTarget {
@@ -1393,6 +1489,7 @@ mod tests {
                     loaded: false,
                     dirty: false,
                     watched: false,
+                    idle_syncs: 0,
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
                     ignore_events_until: None,
                 },
