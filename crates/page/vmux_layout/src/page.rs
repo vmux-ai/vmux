@@ -38,7 +38,7 @@ use vmux_ui::components::tree_row::{
 use vmux_ui::favicon::{Favicon, favicon_src_for_url};
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView, PageIconView};
+use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::util::cn;
@@ -1063,7 +1063,7 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
     rsx! {
         div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2",
-                LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+                GitIconView { class: "size-3.5 shrink-0".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-semibold text-foreground", title: "{repository}", "{repository}" }
                 if boundary.is_worktree {
                     span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary",

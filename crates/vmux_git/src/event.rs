@@ -42,6 +42,7 @@ wire! {
     }
 
     pub struct GitStatusEvent {
+        pub path: String,
         pub branch: String,
         pub ahead: u32,
         pub behind: u32,
@@ -74,6 +75,7 @@ wire! {
     }
 
     pub struct GitRepositoryEvent {
+        pub path: String,
         pub repo_root: String,
         pub repo_name: String,
         pub branch: String,

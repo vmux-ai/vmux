@@ -1,4 +1,6 @@
-pub use wasm::{BuiltinIconView, LineIconView, PageIconView};
+pub use wasm::{BuiltinIconView, GitIconView, LineIconView, PageIconView};
+
+pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
@@ -152,7 +154,7 @@ impl LineIcon {
 }
 
 mod wasm {
-    use super::LineIcon;
+    use super::{GIT_ICON_URL, LineIcon};
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
@@ -166,6 +168,18 @@ mod wasm {
                 for d in icon.paths() {
                     path { d: "{d}" }
                 }
+            }
+        }
+    }
+
+    #[component]
+    pub fn GitIconView(class: String) -> Element {
+        rsx! {
+            Favicon {
+                favicon_url: GIT_ICON_URL.to_string(),
+                url: "git:///".to_string(),
+                class: class.clone(),
+                globe_class: class,
             }
         }
     }
@@ -243,7 +257,7 @@ mod wasm {
                 path { d: "M10 18h4" }
             } },
             BuiltinIcon::GitBranch => {
-                rsx! { LineIconView { icon: LineIcon::GitBranch, class } }
+                rsx! { GitIconView { class } }
             }
             BuiltinIcon::Nushell => {
                 rsx! { BrandGlyph { class: class.clone(), d: "M0 16.338h1.25v-5.7c.417-.624 1.205-1.309 2.127-1.309 1.176 0 1.34.64 1.34 2.247v4.762h1.25v-5.685c0-1.458-.67-2.32-2.202-2.32-.923 0-1.964.46-2.59 1.264l-.103-1.1H0Zm10.177-7.842h-1.25v5.698c0 1.46.745 2.307 2.263 2.307.921 0 1.889-.431 2.514-1.22l.104 1.057h1.072V8.496h-1.25v5.773c-.432.67-1.265 1.25-2.129 1.25-.907 0-1.324-.446-1.324-1.458zm8.11-.997-.61.952 5.251 3.229-5.251 3.244.669.922L24 12.32v-1.28z" } }

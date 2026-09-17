@@ -14,7 +14,7 @@ impl HostSpawnRegistry {
 
     pub fn register_scheme(&mut self, scheme: &str) {
         self.schemes
-            .insert(scheme.trim_end_matches(':').to_string());
+            .insert(scheme.trim_end_matches(':').to_ascii_lowercase());
     }
 
     pub fn needs_host_spawn(&self, url: &str) -> bool {
@@ -23,7 +23,7 @@ impl HostSpawnRegistry {
         }
         if url
             .split_once(':')
-            .is_some_and(|(scheme, _)| self.schemes.contains(scheme))
+            .is_some_and(|(scheme, _)| self.schemes.contains(&scheme.to_ascii_lowercase()))
         {
             return true;
         }
@@ -115,6 +115,7 @@ mod tests {
         r.register_scheme("git");
 
         assert!(r.needs_host_spawn("git://Users/me/repo"));
+        assert!(r.needs_host_spawn("GIT://Users/me/repo"));
         assert!(!r.needs_host_spawn("https://example.com"));
     }
 }

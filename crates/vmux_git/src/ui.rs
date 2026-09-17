@@ -95,6 +95,9 @@ impl GitStatusFeed {
         } = self;
 
         let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+            if s.path != path() {
+                return;
+            }
             message.set(String::new());
             repo_root.set(s.repo_root);
             branch.set(s.branch);
@@ -134,6 +137,16 @@ pub fn GitFooter(
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
+    let mut pending_commit_msg = use_signal(String::new);
+    let _commit_result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
+        if result.action != "commit" {
+            return;
+        }
+        if result.ok && commit_msg().trim() == pending_commit_msg() {
+            commit_msg.set(String::new());
+        }
+        pending_commit_msg.set(String::new());
+    });
 
     let has_branch = !branch().is_empty();
     if !has_branch && !always_visible {
@@ -180,12 +193,17 @@ pub fn GitFooter(
                     Button {
                         variant: ButtonVariant::Ghost,
                         class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
-                        disabled: commit_msg().is_empty(),
+                        disabled: commit_msg().is_empty() || !pending_commit_msg().is_empty(),
                         onclick: move |_| {
                             let m = commit_msg();
-                            if !m.is_empty() {
-                                let _ = send(&GitCommitRequest { path: path(), message: m });
-                                commit_msg.set(String::new());
+                            if !m.is_empty()
+                                && send(&GitCommitRequest {
+                                    path: path(),
+                                    message: m.clone(),
+                                })
+                                .is_ok()
+                            {
+                                pending_commit_msg.set(m);
                             }
                         },
                         {translate_with(

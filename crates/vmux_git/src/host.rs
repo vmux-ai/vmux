@@ -438,11 +438,18 @@ fn git_watch_targets(
         .next()
         .map(|line| resolve_git_path(&root, line))
         .ok_or_else(|| crate::host::runner::GitError("missing common git directory".into()))?;
-    let mut targets = vec![GitWatchTarget {
-        path: git_dir.clone(),
-        recursive: false,
-        kind: GitWatchKind::Metadata,
-    }];
+    let mut targets = vec![
+        GitWatchTarget {
+            path: canon(&root),
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        },
+        GitWatchTarget {
+            path: git_dir.clone(),
+            recursive: false,
+            kind: GitWatchKind::Metadata,
+        },
+    ];
     if common_dir != git_dir {
         targets.push(GitWatchTarget {
             path: common_dir.clone(),
@@ -687,7 +694,9 @@ fn on_status_request(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(GitOutboxItem::Events {
                 webview,
-                emits: vec![Emit::Status(crate::host::runner::non_repository_status())],
+                emits: vec![Emit::Status(crate::host::runner::non_repository_status(
+                    &path,
+                ))],
             });
         return;
     }
@@ -769,7 +778,7 @@ fn on_repository_request(
     {
         page.url = url;
     }
-    spawn_job(&outbox, webview, JobKind::Repository { path: repo_root });
+    spawn_job(&outbox, webview, JobKind::Repository { path });
 }
 
 fn on_repository_picker_request(
@@ -1097,8 +1106,14 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         let (_, targets) = git_watch_targets(&file).unwrap();
+        let root = canon(repo.path());
         let git_dir = canon(&repo.path().join(".git"));
 
+        assert!(targets.contains(&GitWatchTarget {
+            path: root,
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        }));
         assert!(targets.contains(&GitWatchTarget {
             path: git_dir.clone(),
             recursive: false,
@@ -1132,8 +1147,14 @@ mod tests {
         );
 
         let (_, targets) = git_watch_targets(&worktree.join("a.txt")).unwrap();
+        let worktree_root = canon(&worktree);
         let common = canon(&repo.path().join(".git"));
 
+        assert!(targets.contains(&GitWatchTarget {
+            path: worktree_root,
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        }));
         assert!(targets.iter().any(|target| {
             !target.recursive
                 && target.path != common

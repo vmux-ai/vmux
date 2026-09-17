@@ -75,7 +75,7 @@ impl NativelyHosted {
         if let Some(scheme) = self.url.strip_suffix("://") {
             return url
                 .split_once(':')
-                .is_some_and(|(candidate, _)| candidate == scheme);
+                .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme));
         }
         let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(url)) else {
             return false;
@@ -600,6 +600,7 @@ mod tests {
 
         assert!(hosted.answers_for("git://Users/me/repo"));
         assert!(hosted.answers_for("git:///Users/me/repo"));
+        assert!(hosted.answers_for("GIT://Users/me/repo"));
         assert!(!hosted.answers_for("https://example.com"));
     }
 

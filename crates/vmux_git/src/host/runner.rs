@@ -114,8 +114,9 @@ pub fn has_repository(file: &Path) -> bool {
         .any(|directory| directory.join(".git").exists())
 }
 
-pub(crate) fn non_repository_status() -> GitStatusEvent {
+pub(crate) fn non_repository_status(path: &Path) -> GitStatusEvent {
     GitStatusEvent {
+        path: path.to_string_lossy().into_owned(),
         branch: String::new(),
         ahead: 0,
         behind: 0,
@@ -173,6 +174,7 @@ pub fn file_statuses(
         &[
             "status",
             "--porcelain=v2",
+            "-z",
             "--branch",
             "--untracked-files=all",
         ],
@@ -258,12 +260,14 @@ impl GitBranchEntry {
 
 impl GitRepositoryEvent {
     pub fn load(path: &Path) -> Result<Self, GitError> {
+        let requested_path = path.to_string_lossy().into_owned();
         let repo_root = repo_root(path)?;
         let (stdout, stderr, ok) = git_read(
             &repo_root,
             &[
                 "status",
                 "--porcelain=v2",
+                "-z",
                 "--branch",
                 "--untracked-files=all",
             ],
@@ -285,6 +289,7 @@ impl GitRepositoryEvent {
         let commits = GitCommitEntry::recent(&repo_root)?;
         let branches = GitBranchEntry::local(&repo_root, &branch)?;
         Ok(Self {
+            path: requested_path,
             repo_root: repo_root.to_string_lossy().to_string(),
             repo_name,
             branch,
@@ -304,6 +309,7 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
         &[
             "status",
             "--porcelain=v2",
+            "-z",
             "--branch",
             "--untracked-files=all",
         ],
@@ -318,6 +324,7 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
         .map(|file| {
             let target = rel(root, file);
             GitStatusEvent {
+                path: file.to_string_lossy().into_owned(),
                 branch: parsed.branch.clone(),
                 ahead: parsed.ahead,
                 behind: parsed.behind,
@@ -334,7 +341,7 @@ pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<Stri
     let root = repo_root(file)?;
     let (stdout, stderr, ok) = git_read(
         &root,
-        &["status", "--porcelain=v2", "--untracked-files=all"],
+        &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
     )?;
     if !ok {
         return Err(GitError(stderr.trim().to_string()));
@@ -813,12 +820,27 @@ mod tests {
         test_repo::write(repo.path(), "modified.txt", "two\n");
         test_repo::write(repo.path(), "staged.txt", "two\n");
         test_repo::run(repo.path(), &["add", "staged.txt"]);
+        let modified_path = modified.to_string_lossy().into_owned();
+        let staged_path = staged.to_string_lossy().into_owned();
 
         let events = statuses(repo.path(), &[modified, staged]).unwrap();
 
         assert_eq!(events.len(), 2);
+        assert_eq!(events[0].path, modified_path);
+        assert_eq!(events[1].path, staged_path);
         assert_eq!(events[0].file_status, FileStatus::Modified);
         assert_eq!(events[1].file_status, FileStatus::Staged);
+    }
+
+    #[test]
+    fn repository_load_preserves_special_pathnames() {
+        let repo = test_repo::init();
+        let name = "tab\tline\nquote\"slash\\name.txt";
+        test_repo::write(repo.path(), name, "new\n");
+
+        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+
+        assert!(repository.files.iter().any(|entry| entry.path == name));
     }
 
     #[test]

@@ -107,7 +107,7 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
         },
         JobKind::Status { path, .. } if !runner::has_repository(&path) => {
-            vec![Emit::Status(runner::non_repository_status())]
+            vec![Emit::Status(runner::non_repository_status(&path))]
         }
         JobKind::Status { path, dirty } => match runner::status(&path) {
             Ok(mut ev) => {

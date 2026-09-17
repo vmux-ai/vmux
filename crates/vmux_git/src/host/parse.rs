@@ -39,11 +39,11 @@ impl ParsedStatuses {
     }
 }
 
-fn entry_path(line: &str, kind_tokens: usize) -> &str {
-    line.splitn(kind_tokens + 1, ' ')
+fn entry_path(record: &str, kind_tokens: usize) -> &str {
+    record
+        .splitn(kind_tokens + 1, ' ')
         .nth(kind_tokens)
         .unwrap_or("")
-        .trim()
 }
 
 fn xy_status(xy: &str) -> FileStatus {
@@ -69,13 +69,14 @@ pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
     let mut file_statuses = HashMap::new();
     let mut file_entries = Vec::new();
 
-    for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("# branch.head ") {
+    let mut records = out.split_terminator('\0');
+    while let Some(record) = records.next() {
+        if let Some(rest) = record.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
-        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+        } else if let Some(rest) = record.strip_prefix("# branch.upstream ") {
             upstream = rest.trim().to_string();
             has_upstream = true;
-        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+        } else if let Some(rest) = record.strip_prefix("# branch.ab ") {
             for tok in rest.split_whitespace() {
                 if let Some(a) = tok.strip_prefix('+') {
                     ahead = a.parse().unwrap_or(0);
@@ -83,14 +84,12 @@ pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
                     behind = b.parse().unwrap_or(0);
                 }
             }
-        } else if let Some(rest) = line.strip_prefix("1 ").or_else(|| line.strip_prefix("2 ")) {
+        } else if let Some(rest) = record.strip_prefix("1 ") {
             let xy = rest.split_whitespace().next().unwrap_or("..");
             if xy.starts_with(|c: char| c != '.') {
                 staged_count += 1;
             }
-            let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
-            let mut paths = entry_path(line, kind_tokens).split('\t');
-            let path = paths.next().unwrap_or("");
+            let path = entry_path(record, 8);
             if !path.is_empty() {
                 let status = xy_status(xy);
                 file_statuses.insert(path.to_string(), status);
@@ -99,15 +98,36 @@ pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
                 let unstaged = chars.next().is_some_and(|value| value != '.');
                 file_entries.push(GitFileEntry {
                     path: path.to_string(),
-                    previous_path: paths.next().map(str::to_string),
+                    previous_path: None,
                     status,
                     staged,
                     unstaged,
                 });
             }
-        } else if let Some(rest) = line.strip_prefix("u ") {
+        } else if let Some(rest) = record.strip_prefix("2 ") {
+            let xy = rest.split_whitespace().next().unwrap_or("..");
+            if xy.starts_with(|c: char| c != '.') {
+                staged_count += 1;
+            }
+            let path = entry_path(record, 9);
+            let previous_path = records.next().filter(|path| !path.is_empty());
+            if !path.is_empty() {
+                let status = xy_status(xy);
+                file_statuses.insert(path.to_string(), status);
+                let mut chars = xy.chars();
+                let staged = chars.next().is_some_and(|value| value != '.');
+                let unstaged = chars.next().is_some_and(|value| value != '.');
+                file_entries.push(GitFileEntry {
+                    path: path.to_string(),
+                    previous_path: previous_path.map(str::to_string),
+                    status,
+                    staged,
+                    unstaged,
+                });
+            }
+        } else if let Some(rest) = record.strip_prefix("u ") {
             let _ = rest;
-            let path = entry_path(line, 10);
+            let path = entry_path(record, 10);
             if !path.is_empty() {
                 file_statuses.insert(path.to_string(), FileStatus::Conflicted);
                 file_entries.push(GitFileEntry {
@@ -118,18 +138,17 @@ pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
                     unstaged: true,
                 });
             }
-        } else if let Some(path) = line.strip_prefix("? ") {
-            let path = path.trim();
-            if !path.is_empty() {
-                file_statuses.insert(path.to_string(), FileStatus::Untracked);
-                file_entries.push(GitFileEntry {
-                    path: path.to_string(),
-                    previous_path: None,
-                    status: FileStatus::Untracked,
-                    staged: false,
-                    unstaged: true,
-                });
-            }
+        } else if let Some(path) = record.strip_prefix("? ")
+            && !path.is_empty()
+        {
+            file_statuses.insert(path.to_string(), FileStatus::Untracked);
+            file_entries.push(GitFileEntry {
+                path: path.to_string(),
+                previous_path: None,
+                status: FileStatus::Untracked,
+                staged: false,
+                unstaged: true,
+            });
         }
     }
 
@@ -159,27 +178,10 @@ pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
 }
 
 pub fn changed_paths(out: &str) -> HashSet<String> {
-    let mut set = HashSet::new();
-    for line in out.lines() {
-        let path = if line.starts_with("1 ") || line.starts_with("2 ") {
-            let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
-            entry_path(line, kind_tokens)
-                .split('\t')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        } else if line.starts_with("u ") {
-            entry_path(line, 10).to_string()
-        } else if let Some(rest) = line.strip_prefix("? ") {
-            rest.trim().to_string()
-        } else {
-            continue;
-        };
-        if !path.is_empty() {
-            set.insert(path);
-        }
-    }
-    set
+    parse_porcelain_v2_statuses(out)
+        .into_file_statuses()
+        .into_keys()
+        .collect()
 }
 
 fn span(text: &str, fg: [u8; 3]) -> Vec<StyledSpan> {
@@ -388,7 +390,15 @@ mod diff_tests {
 mod porcelain_tests {
     use super::*;
 
-    const OUT: &str = "# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n1 .M N... 100644 100644 100644 aaa bbb src/main.rs\n1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\n? notes.txt\n";
+    const OUT: &str = concat!(
+        "# branch.oid abc123\0",
+        "# branch.head main\0",
+        "# branch.upstream origin/main\0",
+        "# branch.ab +2 -1\0",
+        "1 .M N... 100644 100644 100644 aaa bbb src/main.rs\0",
+        "1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\0",
+        "? notes.txt\0",
+    );
 
     #[test]
     fn parses_branch_and_ahead_behind() {
@@ -438,7 +448,7 @@ mod porcelain_tests {
 
     #[test]
     fn no_upstream_header() {
-        let out = "# branch.head feature\n";
+        let out = "# branch.head feature\0";
         let p = parse_porcelain_v2(out, "x");
         assert!(!p.has_upstream);
         assert_eq!(p.ahead, 0);
@@ -447,12 +457,12 @@ mod porcelain_tests {
 
     #[test]
     fn changed_paths_collects_all_entry_kinds() {
-        let out = "# branch.head main\n\
-1 .M N... 100644 100644 100644 aaa bbb src/main.rs\n\
-1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\n\
-2 R. N... 100644 100644 100644 eee fff R100 new.rs\told.rs\n\
-u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
-? notes.txt\n";
+        let out = "# branch.head main\0\
+1 .M N... 100644 100644 100644 aaa bbb src/main.rs\0\
+1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\0\
+2 R. N... 100644 100644 100644 eee fff R100 new.rs\0old.rs\0\
+u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\0\
+? notes.txt\0";
         let set = changed_paths(out);
         assert!(set.contains("src/main.rs"));
         assert!(set.contains("src/lib.rs"));
@@ -461,6 +471,18 @@ u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
         assert!(set.contains("conflict.rs"));
         assert!(set.contains("notes.txt"));
         assert_eq!(set.len(), 5);
+    }
+
+    #[test]
+    fn preserves_special_pathnames_and_rename_sources() {
+        let path = "dir/tab\tline\nquote\"slash\\name ";
+        let previous = "old\tname\n";
+        let out = format!("2 R. N... 100644 100644 100644 aaa bbb R100 {path}\0{previous}\0");
+        let entries = parse_porcelain_v2_statuses(&out).into_file_entries();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, path);
+        assert_eq!(entries[0].previous_path.as_deref(), Some(previous));
     }
 }
 

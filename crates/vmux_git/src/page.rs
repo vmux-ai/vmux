@@ -12,7 +12,7 @@ use vmux_ui::components::textarea::{Textarea, TextareaVariant};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
 use crate::event::*;
 use crate::ui::DiffView;
@@ -37,7 +37,8 @@ pub fn Page() -> Element {
     let mut selected_commit = use_signal(String::new);
     let mut selected_branch = use_signal(String::new);
     let confirm_discard = use_signal(String::new);
-    let commit_message = use_signal(String::new);
+    let mut commit_message = use_signal(String::new);
+    let mut pending_commit_message = use_signal(String::new);
     let mut loading = use_signal(|| true);
     let mut message = use_signal(String::new);
     let mut nonce = use_signal(|| 0u32);
@@ -48,6 +49,11 @@ pub fn Page() -> Element {
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or(context.working_directory);
         workspace.set(path);
+        repository.set(None);
+        selected_path.set(String::new());
+        selected_abs_path.set(String::new());
+        selected_commit.set(String::new());
+        selected_branch.set(String::new());
         if workspace().is_empty() {
             loading.set(false);
             return;
@@ -57,6 +63,9 @@ pub fn Page() -> Element {
         GitWorkspace::request(&workspace());
     });
     let _repository = use_listener::<GitRepositoryEvent, _>(GIT_REPOSITORY_EVENT, move |event| {
+        if event.path != workspace() {
+            return;
+        }
         let next_path = event
             .files
             .iter()
@@ -100,6 +109,12 @@ pub fn Page() -> Element {
             GitWorkspace::request(&event.path);
         });
     let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
+        if result.action == "commit" {
+            if result.ok && commit_message().trim() == pending_commit_message() {
+                commit_message.set(String::new());
+            }
+            pending_commit_message.set(String::new());
+        }
         if result.ok {
             message.set(String::new());
         } else {
@@ -142,6 +157,7 @@ pub fn Page() -> Element {
                     selected_branch,
                     confirm_discard,
                     commit_message,
+                    pending_commit_message,
                     workspace,
                     nonce,
                     markers,
@@ -250,7 +266,7 @@ fn GitHeader(
 
     rsx! {
         header { class: "flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background px-3 py-2 sm:min-h-14 sm:flex-nowrap sm:gap-3 sm:px-4",
-            LineIconView { icon: LineIcon::GitBranch, class: "h-5 w-5 shrink-0 text-muted-foreground" }
+            GitIconView { class: "h-5 w-5 shrink-0" }
             div { class: "min-w-0 flex-[1_1_14rem]",
                 div { class: "flex min-w-0 items-center gap-2",
                     h1 { class: "truncate text-sm font-semibold tracking-tight sm:text-base", "{repo_name}" }
@@ -316,6 +332,7 @@ fn GitDashboard(
     selected_branch: Signal<String>,
     confirm_discard: Signal<String>,
     commit_message: Signal<String>,
+    pending_commit_message: Signal<String>,
     workspace: Signal<String>,
     nonce: Signal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
@@ -329,6 +346,7 @@ fn GitDashboard(
                     selected_abs_path,
                     confirm_discard,
                     commit_message,
+                    pending_commit_message,
                 }
                 BranchesCard { repository: repository.clone(), selected_branch }
                 HistoryCard { repository: repository.clone(), selected_commit }
@@ -362,6 +380,7 @@ fn ChangesCard(
     selected_abs_path: Signal<String>,
     confirm_discard: Signal<String>,
     commit_message: Signal<String>,
+    pending_commit_message: Signal<String>,
 ) -> Element {
     let staged = repository
         .files
@@ -412,7 +431,12 @@ fn ChangesCard(
                     }
                 }
             }
-            CommitPanel { repo_root: repository.repo_root, staged_count, commit_message }
+            CommitPanel {
+                repo_root: repository.repo_root,
+                staged_count,
+                commit_message,
+                pending_commit_message,
+            }
         }
     }
 }
@@ -493,7 +517,7 @@ fn FileRow(
                     div { class: "truncate text-[10px] text-muted-foreground", "{parent}" }
                 }
             }
-            div { class: "flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
+            div { class: "flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
                 Button {
                     variant: ButtonVariant::Ghost,
                     class: "h-7 w-7 p-0 text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
@@ -546,8 +570,15 @@ fn FileRow(
 }
 
 #[component]
-fn CommitPanel(repo_root: String, staged_count: u32, commit_message: Signal<String>) -> Element {
-    let can_commit = staged_count > 0 && !commit_message().trim().is_empty();
+fn CommitPanel(
+    repo_root: String,
+    staged_count: u32,
+    commit_message: Signal<String>,
+    pending_commit_message: Signal<String>,
+) -> Element {
+    let can_commit = staged_count > 0
+        && !commit_message().trim().is_empty()
+        && pending_commit_message().is_empty();
 
     rsx! {
         div { class: "shrink-0 border-t border-border bg-background p-2.5",
@@ -569,8 +600,14 @@ fn CommitPanel(repo_root: String, staged_count: u32, commit_message: Signal<Stri
                         if text.is_empty() {
                             return;
                         }
-                        let _ = send(&GitCommitRequest { path: repo_root.clone(), message: text });
-                        commit_message.set(String::new());
+                        if send(&GitCommitRequest {
+                            path: repo_root.clone(),
+                            message: text.clone(),
+                        })
+                        .is_ok()
+                        {
+                            pending_commit_message.set(text);
+                        }
                     },
                     {translate_with("git-commit", &[("count", TranslationValue::Number(staged_count as i64))])}
                 }
