@@ -264,6 +264,24 @@ struct AgentModeMemory {
     modes: Vec<vmux_wire::protocol::AcpModeOption>,
 }
 
+struct AgentSelectionKey;
+
+impl AgentSelectionKey {
+    fn of(agent_id: &str) -> &str {
+        if agent_id.starts_with("cli:") {
+            return agent_id;
+        }
+        crate::acp_install::agent_url_id(agent_id)
+    }
+
+    fn acp_url(agent_id: &str) -> String {
+        vmux_command::snapshot::AgentPromptTarget::Acp {
+            id: Self::of(agent_id).to_string(),
+        }
+        .url()
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum SavedAgentModel {
@@ -302,7 +320,12 @@ fn load_agent_model_selections(mut models: ResMut<AgentModelSelections>) {
         return;
     };
     for (agent, entry) in saved {
-        models.by_agent.insert(agent, entry.memory());
+        let key = AgentSelectionKey::of(&agent).to_string();
+        let mut memory = entry.memory();
+        if !key.starts_with("cli:") && !memory.url.is_empty() {
+            memory.url = AgentSelectionKey::acp_url(&agent);
+        }
+        models.by_agent.insert(key, memory);
     }
     models.dirty = false;
 }
@@ -316,7 +339,11 @@ fn load_agent_mode_selections(mut modes: ResMut<AgentModeSelections>) {
     else {
         return;
     };
-    modes.by_agent = saved;
+    for (agent, mut memory) in saved {
+        let key = AgentSelectionKey::of(&agent).to_string();
+        memory.url = AgentSelectionKey::acp_url(&agent);
+        modes.by_agent.insert(key, memory);
+    }
     modes.dirty = false;
 }
 
@@ -488,10 +515,7 @@ fn remember_acp_model_lists(
     for (session, state) in &sessions {
         let listed = model_state_of(Some(state)).models;
         let current = state.display_model_id().to_string();
-        let url = vmux_command::snapshot::AgentPromptTarget::Acp {
-            id: session.agent_id.clone(),
-        }
-        .url();
+        let url = AgentSelectionKey::acp_url(&session.agent_id);
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
     }
 }
@@ -501,10 +525,7 @@ fn remember_acp_mode_lists(
     mut last_used: ResMut<AgentModeSelections>,
 ) {
     for (session, state) in &sessions {
-        let url = vmux_command::snapshot::AgentPromptTarget::Acp {
-            id: session.agent_id.clone(),
-        }
-        .url();
+        let url = AgentSelectionKey::acp_url(&session.agent_id);
         last_used.remember_catalog(
             &session.agent_id,
             &url,
@@ -797,7 +818,10 @@ fn apply_last_used_acp_model(
     mut requests: MessageWriter<AcpSetModelRequest>,
 ) {
     for (session, mut state) in &mut sessions {
-        let Some(remembered) = last_used.by_agent.get(&session.agent_id) else {
+        let Some(remembered) = last_used
+            .by_agent
+            .get(AgentSelectionKey::of(&session.agent_id))
+        else {
             continue;
         };
         let model_id = &remembered.selected;
@@ -859,7 +883,8 @@ fn send_acp_mode_requests(
 
 impl AgentModelSelections {
     fn select(&mut self, agent_id: &str, model_id: &str) {
-        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        let key = AgentSelectionKey::of(agent_id).to_string();
+        let entry = self.by_agent.entry(key).or_default();
         if !entry.models.is_empty() && !entry.models.iter().any(|model| model.id == model_id) {
             return;
         }
@@ -871,7 +896,7 @@ impl AgentModelSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(agent_id) {
+        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -887,7 +912,8 @@ impl AgentModelSelections {
         if models.is_empty() {
             return;
         }
-        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        let key = AgentSelectionKey::of(agent_id).to_string();
+        let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
             entry.url = url.to_string();
@@ -916,7 +942,8 @@ impl AgentModelSelections {
 
 impl AgentModeSelections {
     fn select(&mut self, agent_id: &str, mode_id: &str) {
-        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        let key = AgentSelectionKey::of(agent_id).to_string();
+        let entry = self.by_agent.entry(key).or_default();
         if !entry.modes.is_empty() && !entry.modes.iter().any(|mode| mode.id == mode_id) {
             return;
         }
@@ -928,7 +955,7 @@ impl AgentModeSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(agent_id) {
+        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -944,7 +971,8 @@ impl AgentModeSelections {
         if modes.is_empty() {
             return;
         }
-        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
+        let key = AgentSelectionKey::of(agent_id).to_string();
+        let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
             entry.url = url.to_string();
@@ -1213,6 +1241,74 @@ mod tests {
         assert_eq!(published.agents[0].agent_key, "cli:codex");
         assert_eq!(published.agents[0].url, "vmux://sessions/codex/cli");
         assert_eq!(published.agents[0].selected, "gpt-next");
+    }
+
+    #[test]
+    fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
+        let mut app = App::new();
+        app.init_resource::<AgentModeSelections>()
+            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+            .add_systems(
+                Update,
+                (
+                    remember_acp_mode_lists,
+                    publish_agent_modes.after(remember_acp_mode_lists),
+                ),
+            );
+        app.world_mut().spawn((
+            AcpSession {
+                agent_id: "codex-acp".into(),
+                sid: "s1".into(),
+                cwd: "/tmp".into(),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            },
+            AcpModeState {
+                config_id: "mode".into(),
+                current_mode_id: "agent".into(),
+                pending: None,
+                modes: vec![vmux_service::protocol::AcpModeOption {
+                    id: "agent".into(),
+                    name: "Agent".into(),
+                    description: None,
+                }],
+            },
+        ));
+
+        app.update();
+
+        let published = app
+            .world()
+            .resource::<vmux_command::snapshot::CommandBarAgentModes>();
+        assert_eq!(published.agents.len(), 1);
+        assert_eq!(published.agents[0].agent_key, "codex");
+        assert_eq!(published.agents[0].url, "vmux://sessions/codex");
+        assert_eq!(published.agents[0].selected, "agent");
+        assert_eq!(
+            app.world()
+                .resource::<AgentModeSelections>()
+                .selected_for("codex-acp"),
+            "agent"
+        );
+    }
+
+    #[test]
+    fn agent_selection_keys_stay_stable_when_loaded_again() {
+        for agent_id in [
+            "claude",
+            "claude-acp",
+            "codex",
+            "codex-acp",
+            "vibe",
+            "vibe-acp",
+            "mistral-vibe",
+            "custom",
+            "custom-acp",
+        ] {
+            let once = AgentSelectionKey::of(agent_id);
+            let twice = AgentSelectionKey::of(once);
+            assert_eq!(once, twice, "{agent_id}");
+        }
     }
 
     #[test]

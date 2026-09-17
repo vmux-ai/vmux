@@ -771,13 +771,14 @@ fn handle_pane_commands(
                     &mut commands,
                 );
             }
-            PaneCommand::MirrorHorizontal | PaneCommand::MirrorVertical => {
+            PaneCommand::Mirror | PaneCommand::MirrorHorizontal | PaneCommand::MirrorVertical => {
                 let Some(tab) = active_tab else {
                     continue;
                 };
                 let direction = match pane_cmd {
-                    PaneCommand::MirrorHorizontal => PaneSplitDirection::Row,
-                    PaneCommand::MirrorVertical => PaneSplitDirection::Column,
+                    PaneCommand::Mirror => None,
+                    PaneCommand::MirrorHorizontal => Some(PaneSplitDirection::Row),
+                    PaneCommand::MirrorVertical => Some(PaneSplitDirection::Column),
                     _ => unreachable!(),
                 };
                 PaneArrangement::mirror(tab, direction, &all_children, &split_dir_q, &mut commands);
@@ -944,7 +945,7 @@ impl PaneArrangement {
 
     fn mirror(
         root: Entity,
-        direction: PaneSplitDirection,
+        direction: Option<PaneSplitDirection>,
         children: &Query<&Children>,
         splits: &Query<&PaneSplit>,
         commands: &mut Commands,
@@ -957,7 +958,7 @@ impl PaneArrangement {
             let Ok(split) = splits.get(child) else {
                 continue;
             };
-            if split.direction == direction
+            if direction.is_none_or(|direction| split.direction == direction)
                 && let Ok(split_children) = children.get(child)
             {
                 let mut reversed = split_children.iter().collect::<Vec<_>>();
@@ -2690,7 +2691,7 @@ mod tests {
                       mut commands: Commands| {
                     PaneArrangement::mirror(
                         tab,
-                        PaneSplitDirection::Row,
+                        Some(PaneSplitDirection::Row),
                         &children,
                         &splits,
                         &mut commands,
@@ -2706,6 +2707,62 @@ mod tests {
                 .iter()
                 .collect::<Vec<_>>(),
             [right, left]
+        );
+    }
+
+    #[test]
+    fn mirror_reverses_every_split_axis() {
+        let mut app = App::new();
+        let tab = app.world_mut().spawn_empty().id();
+        let row = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app.world_mut().spawn((Pane, ChildOf(row))).id();
+        let column = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(row),
+            ))
+            .id();
+        let top = app.world_mut().spawn((Pane, ChildOf(column))).id();
+        let bottom = app.world_mut().spawn((Pane, ChildOf(column))).id();
+
+        app.world_mut()
+            .run_system_once(
+                move |children: Query<&Children>,
+                      splits: Query<&PaneSplit>,
+                      mut commands: Commands| {
+                    PaneArrangement::mirror(tab, None, &children, &splits, &mut commands);
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            app.world()
+                .get::<Children>(row)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            [column, left]
+        );
+        assert_eq!(
+            app.world()
+                .get::<Children>(column)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            [bottom, top]
         );
     }
 

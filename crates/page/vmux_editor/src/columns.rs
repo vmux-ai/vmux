@@ -51,7 +51,6 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                 for (i, e) in window.entries().into_iter().enumerate() {
                     {
                         let entry = e.clone();
-                        let opened = e.clone();
                         rsx! {
                             div {
                                 key: "{e.path}",
@@ -62,7 +61,6 @@ pub(crate) fn DirColumns(window: DirWindow) -> Element {
                                     event.stop_propagation();
                                     clicks.row(Column::Current(i), entry.clone(), event.client_coordinates());
                                 },
-                                ondoubleclick: move |_| window.open(&opened),
                                 EntryVisual { entry: e.clone(), thumb: thumbs.get(&e.path).cloned() }
                                 span { class: "truncate text-xs", "{e.name}" }
                             }
@@ -257,21 +255,22 @@ impl DirClick {
         if self.take_open(at) {
             return;
         }
-        let shifted = match column {
+        match column {
             Column::Current(index) => {
                 self.window.select(index, entry.path.clone());
-                false
             }
-            Column::Parent => self.window.ascend(entry.path.clone()),
-            Column::Child => self.window.descend(entry.path.clone()),
-        };
-        if shifted {
-            self.pending.set(Some(PendingOpen {
-                entry,
-                at: now_millis(),
-                origin: (at.x, at.y),
-            }));
+            Column::Parent => {
+                self.window.ascend(entry.path.clone());
+            }
+            Column::Child => {
+                self.window.descend(entry.path.clone());
+            }
         }
+        self.pending.set(Some(PendingOpen {
+            entry,
+            at: now_millis(),
+            origin: (at.x, at.y),
+        }));
     }
 
     fn pane(mut self, at: ClientPoint) {

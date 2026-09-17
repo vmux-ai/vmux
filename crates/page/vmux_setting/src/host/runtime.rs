@@ -733,7 +733,7 @@ impl Default for ShortcutSettings {
 
 fn default_leader() -> KeyComboDef {
     KeyComboDef {
-        key: "g".to_string(),
+        key: "b".to_string(),
         ctrl: true,
         shift: false,
         alt: false,
@@ -2594,6 +2594,46 @@ mod tests {
             None,
             "leader c is rebound from new stack to new tab"
         );
+    }
+
+    #[test]
+    fn embedded_settings_bind_tmux_layout_parity_to_leader() {
+        let settings = load_embedded_settings();
+        let has = |command: &str, key: &str, ctrl: bool, shift: bool, alt: bool| {
+            settings.shortcuts.bindings.iter().any(|entry| {
+                let ShortcutDef::Leader(combo) = &entry.binding else {
+                    return false;
+                };
+                entry.command == command
+                    && combo.key == key
+                    && combo.ctrl == ctrl
+                    && combo.shift == shift
+                    && combo.alt == alt
+            })
+        };
+
+        for (command, key, ctrl, shift, alt) in [
+            ("open_in_pane_right", "%", false, false, false),
+            ("open_in_pane_bottom", "\"", false, false, false),
+            ("close_pane", "x", false, false, false),
+            ("toggle_pane", "o", false, false, false),
+            ("zoom_pane", "z", false, false, false),
+            ("swap_pane_prev", "{", false, false, false),
+            ("swap_pane_next", "}", false, false, false),
+            ("rotate_forward", "r", false, false, false),
+            ("rotate_backward", "r", false, true, false),
+            ("rotate_forward", "o", true, false, false),
+            ("rotate_backward", "o", false, false, true),
+            ("mirror_panes", "m", false, false, false),
+            ("equalize_pane_size", "e", false, true, false),
+            ("resize_pane_left", "ArrowLeft", true, false, false),
+            ("resize_pane_right", "ArrowRight", false, false, true),
+        ] {
+            assert!(
+                has(command, key, ctrl, shift, alt),
+                "missing <leader> {key} binding for {command}"
+            );
+        }
     }
 
     #[test]

@@ -21,8 +21,8 @@ pub struct StreamServer {
 
 impl StreamServer {
     const FRAME_INTERVAL: Duration = Duration::from_millis(67);
-    const JPEG_QUALITY: u8 = 70;
-    const SCALE: &'static str = "0.3";
+    const JPEG_QUALITY: u8 = 90;
+    const SCALE: &'static str = "0.5";
 
     pub fn start(
         axe: &Axe,
@@ -354,8 +354,8 @@ struct BgraFrameLayout {
 
 impl BgraFrameLayout {
     fn of((source_width, source_height): (u32, u32)) -> io::Result<Self> {
-        let width = source_width.saturating_mul(3) / 10;
-        let height = source_height.saturating_mul(3) / 10;
+        let width = source_width / 2;
+        let height = source_height / 2;
         let row_bytes = width.checked_mul(4).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -491,10 +491,10 @@ mod tests {
     fn bgra_layout_matches_core_video_stride_alignment() {
         let layout = BgraFrameLayout::of((1206, 2622)).unwrap();
 
-        assert_eq!(layout.width, 361);
-        assert_eq!(layout.height, 786);
-        assert_eq!(layout.stride, 1472);
-        assert_eq!(layout.frame_bytes, 1_156_992);
+        assert_eq!(layout.width, 603);
+        assert_eq!(layout.height, 1311);
+        assert_eq!(layout.stride, 2432);
+        assert_eq!(layout.frame_bytes, 3_188_352);
     }
 
     #[test]

@@ -66,6 +66,11 @@ fn Mirror(
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
+    let rendered_width = image_size()
+        .map(|size| size.0)
+        .unwrap_or(f64::from(frame_width));
+    let phone_style = format!("border-radius:{:.2}px;", (rendered_width * 0.145).max(8.0));
+    let screen_style = format!("border-radius:{:.2}px;", (rendered_width * 0.13).max(7.0));
     let stream = CanvasStream::new(port, capability, frame_width, frame_height);
     let stream_start = stream.clone();
     use_effect(move || {
@@ -164,11 +169,14 @@ fn Mirror(
             }
             div {
                 id: stream.phone_id.clone(),
-                class: "invisible relative rounded-[clamp(1.25rem,2.6vw,3.25rem)] bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity",
+                class: "invisible relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity",
+                style: phone_style,
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
-                div { class: "overflow-hidden rounded-[clamp(1rem,2.2vw,2.8rem)] bg-black ring-1 ring-black",
+                div {
+                    class: "overflow-hidden bg-black ring-1 ring-black",
+                    style: screen_style,
                     canvas {
                         id: "{stream.canvas_id}",
                         width: "{frame_width}",
@@ -446,10 +454,16 @@ struct PointerSession {
     size: (f64, f64),
     start: (f32, f32),
     last: (f32, f32),
+    home_candidate: bool,
     home: bool,
+    touch_started: bool,
 }
 
 impl PointerSession {
+    const HOME_ACTIVATION_DISTANCE: f32 = 0.03;
+    const HOME_COMPLETION_DISTANCE: f32 = 0.08;
+    const HOME_START_Y: f32 = 0.88;
+
     fn start(
         event: &Event<PointerData>,
         size: (f64, f64),
@@ -458,15 +472,19 @@ impl PointerSession {
         let local = event.element_coordinates();
         let origin = (client.x - local.x, client.y - local.y);
         let point = Self::fraction((client.x, client.y), origin, size)?;
-        let home = point.1 >= 0.94;
+        let home_candidate = point.1 >= Self::HOME_START_Y;
         let session = Self {
             origin,
             size,
             start: point,
             last: point,
-            home,
+            home_candidate,
+            home: false,
+            touch_started: !home_candidate,
         };
-        let touch = (!home).then(|| session.touch(SimulatorTouchPhase::Down));
+        let touch = session
+            .touch_started
+            .then(|| session.touch(SimulatorTouchPhase::Down));
         Some((session, touch))
     }
 
@@ -476,7 +494,22 @@ impl PointerSession {
             return None;
         }
         self.last = point;
-        let touch = (!self.home).then(|| self.touch(SimulatorTouchPhase::Move));
+        if !self.home && self.activates_home() {
+            self.home = true;
+            return Some((self, None));
+        }
+        if self.home_candidate && self.rejects_home() {
+            self.home_candidate = false;
+            self.home = false;
+            self.touch_started = true;
+            return Some((
+                self,
+                Some(Self::touch_at(self.start, SimulatorTouchPhase::Down)),
+            ));
+        }
+        let touch = self
+            .touch_started
+            .then(|| self.touch(SimulatorTouchPhase::Move));
         Some((self, touch))
     }
 
@@ -485,6 +518,9 @@ impl PointerSession {
             self.last = point;
         }
         if !self.home {
+            if !self.touch_started {
+                return PointerRelease::Touch(Self::touch_at(self.start, SimulatorTouchPhase::Tap));
+            }
             return PointerRelease::Touch(self.touch(SimulatorTouchPhase::Up));
         }
         if self.completes_home() {
@@ -495,7 +531,7 @@ impl PointerSession {
     }
 
     fn cancel(self) -> PointerRelease {
-        if self.home {
+        if self.home || !self.touch_started {
             PointerRelease::None
         } else {
             PointerRelease::Touch(self.touch(SimulatorTouchPhase::Cancel))
@@ -503,10 +539,14 @@ impl PointerSession {
     }
 
     fn touch(self, phase: SimulatorTouchPhase) -> SimulatorTouch {
+        Self::touch_at(self.last, phase)
+    }
+
+    fn touch_at(point: (f32, f32), phase: SimulatorTouchPhase) -> SimulatorTouch {
         SimulatorTouch {
             phase,
-            x: self.last.0,
-            y: self.last.1,
+            x: point.0,
+            y: point.1,
         }
     }
 
@@ -524,7 +564,26 @@ impl PointerSession {
     fn completes_home(self) -> bool {
         let dx = self.last.0 - self.start.0;
         let dy = self.last.1 - self.start.1;
-        dy < -0.1 && dy.abs() > dx.abs()
+        dy < -Self::HOME_COMPLETION_DISTANCE && dy.abs() > dx.abs()
+    }
+
+    fn activates_home(self) -> bool {
+        if !self.home_candidate {
+            return false;
+        }
+        let dx = self.last.0 - self.start.0;
+        let dy = self.last.1 - self.start.1;
+        dy < -Self::HOME_ACTIVATION_DISTANCE && dy.abs() > dx.abs()
+    }
+
+    fn rejects_home(self) -> bool {
+        if !self.home_candidate {
+            return false;
+        }
+        let dx = self.last.0 - self.start.0;
+        let dy = self.last.1 - self.start.1;
+        let distance = (dx.powi(2) + dy.powi(2)).sqrt();
+        distance >= Self::HOME_ACTIVATION_DISTANCE && (dy >= 0.0 || dx.abs() >= dy.abs())
     }
 
     fn fraction(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) -> Option<(f32, f32)> {
@@ -561,5 +620,44 @@ impl PointerRelease {
             }
             Self::None => home_progress.set(0.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_rejected_home_gesture_finishes_its_fallback_touch() {
+        let session = PointerSession {
+            origin: (0.0, 0.0),
+            size: (100.0, 100.0),
+            start: (0.5, 0.95),
+            last: (0.5, 0.95),
+            home_candidate: true,
+            home: false,
+            touch_started: false,
+        };
+        let (session, touch) = session
+            .move_to(ClientPoint::new(50.0, 90.0))
+            .expect("home activation");
+        assert!(session.home);
+        assert!(touch.is_none());
+
+        let (session, touch) = session
+            .move_to(ClientPoint::new(70.0, 90.0))
+            .expect("fallback touch");
+        assert!(!session.home);
+        assert_eq!(
+            touch.map(|touch| touch.phase),
+            Some(SimulatorTouchPhase::Down)
+        );
+        assert!(matches!(
+            session.release_at(ClientPoint::new(70.0, 90.0)),
+            PointerRelease::Touch(SimulatorTouch {
+                phase: SimulatorTouchPhase::Up,
+                ..
+            })
+        ));
     }
 }

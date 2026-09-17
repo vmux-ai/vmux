@@ -120,11 +120,21 @@ impl KeymapView<'_> {
     }
 
     pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<AppCommand> {
-        let second = pressed.chord_second_after(prefix);
+        if let Some(command) = self.chord_exact(prefix, pressed) {
+            return Some(command);
+        }
+        let inherited = pressed.chord_second_after(prefix);
+        if inherited == *pressed {
+            return None;
+        }
+        self.chord_exact(prefix, &inherited)
+    }
+
+    fn chord_exact(&self, prefix: &KeyCombo, second: &KeyCombo) -> Option<AppCommand> {
         self.applicable()
             .find_map(|binding| match &binding.shortcut {
                 Shortcut::Chord(bound_prefix, bound_second)
-                    if bound_prefix == prefix && bound_second == &second =>
+                    if bound_prefix == prefix && bound_second == second =>
                 {
                     AppCommand::from_shortcut_id(&binding.command)
                 }
@@ -765,6 +775,27 @@ mod tests {
         );
 
         assert_eq!(keymap.direct(&combo(KeyCode::KeyX)), None);
+    }
+
+    #[test]
+    fn an_explicit_second_stroke_modifier_wins_before_inherited_modifier_normalization() {
+        use crate::{LayoutCommand, PaneCommand};
+
+        let keymap = Keymap::defaults();
+        let prefix = modified(KeyCode::KeyB, CTRL);
+
+        assert_eq!(
+            keymap.chord(&prefix, &modified(KeyCode::ArrowLeft, CTRL)),
+            Some(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::ResizeLeft
+            )))
+        );
+        assert_eq!(
+            keymap.chord(&prefix, &modified(KeyCode::KeyH, CTRL)),
+            Some(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft
+            )))
+        );
     }
 
     #[test]

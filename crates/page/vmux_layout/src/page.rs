@@ -214,6 +214,12 @@ pub fn Page() -> Element {
                     id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
+                    WindowDragRegion {
+                        id: "side-sheet-titlebar",
+                        revision: sheet_width().to_string(),
+                        class: "pointer-events-none absolute top-0 h-7",
+                        style: "left:80px;right:4px;",
+                    }
                     SideSheetGrab { resizing: sheet_resizing }
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
@@ -1054,7 +1060,6 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
     } else {
         format!("{} → {}", boundary.base_ref, branch)
     };
-    let compact_dir = compact_workspace_path(&boundary.effective_dir);
     rsx! {
         div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2",
@@ -1102,24 +1107,17 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
             }
             if !boundary.effective_dir.is_empty() {
                 div { class: "mt-2 flex min-w-0 items-center gap-1.5 text-muted-foreground/65",
-                    BuiltinIconView { icon: vmux_core::BuiltinIcon::Files, class: "size-3 shrink-0".to_string() }
-                    span { class: "min-w-0 truncate font-mono text-[9px]", title: "{boundary.effective_dir}", "{compact_dir}" }
+                    LineIconView { icon: LineIcon::ExternalLink, class: "size-3 shrink-0".to_string() }
+                    span {
+                        dir: "rtl",
+                        class: "min-w-0 truncate text-left font-mono text-[9px]",
+                        title: "{boundary.effective_dir}",
+                        "{boundary.effective_dir}"
+                    }
                 }
             }
         }
     }
-}
-
-fn compact_workspace_path(path: &str) -> String {
-    let components = path
-        .trim_end_matches('/')
-        .split('/')
-        .filter(|component| !component.is_empty())
-        .collect::<Vec<_>>();
-    if components.len() <= 3 {
-        return path.to_string();
-    }
-    format!("…/{}", components[components.len() - 3..].join("/"))
 }
 
 #[component]

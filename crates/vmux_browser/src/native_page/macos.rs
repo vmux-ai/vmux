@@ -172,15 +172,18 @@ fn open_native_pages(world: &mut World) {
         if current.is_some_and(|(current, window)| {
             current.transparent == page.transparent && window == window_entity
         }) {
-            world
-                .entity_mut(entity)
-                .remove::<vmux_core::page::PageReady>();
-            {
+            let remounted = {
                 let mut hosted = world.non_send_mut::<HostedPages>();
                 let hosted = hosted.0.get_mut(&entity).expect("the page was just found");
-                hosted.surface.navigate(page, instance);
+                let remounted = hosted.surface.navigate(page, instance);
                 hosted.page = page;
                 hosted.placement = placement;
+                remounted
+            };
+            if remounted {
+                world
+                    .entity_mut(entity)
+                    .remove::<vmux_core::page::PageReady>();
             }
             info!("native_page: navigated {entity:?} to {}", page.url);
             continue;

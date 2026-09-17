@@ -335,7 +335,11 @@ mod tests {
             .map(|entry| entry.name.as_str())
             .collect::<Vec<_>>();
 
-        assert!(names.iter().any(|name| name.contains("Rotate Forward")));
+        assert!(
+            names
+                .iter()
+                .any(|name| name.contains("Rotate Panes Forward"))
+        );
         assert!(names.iter().any(|name| name.contains("Open in New Tab")));
     }
 
@@ -348,11 +352,11 @@ mod tests {
         );
         let shortcut = event
             .bindings()
-            .find(|(entry, shortcut)| entry.id == "stack_close" && shortcut.strokes.len() == 2)
+            .find(|(entry, shortcut)| entry.id == "close_pane" && shortcut.strokes.len() == 2)
             .map(|(_, shortcut)| shortcut)
-            .expect("close stack chord");
+            .expect("close pane chord");
 
-        assert_eq!(shortcut.strokes[0].code, "KeyG");
+        assert_eq!(shortcut.strokes[0].code, "KeyB");
         assert!(shortcut.strokes[0].ctrl);
         assert_eq!(shortcut.strokes[1].code, "KeyX");
         assert_eq!(shortcut.strokes[1].keycaps(), ["X"]);

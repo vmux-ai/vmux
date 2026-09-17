@@ -4,7 +4,7 @@ use std::sync::{LazyLock, Mutex};
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
-use vmux_layout::{Header, LayoutCef, Open};
+use vmux_layout::{LayoutCef, window::VmuxWindow};
 
 use crate::LayoutPointerCapture;
 
@@ -118,7 +118,7 @@ fn on_window_drag_region(
 
 fn publish_window_drag_region(
     reported: Res<ReportedWindowDragRegions>,
-    header_q: Query<(Entity, &ComputedNode, Has<Open>), With<Header>>,
+    window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
@@ -132,10 +132,9 @@ fn publish_window_drag_region(
             .any(|(_, host)| Some(host.0) == focused_window.0);
     let mut regions = PublishedWindowDragRegions::default();
     if !overlay_owns_input {
-        for (entity, header, open) in header_q.iter() {
-            if !open
-                || vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
-                    != focused_window.0
+        for (entity, viewport) in window_q.iter() {
+            if vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
+                != focused_window.0
             {
                 continue;
             }
@@ -145,7 +144,7 @@ fn publish_window_drag_region(
                 {
                     continue;
                 }
-                if let Some(region) = WindowDragRegion::of(reported.clone(), *header) {
+                if let Some(region) = WindowDragRegion::of(reported.clone(), *viewport) {
                     if reported.blocked {
                         regions.blocked.push(region);
                     } else {

@@ -628,6 +628,10 @@ pub fn Page() -> Element {
         git_path.set(d.abs_path);
         git_nonce.set(git_nonce() + 1);
         mode.set(Mode::Dir);
+        comp_open.set(false);
+        comps.set(Vec::new());
+        refs_open.set(false);
+        refs.set(Vec::new());
         diagnostics.set(Vec::new());
         hover_diag.set(None);
         lsp_status.set(None);
@@ -825,11 +829,12 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
-                if keys.offer(&e) {
+                let current_mode = mode();
+                if current_mode != Mode::Dir && keys.offer(&e) {
                     return;
                 }
                 let key = e.key().to_string();
-                if mode() == Mode::Text
+                if current_mode == Mode::Text
                     && file_view_mode() == FileViewMode::Note
                     && is_markdown_file(&git_path())
                     && !note_editing()
@@ -837,7 +842,7 @@ pub fn Page() -> Element {
                     let _ = forward_file_key(&e, ed_mode());
                     return;
                 }
-                match mode() {
+                match current_mode {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
                         let len = vis.len();
@@ -940,7 +945,9 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 toggle_preview_video();
                             }
-                            _ => {}
+                            _ => {
+                                keys.offer(&e);
+                            }
                         }
                     }
                     _ => {

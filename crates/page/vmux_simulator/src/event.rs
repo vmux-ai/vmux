@@ -57,6 +57,7 @@ pub enum SimulatorTouchPhase {
     Move,
     Up,
     Cancel,
+    Tap,
 }
 
 #[derive(

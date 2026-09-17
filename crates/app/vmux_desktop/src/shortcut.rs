@@ -307,10 +307,10 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         clear_input_frame(&mut app);
         press(&mut app, KeyCode::KeyH);
@@ -336,10 +336,10 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         clear_input_frame(&mut app);
         press(&mut app, KeyCode::KeyL);
@@ -365,10 +365,10 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         clear_input_frame(&mut app);
         press(&mut app, KeyCode::KeyJ);
@@ -394,10 +394,10 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         clear_input_frame(&mut app);
         press(&mut app, KeyCode::KeyK);
@@ -422,10 +422,10 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         clear_input_frame(&mut app);
         press(&mut app, KeyCode::KeyS);
@@ -448,7 +448,7 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
         press(&mut app, KeyCode::KeyS);
         app.update();
 
@@ -469,8 +469,8 @@ mod tests {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyG);
-        release(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::KeyB);
         release(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyS);
         app.update();
@@ -485,6 +485,38 @@ mod tests {
             commands,
             vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
         );
+    }
+
+    #[test]
+    fn default_tmux_rotate_and_mirror_chords_emit_commands() {
+        use vmux_command::PaneCommand;
+
+        for (key, expected) in [
+            (KeyCode::KeyR, PaneCommand::RotateForward),
+            (KeyCode::KeyM, PaneCommand::Mirror),
+        ] {
+            let mut app = test_app();
+            press(&mut app, KeyCode::ControlLeft);
+            press(&mut app, KeyCode::KeyB);
+            app.update();
+
+            release(&mut app, KeyCode::KeyB);
+            release(&mut app, KeyCode::ControlLeft);
+            clear_input_frame(&mut app);
+            press(&mut app, key);
+            app.update();
+
+            let commands: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .drain()
+                .collect();
+
+            assert_eq!(
+                commands,
+                vec![AppCommand::Layout(LayoutCommand::Pane(expected))]
+            );
+        }
     }
 
     #[test]

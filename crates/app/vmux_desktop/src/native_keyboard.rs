@@ -614,7 +614,7 @@ mod tests {
         let action = decide(
             &map,
             &mut pending,
-            combo(KeyCode::KeyG, true),
+            combo(KeyCode::KeyB, true),
             Instant::now(),
             true,
         );
@@ -629,7 +629,7 @@ mod tests {
         let mut pending = None;
         let now = Instant::now();
 
-        let prefix = decide(&map, &mut pending, combo(KeyCode::KeyG, true), now, false);
+        let prefix = decide(&map, &mut pending, combo(KeyCode::KeyB, true), now, false);
         assert!(matches!(prefix, KeyAction::Consume(None)));
         assert!(pending.is_some());
 
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn expired_prefix_does_not_consume_second_key() {
         let map = map();
-        let mut pending = Some((combo(KeyCode::KeyG, true), Instant::now()));
+        let mut pending = Some((combo(KeyCode::KeyB, true), Instant::now()));
         let later = Instant::now() + Duration::from_millis(2000);
         let action = decide(
             &map,

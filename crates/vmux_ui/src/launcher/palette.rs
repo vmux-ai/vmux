@@ -1073,12 +1073,21 @@ impl ActiveProject {
 
 pub struct SelectedAgentModels;
 
+struct AgentCatalogUrl;
+
+impl AgentCatalogUrl {
+    fn matches(left: &str, right: &str) -> bool {
+        left.trim_end_matches('/') == right.trim_end_matches('/')
+    }
+}
+
 impl SelectedAgentModels {
     pub fn of<'a>(rows: &'a [AgentModels], target_url: &str) -> Option<&'a AgentModels> {
         if target_url.is_empty() {
             return None;
         }
-        rows.iter().find(|row| row.url == target_url)
+        rows.iter()
+            .find(|row| AgentCatalogUrl::matches(&row.url, target_url))
     }
 
     pub fn name(row: Option<&AgentModels>) -> String {
@@ -1101,7 +1110,8 @@ impl SelectedAgentModes {
         if target_url.is_empty() {
             return None;
         }
-        rows.iter().find(|row| row.url == target_url)
+        rows.iter()
+            .find(|row| AgentCatalogUrl::matches(&row.url, target_url))
     }
 }
 
@@ -2338,6 +2348,27 @@ mod tests {
         );
         assert!(codex.composer.model_name.is_empty());
         assert!(codex.composer.model_options.is_empty());
+    }
+
+    #[test]
+    fn the_composer_matches_permission_modes_across_a_trailing_slash() {
+        let mut state = Launcher::state();
+        state.agent_modes = vec![AgentModes {
+            agent_key: "vibe".into(),
+            url: "vmux://sessions/vibe".into(),
+            selected: "agent".into(),
+            modes: vec![AcpModeOption {
+                id: "agent".into(),
+                name: "Agent".into(),
+                description: None,
+            }],
+        }];
+
+        let vibe = PaletteState::start(&state, PaletteDraft::typed("fix it"));
+
+        assert_eq!(vibe.composer.permission_agent_key, "vibe");
+        assert_eq!(vibe.composer.permission_current_id, "agent");
+        assert_eq!(vibe.composer.permission_modes.len(), 1);
     }
 
     #[test]
