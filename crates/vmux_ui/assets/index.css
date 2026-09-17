@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @source "../src";
 @source "../../vmux_browser/src";
+@source "../../vmux_git/src";
 @source "../../host/vmux_service/src";
 
 /* The whole page bucket, not a list of the pages that existed when someone last edited this.

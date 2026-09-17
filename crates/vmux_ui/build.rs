@@ -10,6 +10,7 @@ const SKIP_ENV: &str = "VMUX_SKIP_DX_BUILD";
 
 const SCANNED: &[&str] = &[
     "../vmux_browser/src",
+    "../vmux_git/src",
     "../vmux_ui/src",
     "../host/vmux_service/src",
 ];
