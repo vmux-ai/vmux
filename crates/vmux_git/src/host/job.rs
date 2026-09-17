@@ -15,6 +15,7 @@ pub enum JobKind {
     Diff {
         repo_root: PathBuf,
         path: PathBuf,
+        generation: u64,
         top_line: u32,
         rows: u32,
         content: Option<String>,
@@ -124,19 +125,23 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
         },
         JobKind::Diff {
             repo_root,
+            generation,
             top_line,
             ..
         } if !runner::has_repository(&repo_root) => vec![
             Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
             Emit::DiffViewport(GitDiffViewportEvent {
+                generation,
                 first_line: top_line,
                 total_lines: 0,
                 lines: Vec::new(),
+                error: String::new(),
             }),
         ],
         JobKind::Diff {
             repo_root,
             path,
+            generation,
             top_line,
             rows,
             content,
@@ -150,13 +155,21 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
                 vec![
                     Emit::DiffMeta(GitDiffMetaEvent { total_lines: total }),
                     Emit::DiffViewport(GitDiffViewportEvent {
+                        generation,
                         first_line: top_line.min(total),
                         total_lines: total,
                         lines: win,
+                        error: String::new(),
                     }),
                 ]
             }
-            Err(e) => vec![Emit::Error(GitErrorEvent { message: e.0 })],
+            Err(error) => vec![Emit::DiffViewport(GitDiffViewportEvent {
+                generation,
+                first_line: top_line,
+                total_lines: 0,
+                lines: Vec::new(),
+                error: error.0,
+            })],
         },
         JobKind::Stage { repo_root, path } => mutate(&repo_root, &path, "stage", runner::stage),
         JobKind::Unstage { repo_root, path } => {
@@ -232,12 +245,16 @@ mod tests {
         let emits = run_job(JobKind::Diff {
             repo_root: repo.path().to_path_buf(),
             path: file,
+            generation: 7,
             top_line: 0,
             rows: 50,
             content: None,
         });
         assert!(matches!(emits[0], Emit::DiffMeta(_)));
-        assert!(matches!(emits[1], Emit::DiffViewport(_)));
+        assert!(matches!(
+            emits[1],
+            Emit::DiffViewport(GitDiffViewportEvent { generation: 7, .. })
+        ));
     }
 
     #[test]
@@ -281,6 +298,7 @@ mod tests {
         let emits = run_job(JobKind::Diff {
             repo_root: dir.path().to_path_buf(),
             path: file,
+            generation: 7,
             top_line: 0,
             rows: 50,
             content: None,
@@ -290,6 +308,7 @@ mod tests {
             [
                 Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
                 Emit::DiffViewport(GitDiffViewportEvent {
+                    generation: 7,
                     total_lines: 0,
                     lines,
                     ..

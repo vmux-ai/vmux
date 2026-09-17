@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -77,13 +78,18 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), 
 }
 
 pub(crate) fn git_read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+    let (stdout, stderr, ok) = git_read_bytes(root, args)?;
+    Ok((String::from_utf8_lossy(&stdout).into_owned(), stderr, ok))
+}
+
+fn git_read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
     let out = git_command(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)
         .output()
         .map_err(|e| GitError(format!("failed to run git: {e}")))?;
     Ok((
-        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.stdout,
         String::from_utf8_lossy(&out.stderr).into_owned(),
         out.status.success(),
     ))
@@ -146,13 +152,52 @@ fn canon(path: &Path) -> PathBuf {
         })
 }
 
-fn rel(root: &Path, file: &Path) -> String {
+fn rel(root: &Path, file: &Path) -> PathBuf {
     let root = canon(root);
     let file = canon(file);
-    file.strip_prefix(&root)
-        .unwrap_or(&file)
-        .to_string_lossy()
-        .into_owned()
+    file.strip_prefix(&root).unwrap_or(&file).to_path_buf()
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().as_bytes().to_vec()
+}
+
+#[cfg(unix)]
+fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+
+    PathBuf::from(OsString::from_vec(bytes.to_vec()))
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
+pub(crate) struct RequestPath<'a> {
+    display: &'a str,
+    bytes: &'a [u8],
+}
+
+impl<'a> RequestPath<'a> {
+    pub(crate) fn new(display: &'a str, bytes: &'a [u8]) -> Self {
+        Self { display, bytes }
+    }
+
+    pub(crate) fn resolve(&self, repo_root: &Path) -> PathBuf {
+        if self.bytes.is_empty() {
+            return PathBuf::from(self.display);
+        }
+        repo_root.join(path_from_bytes(self.bytes))
+    }
 }
 
 pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
@@ -169,7 +214,7 @@ pub fn status_at(root: &Path, file: &Path) -> Result<GitStatusEvent, GitError> {
 pub fn file_statuses(
     root: &Path,
 ) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
-    let (stdout, stderr, ok) = git_read(
+    let (stdout, stderr, ok) = git_read_bytes(
         root,
         &[
             "status",
@@ -262,7 +307,7 @@ impl GitRepositoryEvent {
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
         let repo_root = repo_root(path)?;
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = git_read_bytes(
             &repo_root,
             &[
                 "status",
@@ -273,7 +318,7 @@ impl GitRepositoryEvent {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(git_err(&String::from_utf8_lossy(&stdout), &stderr));
         }
         let parsed = parse::parse_porcelain_v2_statuses(&stdout);
         let branch = parsed.branch.clone();
@@ -281,7 +326,7 @@ impl GitRepositoryEvent {
         let ahead = parsed.ahead;
         let behind = parsed.behind;
         let mut files = parsed.into_file_entries();
-        files.sort_by(|left, right| left.path.cmp(&right.path));
+        files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
         let repo_name = repo_root
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -304,7 +349,7 @@ impl GitRepositoryEvent {
 }
 
 pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
-    let (stdout, stderr, ok) = git_read(
+    let (stdout, stderr, ok) = git_read_bytes(
         root,
         &[
             "status",
@@ -329,7 +374,7 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
                 ahead: parsed.ahead,
                 behind: parsed.behind,
                 has_upstream: parsed.has_upstream,
-                file_status: parsed.file_status(&target),
+                file_status: parsed.file_status(&path_bytes(&target)),
                 staged_count: parsed.staged_count,
                 repo_root: repo_root.clone(),
             }
@@ -339,7 +384,7 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
 
 pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
     let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git_read(
+    let (stdout, stderr, ok) = git_read_bytes(
         &root,
         &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
     )?;
@@ -349,20 +394,25 @@ pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<Stri
     Ok((root, parse::changed_paths(&stdout)))
 }
 
-fn diff_text(root: &Path, target: &str, cached: bool, ctx: u32) -> Result<String, GitError> {
+fn diff_text(root: &Path, target: &Path, cached: bool, ctx: u32) -> Result<String, GitError> {
     let uarg = format!("--unified={ctx}");
-    let mut args: Vec<&str> = vec!["diff"];
+    let mut command = git_command(root);
+    command.arg("diff");
     if cached {
-        args.push("--cached");
+        command.arg("--cached");
     }
-    args.push(&uarg);
-    args.push("--");
-    args.push(target);
-    let (out, stderr, ok) = git(root, &args)?;
-    if ok {
-        Ok(out)
+    let output = command
+        .arg(&uarg)
+        .arg("--")
+        .arg(target)
+        .output()
+        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        Err(GitError(stderr.trim().to_string()))
+        Err(GitError(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
     }
 }
 
@@ -386,7 +436,7 @@ fn tag_hunk(line: &DiffLine, ranges: &[parse::HunkRange]) -> Option<u32> {
     }
 }
 
-fn staged_lineset(root: &Path, target: &str) -> HashSet<u32> {
+fn staged_lineset(root: &Path, target: &Path) -> HashSet<u32> {
     diff_text(root, target, true, 0)
         .map(|t| {
             parse::hunk_ranges(&t)
@@ -400,7 +450,7 @@ fn staged_lineset(root: &Path, target: &str) -> HashSet<u32> {
 fn staged_only_lines(
     file: &Path,
     root: &Path,
-    target: &str,
+    target: &Path,
     staged: &HashSet<u32>,
 ) -> Result<Vec<DiffLine>, GitError> {
     if diff_text(root, target, true, 100_000)?.trim().is_empty() {
@@ -429,10 +479,28 @@ fn staged_only_lines(
     Ok(lines)
 }
 
-fn index_text(root: &Path, target: &str) -> Result<String, GitError> {
-    let spec = format!(":{target}");
-    let (out, _, ok) = git(root, &["show", &spec])?;
-    if ok { Ok(out) } else { Ok(String::new()) }
+fn index_text(root: &Path, target: &Path) -> Result<String, GitError> {
+    #[cfg(unix)]
+    let spec = {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let mut bytes = vec![b':'];
+        bytes.extend_from_slice(target.as_os_str().as_bytes());
+        OsString::from_vec(bytes)
+    };
+    #[cfg(not(unix))]
+    let spec = OsString::from(format!(":{}", target.to_string_lossy()));
+
+    let output = git_command(root)
+        .arg("show")
+        .arg(spec)
+        .output()
+        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Ok(String::new())
+    }
 }
 
 pub fn diff_lines_with_content(
@@ -591,13 +659,18 @@ pub fn apply_hunk(root: &Path, file: &Path, index: u32, accept: bool) -> Result<
 
 fn simple(root: &Path, file: &Path, verb: &[&str]) -> Result<(), GitError> {
     let target = rel(root, file);
-    let mut args: Vec<&str> = verb.to_vec();
-    args.push(&target);
-    let (stdout, stderr, ok) = git(root, &args)?;
-    if ok {
+    let output = git_command(root)
+        .args(verb)
+        .arg(&target)
+        .output()
+        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+    if output.status.success() {
         Ok(())
     } else {
-        Err(git_err(&stdout, &stderr))
+        Err(git_err(
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+        ))
     }
 }
 
@@ -841,6 +914,43 @@ mod tests {
         let repository = GitRepositoryEvent::load(repo.path()).unwrap();
 
         assert!(repository.files.iter().any(|entry| entry.path == name));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn non_utf8_path_round_trips_through_repository_actions() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let repo = test_repo::init();
+        let raw_path = b"invalid-\x80-name.txt".to_vec();
+        let file = repo.path().join(OsString::from_vec(raw_path.clone()));
+        std::fs::write(&file, "one\n").unwrap();
+        stage(repo.path(), &file).unwrap();
+        commit(&file, "initial").unwrap();
+        std::fs::write(&file, "two\n").unwrap();
+
+        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        let entry = repository
+            .files
+            .iter()
+            .find(|entry| entry.path_bytes == raw_path)
+            .unwrap();
+        let request_path = RequestPath::new(&entry.path, &entry.path_bytes).resolve(repo.path());
+
+        assert_eq!(request_path, file);
+        assert!(!diff_lines(repo.path(), &request_path).unwrap().is_empty());
+        stage(repo.path(), &request_path).unwrap();
+        assert_eq!(
+            status(&request_path).unwrap().file_status,
+            FileStatus::Staged
+        );
+        unstage(repo.path(), &request_path).unwrap();
+        assert_eq!(
+            status(&request_path).unwrap().file_status,
+            FileStatus::Modified
+        );
+        discard(repo.path(), &request_path).unwrap();
+        assert_eq!(std::fs::read_to_string(request_path).unwrap(), "one\n");
     }
 
     #[test]

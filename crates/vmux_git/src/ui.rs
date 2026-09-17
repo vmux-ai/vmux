@@ -193,9 +193,9 @@ pub fn GitFooter(
                     Button {
                         variant: ButtonVariant::Ghost,
                         class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
-                        disabled: commit_msg().is_empty() || !pending_commit_msg().is_empty(),
+                        disabled: commit_msg().trim().is_empty() || !pending_commit_msg().is_empty(),
                         onclick: move |_| {
-                            let m = commit_msg();
+                            let m = commit_msg().trim().to_string();
                             if !m.is_empty()
                                 && send(&GitCommitRequest {
                                     path: path(),
@@ -241,36 +241,41 @@ pub fn GitFooter(
 pub fn DiffView(
     repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
+    #[props(default)] path_bytes: Vec<u8>,
     nonce: ReadSignal<u32>,
     visible: bool,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
+    let path_bytes = use_memo(move || path_bytes.clone());
     let mut lines = use_signal(Vec::<DiffLine>::new);
     let mut expanded = use_signal(Vec::<(usize, usize)>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
     let mut requested_path = use_signal(String::new);
+    let mut request_generation = use_signal(|| 0u64);
 
     let _vp = use_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
+        if p.generation != request_generation() {
+            return;
+        }
         markers.set(editor_diff_markers(&p.lines));
         lines.set(p.lines);
         expanded.set(Vec::new());
         loading.set(false);
-        error.set(String::new());
-    });
-    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
-        error.set(event.message);
-        loading.set(false);
+        error.set(p.error);
     });
 
     use_effect(move || {
         let root = repo_root();
         let p = path();
+        let raw_path = path_bytes();
         let _ = nonce();
         if !root.is_empty() && !p.is_empty() {
-            let request_key = format!("{root}\0{p}");
+            let request_key = format!("{root}\0{p}\0{raw_path:?}");
             let path_changed = *requested_path.peek() != request_key;
             requested_path.set(request_key);
+            let generation = request_generation().wrapping_add(1);
+            request_generation.set(generation);
             if path_changed || lines.peek().is_empty() {
                 loading.set(true);
             }
@@ -282,6 +287,8 @@ pub fn DiffView(
             let _ = send(&GitDiffRequest {
                 repo_root: root,
                 path: p,
+                path_bytes: raw_path,
+                generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
             });
@@ -358,6 +365,7 @@ pub fn DiffView(
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
                                                     path: path(),
+                                                    path_bytes: path_bytes(),
                                                     hunk: h,
                                                     accept: true,
                                                 });
@@ -371,6 +379,7 @@ pub fn DiffView(
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
                                                     path: path(),
+                                                    path_bytes: path_bytes(),
                                                     hunk: h,
                                                     accept: false,
                                                 });

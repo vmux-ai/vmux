@@ -24,13 +24,13 @@ wire! {
     pub struct GitStatusRequest { pub path: String }
     pub struct GitRepositoryRequest { pub path: String }
     pub struct GitRepositoryPickerRequest { pub path: String }
-    pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub top_line: u32, pub rows: u32 }
-    pub struct GitStageRequest { pub repo_root: String, pub path: String }
-    pub struct GitUnstageRequest { pub repo_root: String, pub path: String }
-    pub struct GitDiscardRequest { pub repo_root: String, pub path: String }
+    pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub generation: u64, pub top_line: u32, pub rows: u32 }
+    pub struct GitStageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
+    pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
+    pub struct GitDiscardRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitCommitRequest { pub path: String, pub message: String }
     pub struct GitPushRequest { pub path: String }
-    pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub hunk: u32, pub accept: bool }
+    pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub hunk: u32, pub accept: bool }
 
     pub struct StyledSpan { pub text: String, pub fg: [u8; 3], pub bold: bool, pub italic: bool }
     pub struct DiffLine {
@@ -54,7 +54,9 @@ wire! {
 
     pub struct GitFileEntry {
         pub path: String,
+        pub path_bytes: Vec<u8>,
         pub previous_path: Option<String>,
+        pub previous_path_bytes: Option<Vec<u8>>,
         pub status: FileStatus,
         pub staged: bool,
         pub unstaged: bool,
@@ -88,7 +90,7 @@ wire! {
     }
 
     pub struct GitDiffMetaEvent { pub total_lines: u32 }
-    pub struct GitDiffViewportEvent { pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine> }
+    pub struct GitDiffViewportEvent { pub generation: u64, pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine>, pub error: String }
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }
     pub struct GitErrorEvent { pub message: String }
     pub struct GitChangedEvent {}

@@ -54,7 +54,7 @@ impl Plugin for GitPlugin {
                 app.insert_non_send(GitWatch {
                     watcher,
                     rx,
-                    watched: HashSet::new(),
+                    watch_references: HashMap::new(),
                     subscriptions: HashMap::new(),
                     repo_info_subscriptions: HashMap::new(),
                 });
@@ -255,7 +255,7 @@ struct GitSubscription {
 struct GitWatch {
     watcher: RecommendedWatcher,
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
-    watched: HashSet<GitWatchTarget>,
+    watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
 }
@@ -549,6 +549,69 @@ fn should_forward_git_watch_result(result: &notify::Result<notify::Event>) -> bo
 }
 
 impl GitWatch {
+    #[cfg(test)]
+    fn test() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(move |result| {
+            let _ = tx.send(result);
+        })
+        .unwrap();
+        Self {
+            watcher,
+            rx,
+            watch_references: HashMap::new(),
+            subscriptions: HashMap::new(),
+            repo_info_subscriptions: HashMap::new(),
+        }
+    }
+
+    fn acquire_targets(&mut self, targets: &[GitWatchTarget]) -> bool {
+        let mut acquired = Vec::new();
+        for target in targets {
+            if let Some(references) = self.watch_references.get_mut(target) {
+                *references += 1;
+                acquired.push(target.clone());
+                continue;
+            }
+            let mode = if target.recursive {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            if self.watcher.watch(&target.path, mode).is_err() {
+                self.release_targets(&acquired);
+                return false;
+            }
+            self.watch_references.insert(target.clone(), 1);
+            acquired.push(target.clone());
+        }
+        true
+    }
+
+    fn release_targets(&mut self, targets: &[GitWatchTarget]) {
+        for target in targets {
+            let remove = match self.watch_references.get_mut(target) {
+                Some(references) if *references > 1 => {
+                    *references -= 1;
+                    false
+                }
+                Some(_) => true,
+                None => false,
+            };
+            if !remove {
+                continue;
+            }
+            self.watch_references.remove(target);
+            if self
+                .watch_references
+                .keys()
+                .all(|other| other.path != target.path)
+            {
+                let _ = self.watcher.unwatch(&target.path);
+            }
+        }
+    }
+
     fn subscribe(
         &mut self,
         entity: Entity,
@@ -562,26 +625,17 @@ impl GitWatch {
         {
             return Ok(subscription.repo_root.clone());
         }
-        let (repo_root, targets) = git_watch_targets(&path).inspect_err(|_| {
-            self.subscriptions.remove(&entity);
-        })?;
-        let mut complete = true;
-        for target in &targets {
-            if self.watched.contains(target) {
-                continue;
+        let (repo_root, targets) = match git_watch_targets(&path) {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some(previous) = self.subscriptions.remove(&entity) {
+                    self.release_targets(&previous.targets);
+                }
+                return Err(error);
             }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_ok() {
-                self.watched.insert(target.clone());
-            } else {
-                complete = false;
-            }
-        }
-        self.subscriptions.insert(
+        };
+        let complete = self.acquire_targets(&targets);
+        let previous = self.subscriptions.insert(
             entity,
             GitSubscription {
                 path,
@@ -590,6 +644,9 @@ impl GitWatch {
                 complete,
             },
         );
+        if let Some(previous) = previous {
+            self.release_targets(&previous.targets);
+        }
         Ok(repo_root)
     }
 
@@ -603,26 +660,14 @@ impl GitWatch {
         if self.repo_info_subscriptions.get(&path) == Some(&targets) {
             return true;
         }
-        let mut complete = true;
-        for target in &targets {
-            if self.watched.contains(target) {
-                continue;
-            }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_ok() {
-                self.watched.insert(target.clone());
-            } else {
-                complete = false;
-            }
+        if !self.acquire_targets(&targets) {
+            return false;
         }
-        if complete {
-            self.repo_info_subscriptions.insert(path, targets);
+        let previous = self.repo_info_subscriptions.insert(path, targets);
+        if let Some(previous) = previous {
+            self.release_targets(&previous);
         }
-        complete
+        true
     }
 }
 
@@ -924,12 +969,15 @@ fn on_diff_request(
     outbox: Res<GitOutbox>,
 ) {
     let p = &trigger.event().payload;
+    let repo_root = PathBuf::from(&p.repo_root);
+    let path = crate::host::runner::RequestPath::new(&p.path, &p.path_bytes).resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
         JobKind::Diff {
-            repo_root: p.repo_root.clone().into(),
-            path: p.path.clone().into(),
+            repo_root,
+            path,
+            generation: p.generation,
             top_line: p.top_line,
             rows: p.rows,
             content: sources
@@ -942,35 +990,38 @@ fn on_diff_request(
 }
 
 fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Stage {
-            repo_root: trigger.event().payload.repo_root.clone().into(),
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Stage { repo_root, path },
     );
 }
 
 fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Unstage {
-            repo_root: trigger.event().payload.repo_root.clone().into(),
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Unstage { repo_root, path },
     );
 }
 
 fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Discard {
-            repo_root: trigger.event().payload.repo_root.clone().into(),
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Discard { repo_root, path },
     );
 }
 
@@ -998,12 +1049,14 @@ fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbo
 
 fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbox>) {
     let p = &trigger.event().payload;
+    let repo_root = PathBuf::from(&p.repo_root);
+    let path = crate::host::runner::RequestPath::new(&p.path, &p.path_bytes).resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
         JobKind::Hunk {
-            repo_root: p.repo_root.clone().into(),
-            path: p.path.clone().into(),
+            repo_root,
+            path,
             hunk: p.hunk,
             accept: p.accept,
         },
@@ -1169,6 +1222,43 @@ mod tests {
             path: common.join("refs"),
             recursive: true,
             kind: GitWatchKind::Metadata,
+        }));
+    }
+
+    #[test]
+    fn replacing_subscription_releases_only_unshared_watch_targets() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let first_file = test_repo::write(first.path(), "a.txt", "one\n");
+        let second_file = test_repo::write(second.path(), "b.txt", "two\n");
+        let first_info = crate::host::worktree::repo_info(first.path()).unwrap();
+        let first_targets = git_watch_targets(&first_file).unwrap().1;
+        let second_targets = git_watch_targets(&second_file).unwrap().1;
+        let entity = Entity::from_bits(1);
+        let mut watch = GitWatch::test();
+
+        watch.subscribe(entity, &first_file).unwrap();
+        assert!(watch.subscribe_repo_info(first.path(), Some(&first_info)));
+        assert!(first_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 2)
+        }));
+
+        watch.subscribe(entity, &second_file).unwrap();
+
+        assert!(first_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 1)
+        }));
+        assert!(second_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 1)
         }));
     }
 

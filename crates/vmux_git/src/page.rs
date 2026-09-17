@@ -33,10 +33,11 @@ pub fn Page() -> Element {
     let mut workspace = use_signal(String::new);
     let mut repository = use_signal(|| Option::<GitRepositoryEvent>::None);
     let mut selected_path = use_signal(String::new);
+    let mut selected_path_bytes = use_signal(Vec::<u8>::new);
     let mut selected_abs_path = use_signal(String::new);
     let mut selected_commit = use_signal(String::new);
     let mut selected_branch = use_signal(String::new);
-    let confirm_discard = use_signal(String::new);
+    let confirm_discard = use_signal(Vec::<u8>::new);
     let mut commit_message = use_signal(String::new);
     let mut pending_commit_message = use_signal(String::new);
     let mut loading = use_signal(|| true);
@@ -51,6 +52,7 @@ pub fn Page() -> Element {
         workspace.set(path);
         repository.set(None);
         selected_path.set(String::new());
+        selected_path_bytes.set(Vec::new());
         selected_abs_path.set(String::new());
         selected_commit.set(String::new());
         selected_branch.set(String::new());
@@ -66,13 +68,12 @@ pub fn Page() -> Element {
         if event.path != workspace() {
             return;
         }
-        let next_path = event
+        let next_file = event
             .files
             .iter()
-            .find(|entry| entry.path == selected_path())
+            .find(|entry| entry.path_bytes == selected_path_bytes())
             .or_else(|| event.files.first())
-            .map(|entry| entry.path.clone())
-            .unwrap_or_default();
+            .cloned();
         let next_commit = event
             .commits
             .iter()
@@ -88,8 +89,19 @@ pub fn Page() -> Element {
             .or_else(|| event.branches.first())
             .map(|entry| entry.name.clone())
             .unwrap_or_default();
-        selected_abs_path.set(GitWorkspace::absolute_path(&event.repo_root, &next_path));
-        selected_path.set(next_path);
+        selected_abs_path.set(
+            next_file
+                .as_ref()
+                .map(|entry| GitWorkspace::absolute_path(&event.repo_root, &entry.path))
+                .unwrap_or_default(),
+        );
+        selected_path.set(
+            next_file
+                .as_ref()
+                .map(|entry| entry.path.clone())
+                .unwrap_or_default(),
+        );
+        selected_path_bytes.set(next_file.map(|entry| entry.path_bytes).unwrap_or_default());
         selected_commit.set(next_commit);
         selected_branch.set(next_branch);
         workspace.set(event.repo_root.clone());
@@ -104,6 +116,11 @@ pub fn Page() -> Element {
             }
             workspace.set(event.path.clone());
             repository.set(None);
+            selected_path.set(String::new());
+            selected_path_bytes.set(Vec::new());
+            selected_abs_path.set(String::new());
+            selected_commit.set(String::new());
+            selected_branch.set(String::new());
             loading.set(true);
             message.set(String::new());
             GitWorkspace::request(&event.path);
@@ -152,6 +169,7 @@ pub fn Page() -> Element {
                 GitDashboard {
                     repository,
                     selected_path,
+                    selected_path_bytes,
                     selected_abs_path,
                     selected_commit,
                     selected_branch,
@@ -327,10 +345,11 @@ fn GitHeader(
 fn GitDashboard(
     repository: GitRepositoryEvent,
     selected_path: Signal<String>,
+    selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
     selected_commit: Signal<String>,
     selected_branch: Signal<String>,
-    confirm_discard: Signal<String>,
+    confirm_discard: Signal<Vec<u8>>,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
     workspace: Signal<String>,
@@ -343,6 +362,7 @@ fn GitDashboard(
                 ChangesCard {
                     repository: repository.clone(),
                     selected_path,
+                    selected_path_bytes,
                     selected_abs_path,
                     confirm_discard,
                     commit_message,
@@ -353,6 +373,7 @@ fn GitDashboard(
                 DiffCard {
                     repo_root: workspace,
                     selected_path,
+                    selected_path_bytes,
                     selected_abs_path,
                     nonce,
                     markers,
@@ -377,8 +398,9 @@ fn PanelHeader(title: String, count: usize, icon: LineIcon) -> Element {
 fn ChangesCard(
     repository: GitRepositoryEvent,
     selected_path: Signal<String>,
+    selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
-    confirm_discard: Signal<String>,
+    confirm_discard: Signal<Vec<u8>>,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
 ) -> Element {
@@ -414,6 +436,7 @@ fn ChangesCard(
                             repo_root: repository.repo_root.clone(),
                             staged_view: true,
                             selected_path,
+                            selected_path_bytes,
                             selected_abs_path,
                             confirm_discard,
                         }
@@ -425,6 +448,7 @@ fn ChangesCard(
                             repo_root: repository.repo_root.clone(),
                             staged_view: false,
                             selected_path,
+                            selected_path_bytes,
                             selected_abs_path,
                             confirm_discard,
                         }
@@ -448,8 +472,9 @@ fn FileSection(
     repo_root: String,
     staged_view: bool,
     selected_path: Signal<String>,
+    selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
-    confirm_discard: Signal<String>,
+    confirm_discard: Signal<Vec<u8>>,
 ) -> Element {
     rsx! {
         div { class: "border-b border-border last:border-b-0",
@@ -460,11 +485,12 @@ fn FileSection(
             div {
                 for entry in files {
                     FileRow {
-                        key: "{staged_view}-{entry.path}",
+                        key: "{staged_view}-{entry.path_bytes:?}",
                         entry,
                         repo_root: repo_root.clone(),
                         staged_view,
                         selected_path,
+                        selected_path_bytes,
                         selected_abs_path,
                         confirm_discard,
                     }
@@ -480,19 +506,21 @@ fn FileRow(
     repo_root: String,
     staged_view: bool,
     selected_path: Signal<String>,
+    selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
-    confirm_discard: Signal<String>,
+    confirm_discard: Signal<Vec<u8>>,
 ) -> Element {
     let absolute = GitWorkspace::absolute_path(&repo_root, &entry.path);
-    let selected = selected_path() == entry.path;
+    let selected = selected_path_bytes() == entry.path_bytes;
     let file_path = entry.path.clone();
+    let file_path_bytes = entry.path_bytes.clone();
     let file_name = entry.name().to_string();
     let parent = entry.parent().to_string();
     let status_label = entry.status.label();
     let status_code = entry.status.code();
     let status_class = entry.status.class();
     let can_discard = entry.can_discard() && !staged_view;
-    let confirming = confirm_discard() == entry.path;
+    let confirming = confirm_discard() == entry.path_bytes;
 
     rsx! {
         div {
@@ -503,9 +531,11 @@ fn FileRow(
             },
             onclick: {
                 let file_path = file_path.clone();
+                let file_path_bytes = file_path_bytes.clone();
                 let absolute = absolute.clone();
                 move |_| {
                     selected_path.set(file_path.clone());
+                    selected_path_bytes.set(file_path_bytes.clone());
                     selected_abs_path.set(absolute.clone());
                 }
             },
@@ -525,13 +555,14 @@ fn FileRow(
                     aria_label: if staged_view { translate("git-unstage") } else { translate("git-stage") },
                     onclick: {
                         let absolute = absolute.clone();
+                        let path_bytes = file_path_bytes.clone();
                         let repo_root = repo_root.clone();
                         move |event: Event<MouseData>| {
                             event.stop_propagation();
                             if staged_view {
-                                let _ = send(&GitUnstageRequest { repo_root: repo_root.clone(), path: absolute.clone() });
+                                let _ = send(&GitUnstageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
                             } else {
-                                let _ = send(&GitStageRequest { repo_root: repo_root.clone(), path: absolute.clone() });
+                                let _ = send(&GitStageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
                             }
                         }
                     },
@@ -549,15 +580,15 @@ fn FileRow(
                         aria_label: if confirming { translate("git-confirm-discard") } else { translate("git-discard") },
                         onclick: {
                             let absolute = absolute.clone();
-                            let file_path = file_path.clone();
+                            let path_bytes = file_path_bytes.clone();
                             let repo_root = repo_root.clone();
                             move |event: Event<MouseData>| {
                                 event.stop_propagation();
-                                if confirm_discard() == file_path {
-                                    let _ = send(&GitDiscardRequest { repo_root: repo_root.clone(), path: absolute.clone() });
-                                    confirm_discard.set(String::new());
+                                if confirm_discard() == path_bytes {
+                                    let _ = send(&GitDiscardRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
+                                    confirm_discard.set(Vec::new());
                                 } else {
-                                    confirm_discard.set(file_path.clone());
+                                    confirm_discard.set(path_bytes.clone());
                                 }
                             }
                         },
@@ -728,6 +759,7 @@ fn HistoryCard(repository: GitRepositoryEvent, selected_commit: Signal<String>) 
 fn DiffCard(
     repo_root: Signal<String>,
     selected_path: Signal<String>,
+    selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
     nonce: Signal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
@@ -745,7 +777,7 @@ fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, nonce, visible: true, markers }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), nonce, visible: true, markers }
             }
         }
     }
