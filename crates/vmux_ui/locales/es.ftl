@@ -935,6 +935,13 @@ resume-age-years = { $count } a
 
 
 git-title = Git
+git-status = Estado
+git-files = Archivos
+git-commits = Confirmaciones
+git-log = Historial
+git-command-log = Registro de comandos
+git-command-log-empty = Las operaciones de Git aparecerán aquí.
+git-command-error = error
 git-repository = Repositorio
 git-changes = Cambios
 git-branches = Ramas

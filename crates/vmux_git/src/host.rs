@@ -17,8 +17,9 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::host::page::NativelyHosted;
 
 use crate::event::{
-    GIT_CHANGED_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitChangedEvent, GitCommitRequest,
-    GitDiffRequest, GitDiscardRequest, GitHunkRequest, GitPushRequest, GitRepositoryPickedEvent,
+    GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitBranchLogRequest,
+    GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest,
+    GitDiscardRequest, GitHunkRequest, GitPushRequest, GitRepositoryPickedEvent,
     GitRepositoryPickerRequest, GitRepositoryRequest, GitStageRequest, GitStatusRequest,
     GitUnstageRequest,
 };
@@ -76,6 +77,8 @@ impl Plugin for GitPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 GitRepositoryRequest,
                 GitRepositoryPickerRequest,
+                GitBranchLogRequest,
+                GitDirectoryRequest,
                 GitStatusRequest,
                 GitDiffRequest,
                 GitStageRequest,
@@ -87,6 +90,8 @@ impl Plugin for GitPlugin {
             )>::default())
             .add_observer(on_repository_request)
             .add_observer(on_repository_picker_request)
+            .add_observer(on_branch_log_request)
+            .add_observer(on_directory_request)
             .add_observer(on_status_request)
             .add_observer(on_diff_request)
             .add_observer(on_stage_request)
@@ -130,6 +135,75 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 pub struct GitDiffSource {
     pub content: String,
     pub dirty: bool,
+}
+
+struct GitDirectory;
+
+impl GitDirectory {
+    fn initial_path(path: &Path) -> PathBuf {
+        let mut current = path.to_path_buf();
+        while !current.is_dir() && current.pop() {}
+        if current.is_dir() && !current.as_os_str().is_empty() {
+            return current;
+        }
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    fn entries(path: &Path) -> Vec<vmux_core::event::FileDirEntry> {
+        let Ok(read) = std::fs::read_dir(path) else {
+            return Vec::new();
+        };
+        let mut entries = Vec::new();
+        for entry in read.flatten() {
+            let path = entry.path();
+            let is_dir = entry
+                .file_type()
+                .map(|kind| {
+                    kind.is_dir()
+                        || kind.is_symlink()
+                            && std::fs::metadata(&path)
+                                .map(|metadata| metadata.is_dir())
+                                .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            entries.push(vmux_core::event::FileDirEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
+                is_dir,
+            });
+        }
+        entries.sort_by(|left, right| {
+            right
+                .is_dir
+                .cmp(&left.is_dir)
+                .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        entries
+    }
+
+    fn event(path: &Path, preview: bool) -> GitDirectoryEvent {
+        let path = Self::initial_path(path);
+        let parent = path.parent().map(Path::to_path_buf);
+        let parent_path = parent
+            .as_ref()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let parent_entries = parent.as_deref().map(Self::entries).unwrap_or_default();
+        let repo_root = crate::host::runner::repo_root(&path)
+            .map(|root| root.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        GitDirectoryEvent {
+            entries: Self::entries(&path),
+            path: path.to_string_lossy().into_owned(),
+            parent_path,
+            parent_entries,
+            repo_root,
+            preview,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -859,6 +933,45 @@ fn on_repository_request(
     spawn_job(&outbox, webview, JobKind::Repository { path });
 }
 
+fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, outbox: Res<GitOutbox>) {
+    let request = &trigger.event().payload;
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::BranchLog {
+            repo_root: request.repo_root.clone().into(),
+            branch: request.branch.clone(),
+        },
+    );
+}
+
+fn on_directory_request(
+    trigger: On<BinReceive<GitDirectoryRequest>>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let event = GitDirectory::event(Path::new(&request.path), request.preview);
+    if !request.preview
+        && let Ok(mut page) = pages.get_mut(trigger.event().webview)
+    {
+        if let Some(url) = crate::GitUrl::from_path(Path::new(&event.path)) {
+            page.url = url;
+        }
+        let name = Path::new(&event.path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Git".to_string());
+        page.title = format!("{name} · Git");
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        trigger.event().webview,
+        GIT_DIRECTORY_EVENT,
+        &event,
+    ));
+}
+
 fn on_repository_picker_request(
     trigger: On<BinReceive<GitRepositoryPickerRequest>>,
     pending: Query<&PendingGitRepositoryPicker>,
@@ -1100,11 +1213,28 @@ fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbo
     );
 }
 
-fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
+fn emit_events(
+    commands: &mut Commands,
+    pages: &mut Query<&mut vmux_core::PageMetadata>,
+    webview: Entity,
+    emits: Vec<Emit>,
+) {
     for emit in emits {
         let name = emit_event_name(&emit);
         match emit {
             Emit::Repository(ev) => {
+                if let Ok(mut page) = pages.get_mut(webview) {
+                    if let Some(url) = crate::GitUrl::from_path(Path::new(&ev.repo_root)) {
+                        page.url = url;
+                    }
+                    page.title = match ev.branch.is_empty() {
+                        true => ev.repo_name.clone(),
+                        false => format!("{} · {}", ev.repo_name, ev.branch),
+                    };
+                }
+                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+            }
+            Emit::BranchLog(ev) => {
                 commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
             }
             Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
@@ -1121,6 +1251,7 @@ fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
 fn drain_git_outbox(
     outbox: Res<GitOutbox>,
     mut jobs: ResMut<GitStatusJobs>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
     mut commands: Commands,
 ) {
     let drained: OutboxQueue = {
@@ -1130,12 +1261,12 @@ fn drain_git_outbox(
     for item in drained {
         match item {
             GitOutboxItem::Events { webview, emits } => {
-                emit_events(&mut commands, webview, emits);
+                emit_events(&mut commands, &mut pages, webview, emits);
             }
             GitOutboxItem::StatusBatch { repo_root, results } => {
                 jobs.complete(&repo_root);
                 for (webview, emits) in results {
-                    emit_events(&mut commands, webview, emits);
+                    emit_events(&mut commands, &mut pages, webview, emits);
                 }
             }
         }

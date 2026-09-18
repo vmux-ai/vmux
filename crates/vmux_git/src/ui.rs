@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -318,8 +319,10 @@ pub fn DiffView(
             class: if visible { "min-h-0 flex-1 overflow-auto" } else { "hidden" },
 
             if loading() {
-                div { class: "flex h-20 items-center justify-center font-sans text-xs text-muted-foreground",
-                    span { class: "animate-pulse", {translate("git-loading-diff")} }
+                div { class: "flex flex-col gap-2 p-3",
+                    for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
+                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                    }
                 }
             } else if !error().is_empty() {
                 div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }

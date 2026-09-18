@@ -5,7 +5,7 @@ use dioxus_primitives::merge_attributes;
 use crate::util::cn;
 
 const CARD_ROOT: &str = "flex flex-col gap-6 rounded-2xl border border-border bg-background py-6 text-muted-foreground shadow-[0_2px_10px_rgb(0_0_0_/_10%)] dark:border-muted dark:bg-card";
-const PANEL_ROOT: &str = "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background text-foreground shadow-sm dark:bg-card";
+const PANEL_ROOT: &str = "flex min-h-0 flex-col overflow-hidden rounded-xl border border-foreground/[0.09] bg-card/80 text-foreground shadow-[0_1px_2px_rgb(0_0_0_/_18%),0_14px_36px_rgb(0_0_0_/_10%)] ring-1 ring-inset ring-white/[0.025] backdrop-blur-sm transition-[border-color,box-shadow] duration-150 hover:border-foreground/[0.14] hover:shadow-[0_2px_5px_rgb(0_0_0_/_18%),0_18px_44px_rgb(0_0_0_/_12%)]";
 
 const CARD_HEADER: &str = "grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 [:has([data-slot=card-action])]:grid-cols-[1fr_auto]";
 
@@ -34,6 +34,7 @@ impl CardVariant {
 #[component]
 pub fn Card(
     #[props(default)] variant: CardVariant,
+    onclick: Option<EventHandler<MouseEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -43,7 +44,11 @@ pub fn Card(
     });
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
-        div { ..merged, {children} }
+        div {
+            onclick: move |event| _ = onclick.map(|callback| callback(event)),
+            ..merged,
+            {children}
+        }
     }
 }
 

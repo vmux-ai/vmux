@@ -260,6 +260,46 @@ impl GitCommitEntry {
                 author: fields[2].to_string(),
                 date: fields[3].to_string(),
                 summary: fields[4].to_string(),
+                body: String::new(),
+                references: String::new(),
+            });
+        }
+        Ok(commits)
+    }
+
+    pub(crate) fn for_reference(root: &Path, reference: &str) -> Result<Vec<Self>, GitError> {
+        let (stdout, stderr, ok) = git_read(
+            root,
+            &[
+                "log",
+                "-50",
+                "--date=relative",
+                "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%b%x1f%D%x1e",
+                reference,
+                "--",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut commits = Vec::new();
+        for record in stdout.split('\x1e') {
+            let record = record.trim_matches(['\n', '\r']);
+            if record.is_empty() {
+                continue;
+            }
+            let fields = record.splitn(7, '\x1f').collect::<Vec<_>>();
+            if fields.len() != 7 {
+                continue;
+            }
+            commits.push(Self {
+                sha: fields[0].to_string(),
+                short_sha: fields[1].to_string(),
+                author: fields[2].to_string(),
+                date: fields[3].to_string(),
+                summary: fields[4].to_string(),
+                body: fields[5].trim().to_string(),
+                references: fields[6].trim().to_string(),
             });
         }
         Ok(commits)

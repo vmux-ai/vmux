@@ -932,6 +932,13 @@ resume-age-years = { $count }년 전
 
 
 git-title = Git
+git-status = 상태
+git-files = 파일
+git-commits = 커밋
+git-log = 로그
+git-command-log = 명령 로그
+git-command-log-empty = Git 작업이 여기에 표시됩니다.
+git-command-error = 오류
 git-repository = 저장소
 git-changes = 변경 사항
 git-branches = 브랜치

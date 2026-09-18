@@ -932,6 +932,13 @@ resume-age-years = { $count } 年前
 
 
 git-title = Git
+git-status = 狀態
+git-files = 檔案
+git-commits = 提交
+git-log = 記錄
+git-command-log = 指令記錄
+git-command-log-empty = Git 操作會顯示在這裡。
+git-command-error = 錯誤
 git-repository = 儲存庫
 git-changes = 變更
 git-branches = 分支

@@ -8,6 +8,10 @@ pub enum JobKind {
     Repository {
         path: PathBuf,
     },
+    BranchLog {
+        repo_root: PathBuf,
+        branch: String,
+    },
     Status {
         path: PathBuf,
         dirty: bool,
@@ -50,6 +54,7 @@ pub enum JobKind {
 #[derive(Debug, Clone)]
 pub enum Emit {
     Repository(GitRepositoryEvent),
+    BranchLog(GitBranchLogEvent),
     Status(GitStatusEvent),
     DiffMeta(GitDiffMetaEvent),
     DiffViewport(GitDiffViewportEvent),
@@ -60,6 +65,7 @@ pub enum Emit {
 pub fn emit_event_name(e: &Emit) -> &'static str {
     match e {
         Emit::Repository(_) => GIT_REPOSITORY_EVENT,
+        Emit::BranchLog(_) => GIT_BRANCH_LOG_EVENT,
         Emit::Status(_) => GIT_STATUS_EVENT,
         Emit::DiffMeta(_) => GIT_DIFF_META_EVENT,
         Emit::DiffViewport(_) => GIT_DIFF_VIEWPORT_EVENT,
@@ -107,6 +113,16 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             Ok(event) => vec![Emit::Repository(event)],
             Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
         },
+        JobKind::BranchLog { repo_root, branch } => {
+            match GitCommitEntry::for_reference(&repo_root, &branch) {
+                Ok(commits) => vec![Emit::BranchLog(GitBranchLogEvent {
+                    repo_root: repo_root.to_string_lossy().into_owned(),
+                    branch,
+                    commits,
+                })],
+                Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
+            }
+        }
         JobKind::Status { path, .. } if !runner::has_repository(&path) => {
             vec![Emit::Status(runner::non_repository_status(&path))]
         }

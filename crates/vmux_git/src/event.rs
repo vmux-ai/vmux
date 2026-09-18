@@ -1,11 +1,13 @@
 pub const GIT_STATUS_EVENT: &str = "git-status";
 pub const GIT_REPOSITORY_EVENT: &str = "git-repository";
+pub const GIT_BRANCH_LOG_EVENT: &str = "git-branch-log";
 pub const GIT_DIFF_META_EVENT: &str = "git-diff-meta";
 pub const GIT_DIFF_VIEWPORT_EVENT: &str = "git-diff-viewport";
 pub const GIT_RESULT_EVENT: &str = "git-result";
 pub const GIT_ERROR_EVENT: &str = "git-error";
 pub const GIT_CHANGED_EVENT: &str = "git-changed";
 pub const GIT_REPOSITORY_PICKED_EVENT: &str = "git-repository-picked";
+pub const GIT_DIRECTORY_EVENT: &str = "git-directory";
 
 macro_rules! wire {
     ($($item:item)*) => {
@@ -24,6 +26,8 @@ wire! {
     pub struct GitStatusRequest { pub path: String }
     pub struct GitRepositoryRequest { pub path: String }
     pub struct GitRepositoryPickerRequest { pub path: String }
+    pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
+    pub struct GitDirectoryRequest { pub path: String, pub preview: bool }
     pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub generation: u64, pub top_line: u32, pub rows: u32 }
     pub struct GitStageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
@@ -68,6 +72,8 @@ wire! {
         pub author: String,
         pub date: String,
         pub summary: String,
+        pub body: String,
+        pub references: String,
     }
 
     pub struct GitBranchEntry {
@@ -89,12 +95,26 @@ wire! {
         pub branches: Vec<GitBranchEntry>,
     }
 
+    pub struct GitBranchLogEvent {
+        pub repo_root: String,
+        pub branch: String,
+        pub commits: Vec<GitCommitEntry>,
+    }
+
     pub struct GitDiffMetaEvent { pub total_lines: u32 }
     pub struct GitDiffViewportEvent { pub generation: u64, pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine>, pub error: String }
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }
     pub struct GitErrorEvent { pub message: String }
     pub struct GitChangedEvent {}
     pub struct GitRepositoryPickedEvent { pub path: String }
+    pub struct GitDirectoryEvent {
+        pub path: String,
+        pub parent_path: String,
+        pub entries: Vec<vmux_core::event::FileDirEntry>,
+        pub parent_entries: Vec<vmux_core::event::FileDirEntry>,
+        pub repo_root: String,
+        pub preview: bool,
+    }
 }
 
 #[derive(
