@@ -274,7 +274,7 @@ pub fn DiffView(
             let request_key = format!("{root}\0{p}\0{raw_path:?}");
             let path_changed = *requested_path.peek() != request_key;
             requested_path.set(request_key);
-            let generation = request_generation().wrapping_add(1);
+            let generation = request_generation.peek().wrapping_add(1);
             request_generation.set(generation);
             if path_changed || lines.peek().is_empty() {
                 loading.set(true);
