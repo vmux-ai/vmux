@@ -233,10 +233,18 @@ pub fn PromptComposer(
                         "autocorrect": "off",
                         placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
                         value: "{value}",
-                        oninput: move |event| on_input.call(event.value()),
+                        oninput: move |event| {
+                            if let Some(value) = ime.input(event.value()) {
+                                on_input.call(value);
+                            }
+                        },
                         onpaste: move |_| on_paste.call(()),
                         oncompositionstart: move |_| ime.start(),
-                        oncompositionend: move |_| ime.commit(),
+                        oncompositionend: move |_| {
+                            if let Some(value) = ime.commit_input() {
+                                on_input.call(value);
+                            }
+                        },
                         onkeydown: move |event| {
                             if ime.swallows(&event) {
                                 return;
