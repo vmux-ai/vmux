@@ -25,6 +25,7 @@ pub mod select;
 pub mod skeleton;
 pub mod start_hero;
 pub mod switch;
+pub mod textarea;
 pub mod tree_row;
 
 #[cfg(test)]

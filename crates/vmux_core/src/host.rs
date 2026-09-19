@@ -22,7 +22,7 @@ pub mod workspace;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
+pub use host_spawn::{HostSpawnRegistry, register_host_spawn, register_scheme_spawn};
 pub use launcher::{
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, PendingLaunch,
     RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,

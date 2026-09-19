@@ -82,6 +82,7 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
+            crate::tools_page::ToolsManagerTabs { active: "extensions".to_string() }
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),

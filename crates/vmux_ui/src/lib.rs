@@ -4,6 +4,11 @@ pub mod caret;
 
 pub mod clipboard;
 
+#[cfg(ui)]
+pub mod directory;
+
+pub mod diff;
+
 pub mod favicon;
 
 pub mod file_icon;

@@ -88,6 +88,32 @@ struct AcpFsScope {
     vibe_temp_root: Option<PathBuf>,
 }
 
+struct AcpSessionContinuity {
+    fresh_on_model_change: bool,
+    prompted: bool,
+}
+
+impl AcpSessionContinuity {
+    fn for_agent(agent_id: &str) -> Self {
+        Self {
+            fresh_on_model_change: matches!(agent_id, "codex" | "codex-acp"),
+            prompted: false,
+        }
+    }
+
+    fn record_prompt(&mut self) {
+        self.prompted = true;
+    }
+
+    fn needs_fresh_session(&self, current_model_id: Option<&str>, next_model_id: &str) -> bool {
+        self.fresh_on_model_change && self.prompted && current_model_id != Some(next_model_id)
+    }
+
+    fn reset(&mut self) {
+        self.prompted = false;
+    }
+}
+
 struct VibeTempRoot(tempfile::TempDir);
 
 impl VibeTempRoot {
@@ -908,6 +934,7 @@ pub async fn run(
         None => env,
     };
     let session_meta = session_meta_for_agent(&agent_id, effort.as_deref());
+    let mut continuity = AcpSessionContinuity::for_agent(&agent_id);
     let agent_cwd = shared.cwd();
     let mut child = match Command::new(&command)
         .args(&args)
@@ -1311,6 +1338,7 @@ pub async fn run(
                                 }
                             }
                         }
+                        continuity.record_prompt();
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
                         let prompt_capabilities = prompt_capabilities.clone();
@@ -1347,15 +1375,70 @@ pub async fn run(
                         config_id,
                         model_id,
                     } => {
-                        let Some(sid) = session_id.clone() else {
+                        let Some(current_sid) = session_id.clone() else {
                             main_shared.emit_status(AgentRunStatus::Errored(
                                 "ACP session is not ready".to_string(),
                             ));
                             continue;
                         };
+                        let current_model_id = main_shared
+                            .model_info
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map(|state| state.current_model_id.clone());
+                        let needs_fresh_session = continuity
+                            .needs_fresh_session(current_model_id.as_deref(), &model_id);
+                        let mut fresh_session = None;
+                        let target_sid = if needs_fresh_session {
+                            let mut new_session = NewSessionRequest::new(main_shared.cwd());
+                            new_session.mcp_servers = mcp_servers.clone();
+                            new_session.meta = session_meta.clone();
+                            match tokio::time::timeout(
+                                ACP_STARTUP_TIMEOUT,
+                                cx.send_request(new_session).block_task(),
+                            )
+                            .await
+                            {
+                                Ok(Ok(response)) => {
+                                    fresh_session = Some((
+                                        response.config_options.unwrap_or_default(),
+                                        response.modes,
+                                    ));
+                                    response.session_id
+                                }
+                                Ok(Err(err)) => {
+                                    publish_model_selection_result(
+                                        &main_shared,
+                                        request_id,
+                                        &model_id,
+                                        false,
+                                    );
+                                    main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                        "acp session restart failed: {err}"
+                                    )));
+                                    continue;
+                                }
+                                Err(_) => {
+                                    publish_model_selection_result(
+                                        &main_shared,
+                                        request_id,
+                                        &model_id,
+                                        false,
+                                    );
+                                    main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                        "acp session restart did not answer within {}s",
+                                        ACP_STARTUP_TIMEOUT.as_secs()
+                                    )));
+                                    continue;
+                                }
+                            }
+                        } else {
+                            current_sid
+                        };
                         match cx
                             .send_request(SetSessionConfigOptionRequest::new(
-                                sid,
+                                target_sid.clone(),
                                 config_id.clone(),
                                 model_id.clone(),
                             ))
@@ -1363,6 +1446,15 @@ pub async fn run(
                             .await
                         {
                             Ok(response) => {
+                                if let Some((config_options, modes)) = fresh_session {
+                                    session_id = Some(target_sid.clone());
+                                    continuity.reset();
+                                    main_shared.publish_mode_info(&config_options, modes.as_ref());
+                                    main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                        sid: main_shared.sid.clone(),
+                                        acp_session_id: target_sid.to_string(),
+                                    });
+                                }
                                 main_shared.publish_selected_model(
                                     &config_id,
                                     &model_id,
@@ -2642,6 +2734,26 @@ mod tests {
             }
             other => panic!("expected ACP model info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn codex_model_change_after_a_prompt_requires_a_fresh_session() {
+        let mut continuity = AcpSessionContinuity::for_agent("codex-acp");
+
+        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
+        continuity.record_prompt();
+        assert!(continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
+        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-sol"));
+        continuity.reset();
+        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
+    }
+
+    #[test]
+    fn other_agents_keep_their_session_when_the_model_changes() {
+        let mut continuity = AcpSessionContinuity::for_agent("claude-acp");
+        continuity.record_prompt();
+
+        assert!(!continuity.needs_fresh_session(Some("sonnet"), "opus"));
     }
 
     #[test]

@@ -132,7 +132,9 @@ pub enum HardwareButton {
 )]
 pub enum SimulatorClipboardAction {
     Copy,
+    Cut,
     Paste,
+    SelectAll,
 }
 
 #[derive(

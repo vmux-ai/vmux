@@ -10,9 +10,9 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_event, use_theme};
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::matrix_rain::MatrixLoader;
+use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::script::PageScript;
 
@@ -66,11 +66,9 @@ fn Mirror(
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
-    let rendered_width = image_size()
-        .map(|size| size.0)
-        .unwrap_or(f64::from(frame_width));
-    let phone_style = format!("border-radius:{:.2}px;", (rendered_width * 0.145).max(8.0));
-    let screen_style = format!("border-radius:{:.2}px;", (rendered_width * 0.13).max(7.0));
+    let frame = SimulatorFrame::new(frame_width, frame_height);
+    let phone_style = frame.phone_style();
+    let screen_style = frame.screen_style();
     let stream = CanvasStream::new(port, capability, frame_width, frame_height);
     let stream_start = stream.clone();
     use_effect(move || {
@@ -156,32 +154,26 @@ fn Mirror(
                 };
                 current.cancel().dispatch(home_progress);
             },
-            SimulatorLoader {
-                id: stream.loader_id.clone(),
-                status_id: stream.status_id.clone(),
-                class: "absolute inset-0".to_string(),
-                label: "Starting simulator stream".to_string(),
-            }
             div {
                 id: stream.device_label_id.clone(),
                 class: "pointer-events-none absolute left-5 top-4 text-sm font-medium text-zinc-300 opacity-0 transition-opacity",
                 "{device_name}"
             }
             div {
-                id: stream.phone_id.clone(),
-                class: "invisible relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] opacity-0 shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20 transition-opacity",
+                class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
                 style: phone_style,
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
-                    class: "overflow-hidden bg-black ring-1 ring-black",
+                    class: "relative overflow-hidden bg-black ring-1 ring-black",
                     style: screen_style,
+                    SimulatorScreenSkeleton { id: stream.loader_id.clone() }
                     canvas {
                         id: "{stream.canvas_id}",
                         width: "{frame_width}",
                         height: "{frame_height}",
-                        class: "block h-auto max-h-[calc(100vh-5rem)] max-w-[calc(100vw-5rem)] cursor-grab touch-none select-none active:cursor-grabbing",
+                        class: "block h-auto w-full cursor-grab touch-none select-none opacity-0 transition-opacity active:cursor-grabbing",
                         style: image_style,
                         onmounted: move |event: Event<MountedData>| {
                             let target = event.data();
@@ -229,8 +221,6 @@ fn Mirror(
 struct CanvasStream {
     canvas_id: String,
     loader_id: String,
-    status_id: String,
-    phone_id: String,
     device_label_id: String,
     port: u16,
     capability: String,
@@ -243,8 +233,6 @@ impl CanvasStream {
         Self {
             canvas_id: format!("simulator-stream-{capability}"),
             loader_id: format!("simulator-loader-{capability}"),
-            status_id: format!("simulator-status-{capability}"),
-            phone_id: format!("simulator-phone-{capability}"),
             device_label_id: format!("simulator-device-{capability}"),
             port,
             capability,
@@ -261,41 +249,28 @@ const streams = globalThis.__vmuxSimulatorStreams ??= new Map();
 streams.get(key)?.abort();
 const controller = new AbortController();
 streams.set(key, controller);
-const setStatus = (text) => {{
-  const status = document.getElementById("{status_id}");
-  if (status) status.textContent = text;
-}};
 const reveal = () => {{
   document.getElementById("{loader_id}")?.classList.add("hidden");
+  document.getElementById("{canvas_id}")?.classList.replace("opacity-0", "opacity-100");
   const label = document.getElementById("{device_label_id}");
   label?.classList.remove("opacity-0");
   label?.classList.add("opacity-100");
-  const phone = document.getElementById("{phone_id}");
-  phone?.classList.remove("invisible", "opacity-0");
-  phone?.classList.add("opacity-100");
 }};
 (async () => {{
 try {{
   const canvas = document.getElementById(key);
   const context = canvas?.getContext("2d", {{ alpha: false, desynchronized: true }});
   if (!canvas || !context) throw new Error("simulator canvas is unavailable");
-  setStatus("Preparing simulator display");
-  setStatus("Connecting to simulator");
-  setStatus("Receiving simulator frames");
   let generation = 0;
   let first = true;
-  let stage = "initializing stream";
   while (!controller.signal.aborted) {{
     const frameUrl = `/__simulator-frame?port={port}&capability={capability}&after=${{generation}}`;
-    stage = "requesting frame";
     const response = await fetch(frameUrl, {{ signal: controller.signal, cache: "no-store" }});
     if (!response.ok) throw new Error(`simulator stream failed: ${{response.status}}`);
-    stage = "reading frame";
     const payload = new Uint8Array(await response.arrayBuffer());
     if (payload.length < 9) throw new Error("simulator frame was empty");
     const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
     generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
-    stage = "decoding frame";
     const bitmap = await createImageBitmap(new Blob([payload.subarray(8)], {{ type: "image/jpeg" }}));
     if (!canvas.isConnected) {{
       bitmap.close();
@@ -312,7 +287,6 @@ try {{
 }} catch (error) {{
   if (!controller.signal.aborted) {{
     console.error(error);
-    setStatus(`Simulator stream failed while ${{stage}}: ${{error?.message ?? String(error)}}`);
   }}
 }} finally {{
   if (streams.get(key) === controller) streams.delete(key);
@@ -321,8 +295,6 @@ try {{
 "#,
             canvas_id = self.canvas_id,
             loader_id = self.loader_id,
-            status_id = self.status_id,
-            phone_id = self.phone_id,
             device_label_id = self.device_label_id,
             port = self.port,
             capability = self.capability,
@@ -365,8 +337,14 @@ impl ClipboardShortcut {
         if !modifiers.meta() || modifiers.ctrl() || modifiers.alt() || modifiers.shift() {
             return None;
         }
-        match event.key().to_string().to_ascii_lowercase().as_str() {
+        Self::for_key(&event.key().to_string())
+    }
+
+    fn for_key(key: &str) -> Option<SimulatorClipboardAction> {
+        match key.to_ascii_lowercase().as_str() {
+            "a" => Some(SimulatorClipboardAction::SelectAll),
             "c" => Some(SimulatorClipboardAction::Copy),
+            "x" => Some(SimulatorClipboardAction::Cut),
             "v" => Some(SimulatorClipboardAction::Paste),
             _ => None,
         }
@@ -410,41 +388,85 @@ impl Keystroke {
 
 #[component]
 fn Waiting(route: Option<SimulatorRoute>) -> Element {
-    let label = match route {
-        Some(SimulatorRoute::Pinned {
-            version,
-            device_name: Some(device_name),
-        }) => translate_with(
-            "simulator-waiting-device",
-            &[
-                ("device", TranslationValue::String(&device_name)),
-                ("version", TranslationValue::String(version.as_str())),
-            ],
-        ),
-        Some(SimulatorRoute::Pinned { version, .. }) => translate_with(
-            "simulator-waiting-version",
-            &[("version", TranslationValue::String(version.as_str()))],
-        ),
-        _ => translate("common-loading"),
-    };
+    let _ = route;
+    let frame = SimulatorFrame::fallback();
     rsx! {
-        MatrixLoader {
-            label,
-            words: vec![translate("simulator-title").to_uppercase()],
+        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8",
+            div {
+                class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
+                style: frame.phone_style(),
+                div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
+                div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
+                div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
+                div {
+                    class: "relative overflow-hidden bg-black ring-1 ring-black",
+                    style: frame.screen_style(),
+                    SimulatorScreenSkeleton {}
+                }
+            }
         }
     }
 }
 
 #[component]
-fn SimulatorLoader(id: String, status_id: String, class: String, label: String) -> Element {
+fn SimulatorScreenSkeleton(#[props(default)] id: String) -> Element {
     rsx! {
-        div { id, class: "{class} flex items-center justify-center bg-background",
-            div { class: "flex w-64 flex-col gap-3 rounded-2xl border border-border/70 bg-card/80 p-5 shadow-xl",
-                div { class: "h-3 w-24 rounded-full bg-muted" }
-                div { class: "h-40 rounded-xl bg-muted/60" }
-                div { id: status_id, class: "truncate text-center text-xs text-muted-foreground", "{label}" }
+        div {
+            id,
+            class: "absolute inset-0 z-10 flex flex-col overflow-hidden bg-zinc-950 p-[5%]",
+            role: "status",
+            aria_label: translate("simulator-title"),
+            div { class: "flex items-center justify-between",
+                Skeleton { class: "h-2.5 w-[18%] rounded-full bg-white/[0.08]" }
+                div { class: "flex gap-1.5",
+                    Skeleton { class: "size-2.5 rounded-full bg-white/[0.08]" }
+                    Skeleton { class: "h-2.5 w-5 rounded-full bg-white/[0.08]" }
+                }
+            }
+            Skeleton { class: "mt-[8%] h-[5%] w-[44%] rounded-full bg-white/[0.07]" }
+            Skeleton { class: "mt-[4%] h-[18%] w-full rounded-[8%] bg-white/[0.055]" }
+            div { class: "mt-[5%] grid grid-cols-2 gap-[4%]",
+                Skeleton { class: "aspect-square rounded-[10%] bg-white/[0.045]" }
+                Skeleton { class: "aspect-square rounded-[10%] bg-white/[0.045]" }
+            }
+            Skeleton { class: "mt-[6%] h-[4%] w-[32%] rounded-full bg-white/[0.07]" }
+            div { class: "mt-[4%] flex flex-col gap-3",
+                Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
+                Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
+                Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SimulatorFrame {
+    width: u32,
+    height: u32,
+}
+
+impl SimulatorFrame {
+    fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+
+    fn fallback() -> Self {
+        Self::new(603, 1311)
+    }
+
+    fn phone_style(self) -> String {
+        let ratio = f64::from(self.width) / f64::from(self.height.max(1));
+        format!(
+            "width:min({}px,calc((100vh - 5rem) * {ratio:.8}),calc(100vw - 5rem));border-radius:14.5% / 6.7%;",
+            self.width,
+        )
+    }
+
+    fn screen_style(self) -> String {
+        format!(
+            "aspect-ratio:{} / {};border-radius:13% / 6%;",
+            self.width, self.height,
+        )
     }
 }
 
@@ -659,5 +681,25 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn command_edit_shortcuts_are_forwarded_to_the_simulator() {
+        assert_eq!(
+            ClipboardShortcut::for_key("a"),
+            Some(SimulatorClipboardAction::SelectAll)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("x"),
+            Some(SimulatorClipboardAction::Cut)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("c"),
+            Some(SimulatorClipboardAction::Copy)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("v"),
+            Some(SimulatorClipboardAction::Paste)
+        );
     }
 }

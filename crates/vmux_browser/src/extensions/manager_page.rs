@@ -9,11 +9,12 @@ use bevy_cef::prelude::{
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
-    EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT,
-    EXTENSIONS_PAGE_URL, ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase,
-    ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus,
-    ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest,
-    ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
+    EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSION_POPUP_EVENT,
+    EXTENSION_POPUP_SIZE_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL, ExtActionRequest,
+    ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
+    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
+    ExtUninstallRequest, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
+    ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::overlay::WindowOverlay;
@@ -42,7 +43,7 @@ impl Plugin for ExtensionsPlugin {
                 ExtToggleRequest,
                 ExtUninstallRequest,
                 ExtBrowseStoreRequest,
-            )>::for_hosts(&["extensions"]))
+            )>::for_hosts(&["extensions", "tools"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtListRequest,
                 ExtActionRequest,
@@ -50,8 +51,15 @@ impl Plugin for ExtensionsPlugin {
                 ExtOpenManagerRequest,
                 ExtensionPopupBoundsRequest,
                 ExtensionPopupCloseRequest,
-            )>::for_hosts(&["extensions", "layout"]))
-            .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
+            )>::for_hosts(&[
+                "extensions",
+                "layout",
+                "tools",
+            ]))
+            .add_plugins((
+                JsEmitEventPlugin::<AddExtensionRequest>::default(),
+                JsEmitEventPlugin::<ExtensionPopupSizeRequest>::default(),
+            ))
             .add_observer(on_list_request)
             .add_observer(on_toggle_request)
             .add_observer(on_uninstall_request)
@@ -62,12 +70,14 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_open_manager_request)
             .add_observer(on_browse_store_request)
             .add_observer(on_add_extension)
+            .add_observer(on_extension_popup_size)
             .add_systems(
                 Update,
                 (
                     run_agent_installs,
                     inject_on_cws_nav,
                     inject_on_cws_load_complete.after(crate::page_life::drain_loading_state),
+                    inject_popup_sizing.after(crate::page_life::drain_loading_state),
                     drain_outbox,
                 ),
             );
@@ -467,7 +477,7 @@ fn on_open_manager_request(
 ) {
     cmd.write(AppCommand::Browser(BrowserCommand::Open(
         OpenCommand::InNewStack {
-            url: Some(EXTENSIONS_PAGE_URL.to_string()),
+            url: Some("vmux://tools/extensions".to_string()),
         },
     )));
 }
@@ -527,8 +537,92 @@ struct AddExtensionRequest {
     nonce: String,
 }
 
+#[derive(serde::Deserialize)]
+struct ExtensionPopupSizeRequest {
+    channel: String,
+    width: f32,
+    height: f32,
+}
+
 const ADD_CHANNEL: &str = "vmux-add-extension";
 const MANAGE_CHANNEL: &str = "vmux-manage-extension";
+const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
+
+fn inject_popup_sizing(
+    mut events: MessageReader<crate::WebviewLoadCompleted>,
+    popups: Query<(), With<ExtensionPopup>>,
+    browsers: NonSend<Browsers>,
+) {
+    for event in events.read() {
+        if !popups.contains(event.webview) {
+            continue;
+        }
+        browsers.execute_js(
+            &event.webview,
+            r#"
+(() => {
+  if (globalThis.__vmuxPopupSizer) return;
+  let scheduled = false;
+  const measure = () => {
+    scheduled = false;
+    const body = document.body;
+    if (!body) return;
+    const bodyRect = body.getBoundingClientRect();
+    let bottom = bodyRect.top;
+    let right = bodyRect.left;
+    for (const child of body.children) {
+      const rect = child.getBoundingClientRect();
+      bottom = Math.max(bottom, rect.bottom);
+      right = Math.max(right, rect.right);
+    }
+    const style = getComputedStyle(body);
+    const height = Math.ceil(bottom - bodyRect.top + parseFloat(style.paddingBottom || 0));
+    const width = Math.ceil(right - bodyRect.left + parseFloat(style.paddingRight || 0));
+    cef.emit({ channel: "vmux-extension-popup-size", width, height });
+  };
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(measure);
+  };
+  const resize = new ResizeObserver(schedule);
+  resize.observe(document.documentElement);
+  resize.observe(document.body);
+  const mutation = new MutationObserver(schedule);
+  mutation.observe(document.body, { childList: true, subtree: true, attributes: true });
+  globalThis.__vmuxPopupSizer = { resize, mutation };
+  schedule();
+})();
+"#,
+        );
+    }
+}
+
+fn on_extension_popup_size(
+    trigger: On<Receive<ExtensionPopupSizeRequest>>,
+    popups: Query<&ExtensionPopup>,
+    mut commands: Commands,
+) {
+    let request = &trigger.payload;
+    if request.channel != POPUP_SIZE_CHANNEL
+        || !request.width.is_finite()
+        || !request.height.is_finite()
+    {
+        return;
+    }
+    let Ok(popup) = popups.get(trigger.event().webview) else {
+        return;
+    };
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        popup.owner,
+        EXTENSION_POPUP_SIZE_EVENT,
+        &ExtensionPopupSizeEvent {
+            id: popup.extension_id.clone(),
+            width: request.width.clamp(200.0, 360.0),
+            height: request.height.clamp(80.0, 600.0),
+        },
+    ));
+}
 
 fn is_webstore_url(url: &str) -> bool {
     url.strip_prefix("https://")
@@ -646,7 +740,7 @@ fn on_add_extension(
         MANAGE_CHANNEL => {
             cmd.write(AppCommand::Browser(BrowserCommand::Open(
                 OpenCommand::InNewStack {
-                    url: Some(EXTENSIONS_PAGE_URL.to_string()),
+                    url: Some("vmux://tools/extensions".to_string()),
                 },
             )));
         }

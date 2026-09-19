@@ -11,6 +11,7 @@ use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::native_open::NativeOpenPlugin;
 use crate::overlay::LayoutOverlayPlugin;
+use crate::page_context::PageContextPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
@@ -67,6 +68,7 @@ impl Plugin for LayoutPlugin {
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
                 WorktreePlugin,
+                PageContextPlugin,
             ))
             .add_plugins((
                 TogglePlugin,

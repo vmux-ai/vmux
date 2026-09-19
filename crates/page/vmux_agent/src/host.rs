@@ -3,7 +3,6 @@ pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
 pub mod acp_install;
 pub mod acp_registry;
-pub mod agents;
 pub mod attach;
 pub mod attention;
 pub mod browser_pane;
