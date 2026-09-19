@@ -459,6 +459,20 @@ pub fn start_page_results(
             .into_iter()
             .filter(|item| prompt_target_matches_query(item, query)),
     );
+    let trimmed = query.trim();
+    if vmux_wire::command_bar::CommandBarQuery(trimmed).is_start_prompt() {
+        let engines = if search_engines.is_empty() {
+            SearchEngine::ALL.as_slice()
+        } else {
+            search_engines
+        };
+        results.extend(engines.iter().take(3).copied().map(|engine| {
+            CommandBarResultItem::Search {
+                engine,
+                query: trimmed.to_string(),
+            }
+        }));
+    }
     let mut app_pages: Vec<_> = pages
         .iter()
         .filter(|page| !page.prompt_target && page.host != "start" && page.host != "terminal")
@@ -478,20 +492,7 @@ pub fn start_page_results(
     );
     results.extend(work_dir_results(work_dirs, &search_lower));
     results.extend(recent_file_results(recent_files, &search_lower));
-    let trimmed = query.trim();
-    if vmux_wire::command_bar::CommandBarQuery(trimmed).is_start_prompt() {
-        let engines = if search_engines.is_empty() {
-            SearchEngine::ALL.as_slice()
-        } else {
-            search_engines
-        };
-        results.extend(engines.iter().take(3).copied().map(|engine| {
-            CommandBarResultItem::Search {
-                engine,
-                query: trimmed.to_string(),
-            }
-        }));
-    } else if !trimmed.is_empty() {
+    if !vmux_wire::command_bar::CommandBarQuery(trimmed).is_start_prompt() && !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
             url: trimmed.to_string(),
         });
@@ -1205,6 +1206,40 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(actual, engines[..3]);
+    }
+
+    #[test]
+    fn start_page_puts_web_search_before_matching_files() {
+        let work_dirs = [CommandBarWorkDir {
+            path: "/work/failing test".into(),
+            is_dir: true,
+        }];
+        let recent_files = [CommandBarRecentFile {
+            url: "file:///work/failing%20test.txt".into(),
+            title: "failing test.txt".into(),
+        }];
+        let results = start_page_results(
+            &sample_pages(),
+            &work_dirs,
+            &recent_files,
+            &[SearchEngine::Google],
+            "failing test",
+        );
+        let search = results
+            .iter()
+            .position(|item| matches!(item, CommandBarResultItem::Search { .. }))
+            .unwrap();
+        let work_dir = results
+            .iter()
+            .position(|item| matches!(item, CommandBarResultItem::WorkDir { .. }))
+            .unwrap();
+        let recent_file = results
+            .iter()
+            .position(|item| matches!(item, CommandBarResultItem::RecentFile { .. }))
+            .unwrap();
+
+        assert!(search < work_dir);
+        assert!(search < recent_file);
     }
 
     #[test]

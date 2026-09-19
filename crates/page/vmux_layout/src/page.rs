@@ -428,14 +428,20 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     } else {
         "relative flex h-12 w-2 items-center justify-center rounded-full bg-background/80 shadow-md ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-16 group-hover:w-3 group-hover:bg-primary/15 group-hover:ring-primary/45"
     };
+    let line_class = if resizing() {
+        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45"
+    } else {
+        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+    };
     rsx! {
         div {
-            class: "group absolute inset-y-0 -right-3 z-20 flex w-6 cursor-col-resize items-center justify-center",
+            class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-start justify-center pt-8",
+            style: "right:-14px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
             },
-            div { class: "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-foreground/[0.08] transition-colors duration-150 group-hover:bg-primary/45" }
+            div { class: "{line_class}" }
             div { class: "{handle_class}",
                 div { class: "h-7 w-0.5 rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
             }
@@ -1168,10 +1174,10 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     let mut choosing = use_signal(|| false);
     rsx! {
         div { class: "relative min-w-0 rounded-md bg-foreground/[0.035]",
-            div { class: "flex min-w-0 items-center",
+            div { class: "group relative flex min-w-0 items-center rounded-md transition-colors hover:bg-glass-hover",
                 button {
                     r#type: "button",
-                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1.5 pl-2 pr-10 text-left text-muted-foreground transition-colors group-hover:text-foreground",
                     title: "{root.display_path}",
                     onclick: move |_| {
                         choosing.set(false);
@@ -1198,7 +1204,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 }
                 button {
                     r#type: "button",
-                    class: "mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                    class: "absolute right-1 top-1 z-10 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
                     title: translate("git-switch-workspace"),
                     aria_label: translate("git-switch-workspace"),
                     onclick: move |event: MouseEvent| {

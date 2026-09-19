@@ -121,7 +121,6 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::AGENTS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::CHAT_PAGE)
                 .takes::<vmux_core::PageMetadata>(),
             native_page::NativePagePlugin::in_pane(&native_page::LSP_PAGE),
@@ -714,6 +713,12 @@ fn should_emit_update(
 
 fn normalize_vmux_url(url: &str) -> String {
     let url = url.trim();
+    if matches!(url, "vmux://tools" | "vmux://tools/") {
+        return "vmux://tools/acp".to_string();
+    }
+    if matches!(url, "vmux://agents" | "vmux://agents/") {
+        return "vmux://tools/acp".to_string();
+    }
     if matches!(url, "vmux://lsp" | "vmux://lsp/") {
         return "vmux://tools/lsp".to_string();
     }
@@ -845,6 +850,9 @@ mod tests {
 
     #[test]
     fn normalize_vmux_url_trims_and_adds_trailing_slash_to_bare_host() {
+        assert_eq!(normalize_vmux_url("vmux://tools"), "vmux://tools/acp");
+        assert_eq!(normalize_vmux_url("vmux://tools/"), "vmux://tools/acp");
+        assert_eq!(normalize_vmux_url("vmux://agents/"), "vmux://tools/acp");
         assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://tools/lsp");
         assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
         assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://tools/lsp");

@@ -2155,7 +2155,7 @@ fn BranchesCard(
                                 key: "local-{branch.name}",
                                 branch,
                                 index,
-                                count: reference_count,
+                                remote: false,
                                 selected_branch,
                                 focused_panel,
                             }
@@ -2167,7 +2167,7 @@ fn BranchesCard(
                                 key: "remote-{branch.name}",
                                 branch,
                                 index,
-                                count: reference_count,
+                                remote: true,
                                 selected_branch,
                                 focused_panel,
                             }
@@ -2229,7 +2229,7 @@ fn BranchCollectionTabs(
 fn BranchRow(
     branch: GitBranchEntry,
     index: usize,
-    count: usize,
+    remote: bool,
     selected_branch: Signal<String>,
     focused_panel: Signal<GitPanel>,
 ) -> Element {
@@ -2248,14 +2248,11 @@ fn BranchRow(
                 focused_panel.set(GitPanel::Branches);
                 selected_branch.set(name.clone());
             },
-            BranchTreeRail {
+            BranchMarker {
                 current: branch.current,
-                upstream: !branch.upstream.is_empty(),
+                upstream: branch.upstream.clone(),
                 worktree: !branch.checkout.is_empty(),
-                ahead: branch.ahead,
-                behind: branch.behind,
-                first: index == 0,
-                last: index + 1 == count,
+                remote,
             }
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{branch.name}" }
@@ -2267,12 +2264,6 @@ fn BranchRow(
                 }
                 if branch.current {
                     span { class: "shrink-0 rounded-full bg-ansi-2/10 px-1.5 text-[8px] font-medium text-ansi-2", {translate("common-current")} }
-                } else if !branch.checkout.is_empty() {
-                    span {
-                        class: "flex size-4 shrink-0 items-center justify-center rounded-full bg-violet-400/[0.08] text-violet-400",
-                        title: translate("layout-worktree"),
-                        LineIconView { icon: LineIcon::GitFork, class: "size-2.5" }
-                    }
                 } else if !branch.upstream.is_empty() {
                     span { class: "max-w-[42%] shrink truncate font-mono text-[8px] text-muted-foreground", "{branch.upstream}" }
                 }
@@ -2315,50 +2306,37 @@ fn TagRow(
 }
 
 #[component]
-fn BranchTreeRail(
-    current: bool,
-    upstream: bool,
-    worktree: bool,
-    ahead: u32,
-    behind: u32,
-    first: bool,
-    last: bool,
-) -> Element {
-    let lane = if worktree {
-        "text-amber-400"
-    } else if upstream {
-        "text-sky-400"
+fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -> Element {
+    let icon = if worktree {
+        LineIcon::GitFork
     } else {
-        "text-violet-400"
+        LineIcon::GitBranch
+    };
+    let tone = if current {
+        "bg-ansi-2/12 text-ansi-2 ring-ansi-2/20"
+    } else if worktree {
+        "bg-amber-400/10 text-amber-400 ring-amber-400/20"
+    } else if remote || !upstream.is_empty() {
+        "bg-sky-400/10 text-sky-400 ring-sky-400/20"
+    } else {
+        "bg-violet-400/10 text-violet-400 ring-violet-400/20"
+    };
+    let title = if current {
+        translate("common-current")
+    } else if worktree {
+        translate("layout-worktree")
+    } else if remote {
+        translate("git-remote")
+    } else if !upstream.is_empty() {
+        upstream
+    } else {
+        translate("git-local")
     };
     rsx! {
-        svg {
-            class: "h-5 w-7 shrink-0 overflow-visible {lane}",
-            view_box: "0 0 28 20",
-            fill: "none",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            if !first {
-                path { d: "M6 0V10", stroke: "currentColor", stroke_opacity: "0.35", stroke_width: "1.5" }
-            }
-            if !last {
-                path { d: "M6 10V20", stroke: "currentColor", stroke_opacity: "0.35", stroke_width: "1.5" }
-            }
-            if current {
-                circle { cx: "6", cy: "10", r: "3.5", fill: "var(--ansi-2)", stroke: "var(--card)", stroke_width: "1.5" }
-            } else if ahead > 0 && behind > 0 {
-                path { d: "M6 2C6 7 18 5 18 10C18 15 6 13 6 18", stroke: "currentColor", stroke_width: "1.7" }
-                circle { cx: "18", cy: "10", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
-            } else if ahead > 0 {
-                path { d: "M6 2C6 8 18 5 18 12V20", stroke: "currentColor", stroke_width: "1.7" }
-                circle { cx: "18", cy: "12", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
-            } else if behind > 0 {
-                path { d: "M18 0V8C18 14 6 11 6 18", stroke: "currentColor", stroke_width: "1.7" }
-                circle { cx: "18", cy: "8", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
-            } else {
-                path { d: "M6 10H15", stroke: "currentColor", stroke_width: "1.7" }
-                circle { cx: "18", cy: "10", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
-            }
+        span {
+            class: "flex size-4 shrink-0 items-center justify-center rounded-md ring-1 ring-inset {tone}",
+            title,
+            LineIconView { icon, class: "size-2.5" }
         }
     }
 }

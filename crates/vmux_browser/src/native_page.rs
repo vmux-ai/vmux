@@ -132,10 +132,6 @@ pub static TEAM_PAGE: NativePage =
     NativePage::pane(vmux_core::event::team::TEAM_PAGE_URL, vmux_team::page::Page).titled("Team");
 
 #[cfg(target_os = "macos")]
-pub static AGENTS_PAGE: NativePage =
-    NativePage::pane("vmux://agents/", vmux_agent::page::Page).titled("Agents");
-
-#[cfg(target_os = "macos")]
 pub static CHAT_PAGE: NativePage = NativePage::pane("vmux://sessions/", vmux_chat::page::Page)
     .titled("Sessions")
     .preserving_host_title()

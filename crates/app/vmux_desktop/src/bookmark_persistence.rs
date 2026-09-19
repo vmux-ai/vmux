@@ -26,6 +26,7 @@ impl Plugin for BookmarkPersistencePlugin {
                     migrate_legacy_bookmark_order,
                     migrate_smart_bookmark_folders,
                     migrate_shortcut_bookmark_aliases,
+                    migrate_tool_page_bookmarks,
                     mark_bookmarks_dirty,
                     autosave_bookmarks,
                 )
@@ -468,6 +469,96 @@ fn migrate_shortcut_bookmark_aliases(
     }
 }
 
+enum ToolBookmarkUrl {
+    Root,
+    Child,
+    Other,
+}
+
+impl ToolBookmarkUrl {
+    const ROOT: &'static str = "vmux://tools/";
+
+    fn of(url: &str) -> Self {
+        let url = url
+            .trim()
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_ascii_lowercase();
+        if url == "vmux://tools" {
+            return Self::Root;
+        }
+        if url.starts_with("vmux://tools/")
+            || matches!(
+                url.as_str(),
+                "vmux://agents" | "vmux://lsp" | "vmux://extensions"
+            )
+        {
+            return Self::Child;
+        }
+        Self::Other
+    }
+}
+
+fn migrate_tool_page_bookmarks(
+    items: Query<(Entity, &PageMetadata), Or<(With<Pin>, With<Bookmark>)>>,
+    mut offered: ResMut<OfferedBookmarkDefaults>,
+    mut auto: ResMut<BookmarkAutoSave>,
+    mut commands: Commands,
+) {
+    let mut changed = false;
+    let mut seen = HashSet::new();
+    let mut normalized_urls = Vec::new();
+    let original_urls = std::mem::take(&mut offered.urls);
+    for url in &original_urls {
+        let normalized = match ToolBookmarkUrl::of(url) {
+            ToolBookmarkUrl::Root => ToolBookmarkUrl::ROOT.to_string(),
+            ToolBookmarkUrl::Child => {
+                changed = true;
+                continue;
+            }
+            ToolBookmarkUrl::Other => url.clone(),
+        };
+        if seen.insert(BookmarkDefaults::key(&normalized)) {
+            normalized_urls.push(normalized);
+        } else {
+            changed = true;
+        }
+    }
+    if original_urls != normalized_urls {
+        offered.urls = normalized_urls;
+        changed = true;
+    } else {
+        offered.urls = original_urls;
+    }
+
+    for (entity, metadata) in &items {
+        match ToolBookmarkUrl::of(&metadata.url) {
+            ToolBookmarkUrl::Root => {
+                if metadata.url == ToolBookmarkUrl::ROOT {
+                    continue;
+                }
+                let mut metadata = metadata.clone();
+                if metadata.title.trim() == metadata.url.trim() {
+                    metadata.title = ToolBookmarkUrl::ROOT.to_string();
+                }
+                metadata.url = ToolBookmarkUrl::ROOT.to_string();
+                commands.entity(entity).insert(metadata);
+                changed = true;
+            }
+            ToolBookmarkUrl::Child => {
+                commands.entity(entity).despawn();
+                changed = true;
+            }
+            ToolBookmarkUrl::Other => {}
+        }
+    }
+    if changed {
+        auto.dirty = true;
+    }
+}
+
 fn mark_bookmarks_dirty(
     mut auto: ResMut<BookmarkAutoSave>,
     changed: Query<
@@ -694,6 +785,81 @@ mod tests {
         app.update();
 
         assert!(!app.world().resource::<BookmarkAutoSave>().dirty);
+    }
+
+    #[test]
+    fn tool_child_bookmarks_migrate_to_the_single_tools_root() {
+        let mut app = App::new();
+        app.insert_resource(OfferedBookmarkDefaults {
+            urls: vec![
+                "vmux://tools".into(),
+                "vmux://tools/lsp".into(),
+                "vmux://agents/".into(),
+                "vmux://extensions/".into(),
+            ],
+            ..default()
+        })
+        .init_resource::<BookmarkAutoSave>()
+        .add_systems(Update, migrate_tool_page_bookmarks);
+        let root = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "vmux://tools".into(),
+                    url: "vmux://tools".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        let lsp = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "Language Servers".into(),
+                    url: "vmux://tools/lsp".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        let extensions = app
+            .world_mut()
+            .spawn((
+                Bookmark,
+                PageMetadata {
+                    title: "Extensions".into(),
+                    url: "vmux://extensions/".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        let agents = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "Agents".into(),
+                    url: "vmux://agents/".into(),
+                    ..default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().entity(root).get::<PageMetadata>().unwrap().url,
+            ToolBookmarkUrl::ROOT
+        );
+        assert!(app.world().get_entity(lsp).is_err());
+        assert!(app.world().get_entity(extensions).is_err());
+        assert!(app.world().get_entity(agents).is_err());
+        assert_eq!(
+            app.world().resource::<OfferedBookmarkDefaults>().urls,
+            [ToolBookmarkUrl::ROOT]
+        );
+        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
     }
 
     #[test]

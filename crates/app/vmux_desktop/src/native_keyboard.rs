@@ -121,7 +121,9 @@ fn simulator_clipboard(
         return None;
     }
     match combo.key {
+        KeyCode::KeyA => Some(vmux_simulator::event::SimulatorClipboardAction::SelectAll),
         KeyCode::KeyC => Some(vmux_simulator::event::SimulatorClipboardAction::Copy),
+        KeyCode::KeyX => Some(vmux_simulator::event::SimulatorClipboardAction::Cut),
         KeyCode::KeyV => Some(vmux_simulator::event::SimulatorClipboardAction::Paste),
         _ => None,
     }
@@ -141,17 +143,16 @@ fn simulator_text_shortcut(combo: &KeyCombo) -> bool {
         return false;
     }
     if modifiers.super_key && !modifiers.alt {
-        return match combo.key {
-            KeyCode::KeyA | KeyCode::KeyX => !modifiers.shift,
+        return matches!(
+            combo.key,
             KeyCode::KeyZ
-            | KeyCode::ArrowLeft
-            | KeyCode::ArrowRight
-            | KeyCode::ArrowUp
-            | KeyCode::ArrowDown
-            | KeyCode::Backspace
-            | KeyCode::Delete => true,
-            _ => false,
-        };
+                | KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::ArrowDown
+                | KeyCode::Backspace
+                | KeyCode::Delete
+        );
     }
     if modifiers.alt && !modifiers.super_key {
         return matches!(
@@ -789,12 +790,20 @@ mod tests {
     }
 
     #[test]
-    fn simulator_clipboard_shortcuts_map_command_c_and_v() {
+    fn simulator_clipboard_shortcuts_map_command_edit_actions() {
         use vmux_simulator::event::SimulatorClipboardAction;
 
         assert_eq!(
+            simulator_clipboard(&super_combo(KeyCode::KeyA)),
+            Some(SimulatorClipboardAction::SelectAll)
+        );
+        assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyC)),
             Some(SimulatorClipboardAction::Copy)
+        );
+        assert_eq!(
+            simulator_clipboard(&super_combo(KeyCode::KeyX)),
+            Some(SimulatorClipboardAction::Cut)
         );
         assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyV)),
@@ -819,8 +828,6 @@ mod tests {
     #[test]
     fn simulator_text_shortcuts_reach_the_phone() {
         for key in [
-            KeyCode::KeyA,
-            KeyCode::KeyX,
             KeyCode::KeyZ,
             KeyCode::ArrowLeft,
             KeyCode::ArrowRight,
@@ -831,6 +838,8 @@ mod tests {
         let mut redo = super_combo(KeyCode::KeyZ);
         redo.modifiers.shift = true;
         assert!(simulator_text_shortcut(&redo));
+        assert!(!simulator_text_shortcut(&super_combo(KeyCode::KeyA)));
+        assert!(!simulator_text_shortcut(&super_combo(KeyCode::KeyX)));
     }
 
     #[test]

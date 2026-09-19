@@ -17,7 +17,7 @@ use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
     ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
-    ToolsRefreshRequest, ToolsSnapshot,
+    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_core::vault::{
     VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
@@ -116,10 +116,7 @@ impl Plugin for ToolsPlugin {
             }
             Err(error) => bevy::log::warn!("Vault watcher init failed: {error}"),
         }
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            vmux_core::host::page::NativelyHosted::page("vmux://tools/", "Tools"),
-        ));
+        app.world_mut().spawn((PAGE_MANIFEST, TOOLS_HOSTED_PAGE));
         app.world_mut().spawn((
             VAULT_PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page("vmux://vault/", "Vault"),
@@ -135,11 +132,13 @@ impl Plugin for ToolsPlugin {
                 ToolsRefreshRequest,
                 ToolActionRequest,
                 ToolOpenRequest,
+                ToolsNavigateRequest,
                 VaultActionRequest,
                 VaultRefreshRequest,
             )>::default())
             .add_observer(on_refresh_request)
             .add_observer(on_action_request)
+            .add_observer(on_navigate_request)
             .add_observer(on_vault_action_request)
             .add_observer(on_vault_refresh_request)
             .add_observer(on_open_request)
@@ -172,6 +171,9 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
     icon: Some(vmux_core::BuiltinIcon::Hammer),
     command_bar: true,
 };
+
+const TOOLS_HOSTED_PAGE: vmux_core::host::page::NativelyHosted =
+    vmux_core::host::page::NativelyHosted::subtree("vmux://tools/", "Tools");
 
 const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
     host: "vault",
@@ -292,6 +294,32 @@ fn on_open_request(
             url: Some(url.to_string()),
         },
     )));
+}
+
+fn on_navigate_request(
+    trigger: On<BinReceive<ToolsNavigateRequest>>,
+    parents: Query<&ChildOf>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    mut requests: MessageWriter<vmux_core::PageOpenRequest>,
+) {
+    let Some(url) = trigger.event().payload.canonical_url() else {
+        return;
+    };
+    let mut current = trigger.event().webview;
+    loop {
+        if stacks.contains(current) {
+            requests.write(vmux_core::PageOpenRequest {
+                target: vmux_core::PageOpenTarget::Stack(current),
+                url: url.to_string(),
+                request_id: None,
+            });
+            return;
+        }
+        let Ok(parent) = parents.get(current) else {
+            return;
+        };
+        current = parent.parent();
+    }
 }
 
 fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: ResMut<ToolsState>) {
@@ -1744,6 +1772,44 @@ fn command_error(program: &str, output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tools_page_owns_provider_routes() {
+        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/extensions"));
+        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/homebrew"));
+        assert!(!TOOLS_HOSTED_PAGE.answers_for("vmux://toolbox/"));
+    }
+
+    #[test]
+    fn tools_tab_navigation_replaces_the_owning_stack() {
+        let mut app = App::new();
+        app.add_message::<vmux_core::PageOpenRequest>()
+            .add_observer(on_navigate_request);
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::Stack::default())
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ToolsNavigateRequest {
+                url: "vmux://tools/lsp".to_string(),
+            },
+        });
+
+        let messages = app
+            .world()
+            .resource::<Messages<vmux_core::PageOpenRequest>>();
+        let mut cursor = messages.get_cursor();
+        let requests = cursor.read(messages).collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, "vmux://tools/lsp");
+        assert!(matches!(
+            requests[0].target,
+            vmux_core::PageOpenTarget::Stack(target) if target == stack
+        ));
+    }
 
     #[test]
     fn parses_brew_inventory_with_versions() {

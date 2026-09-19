@@ -1884,7 +1884,6 @@ mod tests {
                 "vmux://terminal/",
                 "vmux://projects/",
                 "vmux://knowledge/",
-                "vmux://agents/",
                 "vmux://tools/",
                 "vmux://vault/",
                 "vmux://services/",

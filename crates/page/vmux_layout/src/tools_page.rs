@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use dioxus::prelude::*;
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
-    ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus, ToolsRefreshRequest,
-    ToolsSnapshot,
+    ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus, ToolsNavigateRequest,
+    ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
@@ -29,7 +29,6 @@ pub fn Page() -> Element {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ToolsRoute {
     #[default]
-    All,
     Acp,
     Lsp,
     Homebrew,
@@ -56,13 +55,12 @@ impl ToolsRoute {
             "mcp" => Self::Mcp,
             "dotfiles" => Self::Dotfiles,
             "extensions" => Self::Extensions,
-            _ => Self::All,
+            _ => Self::Acp,
         }
     }
 
     fn id(self) -> &'static str {
         match self {
-            Self::All => "all",
             Self::Acp => "acp",
             Self::Lsp => "lsp",
             Self::Homebrew => "homebrew",
@@ -75,7 +73,6 @@ impl ToolsRoute {
 
     fn matches(self, provider: ToolProvider) -> bool {
         match self {
-            Self::All => true,
             Self::Acp => provider == ToolProvider::Acp,
             Self::Lsp => provider == ToolProvider::Lsp,
             Self::Homebrew => matches!(
@@ -91,7 +88,6 @@ impl ToolsRoute {
 
     fn title(self) -> String {
         match self {
-            Self::All => translate("tools-title"),
             Self::Acp => translate("tools-provider-acp-agents"),
             Self::Lsp => translate("tools-provider-lsp-servers"),
             Self::Homebrew => translate("tools-homebrew"),
@@ -106,7 +102,6 @@ impl ToolsRoute {
 #[component]
 pub(crate) fn ToolsManagerTabs(active: String) -> Element {
     let routes = [
-        (ToolsRoute::All, "tools-title"),
         (ToolsRoute::Acp, "tools-provider-acp-agents"),
         (ToolsRoute::Lsp, "tools-provider-lsp-servers"),
         (ToolsRoute::Homebrew, "tools-homebrew"),
@@ -120,14 +115,18 @@ pub(crate) fn ToolsManagerTabs(active: String) -> Element {
         .map(|(route, label)| ManagerTab {
             id: route.id().to_string(),
             label: translate(label),
-            href: if route == ToolsRoute::All {
-                "vmux://tools/".to_string()
-            } else {
-                format!("vmux://tools/{}", route.id())
-            },
+            href: format!("vmux://tools/{}", route.id()),
         })
         .collect();
-    rsx! { ManagerTabs { active, tabs } }
+    rsx! {
+        ManagerTabs {
+            active,
+            tabs,
+            onselect: move |url| {
+                let _ = send(&ToolsNavigateRequest { url });
+            },
+        }
+    }
 }
 
 #[component]
@@ -206,7 +205,7 @@ fn ToolManager(route: ToolsRoute) -> Element {
                 },
             }
             ManagerList {
-                if matches!(route, ToolsRoute::All | ToolsRoute::Homebrew) {
+                if route == ToolsRoute::Homebrew {
                     HomebrewSourceCard {
                         root: current.root.clone(),
                     }
@@ -472,6 +471,7 @@ mod tests {
 
     #[test]
     fn tool_routes_select_their_provider() {
+        assert_eq!(ToolsRoute::of("vmux://tools/"), ToolsRoute::Acp);
         assert_eq!(ToolsRoute::of("vmux://tools/acp"), ToolsRoute::Acp);
         assert_eq!(ToolsRoute::of("vmux://tools/lsp/"), ToolsRoute::Lsp);
         assert!(ToolsRoute::Homebrew.matches(ToolProvider::HomebrewFormula));
