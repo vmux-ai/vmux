@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::diff::DiffTone;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -41,31 +42,27 @@ fn opt_no(n: Option<u32>) -> String {
     n.map(|v| v.to_string()).unwrap_or_default()
 }
 
-fn row_bg(kind: DiffKind) -> &'static str {
+fn diff_tone(kind: DiffKind) -> Option<DiffTone> {
     match kind {
-        DiffKind::Add => "background:rgba(80,200,120,0.13);",
-        DiffKind::Remove => "background:rgba(220,80,80,0.13);",
-        DiffKind::Staged => "background:rgba(80,200,120,0.05);",
-        _ => "",
+        DiffKind::Add => Some(DiffTone::Added),
+        DiffKind::Remove => Some(DiffTone::Deleted),
+        DiffKind::Staged => Some(DiffTone::Staged),
+        DiffKind::Context | DiffKind::Hunk => None,
     }
 }
 
 fn sign(kind: DiffKind) -> &'static str {
-    match kind {
-        DiffKind::Add => "+",
-        DiffKind::Remove => "-",
-        DiffKind::Staged => "\u{258e}",
-        _ => " ",
-    }
+    diff_tone(kind).map(DiffTone::sign).unwrap_or(" ")
 }
 
-fn sign_style(kind: DiffKind) -> &'static str {
-    match kind {
-        DiffKind::Add => "color:rgb(80,200,120);",
-        DiffKind::Remove => "color:rgb(220,80,80);",
-        DiffKind::Staged => "color:rgb(80,200,120);",
-        _ => "opacity:0.25;",
-    }
+fn row_class(kind: DiffKind) -> &'static str {
+    diff_tone(kind).map(DiffTone::row_class).unwrap_or("")
+}
+
+fn text_class(kind: DiffKind) -> &'static str {
+    diff_tone(kind)
+        .map(DiffTone::text_class)
+        .unwrap_or("text-muted-foreground")
 }
 
 #[derive(Clone, Copy)]
@@ -316,7 +313,7 @@ pub fn DiffView(
 
     rsx! {
         div {
-            class: if visible { "min-h-0 flex-1 overflow-auto" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 overflow-auto bg-background/35 font-mono text-xs leading-5" } else { "hidden" },
 
             if loading() {
                 div { class: "flex flex-col gap-2 p-3",
@@ -336,23 +333,24 @@ pub fn DiffView(
                         let line = &rows[i];
                         rsx! {
                             div { key: "line-{i}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                div { class: "flex whitespace-pre", style: "{row_bg(line.kind)}",
-                                    span {
-                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
-                                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                                        "{opt_no(line.old_no)}"
+                                div { class: "group flex min-w-max whitespace-pre transition-colors {row_class(line.kind)}",
+                                    span { class: "sticky left-0 z-[1] flex shrink-0 select-none border-r border-foreground/[0.08] bg-background/95 shadow-[4px_0_10px_-8px_rgba(0,0,0,0.8)] backdrop-blur-sm",
+                                        span {
+                                            class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
+                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                            "{opt_no(line.old_no)}"
+                                        }
+                                        span {
+                                            class: "flex shrink-0 items-center justify-end border-l border-foreground/[0.045] px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                            "{opt_no(line.new_no)}"
+                                        }
+                                        span {
+                                            class: "flex w-6 shrink-0 items-center justify-center border-l border-foreground/[0.045] font-semibold {text_class(line.kind)}",
+                                            "{sign(line.kind)}"
+                                        }
                                     }
-                                    span {
-                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
-                                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                                        "{opt_no(line.new_no)}"
-                                    }
-                                    span {
-                                        class: "shrink-0 select-none px-1 text-center",
-                                        style: "{sign_style(line.kind)}",
-                                        "{sign(line.kind)}"
-                                    }
-                                    span { class: "pr-6",
+                                    span { class: "min-w-0 pr-8",
                                         for (j, styled) in line.spans.iter().enumerate() {
                                             span { key: "{j}", style: "{span_style(styled)}", "{styled.text}" }
                                         }
@@ -360,10 +358,10 @@ pub fn DiffView(
                                 }
                                 if let Some(h) = ends[i] {
                                     div {
-                                        class: "flex items-center justify-end gap-2 border-y border-foreground/[0.05] bg-foreground/[0.02] px-2 py-0.5 pr-6 font-sans text-xs select-none",
+                                        class: "flex min-w-full items-center justify-end gap-1.5 border-y border-foreground/[0.06] bg-background/70 px-3 py-1 font-sans text-[11px] select-none backdrop-blur-sm",
                                         Button {
                                             variant: ButtonVariant::Ghost,
-                                            class: "h-auto px-1.5 py-0.5 text-xs text-ansi-2 hover:bg-ansi-2/15 hover:text-ansi-2",
+                                            class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
@@ -373,11 +371,12 @@ pub fn DiffView(
                                                     accept: true,
                                                 });
                                             },
+                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
                                             {translate("git-stage-hunk")}
                                         }
                                         Button {
                                             variant: ButtonVariant::Ghost,
-                                            class: "h-auto px-1.5 py-0.5 text-xs text-ansi-1 hover:bg-ansi-1/15 hover:text-ansi-1",
+                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.08] bg-foreground/[0.025] px-2 text-[11px] text-muted-foreground hover:bg-ansi-1/10 hover:text-ansi-1",
                                             onclick: move |_| {
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
@@ -387,6 +386,7 @@ pub fn DiffView(
                                                     accept: false,
                                                 });
                                             },
+                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
                                             {translate("git-revert-hunk")}
                                         }
                                     }
@@ -407,10 +407,11 @@ pub fn DiffView(
                         rsx! {
                             div {
                                 key: "gap-{start}-{end}",
-                                class: "border-y border-cyan-400/10 bg-cyan-400/[0.035] font-sans",
+                                class: "flex min-w-full items-center border-y border-foreground/[0.055] bg-foreground/[0.018] px-3 py-1 font-sans",
+                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
                                 Button {
                                     variant: ButtonVariant::Ghost,
-                                    class: "group h-7 w-full justify-start gap-2 rounded-none px-2 py-0 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
+                                    class: "mx-2 h-6 shrink-0 gap-1.5 rounded-full border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                                     title: translate_with(
                                         "git-show-unchanged-lines",
                                         &[("count", TranslationValue::Number(hidden as i64))],
@@ -418,12 +419,13 @@ pub fn DiffView(
                                     onclick: move |_| {
                                         expanded.write().push(reveal);
                                     },
-                                    LineIconView {
-                                        icon: LineIcon::ChevronDown,
-                                        class: if upward { "h-3.5 w-3.5 shrink-0 rotate-180 transition-transform group-hover:-translate-y-0.5" } else { "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5" },
-                                    }
-                                    span { "Show {hidden} unchanged lines" }
+                                    span { "⋯" }
+                                    span { {translate_with(
+                                        "git-show-unchanged-lines",
+                                        &[("count", TranslationValue::Number(hidden as i64))],
+                                    )} }
                                 }
+                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
                             }
                         }
                     }

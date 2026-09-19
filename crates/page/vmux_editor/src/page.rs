@@ -27,6 +27,7 @@ use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::caret::EventSelection;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::diff::DiffTone;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
@@ -4222,36 +4223,27 @@ pub(crate) fn row_class(selected: bool) -> String {
 }
 
 fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "+",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "~",
-        EditorDiffMarker::Deleted => "-",
-    }
+    diff_tone(marker).sign()
 }
 
 fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "text-ansi-2",
-        EditorDiffMarker::Modified => "text-ansi-3",
-        EditorDiffMarker::Deleted => "text-ansi-1",
-        EditorDiffMarker::Staged => "text-ansi-3/80",
-    }
+    diff_tone(marker).text_class()
 }
 
 fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
-        EditorDiffMarker::Modified => "bg-ansi-3/[0.06] hover:bg-ansi-3/[0.10]",
-        EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
-        EditorDiffMarker::Staged => "bg-ansi-3/[0.035] hover:bg-ansi-3/[0.07]",
-    }
+    diff_tone(marker).row_class()
 }
 
 fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+    diff_tone(marker).marker_class()
+}
+
+fn diff_tone(marker: EditorDiffMarker) -> DiffTone {
     match marker {
-        EditorDiffMarker::Added => "bg-ansi-2",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "bg-ansi-3",
-        EditorDiffMarker::Deleted => "bg-ansi-1",
+        EditorDiffMarker::Added => DiffTone::Added,
+        EditorDiffMarker::Modified => DiffTone::Modified,
+        EditorDiffMarker::Deleted => DiffTone::Deleted,
+        EditorDiffMarker::Staged => DiffTone::Staged,
     }
 }
 
