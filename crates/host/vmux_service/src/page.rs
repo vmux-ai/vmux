@@ -68,6 +68,7 @@ pub fn Page() -> Element {
                 },
             }
             ManagerList {
+                class: "mx-auto grid w-full max-w-7xl grid-cols-1 items-start gap-3 md:grid-cols-2 2xl:grid-cols-3".to_string(),
                 if !data.connected && !has_processes {
                     ManagerEmpty { title: translate("services-not-running"), detail: empty_detail }
                 } else if !has_processes {
@@ -172,63 +173,27 @@ fn ProcessCard(process: ProcessEntry) -> Element {
     rsx! {
         article {
             class: if process.attached {
-                "group cursor-pointer rounded-2xl bg-primary/[0.07] px-5 py-4 ring-1 ring-inset ring-primary/25 backdrop-blur-xl transition-colors hover:bg-primary/[0.11]"
+                "group min-w-0 cursor-pointer overflow-hidden rounded-xl bg-primary/[0.07] ring-1 ring-inset ring-primary/25 backdrop-blur-xl transition-colors hover:bg-primary/[0.11]"
             } else if managed {
-                "group cursor-pointer rounded-2xl bg-foreground/[0.035] px-5 py-4 ring-1 ring-inset ring-foreground/10 backdrop-blur-xl transition-colors hover:bg-foreground/[0.07]"
+                "group min-w-0 cursor-pointer overflow-hidden rounded-xl bg-foreground/[0.035] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl transition-colors hover:bg-foreground/[0.07]"
             } else {
-                "group rounded-2xl bg-foreground/[0.035] px-5 py-4 ring-1 ring-inset ring-foreground/10 backdrop-blur-xl transition-colors hover:bg-foreground/[0.07]"
+                "group min-w-0 overflow-hidden rounded-xl bg-foreground/[0.035] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl transition-colors hover:bg-foreground/[0.07]"
             },
             onclick,
-            div { class: "flex items-start gap-4",
+            div { class: "flex items-center gap-3 border-b border-foreground/[0.07] px-3 py-2.5",
                 div { class: if process.attached {
-                        "flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
+                        "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
                     } else {
-                        "flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10"
+                        "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10"
                     },
                     ServiceIcon {}
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "flex min-w-0 flex-wrap items-center gap-2",
-                        span { class: "truncate font-medium text-foreground/95", "{shell_name}" }
-                        ManagerBadge { tone: ManagerTone::Neutral, "{identifier}" }
-                        if managed {
-                            ManagerBadge { tone: ManagerTone::Neutral, "{id_short}" }
-                        }
-                        if process.attached {
-                            ManagerBadge { tone: ManagerTone::Primary, {translate("services-attached")} }
-                        }
+                    div { class: "flex min-w-0 items-center gap-2",
+                        span { class: "min-w-0 flex-1 truncate font-mono text-xs font-semibold text-foreground", "{shell_name}" }
+                        if process.attached { span { class: "size-2 shrink-0 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--primary)_65%,transparent)]" } }
                     }
-                    div { class: "mt-2 flex flex-wrap gap-1.5",
-                        ProcessMetric { label: "CPU".to_string(), value: format!("{:.0}%", process.cpu_percent), tone: ManagerTone::Amber }
-                        ProcessMetric { label: translate("services-memory"), value: format_mem(process.mem_bytes), tone: ManagerTone::Neutral }
-                        ProcessMetric { label: translate("services-uptime"), value: uptime, tone: ManagerTone::Neutral }
-                        if managed {
-                            ProcessMetric { label: translate("services-size"), value: format!("{}×{}", process.cols, process.rows), tone: ManagerTone::Neutral }
-                        }
-                    }
-                    if !process.cwd.is_empty() || !process.shell.is_empty() {
-                        div { class: "mt-3 grid min-w-0 gap-1 rounded-lg bg-background/35 px-3 py-2 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/[0.06]",
-                            if !process.cwd.is_empty() {
-                                div { class: "flex min-w-0 items-center gap-2",
-                                    span { class: "w-12 shrink-0 uppercase tracking-wide text-muted-foreground/60", "CWD" }
-                                    span { class: "min-w-0 flex-1 truncate text-foreground/75", title: "{process.cwd}", "{process.cwd}" }
-                                }
-                            }
-                            if !process.shell.is_empty() {
-                                div { class: "flex min-w-0 items-center gap-2",
-                                    span { class: "w-12 shrink-0 uppercase tracking-wide text-muted-foreground/60", {translate("services-shell")} }
-                                    span { class: "min-w-0 flex-1 truncate text-foreground/75", title: "{process.shell}", "{process.shell}" }
-                                }
-                            }
-                        }
-                    }
-                    if !process.preview_lines.is_empty() {
-                        div { class: "mt-2 rounded-lg bg-background/35 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground ring-1 ring-inset ring-foreground/[0.06]",
-                            for line in process.preview_lines.iter() {
-                                div { class: "truncate whitespace-pre", "{line.text}" }
-                            }
-                        }
-                    }
+                    div { class: "mt-0.5 min-w-0 truncate font-mono text-[9px] text-muted-foreground", title: "{process.cwd}", "{process.cwd}" }
                 }
                 if managed {
                     div { class: "shrink-0",
@@ -240,16 +205,36 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                     }
                 }
             }
+            div { class: "grid grid-cols-4 gap-px bg-foreground/[0.07]",
+                ProcessMetric { label: "CPU".to_string(), value: format!("{:.0}%", process.cpu_percent), tone: ManagerTone::Amber }
+                ProcessMetric { label: translate("services-memory"), value: format_mem(process.mem_bytes), tone: ManagerTone::Neutral }
+                ProcessMetric { label: translate("services-uptime"), value: uptime, tone: ManagerTone::Neutral }
+                ProcessMetric { label: if managed { translate("services-size") } else { "PID".to_string() }, value: if managed { format!("{}×{}", process.cols, process.rows) } else { process.pid.to_string() }, tone: ManagerTone::Neutral }
+            }
+            if !process.preview_lines.is_empty() {
+                div { class: "min-h-24 bg-zinc-950 px-3 py-2 font-mono text-[10px] leading-4 text-zinc-400",
+                    for line in process.preview_lines.iter().take(6) {
+                        div { class: "truncate whitespace-pre", "{line.text}" }
+                    }
+                }
+            } else {
+                div { class: "flex min-h-24 items-center justify-center bg-zinc-950/80 font-mono text-[10px] text-zinc-600", "{identifier} · {id_short}" }
+            }
         }
     }
 }
 
 #[component]
 fn ProcessMetric(label: String, value: String, tone: ManagerTone) -> Element {
+    let color = match tone {
+        ManagerTone::Amber => "text-amber-400",
+        ManagerTone::Green => "text-success",
+        _ => "text-foreground",
+    };
     rsx! {
-        ManagerBadge { tone,
-            span { class: "opacity-65", "{label}" }
-            span { class: "font-mono", "{value}" }
+        div { class: "flex min-w-0 flex-col bg-card/70 px-2 py-1.5",
+            span { class: "truncate text-[8px] font-medium uppercase tracking-wide text-muted-foreground/65", "{label}" }
+            span { class: "truncate font-mono text-[10px] font-semibold {color}", "{value}" }
         }
     }
 }

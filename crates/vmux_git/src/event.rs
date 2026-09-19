@@ -26,6 +26,7 @@ wire! {
     pub struct GitStatusRequest { pub path: String }
     pub struct GitRepositoryRequest { pub path: String }
     pub struct GitRepositoryPickerRequest { pub path: String }
+    pub struct GitAppActionRequest { pub repo_root: String, pub action: GitAppAction }
     pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
     pub struct GitDirectoryRequest { pub path: String, pub preview: bool }
     pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub reference: String, pub generation: u64, pub top_line: u32, pub rows: u32 }
@@ -85,6 +86,9 @@ wire! {
         pub current: bool,
         pub upstream: String,
         pub checkout: String,
+        pub short_sha: String,
+        pub ahead: u32,
+        pub behind: u32,
     }
 
     pub struct GitTagEntry {
@@ -136,6 +140,23 @@ wire! {
         pub repo_root: String,
         pub preview: bool,
     }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum GitAppAction {
+    EditConfig,
+    CheckForUpdates,
 }
 
 #[derive(

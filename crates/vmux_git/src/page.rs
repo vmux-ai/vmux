@@ -187,6 +187,14 @@ pub fn Page() -> Element {
             branch_log.set(Some(event));
         }
     });
+    let _repository_picked =
+        use_listener::<GitRepositoryPickedEvent, _>(GIT_REPOSITORY_PICKED_EVENT, move |event| {
+            if event.path.is_empty() {
+                return;
+            }
+            loading.set(true);
+            GitWorkspace::browse(&event.path, false);
+        });
     let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
         {
             let mut entries = command_log.write();
@@ -336,26 +344,22 @@ pub fn Page() -> Element {
                     return;
                 };
                 let handled = match (focused_panel(), key.as_str()) {
-                    (GitPanel::Status, "P") => {
-                        let _ = send(&GitPushRequest { path: repository.repo_root.clone() });
+                    (GitPanel::Status, "e") => {
+                        GitWorkspace::app_action(&repository.repo_root, GitAppAction::EditConfig);
                         true
                     }
-                    (GitPanel::Status, "p") => {
-                        let _ = send(&GitPullRequest { path: repository.repo_root.clone() });
+                    (GitPanel::Status, "u") => {
+                        GitWorkspace::app_action(
+                            &repository.repo_root,
+                            GitAppAction::CheckForUpdates,
+                        );
                         true
                     }
-                    (GitPanel::Status, "f") => {
-                        if fetching() {
-                            false
-                        } else {
-                            fetching.set(
-                                send(&GitFetchRequest {
-                                    path: repository.repo_root.clone(),
-                                })
-                                .is_ok(),
-                            );
-                            true
-                        }
+                    (GitPanel::Status, "Enter") => {
+                        let _ = send(&GitRepositoryPickerRequest {
+                            path: repository.repo_root.clone(),
+                        });
+                        true
                     }
                     (GitPanel::Files, "a") => {
                         let _ = send(&GitStageAllRequest { path: repository.repo_root.clone() });
@@ -661,6 +665,13 @@ impl GitWorkspace {
         let _ = send(&GitOperationRequest {
             repo_root: repo_root.to_string(),
             operation,
+        });
+    }
+
+    fn app_action(repo_root: &str, action: GitAppAction) {
+        let _ = send(&GitAppActionRequest {
+            repo_root: repo_root.to_string(),
+            action,
         });
     }
 }
@@ -1138,7 +1149,12 @@ fn GitDashboard(
                 CommandLogCard { command_log }
             }
         }
-        GitShortcutBar { focused_panel, branch_collection, shortcut_help }
+        GitShortcutBar {
+            repo_root: repository.repo_root,
+            focused_panel,
+            branch_collection,
+            shortcut_help,
+        }
         if shortcut_help() {
             GitShortcutHelp { shortcut_help }
         }
@@ -1147,16 +1163,13 @@ fn GitDashboard(
 
 #[component]
 fn GitShortcutBar(
+    repo_root: String,
     focused_panel: Signal<GitPanel>,
     branch_collection: Signal<BranchCollection>,
     shortcut_help: Signal<bool>,
 ) -> Element {
     let panel_shortcuts = match focused_panel() {
-        GitPanel::Status => vec![
-            ("f", translate("git-fetch")),
-            ("p", translate("git-pull")),
-            ("P", translate("git-push-label")),
-        ],
+        GitPanel::Status => Vec::new(),
         GitPanel::Files => vec![
             ("space", translate("git-toggle-stage")),
             ("a", translate("git-stage-all")),
@@ -1186,18 +1199,64 @@ fn GitShortcutBar(
 
     rsx! {
         footer { class: "flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t border-foreground/[0.08] bg-card/92 px-2 text-[10px] text-muted-foreground backdrop-blur-xl",
-            for (keycap, label) in panel_shortcuts {
-                ShortcutHint { keycap, label }
+            if focused_panel() == GitPanel::Status {
+                ShortcutButton {
+                    keycap: "e",
+                    label: translate("git-edit-config"),
+                    onclick: {
+                        let repo_root = repo_root.clone();
+                        move |_| GitWorkspace::app_action(&repo_root, GitAppAction::EditConfig)
+                    },
+                }
+                ShortcutButton {
+                    keycap: "u",
+                    label: translate("settings-check-updates"),
+                    onclick: {
+                        let repo_root = repo_root.clone();
+                        move |_| GitWorkspace::app_action(&repo_root, GitAppAction::CheckForUpdates)
+                    },
+                }
+                ShortcutButton {
+                    keycap: "enter",
+                    label: translate("git-switch-recent-repository"),
+                    onclick: {
+                        let repo_root = repo_root.clone();
+                        move |_| {
+                            let _ = send(&GitRepositoryPickerRequest { path: repo_root.clone() });
+                        }
+                    },
+                }
+            } else {
+                for (keycap, label) in panel_shortcuts {
+                    ShortcutHint { keycap, label }
+                }
+                ShortcutHint { keycap: "↑↓", label: translate("git-shortcut-navigate") }
+                ShortcutHint { keycap: "1–5", label: translate("git-shortcut-panels") }
             }
-            ShortcutHint { keycap: "↑↓", label: translate("git-shortcut-navigate") }
-            ShortcutHint { keycap: "1–5", label: translate("git-shortcut-panels") }
             button {
                 r#type: "button",
                 class: "ml-auto flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
                 onclick: move |_| shortcut_help.set(true),
                 kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "?" }
-                span { {translate("git-shortcut-help")} }
+                span { {translate("git-keybindings")} }
             }
+        }
+    }
+}
+
+#[component]
+fn ShortcutButton(
+    keycap: &'static str,
+    label: String,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+            onclick: move |event| onclick.call(event),
+            kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "{keycap}" }
+            span { "{label}" }
         }
     }
 }
@@ -2192,11 +2251,20 @@ fn BranchRow(
             BranchTreeRail {
                 current: branch.current,
                 upstream: !branch.upstream.is_empty(),
+                worktree: !branch.checkout.is_empty(),
+                ahead: branch.ahead,
+                behind: branch.behind,
                 first: index == 0,
                 last: index + 1 == count,
             }
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{branch.name}" }
+                if branch.ahead > 0 {
+                    span { class: "shrink-0 rounded-full bg-sky-400/10 px-1.5 font-mono text-[8px] text-sky-400", "↑{branch.ahead}" }
+                }
+                if branch.behind > 0 {
+                    span { class: "shrink-0 rounded-full bg-violet-400/10 px-1.5 font-mono text-[8px] text-violet-400", "↓{branch.behind}" }
+                }
                 if branch.current {
                     span { class: "shrink-0 rounded-full bg-ansi-2/10 px-1.5 text-[8px] font-medium text-ansi-2", {translate("common-current")} }
                 } else if !branch.checkout.is_empty() {
@@ -2207,6 +2275,9 @@ fn BranchRow(
                     }
                 } else if !branch.upstream.is_empty() {
                     span { class: "max-w-[42%] shrink truncate font-mono text-[8px] text-muted-foreground", "{branch.upstream}" }
+                }
+                if !branch.short_sha.is_empty() {
+                    code { class: "shrink-0 font-mono text-[8px] text-muted-foreground/60", "{branch.short_sha}" }
                 }
             }
         }
@@ -2244,25 +2315,49 @@ fn TagRow(
 }
 
 #[component]
-fn BranchTreeRail(current: bool, upstream: bool, first: bool, last: bool) -> Element {
-    let color = if current {
-        "border-ansi-2 bg-ansi-2"
+fn BranchTreeRail(
+    current: bool,
+    upstream: bool,
+    worktree: bool,
+    ahead: u32,
+    behind: u32,
+    first: bool,
+    last: bool,
+) -> Element {
+    let lane = if worktree {
+        "text-amber-400"
+    } else if upstream {
+        "text-sky-400"
     } else {
-        "border-violet-400 bg-card"
+        "text-violet-400"
     };
-
     rsx! {
-        div { class: "relative h-5 w-5 shrink-0 self-stretch text-violet-400/50",
+        svg {
+            class: "h-5 w-7 shrink-0 overflow-visible {lane}",
+            view_box: "0 0 28 20",
+            fill: "none",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
             if !first {
-                span { class: "absolute left-[6px] top-0 h-[8px] w-px bg-current" }
+                path { d: "M6 0V10", stroke: "currentColor", stroke_opacity: "0.35", stroke_width: "1.5" }
             }
             if !last {
-                span { class: "absolute bottom-0 left-[6px] top-[8px] w-px bg-current" }
+                path { d: "M6 10V20", stroke: "currentColor", stroke_opacity: "0.35", stroke_width: "1.5" }
             }
-            span { class: "absolute left-[2px] top-[5px] size-[9px] rounded-full border-2 {color} shadow-[0_0_0_2px_color-mix(in_oklab,var(--card)_90%,transparent)]" }
-            if upstream {
-                span { class: "absolute left-[6px] top-[9px] h-[9px] w-[9px] rounded-bl-md border-b border-l border-current" }
-                span { class: "absolute left-[13px] top-[16px] size-[5px] rounded-full border border-violet-400 bg-card" }
+            if current {
+                circle { cx: "6", cy: "10", r: "3.5", fill: "var(--ansi-2)", stroke: "var(--card)", stroke_width: "1.5" }
+            } else if ahead > 0 && behind > 0 {
+                path { d: "M6 2C6 7 18 5 18 10C18 15 6 13 6 18", stroke: "currentColor", stroke_width: "1.7" }
+                circle { cx: "18", cy: "10", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
+            } else if ahead > 0 {
+                path { d: "M6 2C6 8 18 5 18 12V20", stroke: "currentColor", stroke_width: "1.7" }
+                circle { cx: "18", cy: "12", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
+            } else if behind > 0 {
+                path { d: "M18 0V8C18 14 6 11 6 18", stroke: "currentColor", stroke_width: "1.7" }
+                circle { cx: "18", cy: "8", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
+            } else {
+                path { d: "M6 10H15", stroke: "currentColor", stroke_width: "1.7" }
+                circle { cx: "18", cy: "10", r: "3", fill: "var(--card)", stroke: "currentColor", stroke_width: "1.7" }
             }
         }
     }

@@ -12,6 +12,7 @@ pub enum LineIcon {
     Camera,
     Check,
     ChevronDown,
+    ChevronsUpDown,
     Clock,
     Copy,
     ExternalLink,
@@ -76,6 +77,7 @@ impl LineIcon {
             ],
             Self::Check => &["m5 12 4 4L19 6"],
             Self::ChevronDown => &["m6 9 6 6 6-6"],
+            Self::ChevronsUpDown => &["m7 15 5 5 5-5", "m7 9 5-5 5 5"],
             Self::Clock => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
             Self::Copy => &[
                 "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",

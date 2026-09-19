@@ -66,12 +66,9 @@ fn Mirror(
     let image_style = format!(
         "transform:translateY({offset:.2}px) scale({scale:.4});border-radius:{radius:.2}px;transition:{transition};"
     );
-    let rendered_width = image_size()
-        .map(|size| size.0)
-        .unwrap_or(f64::from(frame_width));
     let frame = SimulatorFrame::new(frame_width, frame_height);
-    let phone_style = frame.phone_style(rendered_width);
-    let screen_style = frame.screen_style(rendered_width);
+    let phone_style = frame.phone_style();
+    let screen_style = frame.screen_style();
     let stream = CanvasStream::new(port, capability, frame_width, frame_height);
     let stream_start = stream.clone();
     use_effect(move || {
@@ -340,8 +337,14 @@ impl ClipboardShortcut {
         if !modifiers.meta() || modifiers.ctrl() || modifiers.alt() || modifiers.shift() {
             return None;
         }
-        match event.key().to_string().to_ascii_lowercase().as_str() {
+        Self::for_key(&event.key().to_string())
+    }
+
+    fn for_key(key: &str) -> Option<SimulatorClipboardAction> {
+        match key.to_ascii_lowercase().as_str() {
+            "a" => Some(SimulatorClipboardAction::SelectAll),
             "c" => Some(SimulatorClipboardAction::Copy),
+            "x" => Some(SimulatorClipboardAction::Cut),
             "v" => Some(SimulatorClipboardAction::Paste),
             _ => None,
         }
@@ -391,13 +394,13 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
         div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8",
             div {
                 class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
-                style: frame.phone_style(f64::from(frame.width)),
+                style: frame.phone_style(),
                 div { class: "absolute -left-[3px] top-28 h-16 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
                     class: "relative overflow-hidden bg-black ring-1 ring-black",
-                    style: frame.screen_style(f64::from(frame.width)),
+                    style: frame.screen_style(),
                     SimulatorScreenSkeleton {}
                 }
             }
@@ -451,21 +454,18 @@ impl SimulatorFrame {
         Self::new(603, 1311)
     }
 
-    fn phone_style(self, rendered_width: f64) -> String {
+    fn phone_style(self) -> String {
         let ratio = f64::from(self.width) / f64::from(self.height.max(1));
         format!(
-            "width:min({}px,calc((100vh - 5rem) * {ratio:.8}),calc(100vw - 5rem));border-radius:{:.2}px;",
+            "width:min({}px,calc((100vh - 5rem) * {ratio:.8}),calc(100vw - 5rem));border-radius:14.5% / 6.7%;",
             self.width,
-            (rendered_width * 0.145).max(8.0),
         )
     }
 
-    fn screen_style(self, rendered_width: f64) -> String {
+    fn screen_style(self) -> String {
         format!(
-            "aspect-ratio:{} / {};border-radius:{:.2}px;",
-            self.width,
-            self.height,
-            (rendered_width * 0.13).max(7.0),
+            "aspect-ratio:{} / {};border-radius:13% / 6%;",
+            self.width, self.height,
         )
     }
 }
@@ -681,5 +681,25 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn command_edit_shortcuts_are_forwarded_to_the_simulator() {
+        assert_eq!(
+            ClipboardShortcut::for_key("a"),
+            Some(SimulatorClipboardAction::SelectAll)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("x"),
+            Some(SimulatorClipboardAction::Cut)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("c"),
+            Some(SimulatorClipboardAction::Copy)
+        );
+        assert_eq!(
+            ClipboardShortcut::for_key("v"),
+            Some(SimulatorClipboardAction::Paste)
+        );
     }
 }

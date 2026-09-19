@@ -1893,8 +1893,6 @@ mod tests {
                 "vmux://team/",
                 "vmux://history/",
                 "vmux://shortcuts/",
-                "vmux://extensions/",
-                "vmux://lsp/",
                 "vmux://settings/",
             ]
         );

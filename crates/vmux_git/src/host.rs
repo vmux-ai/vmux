@@ -15,17 +15,22 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::host::page::NativelyHosted;
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{
-    GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitBranchLogRequest,
-    GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest,
-    GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitOperationRequest, GitPullRequest,
-    GitPushRequest, GitRepositoryPickedEvent, GitRepositoryPickerRequest, GitRepositoryRequest,
-    GitStageAllRequest, GitStageRequest, GitStatusRequest, GitUnstageRequest,
+    GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitAppAction,
+    GitAppActionRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest, GitDiffRequest,
+    GitDirectoryEvent, GitDirectoryRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest,
+    GitOperationRequest, GitPullRequest, GitPushRequest, GitRepositoryPickedEvent,
+    GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest, GitStageRequest,
+    GitStatusRequest, GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
 pub struct GitPlugin;
+
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GitCheckForUpdatesRequest;
 
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
@@ -68,6 +73,7 @@ impl Plugin for GitPlugin {
             .map(|wrapper| (**wrapper).clone());
         app.init_resource::<GitOutbox>()
             .init_resource::<GitStatusJobs>()
+            .add_message::<GitCheckForUpdatesRequest>()
             .insert_resource(RepoInfoCache {
                 entries: HashMap::new(),
                 canonical: HashMap::new(),
@@ -90,12 +96,14 @@ impl Plugin for GitPlugin {
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 GitFetchRequest,
+                GitAppActionRequest,
                 GitOperationRequest,
                 GitPullRequest,
                 GitStageAllRequest,
             )>::default())
             .add_observer(on_repository_request)
             .add_observer(on_repository_picker_request)
+            .add_observer(on_app_action_request)
             .add_observer(on_branch_log_request)
             .add_observer(on_directory_request)
             .add_observer(on_status_request)
@@ -953,6 +961,41 @@ fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, outbox: R
             branch: request.branch.clone(),
         },
     );
+}
+
+fn on_app_action_request(
+    trigger: On<BinReceive<GitAppActionRequest>>,
+    child_of: Query<&ChildOf>,
+    mut page_open: MessageWriter<PageOpenRequest>,
+    mut update_requests: MessageWriter<GitCheckForUpdatesRequest>,
+) {
+    let target = child_of
+        .get(trigger.event().webview)
+        .ok()
+        .and_then(|stack| child_of.get(stack.parent()).ok())
+        .map(|pane| PageOpenTarget::NewStackInPane(pane.parent()))
+        .unwrap_or(PageOpenTarget::ActiveStack);
+    let url = match trigger.event().payload.action {
+        GitAppAction::EditConfig => {
+            let Ok(path) = runner::config_path(Path::new(&trigger.event().payload.repo_root))
+            else {
+                return;
+            };
+            let Ok(url) = url::Url::from_file_path(path) else {
+                return;
+            };
+            url.to_string()
+        }
+        GitAppAction::CheckForUpdates => {
+            update_requests.write(GitCheckForUpdatesRequest);
+            return;
+        }
+    };
+    page_open.write(PageOpenRequest {
+        target,
+        url,
+        request_id: None,
+    });
 }
 
 fn on_directory_request(

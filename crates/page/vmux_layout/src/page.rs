@@ -16,10 +16,10 @@ use dioxus::prelude::*;
 use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::event::{
-    EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest,
-    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
-    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
-    TabWorkspaceRequest,
+    EXTENSION_POPUP_EVENT, EXTENSION_POPUP_SIZE_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest,
+    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
+    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
+    ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -114,6 +114,10 @@ pub fn Page() -> Element {
         use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
     let extension_popup =
         use_event::<ExtensionPopupEvent>(EXTENSION_POPUP_EVENT, ExtensionPopupEvent::default);
+    let extension_popup_size = use_event::<ExtensionPopupSizeEvent>(
+        EXTENSION_POPUP_SIZE_EVENT,
+        ExtensionPopupSizeEvent::default,
+    );
     use_effect(move || {
         let _ = send(&ExtListRequest);
     });
@@ -258,7 +262,7 @@ pub fn Page() -> Element {
             }
             CommandBarPanel {}
             if !extension_popup().id.is_empty() {
-                ExtensionPopupModal { popup: extension_popup }
+                ExtensionPopupModal { popup: extension_popup, preferred_size: extension_popup_size() }
             }
             if sheet_resizing() {
                 div {
@@ -282,10 +286,22 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
+fn ExtensionPopupModal(
+    popup: Signal<ExtensionPopupEvent>,
+    preferred_size: ExtensionPopupSizeEvent,
+) -> Element {
     let current = popup();
     let state = ExtensionPopupState { popup };
     let placement = ExtensionPopupPlacement::of(current.anchor);
+    let size = if preferred_size.id == current.id {
+        preferred_size
+    } else {
+        ExtensionPopupSizeEvent {
+            id: current.id.clone(),
+            width: 360.0,
+            height: 240.0,
+        }
+    };
     let reporter = ExtensionPopupBoundsReporter {
         region: use_signal(|| None::<Rc<MountedData>>),
     };
@@ -325,7 +341,7 @@ fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
             div {
                 key: "{current.id}",
                 class: "pointer-events-none absolute",
-                style: "{placement.style()}",
+                style: "{placement.style(&size)}",
                 onpointerdown: move |event| event.stop_propagation(),
                 onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
                 onresize: move |_: Event<ResizeData>| resized.publish(),
@@ -348,11 +364,13 @@ impl ExtensionPopupPlacement {
         }
     }
 
-    fn style(self) -> String {
+    fn style(self, size: &ExtensionPopupSizeEvent) -> String {
         format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min(360px,calc(100vw - 16px));height:min(600px,calc(100vh - {}px));",
+            "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
             self.right,
             self.top,
+            size.width.clamp(200.0, 360.0),
+            size.height.clamp(80.0, 600.0),
             self.top + 8
         )
     }
@@ -405,14 +423,22 @@ impl ExtensionPopupBoundsReporter {
 
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
+    let handle_class = if resizing() {
+        "relative flex h-16 w-3 items-center justify-center rounded-full bg-primary/20 shadow-md ring-1 ring-primary/50"
+    } else {
+        "relative flex h-12 w-2 items-center justify-center rounded-full bg-background/80 shadow-md ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-16 group-hover:w-3 group-hover:bg-primary/15 group-hover:ring-primary/45"
+    };
     rsx! {
         div {
-            class: "absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize",
+            class: "group absolute inset-y-0 -right-3 z-20 flex w-6 cursor-col-resize items-center justify-center",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
             },
-            div { class: "mx-auto h-full w-px bg-transparent transition-colors duration-150 hover:bg-primary/40" }
+            div { class: "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-foreground/[0.08] transition-colors duration-150 group-hover:bg-primary/45" }
+            div { class: "{handle_class}",
+                div { class: "h-7 w-0.5 rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
+            }
         }
     }
 }
@@ -1137,7 +1163,7 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
 #[component]
 fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
     let root = project.root;
-    let root_path = root.path.clone();
+    let tree_path = root.path.clone();
     let choices = project.choices;
     let mut choosing = use_signal(|| false);
     rsx! {
@@ -1147,7 +1173,17 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     r#type: "button",
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
                     title: "{root.display_path}",
-                    onclick: move |_| choosing.set(!choosing()),
+                    onclick: move |_| {
+                        choosing.set(false);
+                        let _ = send(&vmux_core::event::ProjectTreeToggle {
+                            path: tree_path.clone(),
+                            pane_id: pane_id.to_string(),
+                        });
+                    },
+                    Icon {
+                        class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
+                    }
                     if root.is_worktree {
                         LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
                     } else {
@@ -1159,28 +1195,17 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             div { class: "truncate font-mono text-[9px] text-muted-foreground", "{root.branch}" }
                         }
                     }
-                    Icon {
-                        class: if choosing() { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
-                        path { d: "m9 18 6-6-6-6" }
-                    }
                 }
                 button {
                     r#type: "button",
                     class: "mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
-                    title: translate("git-files"),
-                    aria_label: translate("git-files"),
+                    title: translate("git-switch-workspace"),
+                    aria_label: translate("git-switch-workspace"),
                     onclick: move |event: MouseEvent| {
                         event.stop_propagation();
-                        choosing.set(false);
-                        let _ = send(&vmux_core::event::ProjectTreeToggle {
-                            path: root_path.clone(),
-                            pane_id: pane_id.to_string(),
-                        });
+                        choosing.set(!choosing());
                     },
-                    Icon {
-                        class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
-                        path { d: "m9 18 6-6-6-6" }
-                    }
+                    LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3.5".to_string() }
                 }
             }
             if choosing() {
@@ -1316,13 +1341,13 @@ fn RemoteControl(remote: RemoteStateEvent) -> Element {
         div { class: "relative ml-1 shrink-0",
             div {
                 class: if remote.enabled {
-                    "flex h-7 items-center overflow-hidden rounded-full border border-success/25 bg-success/10 text-success"
+                    "group flex h-7 items-center overflow-hidden rounded-full border border-success/25 bg-success/10 text-success transition-colors hover:bg-success/20"
                 } else {
-                    "flex h-7 items-center overflow-hidden rounded-full border border-foreground/10 bg-foreground/[0.04] text-muted-foreground"
+                    "group flex h-7 items-center overflow-hidden rounded-full border border-foreground/10 bg-foreground/[0.04] text-muted-foreground transition-colors hover:bg-foreground/[0.09]"
                 },
                 button {
                     r#type: "button",
-                    class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold hover:bg-foreground/[0.06]",
+                    class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold",
                     aria_label: "Live",
                     onclick: move |_| open.set(!open()),
                     span { class: if remote.enabled { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-muted-foreground/50" } }

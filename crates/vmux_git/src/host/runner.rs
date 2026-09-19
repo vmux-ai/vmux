@@ -309,12 +309,18 @@ impl GitCommitEntry {
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
         let registrations = crate::host::worktree::worktree_registrations(root)?;
+        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        let format = if has_head {
+            "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00%(ahead-behind:HEAD)"
+        } else {
+            "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00"
+        };
         let (stdout, stderr, ok) = git_read(
             root,
             &[
                 "for-each-ref",
                 "--sort=-committerdate",
-                "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)",
+                format,
                 "refs/heads",
             ],
         )?;
@@ -324,9 +330,10 @@ impl GitBranchEntry {
         let mut branches = Vec::new();
         for line in stdout.lines() {
             let fields = line.split('\0').collect::<Vec<_>>();
-            if fields.len() != 3 {
+            if fields.len() != 5 {
                 continue;
             }
+            let (ahead, behind) = Self::relation(fields[4]);
             branches.push(Self {
                 name: fields[0].to_string(),
                 current: fields[1] == "*",
@@ -336,6 +343,9 @@ impl GitBranchEntry {
                     .find(|registration| registration.branch.as_deref() == Some(fields[0]))
                     .map(|registration| registration.path.to_string_lossy().into_owned())
                     .unwrap_or_default(),
+                short_sha: fields[3].to_string(),
+                ahead,
+                behind,
             });
         }
         if branches.is_empty() && !current.is_empty() && current != "(detached)" {
@@ -344,18 +354,27 @@ impl GitBranchEntry {
                 current: true,
                 upstream: String::new(),
                 checkout: root.to_string_lossy().into_owned(),
+                short_sha: String::new(),
+                ahead: 0,
+                behind: 0,
             });
         }
         Ok(branches)
     }
 
     fn remote(root: &Path) -> Result<Vec<Self>, GitError> {
+        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        let format = if has_head {
+            "--format=%(refname:short)%00%(symref)%00%(objectname:short)%00%(ahead-behind:HEAD)"
+        } else {
+            "--format=%(refname:short)%00%(symref)%00%(objectname:short)%00"
+        };
         let (stdout, stderr, ok) = git_read(
             root,
             &[
                 "for-each-ref",
                 "--sort=-committerdate",
-                "--format=%(refname:short)%00%(symref)",
+                format,
                 "refs/remotes",
             ],
         )?;
@@ -365,17 +384,34 @@ impl GitBranchEntry {
         let mut branches = Vec::new();
         for line in stdout.lines() {
             let fields = line.split('\0').collect::<Vec<_>>();
-            if fields.len() != 2 || !fields[1].is_empty() {
+            if fields.len() != 4 || !fields[1].is_empty() {
                 continue;
             }
+            let (ahead, behind) = Self::relation(fields[3]);
             branches.push(Self {
                 name: fields[0].to_string(),
                 current: false,
                 upstream: String::new(),
                 checkout: String::new(),
+                short_sha: fields[2].to_string(),
+                ahead,
+                behind,
             });
         }
         Ok(branches)
+    }
+
+    fn relation(value: &str) -> (u32, u32) {
+        let mut counts = value.split_whitespace();
+        let ahead = counts
+            .next()
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(0);
+        let behind = counts
+            .next()
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(0);
+        (ahead, behind)
     }
 }
 
@@ -575,6 +611,26 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
             }
         })
         .collect())
+}
+
+pub(crate) fn config_path(root: &Path) -> Result<PathBuf, GitError> {
+    let (stdout, stderr, ok) = git_read(
+        root,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "config",
+        ],
+    )?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    let path = stdout.trim();
+    if path.is_empty() {
+        return Err(GitError("git config path is empty".to_string()));
+    }
+    Ok(PathBuf::from(path))
 }
 
 pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {

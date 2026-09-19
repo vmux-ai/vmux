@@ -96,10 +96,15 @@ impl ClipboardJob {
                 self.key_combo(6)?;
                 self.sync(&self.udid, "host")
             }
+            crate::event::SimulatorClipboardAction::Cut => {
+                self.key_combo(27)?;
+                self.sync(&self.udid, "host")
+            }
             crate::event::SimulatorClipboardAction::Paste => {
                 self.sync("host", &self.udid)?;
                 self.key_combo(25)
             }
+            crate::event::SimulatorClipboardAction::SelectAll => self.key_combo(4),
         }
     }
 

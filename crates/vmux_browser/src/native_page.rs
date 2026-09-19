@@ -199,7 +199,9 @@ pub static SPACES_PAGE: NativePage =
 
 #[cfg(target_os = "macos")]
 pub static TOOLS_PAGE: NativePage =
-    NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page).titled("Tools");
+    NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page)
+        .titled("Tools")
+        .owning_subtree();
 
 #[cfg(target_os = "macos")]
 pub static VAULT_PAGE: NativePage =

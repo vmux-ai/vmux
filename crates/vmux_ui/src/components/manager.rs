@@ -75,6 +75,35 @@ pub fn ManagerPage(children: Element) -> Element {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagerTab {
+    pub id: String,
+    pub label: String,
+    pub href: String,
+}
+
+#[component]
+pub fn ManagerTabs(active: String, tabs: Vec<ManagerTab>) -> Element {
+    rsx! {
+        nav { class: "shrink-0 overflow-x-auto border-b border-foreground/[0.07] px-5 pt-2",
+            div { class: "flex min-w-max items-center gap-1",
+                for tab in tabs {
+                    a {
+                        href: "{tab.href}",
+                        aria_current: if tab.id == active { "page" } else { "false" },
+                        class: if tab.id == active {
+                            "relative flex h-8 items-center rounded-t-lg bg-foreground/[0.07] px-3 text-xs font-semibold text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary"
+                        } else {
+                            "flex h-8 items-center rounded-t-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
+                        },
+                        "{tab.label}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn ManagerHeader(
     title: String,
@@ -110,10 +139,15 @@ pub fn ManagerHeader(
 }
 
 #[component]
-pub fn ManagerList(children: Element) -> Element {
+pub fn ManagerList(children: Element, #[props(default)] class: String) -> Element {
+    let content_class = if class.is_empty() {
+        "mx-auto flex max-w-3xl flex-col gap-2.5".to_string()
+    } else {
+        class
+    };
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto px-5 py-5",
-            div { class: "mx-auto flex max-w-3xl flex-col gap-2.5", {children} }
+            div { class: "{content_class}", {children} }
         }
     }
 }
