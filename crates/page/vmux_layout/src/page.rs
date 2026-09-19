@@ -30,6 +30,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::progress::{Progress, ProgressIndicator};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
     SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_CHEVRON_CLOSED,
     SIDEBAR_TREE_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren,
@@ -1270,8 +1271,14 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     let mut pairing_generation = use_signal(|| 0_u64);
     let mut pairing_started_paired = use_signal(|| false);
     let mut copied = use_signal(|| false);
+    let mut dismissed_pairing_link = use_signal(String::new);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
+    let pairing_visible = show_pairing()
+        || (active
+            && !remote.paired
+            && !remote.pairing_deep_link.is_empty()
+            && dismissed_pairing_link() != remote.pairing_deep_link);
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
         RemotePhase::Starting if remote.enabled => Some("Starting…"),
@@ -1279,7 +1286,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
         RemotePhase::Error => Some("Needs attention"),
     };
     let qr = if active
-        && show_pairing()
+        && pairing_visible
         && (!remote.paired || pairing_started_paired())
         && !remote.pairing_deep_link.is_empty()
     {
@@ -1325,6 +1332,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
+                        dismissed_pairing_link.set(String::new());
                         if remote.enabled {
                             pairing_generation.set(pairing_generation().wrapping_add(1));
                             show_pairing.set(false);
@@ -1357,8 +1365,12 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     }
                 }
             } else if transitioning {
-                div { class: "mt-2 h-1 overflow-hidden rounded-full bg-foreground/10",
-                    div { class: "h-full w-full rounded-full bg-success" }
+                div { class: "mt-3 flex flex-col gap-2",
+                    Skeleton { class: "h-1.5 w-full rounded-full bg-success/25" }
+                    div { class: "flex items-center gap-2",
+                        Skeleton { class: "h-2 w-24" }
+                        Skeleton { class: "ml-auto h-2 w-10" }
+                    }
                 }
             } else if active {
                 if let Some(svg) = qr {
@@ -1369,6 +1381,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
                                 pairing_generation.set(pairing_generation().wrapping_add(1));
+                                dismissed_pairing_link.set(remote.pairing_deep_link.clone());
                                 show_pairing.set(false);
                             },
                             "Close"
@@ -1423,7 +1436,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                                     }
                                 });
                             },
-                            "Connect device"
+                            if remote.paired { "Show QR" } else { "Connect device" }
                         }
                     }
                 }

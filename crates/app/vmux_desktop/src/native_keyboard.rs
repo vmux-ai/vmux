@@ -135,6 +135,38 @@ fn toggles_simulator_software_keyboard(combo: &KeyCombo) -> bool {
         && !combo.modifiers.shift
 }
 
+fn simulator_text_shortcut(combo: &KeyCombo) -> bool {
+    let modifiers = combo.modifiers;
+    if modifiers.ctrl {
+        return false;
+    }
+    if modifiers.super_key && !modifiers.alt {
+        return match combo.key {
+            KeyCode::KeyA | KeyCode::KeyX => !modifiers.shift,
+            KeyCode::KeyZ
+            | KeyCode::ArrowLeft
+            | KeyCode::ArrowRight
+            | KeyCode::ArrowUp
+            | KeyCode::ArrowDown
+            | KeyCode::Backspace
+            | KeyCode::Delete => true,
+            _ => false,
+        };
+    }
+    if modifiers.alt && !modifiers.super_key {
+        return matches!(
+            combo.key,
+            KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::ArrowDown
+                | KeyCode::Backspace
+                | KeyCode::Delete
+        );
+    }
+    false
+}
+
 enum KeyAction {
     Consume(Option<AppCommand>),
     PassThrough,
@@ -192,6 +224,9 @@ fn classify(combo: KeyCombo) -> KeyAction {
     {
         PENDING_SIMULATOR_BUTTONS.lock().push(button);
         return KeyAction::Consume(None);
+    }
+    if SIMULATOR_ACTIVE.load(Ordering::Relaxed) && simulator_text_shortcut(&combo) {
+        return KeyAction::PassThrough;
     }
     if escape_exits_fullscreen(&combo) {
         EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
@@ -779,6 +814,33 @@ mod tests {
         assert!(!toggles_simulator_software_keyboard(&super_combo(
             KeyCode::KeyH
         )));
+    }
+
+    #[test]
+    fn simulator_text_shortcuts_reach_the_phone() {
+        for key in [
+            KeyCode::KeyA,
+            KeyCode::KeyX,
+            KeyCode::KeyZ,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::Backspace,
+        ] {
+            assert!(simulator_text_shortcut(&super_combo(key)));
+        }
+        let mut redo = super_combo(KeyCode::KeyZ);
+        redo.modifiers.shift = true;
+        assert!(simulator_text_shortcut(&redo));
+    }
+
+    #[test]
+    fn simulator_text_shortcuts_do_not_take_app_commands() {
+        assert!(!simulator_text_shortcut(&super_combo(KeyCode::KeyW)));
+        assert!(!simulator_text_shortcut(&super_combo(KeyCode::KeyT)));
+        assert!(!simulator_text_shortcut(&super_combo(KeyCode::KeyQ)));
+        let mut shifted_select_all = super_combo(KeyCode::KeyA);
+        shifted_select_all.modifiers.shift = true;
+        assert!(!simulator_text_shortcut(&shifted_select_all));
     }
 
     #[test]

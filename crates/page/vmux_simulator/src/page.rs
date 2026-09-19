@@ -10,6 +10,7 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::matrix_rain::MatrixLoader;
@@ -440,9 +441,12 @@ fn SimulatorLoader(id: String, status_id: String, class: String, label: String) 
     rsx! {
         div { id, class: "{class} flex items-center justify-center bg-background",
             div { class: "flex w-64 flex-col gap-3 rounded-2xl border border-border/70 bg-card/80 p-5 shadow-xl",
-                div { class: "h-3 w-24 rounded-full bg-muted" }
-                div { class: "h-40 rounded-xl bg-muted/60" }
-                div { id: status_id, class: "truncate text-center text-xs text-muted-foreground", "{label}" }
+                div { class: "flex items-center gap-2",
+                    Skeleton { class: "size-3 rounded-full" }
+                    Skeleton { class: "h-3 w-24 rounded-full" }
+                }
+                Skeleton { class: "h-40 rounded-xl bg-muted/60" }
+                div { id: status_id, class: "animate-pulse truncate text-center text-xs text-muted-foreground motion-reduce:animate-none", "{label}" }
             }
         }
     }
