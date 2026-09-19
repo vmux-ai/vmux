@@ -308,6 +308,7 @@ impl GitCommitEntry {
 
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
+        let registrations = crate::host::worktree::worktree_registrations(root)?;
         let (stdout, stderr, ok) = git_read(
             root,
             &[
@@ -330,6 +331,11 @@ impl GitBranchEntry {
                 name: fields[0].to_string(),
                 current: fields[1] == "*",
                 upstream: fields[2].to_string(),
+                checkout: registrations
+                    .iter()
+                    .find(|registration| registration.branch.as_deref() == Some(fields[0]))
+                    .map(|registration| registration.path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
             });
         }
         if branches.is_empty() && !current.is_empty() && current != "(detached)" {
@@ -337,6 +343,7 @@ impl GitBranchEntry {
                 name: current.to_string(),
                 current: true,
                 upstream: String::new(),
+                checkout: root.to_string_lossy().into_owned(),
             });
         }
         Ok(branches)
@@ -736,9 +743,39 @@ pub fn commit(file: &Path, message: &str) -> Result<(), GitError> {
     }
 }
 
+pub fn fetch(file: &Path) -> Result<(), GitError> {
+    let root = repo_root(file)?;
+    let (stdout, stderr, ok) = git(&root, &["fetch", "--prune"])?;
+    if ok {
+        Ok(())
+    } else {
+        Err(git_err(&stdout, &stderr))
+    }
+}
+
+pub fn pull(file: &Path) -> Result<(), GitError> {
+    let root = repo_root(file)?;
+    let (stdout, stderr, ok) = git(&root, &["pull", "--ff-only"])?;
+    if ok {
+        Ok(())
+    } else {
+        Err(git_err(&stdout, &stderr))
+    }
+}
+
 pub fn push(file: &Path) -> Result<(), GitError> {
     let root = repo_root(file)?;
     let (stdout, stderr, ok) = git(&root, &["push"])?;
+    if ok {
+        Ok(())
+    } else {
+        Err(git_err(&stdout, &stderr))
+    }
+}
+
+pub fn stage_all(file: &Path) -> Result<(), GitError> {
+    let root = repo_root(file)?;
+    let (stdout, stderr, ok) = git(&root, &["add", "--all"])?;
     if ok {
         Ok(())
     } else {

@@ -10,6 +10,7 @@ pub use vmux_wire::{
 
 pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
 pub const PAGE_CONTEXT_EVENT: &str = "page_context";
+pub const TAB_WORKSPACE_EVENT: &str = "tab_workspace";
 pub const TERM_KEY_EVENT: &str = "term_key";
 pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
@@ -125,6 +126,43 @@ pub struct PageContextRequest {}
 pub struct PageContextEvent {
     pub working_directory: String,
     pub page_url: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TabWorkspaceRequest {
+    pub path: String,
+    pub branch: String,
+    pub checkout: String,
+    pub pane_id: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TabWorkspaceEvent {
+    pub path: String,
+    pub branch: String,
+    pub error: String,
 }
 
 #[derive(

@@ -19,9 +19,9 @@ use vmux_core::host::page::NativelyHosted;
 use crate::event::{
     GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitBranchLogRequest,
     GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest,
-    GitDiscardRequest, GitHunkRequest, GitPushRequest, GitRepositoryPickedEvent,
-    GitRepositoryPickerRequest, GitRepositoryRequest, GitStageRequest, GitStatusRequest,
-    GitUnstageRequest,
+    GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitPullRequest, GitPushRequest,
+    GitRepositoryPickedEvent, GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest,
+    GitStageRequest, GitStatusRequest, GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
@@ -88,6 +88,11 @@ impl Plugin for GitPlugin {
                 GitPushRequest,
                 GitHunkRequest,
             )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                GitFetchRequest,
+                GitPullRequest,
+                GitStageAllRequest,
+            )>::default())
             .add_observer(on_repository_request)
             .add_observer(on_repository_picker_request)
             .add_observer(on_branch_log_request)
@@ -98,7 +103,10 @@ impl Plugin for GitPlugin {
             .add_observer(on_unstage_request)
             .add_observer(on_discard_request)
             .add_observer(on_commit_request)
+            .add_observer(on_fetch_request)
+            .add_observer(on_pull_request)
             .add_observer(on_push_request)
+            .add_observer(on_stage_all_request)
             .add_observer(on_hunk_request)
             .add_systems(
                 Update,
@@ -1187,11 +1195,41 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, outbox: Res<GitO
     );
 }
 
+fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Fetch {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
+fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Pull {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
 fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbox>) {
     spawn_job(
         &outbox,
         trigger.event().webview,
         JobKind::Push {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
+fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::StageAll {
             path: trigger.event().payload.path.clone().into(),
         },
     );

@@ -33,7 +33,10 @@ wire! {
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitDiscardRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitCommitRequest { pub path: String, pub message: String }
+    pub struct GitFetchRequest { pub path: String }
+    pub struct GitPullRequest { pub path: String }
     pub struct GitPushRequest { pub path: String }
+    pub struct GitStageAllRequest { pub path: String }
     pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub hunk: u32, pub accept: bool }
 
     pub struct StyledSpan { pub text: String, pub fg: [u8; 3], pub bold: bool, pub italic: bool }
@@ -80,6 +83,7 @@ wire! {
         pub name: String,
         pub current: bool,
         pub upstream: String,
+        pub checkout: String,
     }
 
     pub struct GitRepositoryEvent {

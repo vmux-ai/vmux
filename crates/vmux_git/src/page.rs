@@ -6,7 +6,10 @@ use std::path::Path;
 use dioxus::prelude::*;
 use vmux_core::event::FileDirEntry;
 use vmux_core::event::space::ProjectCommandEvent;
-use vmux_core::event::{PAGE_CONTEXT_EVENT, PageContextEvent, PageContextRequest};
+use vmux_core::event::{
+    PAGE_CONTEXT_EVENT, PageContextEvent, PageContextRequest, TAB_WORKSPACE_EVENT,
+    TabWorkspaceEvent, TabWorkspaceRequest,
+};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::card::{Card, CardVariant};
@@ -49,7 +52,7 @@ pub fn Page() -> Element {
     let mut selected_abs_path = use_signal(String::new);
     let mut selected_commit = use_signal(String::new);
     let mut selected_branch = use_signal(String::new);
-    let confirm_discard = use_signal(Vec::<u8>::new);
+    let mut confirm_discard = use_signal(Vec::<u8>::new);
     let mut commit_message = use_signal(String::new);
     let mut pending_commit_message = use_signal(String::new);
     let mut loading = use_signal(|| true);
@@ -57,6 +60,7 @@ pub fn Page() -> Element {
     let mut focused_panel = use_signal(GitPanel::default);
     let mut command_log = use_signal(Vec::<GitCommandLogEntry>::new);
     let mut branch_log = use_signal(|| Option::<GitBranchLogEvent>::None);
+    let mut shortcut_help = use_signal(|| false);
     let mut nonce = use_signal(|| 0u32);
     let markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
 
@@ -200,6 +204,26 @@ pub fn Page() -> Element {
         nonce.set(nonce().wrapping_add(1));
         GitWorkspace::request(&workspace());
     });
+    let _workspace = use_listener::<TabWorkspaceEvent, _>(TAB_WORKSPACE_EVENT, move |event| {
+        if !event.error.is_empty() {
+            GitCommandLogEntry::error(&event.error).append(&mut command_log.write());
+            message.set(event.error);
+            return;
+        }
+        if event.path.is_empty() || event.path == workspace() {
+            return;
+        }
+        workspace.set(event.path.clone());
+        repository.set(None);
+        selected_path.set(String::new());
+        selected_path_bytes.set(Vec::new());
+        selected_abs_path.set(String::new());
+        selected_commit.set(String::new());
+        selected_branch.set(event.branch);
+        branch_log.set(None);
+        loading.set(true);
+        GitWorkspace::request(&event.path);
+    });
 
     use_effect(move || {
         let _ = send(&PageContextRequest {});
@@ -223,10 +247,16 @@ pub fn Page() -> Element {
     rsx! {
         document::Title { {translate("git-title")} }
         div {
-            class: "flex h-screen min-w-0 flex-col bg-background text-foreground outline-none",
+            class: "relative flex h-screen min-w-0 flex-col bg-background text-foreground outline-none",
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
+                if event.key() == Key::Escape && shortcut_help() {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    shortcut_help.set(false);
+                    return;
+                }
                 if let Some(direction) = GitPanel::menu_direction(&event) {
                     let Some(repository) = repository() else {
                         return;
@@ -254,12 +284,110 @@ pub fn Page() -> Element {
                 if modifiers.ctrl() || modifiers.alt() || modifiers.meta() {
                     return;
                 }
-                let Some(panel) = GitPanel::from_key(&event.key().to_string()) else {
+                let key = event.key().to_string();
+                if key == "?" {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    shortcut_help.set(!shortcut_help());
+                    return;
+                }
+                if key == "Tab" {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    focused_panel.set(focused_panel().next(modifiers.shift()));
+                    return;
+                }
+                if let Some(panel) = GitPanel::from_key(&key) {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    focused_panel.set(panel);
+                    return;
+                }
+                let Some(repository) = repository() else {
                     return;
                 };
-                event.prevent_default();
-                event.stop_propagation();
-                focused_panel.set(panel);
+                let handled = match (focused_panel(), key.as_str()) {
+                    (GitPanel::Status, "P") => {
+                        let _ = send(&GitPushRequest { path: repository.repo_root.clone() });
+                        true
+                    }
+                    (GitPanel::Status, "p") => {
+                        let _ = send(&GitPullRequest { path: repository.repo_root.clone() });
+                        true
+                    }
+                    (GitPanel::Status, "f") => {
+                        let _ = send(&GitFetchRequest { path: repository.repo_root.clone() });
+                        true
+                    }
+                    (GitPanel::Files, "a") => {
+                        let _ = send(&GitStageAllRequest { path: repository.repo_root.clone() });
+                        true
+                    }
+                    (GitPanel::Files, " ") | (GitPanel::Files, "Space") => {
+                        let Some(entry) = repository
+                            .files
+                            .iter()
+                            .find(|entry| entry.path_bytes == selected_path_bytes())
+                        else {
+                            return;
+                        };
+                        let path = GitWorkspace::absolute_path(&repository.repo_root, &entry.path);
+                        if entry.unstaged {
+                            let _ = send(&GitStageRequest {
+                                repo_root: repository.repo_root.clone(),
+                                path,
+                                path_bytes: entry.path_bytes.clone(),
+                            });
+                        } else if entry.staged {
+                            let _ = send(&GitUnstageRequest {
+                                repo_root: repository.repo_root.clone(),
+                                path,
+                                path_bytes: entry.path_bytes.clone(),
+                            });
+                        }
+                        true
+                    }
+                    (GitPanel::Files, "x") => {
+                        let Some(entry) = repository
+                            .files
+                            .iter()
+                            .find(|entry| entry.path_bytes == selected_path_bytes())
+                            .filter(|entry| entry.can_discard())
+                        else {
+                            return;
+                        };
+                        if confirm_discard() == entry.path_bytes {
+                            let _ = send(&GitDiscardRequest {
+                                repo_root: repository.repo_root.clone(),
+                                path: GitWorkspace::absolute_path(&repository.repo_root, &entry.path),
+                                path_bytes: entry.path_bytes.clone(),
+                            });
+                            confirm_discard.set(Vec::new());
+                        } else {
+                            confirm_discard.set(entry.path_bytes.clone());
+                        }
+                        true
+                    }
+                    (GitPanel::Branches, "Enter")
+                    | (GitPanel::Branches, " ")
+                    | (GitPanel::Branches, "Space")
+                    | (GitPanel::Branches, "c") => {
+                        let Some(branch) = repository
+                            .branches
+                            .iter()
+                            .find(|branch| branch.name == selected_branch())
+                        else {
+                            return;
+                        };
+                        GitWorkspace::select_branch(&repository.repo_root, branch);
+                        true
+                    }
+                    _ => false,
+                };
+                if handled {
+                    event.prevent_default();
+                    event.stop_propagation();
+                }
             },
             if let Some(repository) = repository() {
                 GitDashboard {
@@ -278,6 +406,7 @@ pub fn Page() -> Element {
                     focused_panel,
                     command_log,
                     branch_log,
+                    shortcut_help,
                 }
             } else {
                 EmptyRepository {
@@ -327,6 +456,25 @@ impl GitWorkspace {
             command: "activate".to_string(),
             path: Some(path.to_string()),
         });
+        let _ = send(&TabWorkspaceRequest {
+            path: path.to_string(),
+            branch: String::new(),
+            checkout: String::new(),
+            pane_id: String::new(),
+        });
+    }
+
+    fn select_branch(repo_root: &str, branch: &GitBranchEntry) {
+        let _ = send(&ProjectCommandEvent {
+            command: "activate".to_string(),
+            path: Some(repo_root.to_string()),
+        });
+        let _ = send(&TabWorkspaceRequest {
+            path: repo_root.to_string(),
+            branch: branch.name.clone(),
+            checkout: branch.checkout.clone(),
+            pane_id: String::new(),
+        });
     }
 }
 
@@ -363,11 +511,25 @@ impl GitPanel {
 
     fn from_key(key: &str) -> Option<Self> {
         match key {
+            "0" => Some(Self::Status),
             "1" => Some(Self::Status),
             "2" => Some(Self::Files),
             "3" => Some(Self::Branches),
             "4" => Some(Self::Commits),
             _ => None,
+        }
+    }
+
+    fn next(self, reverse: bool) -> Self {
+        match (self, reverse) {
+            (Self::Status, false) => Self::Files,
+            (Self::Files, false) => Self::Branches,
+            (Self::Branches, false) => Self::Commits,
+            (Self::Commits, false) => Self::Status,
+            (Self::Status, true) => Self::Commits,
+            (Self::Files, true) => Self::Status,
+            (Self::Branches, true) => Self::Files,
+            (Self::Commits, true) => Self::Branches,
         }
     }
 
@@ -547,6 +709,7 @@ fn GitDashboard(
     focused_panel: Signal<GitPanel>,
     command_log: Signal<Vec<GitCommandLogEntry>>,
     branch_log: Signal<Option<GitBranchLogEvent>>,
+    shortcut_help: Signal<bool>,
 ) -> Element {
     rsx! {
         main { class: "min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(120%_90%_at_50%_-20%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-2 sm:overflow-hidden sm:p-3",
@@ -582,6 +745,135 @@ fn GitDashboard(
                     }
                 }
                 CommandLogCard { command_log }
+            }
+        }
+        GitShortcutBar { focused_panel, shortcut_help }
+        if shortcut_help() {
+            GitShortcutHelp { shortcut_help }
+        }
+    }
+}
+
+#[component]
+fn GitShortcutBar(focused_panel: Signal<GitPanel>, shortcut_help: Signal<bool>) -> Element {
+    let panel_shortcuts = match focused_panel() {
+        GitPanel::Status => vec![
+            ("f", translate("git-fetch")),
+            ("p", translate("git-pull")),
+            ("P", translate("git-push-label")),
+        ],
+        GitPanel::Files => vec![
+            ("space", translate("git-toggle-stage")),
+            ("a", translate("git-stage-all")),
+            ("x", translate("git-discard")),
+        ],
+        GitPanel::Branches => vec![("enter", translate("git-switch-workspace"))],
+        GitPanel::Commits => Vec::new(),
+    };
+
+    rsx! {
+        footer { class: "flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t border-foreground/[0.08] bg-card/92 px-2 text-[10px] text-muted-foreground backdrop-blur-xl",
+            ShortcutHint { keycap: "1–4", label: translate("git-shortcut-panels") }
+            ShortcutHint { keycap: "↑↓", label: translate("git-shortcut-navigate") }
+            for (keycap, label) in panel_shortcuts {
+                ShortcutHint { keycap, label }
+            }
+            button {
+                r#type: "button",
+                class: "ml-auto flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+                onclick: move |_| shortcut_help.set(true),
+                kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "?" }
+                span { {translate("git-shortcut-help")} }
+            }
+        }
+    }
+}
+
+#[component]
+fn ShortcutHint(keycap: &'static str, label: String) -> Element {
+    rsx! {
+        span { class: "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5",
+            kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "{keycap}" }
+            span { "{label}" }
+        }
+    }
+}
+
+#[component]
+fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm",
+            onclick: move |_| shortcut_help.set(false),
+            div {
+                class: "max-h-[min(42rem,calc(100vh-2rem))] w-full max-w-2xl overflow-y-auto rounded-2xl border border-foreground/10 bg-card p-4 shadow-2xl sm:p-5",
+                onclick: move |event| event.stop_propagation(),
+                div { class: "flex items-center justify-between gap-3",
+                    div {
+                        h2 { class: "text-base font-semibold", {translate("git-shortcut-title")} }
+                        p { class: "mt-1 text-xs text-muted-foreground", {translate("git-shortcut-description")} }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "rounded-lg border border-foreground/10 bg-foreground/[0.04] px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground",
+                        onclick: move |_| shortcut_help.set(false),
+                        "esc"
+                    }
+                }
+                div { class: "mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2",
+                    ShortcutGroup {
+                        title: translate("git-shortcut-universal"),
+                        shortcuts: vec![
+                            ("1–4".to_string(), translate("git-shortcut-panels")),
+                            ("tab".to_string(), translate("git-shortcut-next-panel")),
+                            ("↑/k".to_string(), translate("git-shortcut-previous")),
+                            ("↓/j".to_string(), translate("git-shortcut-next")),
+                            ("ctrl+p".to_string(), translate("git-shortcut-previous")),
+                            ("ctrl+n".to_string(), translate("git-shortcut-next")),
+                            ("?".to_string(), translate("git-shortcut-help")),
+                        ],
+                    }
+                    ShortcutGroup {
+                        title: translate("git-status"),
+                        shortcuts: vec![
+                            ("f".to_string(), translate("git-fetch")),
+                            ("p".to_string(), translate("git-pull")),
+                            ("P".to_string(), translate("git-push-label")),
+                        ],
+                    }
+                    ShortcutGroup {
+                        title: translate("git-files"),
+                        shortcuts: vec![
+                            ("space".to_string(), translate("git-toggle-stage")),
+                            ("a".to_string(), translate("git-stage-all")),
+                            ("x x".to_string(), translate("git-discard")),
+                        ],
+                    }
+                    ShortcutGroup {
+                        title: translate("git-branches"),
+                        shortcuts: vec![
+                            ("enter".to_string(), translate("git-switch-workspace")),
+                            ("c".to_string(), translate("git-switch-workspace")),
+                        ],
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ShortcutGroup(title: String, shortcuts: Vec<(String, String)>) -> Element {
+    rsx! {
+        section { class: "overflow-hidden rounded-xl border border-foreground/[0.08] bg-foreground/[0.02]",
+            h3 { class: "border-b border-foreground/[0.07] px-3 py-2 text-xs font-semibold", "{title}" }
+            div { class: "divide-y divide-foreground/[0.06]",
+                for (keycap, label) in shortcuts {
+                    div { class: "flex min-h-8 items-center justify-between gap-3 px-3 py-1.5 text-xs",
+                        span { class: "text-muted-foreground", "{label}" }
+                        kbd { class: "shrink-0 rounded-md border border-foreground/10 bg-background/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground", "{keycap}" }
+                    }
+                }
             }
         }
     }
@@ -691,7 +983,7 @@ fn StatusDetailCard(repository: GitRepositoryEvent) -> Element {
                         let _ = send(&GitPushRequest { path: repository.repo_root.clone() });
                     },
                     LineIconView { icon: LineIcon::Upload, class: "h-3.5 w-3.5" }
-                    span { class: "hidden sm:inline", {translate("git-push")} }
+                    span { class: "hidden sm:inline", {translate("git-push-label")} }
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-4 sm:p-6",
@@ -1209,6 +1501,9 @@ fn BranchesCard(
                             if !branch.upstream.is_empty() {
                                 div { class: "mt-0.5 truncate text-[10px] text-muted-foreground", "{branch.upstream}" }
                             }
+                            if !branch.checkout.is_empty() {
+                                div { class: "mt-0.5 truncate font-mono text-[9px] text-muted-foreground/70", "{branch.checkout}" }
+                            }
                         }
                     }
                 }
@@ -1218,6 +1513,18 @@ fn BranchesCard(
                     div { class: "truncate text-xs font-medium", "{branch.name}" }
                     div { class: "mt-0.5 truncate text-[10px] text-muted-foreground",
                         if branch.upstream.is_empty() { {translate("git-no-upstream")} } else { "{branch.upstream}" }
+                    }
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        class: "mt-2 h-7 w-full rounded-lg px-2.5 text-xs font-medium",
+                        onclick: {
+                            let repo_root = repository.repo_root.clone();
+                            move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                GitWorkspace::select_branch(&repo_root, &branch);
+                            }
+                        },
+                        {translate("git-switch-workspace")}
                     }
                 }
             }
@@ -1504,10 +1811,19 @@ mod tests {
 
     #[test]
     fn number_keys_select_panels() {
+        assert_eq!(GitPanel::from_key("0"), Some(GitPanel::Status));
         assert_eq!(GitPanel::from_key("1"), Some(GitPanel::Status));
         assert_eq!(GitPanel::from_key("2"), Some(GitPanel::Files));
         assert_eq!(GitPanel::from_key("3"), Some(GitPanel::Branches));
         assert_eq!(GitPanel::from_key("4"), Some(GitPanel::Commits));
         assert_eq!(GitPanel::from_key("5"), None);
+    }
+
+    #[test]
+    fn tab_cycles_panels_in_both_directions() {
+        assert_eq!(GitPanel::Status.next(false), GitPanel::Files);
+        assert_eq!(GitPanel::Commits.next(false), GitPanel::Status);
+        assert_eq!(GitPanel::Status.next(true), GitPanel::Commits);
+        assert_eq!(GitPanel::Files.next(true), GitPanel::Status);
     }
 }

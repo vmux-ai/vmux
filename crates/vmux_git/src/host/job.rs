@@ -40,7 +40,16 @@ pub enum JobKind {
         path: PathBuf,
         message: String,
     },
+    Fetch {
+        path: PathBuf,
+    },
+    Pull {
+        path: PathBuf,
+    },
     Push {
+        path: PathBuf,
+    },
+    StageAll {
         path: PathBuf,
     },
     Hunk {
@@ -202,10 +211,34 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
                 message: e.0,
             })],
         },
+        JobKind::Fetch { path } => match runner::fetch(&path) {
+            Ok(()) => result_then_status(&path, &path, "fetch", "fetched"),
+            Err(e) => vec![Emit::Result(GitResultEvent {
+                action: "fetch".into(),
+                ok: false,
+                message: e.0,
+            })],
+        },
+        JobKind::Pull { path } => match runner::pull(&path) {
+            Ok(()) => result_then_status(&path, &path, "pull", "pulled"),
+            Err(e) => vec![Emit::Result(GitResultEvent {
+                action: "pull".into(),
+                ok: false,
+                message: e.0,
+            })],
+        },
         JobKind::Push { path } => match runner::push(&path) {
             Ok(()) => result_then_status(&path, &path, "push", "pushed"),
             Err(e) => vec![Emit::Result(GitResultEvent {
                 action: "push".into(),
+                ok: false,
+                message: e.0,
+            })],
+        },
+        JobKind::StageAll { path } => match runner::stage_all(&path) {
+            Ok(()) => result_then_status(&path, &path, "stage all", "staged"),
+            Err(e) => vec![Emit::Result(GitResultEvent {
+                action: "stage all".into(),
                 ok: false,
                 message: e.0,
             })],

@@ -19,6 +19,7 @@ use vmux_core::event::{
     EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest,
     ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
+    TabWorkspaceRequest,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -912,6 +913,7 @@ struct ActiveSessionInfo {
 struct ActiveWorkspaceProject {
     root: vmux_core::event::ProjectRow,
     children: Vec<vmux_core::event::ProjectRow>,
+    choices: Vec<vmux_core::event::ProjectRow>,
 }
 
 impl ActiveWorkspaceProject {
@@ -926,7 +928,16 @@ impl ActiveWorkspaceProject {
             .take_while(|project| project.depth > 0)
             .cloned()
             .collect();
-        Some(Self { root, children })
+        let choices = projects
+            .iter()
+            .filter(|project| project.depth == 0 && !project.missing)
+            .cloned()
+            .collect();
+        Some(Self {
+            root,
+            children,
+            choices,
+        })
     }
 }
 
@@ -1154,6 +1165,58 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         }
                     }
                 }
+            }
+            if project.choices.len() > 1 {
+                div { class: "border-t border-foreground/[0.06] p-1",
+                    for choice in project.choices {
+                        ActiveWorkspaceChoice { key: "{choice.path}", project: choice, pane_id }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ActiveWorkspaceChoice(project: vmux_core::event::ProjectRow, pane_id: u64) -> Element {
+    let path = project.path.clone();
+    let activate_path = path.clone();
+    let workspace_path = path.clone();
+    rsx! {
+        button {
+            r#type: "button",
+            class: if project.is_active {
+                "flex w-full min-w-0 items-center gap-2 rounded-md bg-primary/[0.10] px-2 py-1.5 text-left text-foreground"
+            } else {
+                "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+            },
+            title: "{project.display_path}",
+            onclick: move |_| {
+                let _ = send(&vmux_core::event::space::ProjectCommandEvent {
+                    command: "activate".to_string(),
+                    path: Some(activate_path.clone()),
+                });
+                let _ = send(&TabWorkspaceRequest {
+                    path: workspace_path.clone(),
+                    branch: String::new(),
+                    checkout: String::new(),
+                    pane_id: pane_id.to_string(),
+                });
+            },
+            BuiltinIconView {
+                icon: if project.is_worktree { vmux_core::BuiltinIcon::GitBranch } else { vmux_core::BuiltinIcon::Project },
+                class: "size-3.5 shrink-0".to_string(),
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate text-[10px] font-medium", "{project.label}" }
+                if !project.branch.is_empty() {
+                    div { class: "truncate font-mono text-[9px] text-muted-foreground", "{project.branch}" }
+                }
+            }
+            if project.is_active {
+                span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-semibold text-primary", {translate("common-current")} }
+            } else if project.is_worktree {
+                span { class: "shrink-0 rounded-full bg-foreground/[0.05] px-1.5 py-0.5 text-[8px] text-muted-foreground", {translate("layout-worktree")} }
             }
         }
     }
