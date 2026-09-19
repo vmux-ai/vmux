@@ -955,6 +955,7 @@ git-no-branches = 沒有本機分支
 git-no-upstream = 無上游分支
 git-no-repository = 此分頁尚未設定 Git 儲存庫。
 git-fetch = 擷取
+git-fetching = 正在擷取…
 git-pull = 拉取
 git-push-label = 推送
 git-toggle-stage = 切換暫存

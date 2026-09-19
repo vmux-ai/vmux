@@ -836,6 +836,7 @@ git-no-branches = No local branches
 git-no-upstream = No upstream
 git-no-repository = No Git repository is configured for this tab.
 git-fetch = Fetch
+git-fetching = Fetching…
 git-pull = Pull
 git-push-label = Push
 git-toggle-stage = Stage / unstage

@@ -958,6 +958,7 @@ git-no-branches = Nenhuma ramificação local
 git-no-upstream = Sem upstream
 git-no-repository = Nenhum repositório Git está configurado para esta aba.
 git-fetch = Buscar
+git-fetching = Buscando…
 git-pull = Baixar
 git-push-label = Enviar
 git-toggle-stage = Alternar preparação

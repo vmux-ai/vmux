@@ -958,6 +958,7 @@ git-no-branches = No hay ramas locales
 git-no-upstream = Sin upstream
 git-no-repository = No hay ningún repositorio Git configurado para esta pestaña.
 git-fetch = Obtener
+git-fetching = Obteniendo…
 git-pull = Descargar
 git-push-label = Enviar
 git-toggle-stage = Alternar preparación

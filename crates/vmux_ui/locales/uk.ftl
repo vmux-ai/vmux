@@ -958,6 +958,7 @@ git-no-branches = Локальних гілок немає
 git-no-upstream = Немає upstream-гілки
 git-no-repository = Для цієї вкладки не налаштовано репозиторій Git.
 git-fetch = Отримати
+git-fetching = Отримання…
 git-pull = Завантажити
 git-push-label = Надіслати
 git-toggle-stage = Перемкнути індексування

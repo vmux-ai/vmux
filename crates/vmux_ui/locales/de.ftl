@@ -958,6 +958,7 @@ git-no-branches = Keine lokalen Zweige
 git-no-upstream = Kein Upstream
 git-no-repository = Für diesen Tab ist kein Git-Repository konfiguriert.
 git-fetch = Abrufen
+git-fetching = Wird abgerufen…
 git-pull = Pullen
 git-push-label = Pushen
 git-toggle-stage = Staging umschalten

@@ -958,6 +958,7 @@ git-no-branches = Brak lokalnych gałęzi
 git-no-upstream = Brak upstreamu
 git-no-repository = Dla tej karty nie skonfigurowano repozytorium Git.
 git-fetch = Pobierz
+git-fetching = Pobieranie…
 git-pull = Ściągnij
 git-push-label = Wyślij
 git-toggle-stage = Przełącz staging

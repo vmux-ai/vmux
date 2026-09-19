@@ -958,6 +958,7 @@ git-no-branches = Geen lokale vertakkingen
 git-no-upstream = Geen upstream
 git-no-repository = Er is geen Git-repository ingesteld voor dit tabblad.
 git-fetch = Ophalen
+git-fetching = Ophalen…
 git-pull = Binnenhalen
 git-push-label = Versturen
 git-toggle-stage = Staging wisselen

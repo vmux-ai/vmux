@@ -788,6 +788,7 @@ git-no-branches = ローカルブランチはありません
 git-no-upstream = upstream はありません
 git-no-repository = このタブには Git リポジトリが設定されていません。
 git-fetch = フェッチ
+git-fetching = フェッチ中…
 git-pull = プル
 git-push-label = プッシュ
 git-toggle-stage = ステージ切替

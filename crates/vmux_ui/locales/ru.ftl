@@ -958,6 +958,7 @@ git-no-branches = Локальных веток нет
 git-no-upstream = Нет upstream-ветки
 git-no-repository = Для этой вкладки не настроен репозиторий Git.
 git-fetch = Получить
+git-fetching = Получение…
 git-pull = Загрузить
 git-push-label = Отправить
 git-toggle-stage = Переключить индексирование

@@ -958,6 +958,7 @@ git-no-branches = Nessun branch locale
 git-no-upstream = Nessun upstream
 git-no-repository = Nessun repository Git configurato per questa scheda.
 git-fetch = Recupera
+git-fetching = Recupero…
 git-pull = Scarica
 git-push-label = Invia
 git-toggle-stage = Attiva/disattiva stage

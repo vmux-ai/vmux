@@ -958,6 +958,7 @@ git-no-branches = Aucune branche locale
 git-no-upstream = Aucun upstream
 git-no-repository = Aucun dépôt Git n’est configuré pour cet onglet.
 git-fetch = Récupérer
+git-fetching = Récupération…
 git-pull = Tirer
 git-push-label = Pousser
 git-toggle-stage = Basculer l’indexation

@@ -958,6 +958,7 @@ git-no-branches = لا توجد فروع محلية
 git-no-upstream = لا يوجد فرع upstream
 git-no-repository = لم يتم إعداد مستودع Git لهذا التبويب.
 git-fetch = جلب
+git-fetching = جارٍ الجلب…
 git-pull = سحب
 git-push-label = دفع
 git-toggle-stage = تبديل التجهيز

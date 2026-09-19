@@ -955,6 +955,7 @@ git-no-branches = 暂无本地分支
 git-no-upstream = 无上游分支
 git-no-repository = 此标签页尚未配置 Git 仓库。
 git-fetch = 获取
+git-fetching = 正在获取…
 git-pull = 拉取
 git-push-label = 推送
 git-toggle-stage = 切换暂存

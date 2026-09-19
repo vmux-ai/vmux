@@ -955,6 +955,7 @@ git-no-branches = 로컬 브랜치가 없습니다
 git-no-upstream = 업스트림 없음
 git-no-repository = 이 탭에 Git 저장소가 설정되어 있지 않습니다.
 git-fetch = 가져오기
+git-fetching = 가져오는 중…
 git-pull = 풀
 git-push-label = 푸시
 git-toggle-stage = 스테이지 전환
