@@ -1137,6 +1137,7 @@ fn on_diff_request(
         JobKind::Diff {
             repo_root,
             path,
+            reference: p.reference.clone(),
             generation: p.generation,
             top_line: p.top_line,
             rows: p.rows,

@@ -19,6 +19,7 @@ pub enum JobKind {
     Diff {
         repo_root: PathBuf,
         path: PathBuf,
+        reference: String,
         generation: u64,
         top_line: u32,
         rows: u32,
@@ -170,15 +171,19 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
         JobKind::Diff {
             repo_root,
             path,
+            reference,
             generation,
             top_line,
             rows,
             content,
-        } => match content
-            .as_deref()
-            .map(|content| runner::diff_lines_with_content(&repo_root, &path, content))
-            .unwrap_or_else(|| runner::diff_lines(&repo_root, &path))
-        {
+        } => match if reference.is_empty() {
+            content
+                .as_deref()
+                .map(|content| runner::diff_lines_with_content(&repo_root, &path, content))
+                .unwrap_or_else(|| runner::diff_lines(&repo_root, &path))
+        } else {
+            runner::commit_diff_lines(&repo_root, &reference)
+        } {
             Ok(lines) => {
                 let (total, win) = parse::window(&lines, top_line, rows);
                 vec![
@@ -316,6 +321,7 @@ mod tests {
         let emits = run_job(JobKind::Diff {
             repo_root: repo.path().to_path_buf(),
             path: file,
+            reference: String::new(),
             generation: 7,
             top_line: 0,
             rows: 50,
@@ -369,6 +375,7 @@ mod tests {
         let emits = run_job(JobKind::Diff {
             repo_root: dir.path().to_path_buf(),
             path: file,
+            reference: String::new(),
             generation: 7,
             top_line: 0,
             rows: 50,

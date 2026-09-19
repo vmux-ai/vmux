@@ -240,11 +240,15 @@ pub fn DiffView(
     repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
+    #[props(default)] reference: String,
     nonce: ReadSignal<u32>,
     visible: bool,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
-    let path_bytes = use_memo(move || path_bytes.clone());
+    let initial_path_bytes = path_bytes.clone();
+    let initial_reference = reference.clone();
+    let mut observed_path_bytes = use_signal(move || initial_path_bytes);
+    let mut observed_reference = use_signal(move || initial_reference);
     let mut lines = use_signal(Vec::<DiffLine>::new);
     let mut expanded = use_signal(Vec::<(usize, usize)>::new);
     let mut loading = use_signal(|| true);
@@ -263,13 +267,19 @@ pub fn DiffView(
         error.set(p.error);
     });
 
+    use_effect(use_reactive!(|(path_bytes, reference)| {
+        observed_path_bytes.set(path_bytes);
+        observed_reference.set(reference);
+    }));
+
     use_effect(move || {
         let root = repo_root();
         let p = path();
-        let raw_path = path_bytes();
+        let raw_path = observed_path_bytes();
+        let reference = observed_reference();
         let _ = nonce();
-        if !root.is_empty() && !p.is_empty() {
-            let request_key = format!("{root}\0{p}\0{raw_path:?}");
+        if !root.is_empty() && (!p.is_empty() || !reference.is_empty()) {
+            let request_key = format!("{root}\0{p}\0{raw_path:?}\0{reference}");
             let path_changed = *requested_path.peek() != request_key;
             requested_path.set(request_key);
             let generation = request_generation.peek().wrapping_add(1);
@@ -286,6 +296,7 @@ pub fn DiffView(
                 repo_root: root,
                 path: p,
                 path_bytes: raw_path,
+                reference,
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -366,7 +377,7 @@ pub fn DiffView(
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
                                                     path: path(),
-                                                    path_bytes: path_bytes(),
+                                                    path_bytes: observed_path_bytes(),
                                                     hunk: h,
                                                     accept: true,
                                                 });
@@ -381,7 +392,7 @@ pub fn DiffView(
                                                 let _ = send(&GitHunkRequest {
                                                     repo_root: repo_root(),
                                                     path: path(),
-                                                    path_bytes: path_bytes(),
+                                                    path_bytes: observed_path_bytes(),
                                                     hunk: h,
                                                     accept: false,
                                                 });

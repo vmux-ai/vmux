@@ -348,6 +348,66 @@ impl GitBranchEntry {
         }
         Ok(branches)
     }
+
+    fn remote(root: &Path) -> Result<Vec<Self>, GitError> {
+        let (stdout, stderr, ok) = git_read(
+            root,
+            &[
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--format=%(refname:short)%00%(symref)",
+                "refs/remotes",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut branches = Vec::new();
+        for line in stdout.lines() {
+            let fields = line.split('\0').collect::<Vec<_>>();
+            if fields.len() != 2 || !fields[1].is_empty() {
+                continue;
+            }
+            branches.push(Self {
+                name: fields[0].to_string(),
+                current: false,
+                upstream: String::new(),
+                checkout: String::new(),
+            });
+        }
+        Ok(branches)
+    }
+}
+
+impl GitTagEntry {
+    fn list(root: &Path) -> Result<Vec<Self>, GitError> {
+        let (stdout, stderr, ok) = git_read(
+            root,
+            &[
+                "for-each-ref",
+                "--sort=-creatordate",
+                "--format=%(refname:short)%00%(objectname:short)%00%(creatordate:relative)%00%(subject)",
+                "refs/tags",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut tags = Vec::new();
+        for line in stdout.lines() {
+            let fields = line.splitn(4, '\0').collect::<Vec<_>>();
+            if fields.len() != 4 {
+                continue;
+            }
+            tags.push(Self {
+                name: fields[0].to_string(),
+                short_sha: fields[1].to_string(),
+                date: fields[2].to_string(),
+                message: fields[3].to_string(),
+            });
+        }
+        Ok(tags)
+    }
 }
 
 impl GitStashEntry {
@@ -382,6 +442,8 @@ impl GitOperation {
             Self::Amend => "amend",
             Self::CheckoutCommit { .. } => "checkout commit",
             Self::CherryPick { .. } => "cherry-pick",
+            Self::CreateBranch { .. } => "new branch",
+            Self::DeleteBranch { .. } => "delete branch",
             Self::FastForward { .. } => "fast-forward",
             Self::Merge { .. } => "merge",
             Self::Rebase { .. } => "rebase",
@@ -393,10 +455,18 @@ impl GitOperation {
     }
 
     pub(crate) fn run(&self, root: &Path) -> Result<String, GitError> {
+        if let Self::CreateBranch { branch, .. } = self {
+            crate::host::worktree::validate_branch_name(root, branch)?;
+        }
         let args = match self {
             Self::Amend => vec!["commit", "--amend", "--no-edit"],
             Self::CheckoutCommit { commit } => vec!["switch", "--detach", commit],
             Self::CherryPick { commit } => vec!["cherry-pick", commit],
+            Self::CreateBranch {
+                branch,
+                start_point,
+            } => vec!["branch", "--", branch, start_point],
+            Self::DeleteBranch { branch } => vec!["branch", "-d", "--", branch],
             Self::FastForward { branch } => vec!["merge", "--ff-only", branch],
             Self::Merge { branch } => vec!["merge", "--no-edit", branch],
             Self::Rebase { branch } => vec!["rebase", branch],
@@ -452,6 +522,8 @@ impl GitRepositoryEvent {
             .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
         let commits = GitCommitEntry::recent(&repo_root)?;
         let branches = GitBranchEntry::local(&repo_root, &branch)?;
+        let remote_branches = GitBranchEntry::remote(&repo_root)?;
+        let tags = GitTagEntry::list(&repo_root)?;
         let stashes = GitStashEntry::list(&repo_root)?;
         Ok(Self {
             path: requested_path,
@@ -464,6 +536,8 @@ impl GitRepositoryEvent {
             files,
             commits,
             branches,
+            remote_branches,
+            tags,
             stashes,
         })
     }
@@ -728,6 +802,24 @@ pub fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
     Ok(lines)
 }
 
+pub fn commit_diff_lines(root: &Path, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+    let (stdout, stderr, ok) = git_read(
+        root,
+        &[
+            "show",
+            "--format=",
+            "--find-renames",
+            "--find-copies",
+            "--unified=100000",
+            reference,
+        ],
+    )?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(parse::parse_unified_diff(&stdout))
+}
+
 fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
     use std::io::Write;
     use std::process::Stdio;
@@ -979,6 +1071,11 @@ mod tests {
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
         test_repo::run(repo.path(), &["branch", "feature"]);
+        test_repo::run(repo.path(), &["tag", "v1.0.0"]);
+        test_repo::run(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
         test_repo::write(repo.path(), "tracked.txt", "two\n");
         test_repo::write(repo.path(), "untracked.txt", "new\n");
 
@@ -1010,7 +1107,68 @@ mod tests {
                 .iter()
                 .any(|branch| branch.name == "feature")
         );
+        assert!(
+            repository
+                .remote_branches
+                .iter()
+                .any(|branch| branch.name == "origin/main")
+        );
+        assert!(repository.tags.iter().any(|tag| tag.name == "v1.0.0"));
         assert!(repository.stashes.is_empty());
+    }
+
+    #[test]
+    fn commit_diff_lines_separate_files_in_the_selected_commit() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::write(repo.path(), "b.txt", "two\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+
+        let lines = commit_diff_lines(repo.path(), "HEAD").unwrap();
+        let files = lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, vec!["a.txt", "b.txt"]);
+        assert!(lines.iter().any(|line| line.kind == DiffKind::Add));
+    }
+
+    #[test]
+    fn branch_operations_create_and_delete_a_branch() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+
+        GitOperation::CreateBranch {
+            branch: "feature".to_string(),
+            start_point: "main".to_string(),
+        }
+        .run(repo.path())
+        .unwrap();
+        assert!(
+            GitBranchEntry::local(repo.path(), "main")
+                .unwrap()
+                .iter()
+                .any(|branch| branch.name == "feature")
+        );
+
+        GitOperation::DeleteBranch {
+            branch: "feature".to_string(),
+        }
+        .run(repo.path())
+        .unwrap();
+        assert!(
+            GitBranchEntry::local(repo.path(), "main")
+                .unwrap()
+                .iter()
+                .all(|branch| branch.name != "feature")
+        );
     }
 
     #[test]

@@ -1078,8 +1078,10 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
                 GitIconView { class: "size-3.5 shrink-0".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-semibold text-foreground", title: "{repository}", "{repository}" }
                 if boundary.is_worktree {
-                    span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary",
-                        {translate("layout-worktree")}
+                    span {
+                        class: "flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary",
+                        title: translate("layout-worktree"),
+                        LineIconView { icon: LineIcon::GitFork, class: "size-3".to_string() }
                     }
                 }
             }
@@ -1136,24 +1138,62 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
 fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
     let root = project.root;
     let root_path = root.path.clone();
+    let choices = project.choices;
+    let mut choosing = use_signal(|| false);
     rsx! {
-        div { class: "min-w-0 overflow-hidden rounded-md bg-foreground/[0.035]",
-            button {
-                r#type: "button",
-                class: "flex w-full min-w-0 cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
-                title: "{root.display_path}",
-                onclick: move |_| {
-                    let _ = send(&vmux_core::event::ProjectTreeToggle {
-                        path: root_path.clone(),
-                        pane_id: pane_id.to_string(),
-                    });
-                },
-                Icon {
-                    class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
-                    path { d: "m9 18 6-6-6-6" }
+        div { class: "relative min-w-0 rounded-md bg-foreground/[0.035]",
+            div { class: "flex min-w-0 items-center",
+                button {
+                    r#type: "button",
+                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                    title: "{root.display_path}",
+                    onclick: move |_| choosing.set(!choosing()),
+                    if root.is_worktree {
+                        LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
+                    } else {
+                        BuiltinIconView { icon: vmux_core::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "truncate text-[10px] font-medium text-foreground", "{root.label}" }
+                        if !root.branch.is_empty() {
+                            div { class: "truncate font-mono text-[9px] text-muted-foreground", "{root.branch}" }
+                        }
+                    }
+                    Icon {
+                        class: if choosing() { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
+                    }
                 }
-                BuiltinIconView { icon: vmux_core::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
-                span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground", "{root.label}" }
+                button {
+                    r#type: "button",
+                    class: "mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                    title: translate("git-files"),
+                    aria_label: translate("git-files"),
+                    onclick: move |event: MouseEvent| {
+                        event.stop_propagation();
+                        choosing.set(false);
+                        let _ = send(&vmux_core::event::ProjectTreeToggle {
+                            path: root_path.clone(),
+                            pane_id: pane_id.to_string(),
+                        });
+                    },
+                    Icon {
+                        class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
+                    }
+                }
+            }
+            if choosing() {
+                div { class: "max-h-64 overflow-y-auto border-t border-foreground/[0.06] p-1",
+                    for choice in choices {
+                        ActiveWorkspaceChoice {
+                            key: "{choice.path}",
+                            project: choice,
+                            pane_id,
+                            on_pick: move |_| choosing.set(false),
+                        }
+                    }
+                }
             }
             SidebarTreeChildren { expanded: root.expanded,
                 div { class: "border-t border-foreground/[0.06] py-1",
@@ -1166,19 +1206,16 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            if project.choices.len() > 1 {
-                div { class: "border-t border-foreground/[0.06] p-1",
-                    for choice in project.choices {
-                        ActiveWorkspaceChoice { key: "{choice.path}", project: choice, pane_id }
-                    }
-                }
-            }
         }
     }
 }
 
 #[component]
-fn ActiveWorkspaceChoice(project: vmux_core::event::ProjectRow, pane_id: u64) -> Element {
+fn ActiveWorkspaceChoice(
+    project: vmux_core::event::ProjectRow,
+    pane_id: u64,
+    on_pick: EventHandler<()>,
+) -> Element {
     let path = project.path.clone();
     let activate_path = path.clone();
     let workspace_path = path.clone();
@@ -1192,6 +1229,7 @@ fn ActiveWorkspaceChoice(project: vmux_core::event::ProjectRow, pane_id: u64) ->
             },
             title: "{project.display_path}",
             onclick: move |_| {
+                on_pick.call(());
                 let _ = send(&vmux_core::event::space::ProjectCommandEvent {
                     command: "activate".to_string(),
                     path: Some(activate_path.clone()),
@@ -1204,7 +1242,7 @@ fn ActiveWorkspaceChoice(project: vmux_core::event::ProjectRow, pane_id: u64) ->
                 });
             },
             BuiltinIconView {
-                icon: if project.is_worktree { vmux_core::BuiltinIcon::GitBranch } else { vmux_core::BuiltinIcon::Project },
+                icon: vmux_core::BuiltinIcon::Project,
                 class: "size-3.5 shrink-0".to_string(),
             }
             div { class: "min-w-0 flex-1",
@@ -1216,7 +1254,10 @@ fn ActiveWorkspaceChoice(project: vmux_core::event::ProjectRow, pane_id: u64) ->
             if project.is_active {
                 span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-semibold text-primary", {translate("common-current")} }
             } else if project.is_worktree {
-                span { class: "shrink-0 rounded-full bg-foreground/[0.05] px-1.5 py-0.5 text-[8px] text-muted-foreground", {translate("layout-worktree")} }
+                LineIconView {
+                    icon: LineIcon::GitFork,
+                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                }
             }
         }
     }

@@ -28,7 +28,7 @@ wire! {
     pub struct GitRepositoryPickerRequest { pub path: String }
     pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
     pub struct GitDirectoryRequest { pub path: String, pub preview: bool }
-    pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub generation: u64, pub top_line: u32, pub rows: u32 }
+    pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub reference: String, pub generation: u64, pub top_line: u32, pub rows: u32 }
     pub struct GitStageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
     pub struct GitDiscardRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
@@ -87,6 +87,13 @@ wire! {
         pub checkout: String,
     }
 
+    pub struct GitTagEntry {
+        pub name: String,
+        pub short_sha: String,
+        pub date: String,
+        pub message: String,
+    }
+
     pub struct GitStashEntry {
         pub index: u32,
         pub reference: String,
@@ -104,6 +111,8 @@ wire! {
         pub files: Vec<GitFileEntry>,
         pub commits: Vec<GitCommitEntry>,
         pub branches: Vec<GitBranchEntry>,
+        pub remote_branches: Vec<GitBranchEntry>,
+        pub tags: Vec<GitTagEntry>,
         pub stashes: Vec<GitStashEntry>,
     }
 
@@ -144,6 +153,8 @@ pub enum GitOperation {
     Amend,
     CheckoutCommit { commit: String },
     CherryPick { commit: String },
+    CreateBranch { branch: String, start_point: String },
+    DeleteBranch { branch: String },
     FastForward { branch: String },
     Merge { branch: String },
     Rebase { branch: String },

@@ -238,17 +238,34 @@ pub fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut saw_hunk = false;
+    let multi_file = diff
+        .lines()
+        .filter(|line| line.starts_with("diff --git"))
+        .count()
+        > 1;
 
     for raw in diff.lines() {
         if raw.starts_with("\\ No newline") {
             continue;
         }
-        if !saw_hunk
-            && (raw.starts_with("diff --git")
-                || raw.starts_with("index ")
-                || raw.starts_with("--- ")
-                || raw.starts_with("+++ "))
+        if let Some((_, path)) = raw.split_once(" b/")
+            && raw.starts_with("diff --git")
         {
+            saw_hunk = false;
+            old_no = 0;
+            new_no = 0;
+            if multi_file {
+                lines.push(DiffLine {
+                    kind: DiffKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    hunk: None,
+                    spans: span(path, HUNK),
+                });
+            }
+            continue;
+        }
+        if raw.starts_with("index ") || raw.starts_with("--- ") || raw.starts_with("+++ ") {
             continue;
         }
         if raw.starts_with("@@") {
@@ -264,6 +281,9 @@ pub fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
                 hunk: None,
                 spans: span(raw, HUNK),
             });
+            continue;
+        }
+        if !saw_hunk {
             continue;
         }
         match raw.chars().next() {
@@ -406,6 +426,25 @@ mod diff_tests {
     #[test]
     fn empty_diff_yields_no_lines() {
         assert!(parse_unified_diff("").is_empty());
+    }
+
+    #[test]
+    fn separates_multiple_files_without_rendering_git_headers_as_code() {
+        let diff = format!("{DIFF}{}", DIFF.replace("f.rs", "g.rs"));
+        let lines = parse_unified_diff(&diff);
+        let files = lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+        assert_eq!(files, vec!["f.rs", "g.rs"]);
+        assert!(!lines.iter().any(|line| {
+            line.spans
+                .first()
+                .is_some_and(|span| span.text.starts_with("index "))
+        }));
     }
 }
 
