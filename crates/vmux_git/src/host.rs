@@ -19,9 +19,9 @@ use vmux_core::host::page::NativelyHosted;
 use crate::event::{
     GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitBranchLogRequest,
     GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest,
-    GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitPullRequest, GitPushRequest,
-    GitRepositoryPickedEvent, GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest,
-    GitStageRequest, GitStatusRequest, GitUnstageRequest,
+    GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitOperationRequest, GitPullRequest,
+    GitPushRequest, GitRepositoryPickedEvent, GitRepositoryPickerRequest, GitRepositoryRequest,
+    GitStageAllRequest, GitStageRequest, GitStatusRequest, GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
@@ -90,6 +90,7 @@ impl Plugin for GitPlugin {
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 GitFetchRequest,
+                GitOperationRequest,
                 GitPullRequest,
                 GitStageAllRequest,
             )>::default())
@@ -104,6 +105,7 @@ impl Plugin for GitPlugin {
             .add_observer(on_discard_request)
             .add_observer(on_commit_request)
             .add_observer(on_fetch_request)
+            .add_observer(on_operation_request)
             .add_observer(on_pull_request)
             .add_observer(on_push_request)
             .add_observer(on_stage_all_request)
@@ -1201,6 +1203,18 @@ fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, outbox: Res<GitOut
         trigger.event().webview,
         JobKind::Fetch {
             path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
+fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, outbox: Res<GitOutbox>) {
+    let request = &trigger.event().payload;
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation.clone(),
         },
     );
 }

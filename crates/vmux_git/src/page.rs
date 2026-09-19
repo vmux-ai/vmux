@@ -52,6 +52,7 @@ pub fn Page() -> Element {
     let mut selected_abs_path = use_signal(String::new);
     let mut selected_commit = use_signal(String::new);
     let mut selected_branch = use_signal(String::new);
+    let mut selected_stash = use_signal(String::new);
     let mut confirm_discard = use_signal(Vec::<u8>::new);
     let mut commit_message = use_signal(String::new);
     let mut pending_commit_message = use_signal(String::new);
@@ -81,6 +82,7 @@ pub fn Page() -> Element {
         selected_abs_path.set(String::new());
         selected_commit.set(String::new());
         selected_branch.set(String::new());
+        selected_stash.set(String::new());
         loading.set(true);
         message.set(String::new());
         focused_panel.set(GitPanel::Status);
@@ -113,6 +115,13 @@ pub fn Page() -> Element {
             .or_else(|| event.branches.first())
             .map(|entry| entry.name.clone())
             .unwrap_or_default();
+        let next_stash = event
+            .stashes
+            .iter()
+            .find(|entry| entry.reference == selected_stash())
+            .or_else(|| event.stashes.first())
+            .map(|entry| entry.reference.clone())
+            .unwrap_or_default();
         selected_abs_path.set(
             next_file
                 .as_ref()
@@ -128,6 +137,7 @@ pub fn Page() -> Element {
         selected_path_bytes.set(next_file.map(|entry| entry.path_bytes).unwrap_or_default());
         selected_commit.set(next_commit);
         selected_branch.set(next_branch);
+        selected_stash.set(next_stash);
         workspace.set(event.repo_root.clone());
         repository.set(Some(event));
         directory.set(None);
@@ -220,6 +230,7 @@ pub fn Page() -> Element {
         selected_abs_path.set(String::new());
         selected_commit.set(String::new());
         selected_branch.set(event.branch);
+        selected_stash.set(String::new());
         branch_log.set(None);
         loading.set(true);
         GitWorkspace::request(&event.path);
@@ -269,6 +280,7 @@ pub fn Page() -> Element {
                             absolute_path: selected_abs_path,
                             branch: selected_branch,
                             commit: selected_commit,
+                            stash: selected_stash,
                         },
                         direction,
                     ) {
@@ -322,6 +334,22 @@ pub fn Page() -> Element {
                     (GitPanel::Files, "a") => {
                         let _ = send(&GitStageAllRequest { path: repository.repo_root.clone() });
                         true
+                    }
+                    (GitPanel::Files, "s") => {
+                        if repository.files.is_empty() {
+                            false
+                        } else {
+                            GitWorkspace::operate(&repository.repo_root, GitOperation::StashPush);
+                            true
+                        }
+                    }
+                    (GitPanel::Files, "A") => {
+                        let can_amend = !repository.commits.is_empty()
+                            && repository.files.iter().any(|entry| entry.staged);
+                        if can_amend {
+                            GitWorkspace::operate(&repository.repo_root, GitOperation::Amend);
+                        }
+                        can_amend
                     }
                     (GitPanel::Files, " ") | (GitPanel::Files, "Space") => {
                         let Some(entry) = repository
@@ -382,6 +410,76 @@ pub fn Page() -> Element {
                         GitWorkspace::select_branch(&repository.repo_root, branch);
                         true
                     }
+                    (GitPanel::Branches, "r")
+                    | (GitPanel::Branches, "M")
+                    | (GitPanel::Branches, "f") => {
+                        let Some(branch) = repository
+                            .branches
+                            .iter()
+                            .find(|branch| branch.name == selected_branch() && !branch.current)
+                        else {
+                            return;
+                        };
+                        let operation = match key.as_str() {
+                            "r" => GitOperation::Rebase {
+                                branch: branch.name.clone(),
+                            },
+                            "M" => GitOperation::Merge {
+                                branch: branch.name.clone(),
+                            },
+                            _ => GitOperation::FastForward {
+                                branch: branch.name.clone(),
+                            },
+                        };
+                        GitWorkspace::operate(&repository.repo_root, operation);
+                        true
+                    }
+                    (GitPanel::Commits, " ")
+                    | (GitPanel::Commits, "Space")
+                    | (GitPanel::Commits, "C")
+                    | (GitPanel::Commits, "V")
+                    | (GitPanel::Commits, "t") => {
+                        let Some(commit) = repository
+                            .commits
+                            .iter()
+                            .find(|commit| commit.sha == selected_commit())
+                        else {
+                            return;
+                        };
+                        let operation = match key.as_str() {
+                            " " | "Space" => GitOperation::CheckoutCommit {
+                                commit: commit.sha.clone(),
+                            },
+                            "t" => GitOperation::Revert {
+                                commit: commit.sha.clone(),
+                            },
+                            _ => GitOperation::CherryPick {
+                                commit: commit.sha.clone(),
+                            },
+                        };
+                        GitWorkspace::operate(&repository.repo_root, operation);
+                        true
+                    }
+                    (GitPanel::Stash, "g") | (GitPanel::Stash, "d") => {
+                        let Some(stash) = repository
+                            .stashes
+                            .iter()
+                            .find(|stash| stash.reference == selected_stash())
+                        else {
+                            return;
+                        };
+                        let operation = if key == "g" {
+                            GitOperation::StashPop {
+                                reference: stash.reference.clone(),
+                            }
+                        } else {
+                            GitOperation::StashDrop {
+                                reference: stash.reference.clone(),
+                            }
+                        };
+                        GitWorkspace::operate(&repository.repo_root, operation);
+                        true
+                    }
                     _ => false,
                 };
                 if handled {
@@ -397,6 +495,7 @@ pub fn Page() -> Element {
                     selected_abs_path,
                     selected_commit,
                     selected_branch,
+                    selected_stash,
                     confirm_discard,
                     commit_message,
                     pending_commit_message,
@@ -476,6 +575,13 @@ impl GitWorkspace {
             pane_id: String::new(),
         });
     }
+
+    fn operate(repo_root: &str, operation: GitOperation) {
+        let _ = send(&GitOperationRequest {
+            repo_root: repo_root.to_string(),
+            operation,
+        });
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -485,6 +591,7 @@ enum GitPanel {
     Files,
     Branches,
     Commits,
+    Stash,
 }
 
 #[derive(Clone, Copy)]
@@ -494,6 +601,7 @@ struct GitPanelSelection {
     absolute_path: Signal<String>,
     branch: Signal<String>,
     commit: Signal<String>,
+    stash: Signal<String>,
 }
 
 impl GitPanel {
@@ -516,6 +624,7 @@ impl GitPanel {
             "2" => Some(Self::Files),
             "3" => Some(Self::Branches),
             "4" => Some(Self::Commits),
+            "5" => Some(Self::Stash),
             _ => None,
         }
     }
@@ -525,11 +634,13 @@ impl GitPanel {
             (Self::Status, false) => Self::Files,
             (Self::Files, false) => Self::Branches,
             (Self::Branches, false) => Self::Commits,
-            (Self::Commits, false) => Self::Status,
-            (Self::Status, true) => Self::Commits,
+            (Self::Commits, false) => Self::Stash,
+            (Self::Stash, false) => Self::Status,
+            (Self::Status, true) => Self::Stash,
             (Self::Files, true) => Self::Status,
             (Self::Branches, true) => Self::Files,
             (Self::Commits, true) => Self::Branches,
+            (Self::Stash, true) => Self::Commits,
         }
     }
 
@@ -602,6 +713,26 @@ impl GitPanel {
                 let index = move_selection(current, len, direction);
                 selection.commit.set(repository.commits[index].sha.clone());
                 ScrollIntoView::nearest(&format!("git-commit-row-{index}"));
+                true
+            }
+            Self::Stash => {
+                let len = repository.stashes.len();
+                if len == 0 {
+                    return false;
+                }
+                let current = repository
+                    .stashes
+                    .iter()
+                    .position(|entry| entry.reference == (selection.stash)())
+                    .unwrap_or(match direction {
+                        MenuDirection::Next => len - 1,
+                        MenuDirection::Previous => 0,
+                    });
+                let index = move_selection(current, len, direction);
+                selection
+                    .stash
+                    .set(repository.stashes[index].reference.clone());
+                ScrollIntoView::nearest(&format!("git-stash-row-{index}"));
                 true
             }
         }
@@ -700,6 +831,7 @@ fn GitDashboard(
     selected_abs_path: Signal<String>,
     selected_commit: Signal<String>,
     selected_branch: Signal<String>,
+    selected_stash: Signal<String>,
     confirm_discard: Signal<Vec<u8>>,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
@@ -712,8 +844,8 @@ fn GitDashboard(
     shortcut_help: Signal<bool>,
 ) -> Element {
     rsx! {
-        main { class: "min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(120%_90%_at_50%_-20%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-2 sm:overflow-hidden sm:p-3",
-            div { class: "grid min-h-full grid-cols-1 gap-2.5 sm:h-full sm:grid-cols-[minmax(19rem,0.86fr)_minmax(0,2.14fr)] sm:grid-rows-[5rem_minmax(11rem,1.05fr)_minmax(9rem,0.85fr)_minmax(8rem,0.8fr)_8rem] sm:gap-3 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,2.1fr)]",
+        main { class: "min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(120%_90%_at_50%_-20%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-1.5 sm:overflow-hidden sm:p-2",
+            div { class: "grid min-h-full grid-cols-1 gap-1.5 sm:h-full sm:grid-cols-[minmax(18rem,0.86fr)_minmax(0,2.14fr)] sm:grid-rows-[4rem_minmax(9rem,1.05fr)_minmax(7rem,0.85fr)_minmax(6rem,0.8fr)_minmax(5rem,0.7fr)] sm:gap-2 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(0,2.1fr)]",
                 StatusCard { repository: repository.clone(), focused_panel }
                 ChangesCard {
                     repository: repository.clone(),
@@ -727,6 +859,7 @@ fn GitDashboard(
                 }
                 BranchesCard { repository: repository.clone(), selected_branch, focused_panel }
                 HistoryCard { repository: repository.clone(), selected_commit, focused_panel }
+                StashCard { repository: repository.clone(), selected_stash, focused_panel }
                 if focused_panel() == GitPanel::Status {
                     StatusDetailCard { repository: repository.clone() }
                 } else if focused_panel() == GitPanel::Branches {
@@ -765,15 +898,30 @@ fn GitShortcutBar(focused_panel: Signal<GitPanel>, shortcut_help: Signal<bool>) 
         GitPanel::Files => vec![
             ("space", translate("git-toggle-stage")),
             ("a", translate("git-stage-all")),
+            ("s", translate("git-stash")),
+            ("A", translate("git-amend")),
             ("x", translate("git-discard")),
         ],
-        GitPanel::Branches => vec![("enter", translate("git-switch-workspace"))],
-        GitPanel::Commits => Vec::new(),
+        GitPanel::Branches => vec![
+            ("enter", translate("git-switch-workspace")),
+            ("r", translate("git-rebase")),
+            ("M", translate("git-merge")),
+            ("f", translate("git-fast-forward")),
+        ],
+        GitPanel::Commits => vec![
+            ("space", translate("git-checkout-commit")),
+            ("C", translate("git-cherry-pick")),
+            ("t", translate("git-revert-commit")),
+        ],
+        GitPanel::Stash => vec![
+            ("g", translate("git-stash-pop")),
+            ("d", translate("git-stash-drop")),
+        ],
     };
 
     rsx! {
         footer { class: "flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t border-foreground/[0.08] bg-card/92 px-2 text-[10px] text-muted-foreground backdrop-blur-xl",
-            ShortcutHint { keycap: "1–4", label: translate("git-shortcut-panels") }
+            ShortcutHint { keycap: "1–5", label: translate("git-shortcut-panels") }
             ShortcutHint { keycap: "↑↓", label: translate("git-shortcut-navigate") }
             for (keycap, label) in panel_shortcuts {
                 ShortcutHint { keycap, label }
@@ -824,7 +972,7 @@ fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
                     ShortcutGroup {
                         title: translate("git-shortcut-universal"),
                         shortcuts: vec![
-                            ("1–4".to_string(), translate("git-shortcut-panels")),
+                            ("1–5".to_string(), translate("git-shortcut-panels")),
                             ("tab".to_string(), translate("git-shortcut-next-panel")),
                             ("↑/k".to_string(), translate("git-shortcut-previous")),
                             ("↓/j".to_string(), translate("git-shortcut-next")),
@@ -846,6 +994,8 @@ fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
                         shortcuts: vec![
                             ("space".to_string(), translate("git-toggle-stage")),
                             ("a".to_string(), translate("git-stage-all")),
+                            ("s".to_string(), translate("git-stash")),
+                            ("A".to_string(), translate("git-amend")),
                             ("x x".to_string(), translate("git-discard")),
                         ],
                     }
@@ -854,6 +1004,24 @@ fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
                         shortcuts: vec![
                             ("enter".to_string(), translate("git-switch-workspace")),
                             ("c".to_string(), translate("git-switch-workspace")),
+                            ("r".to_string(), translate("git-rebase")),
+                            ("M".to_string(), translate("git-merge")),
+                            ("f".to_string(), translate("git-fast-forward")),
+                        ],
+                    }
+                    ShortcutGroup {
+                        title: translate("git-commits"),
+                        shortcuts: vec![
+                            ("space".to_string(), translate("git-checkout-commit")),
+                            ("C / V".to_string(), translate("git-cherry-pick")),
+                            ("t".to_string(), translate("git-revert-commit")),
+                        ],
+                    }
+                    ShortcutGroup {
+                        title: translate("git-stashes"),
+                        shortcuts: vec![
+                            ("g".to_string(), translate("git-stash-pop")),
+                            ("d".to_string(), translate("git-stash-drop")),
                         ],
                     }
                 }
@@ -891,20 +1059,20 @@ fn PanelHeader(
 ) -> Element {
     rsx! {
         div { class: if focused {
-                "flex h-10 shrink-0 items-center gap-2.5 border-b border-ansi-2/20 bg-gradient-to-r from-ansi-2/[0.08] to-transparent px-3"
+                "flex h-7 shrink-0 items-center gap-1.5 border-b border-ansi-2/20 bg-gradient-to-r from-ansi-2/[0.08] to-transparent px-2"
             } else {
-                "flex h-10 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-gradient-to-r from-foreground/[0.035] to-transparent px-3"
+                "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-foreground/[0.035] to-transparent px-2"
             },
-            div { class: "flex size-6 shrink-0 items-center justify-center rounded-lg {icon_class}",
+            div { class: "flex size-5 shrink-0 items-center justify-center rounded-md {icon_class}",
                 match icon {
-                    PanelIcon::Git => rsx! { GitIconView { class: "h-3.5 w-3.5" } },
-                    PanelIcon::Line(icon) => rsx! { LineIconView { icon, class: "h-3.5 w-3.5" } },
+                    PanelIcon::Git => rsx! { GitIconView { class: "h-3 w-3" } },
+                    PanelIcon::Line(icon) => rsx! { LineIconView { icon, class: "h-3 w-3" } },
                 }
             }
-            span { class: if focused { "font-mono text-[10px] font-semibold text-ansi-2" } else { "font-mono text-[10px] font-semibold text-muted-foreground" }, "[{index}]" }
-            span { class: "min-w-0 flex-1 truncate text-xs font-semibold tracking-[-0.01em]", "{title}" }
+            span { class: if focused { "font-mono text-[9px] font-semibold text-ansi-2" } else { "font-mono text-[9px] font-semibold text-muted-foreground" }, "[{index}]" }
+            span { class: "min-w-0 flex-1 truncate text-[11px] font-semibold tracking-[-0.01em]", "{title}" }
             if let Some(count) = count {
-                Badge { class: "min-h-5 min-w-5 rounded-full border px-1.5 text-[9px] font-semibold tabular-nums {badge_class}", "{count}" }
+                Badge { class: "min-h-4 min-w-4 rounded-full border px-1 text-[8px] font-semibold tabular-nums {badge_class}", "{count}" }
             }
         }
     }
@@ -917,6 +1085,32 @@ enum PanelIcon {
 }
 
 #[component]
+fn GitOperationButton(
+    repo_root: String,
+    operation: GitOperation,
+    label: String,
+    disabled: bool,
+    danger: bool,
+) -> Element {
+    rsx! {
+        Button {
+            variant: ButtonVariant::Outline,
+            class: if danger {
+                "h-6 min-w-0 rounded-md px-1.5 text-[9px] font-medium text-ansi-1 hover:bg-ansi-1/10 disabled:opacity-35"
+            } else {
+                "h-6 min-w-0 rounded-md px-1.5 text-[9px] font-medium disabled:opacity-35"
+            },
+            disabled,
+            onclick: move |event: Event<MouseData>| {
+                event.stop_propagation();
+                GitWorkspace::operate(&repo_root, operation.clone());
+            },
+            span { class: "truncate", "{label}" }
+        }
+    }
+}
+
+#[component]
 fn StatusCard(repository: GitRepositoryEvent, focused_panel: Signal<GitPanel>) -> Element {
     let focused = focused_panel() == GitPanel::Status;
 
@@ -924,9 +1118,9 @@ fn StatusCard(repository: GitRepositoryEvent, focused_panel: Signal<GitPanel>) -
         Card {
             variant: CardVariant::Panel,
             class: if focused {
-                "order-1 min-h-20 cursor-default border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_22%,transparent),0_14px_36px_rgb(0_0_0_/_12%)] sm:col-start-1 sm:row-start-1 sm:min-h-0 sm:order-none"
+                "order-1 min-h-16 cursor-default border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_22%,transparent),0_14px_36px_rgb(0_0_0_/_12%)] sm:col-start-1 sm:row-start-1 sm:min-h-0 sm:order-none"
             } else {
-                "order-1 min-h-20 cursor-default sm:col-start-1 sm:row-start-1 sm:min-h-0 sm:order-none"
+                "order-1 min-h-16 cursor-default sm:col-start-1 sm:row-start-1 sm:min-h-0 sm:order-none"
             },
             onclick: move |_| focused_panel.set(GitPanel::Status),
             PanelHeader {
@@ -938,7 +1132,7 @@ fn StatusCard(repository: GitRepositoryEvent, focused_panel: Signal<GitPanel>) -
                 badge_class: "",
                 focused,
             }
-            div { class: "flex min-h-0 flex-1 items-center gap-2.5 px-3 text-xs",
+            div { class: "flex min-h-0 flex-1 items-center gap-2 px-2 text-[11px]",
                 span { class: "min-w-0 truncate font-semibold", "{repository.repo_name}" }
                 span { class: "shrink-0 text-muted-foreground", "→" }
                 span { class: "min-w-0 truncate font-medium", "{repository.branch}" }
@@ -969,15 +1163,15 @@ fn StatusDetailCard(repository: GitRepositoryEvent) -> Element {
 
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[26rem] border-t-ansi-2/30 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-10 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-gradient-to-r from-ansi-2/[0.065] to-transparent px-3",
-                div { class: "flex size-6 shrink-0 items-center justify-center rounded-lg bg-ansi-2/10 text-ansi-2 ring-1 ring-inset ring-ansi-2/15",
-                    LineIconView { icon: LineIcon::GitBranch, class: "h-3.5 w-3.5" }
+            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-ansi-2/[0.065] to-transparent px-2",
+                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-ansi-2/10 text-ansi-2 ring-1 ring-inset ring-ansi-2/15",
+                    LineIconView { icon: LineIcon::GitBranch, class: "h-3 w-3" }
                 }
-                span { class: "font-mono text-[10px] font-semibold text-muted-foreground", "[0]" }
-                span { class: "min-w-0 flex-1 truncate text-xs font-semibold tracking-[-0.01em]", {translate("git-status")} }
+                span { class: "font-mono text-[9px] font-semibold text-muted-foreground", "[0]" }
+                span { class: "min-w-0 flex-1 truncate text-[11px] font-semibold tracking-[-0.01em]", {translate("git-status")} }
                 Button {
                     variant: ButtonVariant::Primary,
-                    class: "h-7 gap-1.5 rounded-lg px-2.5 py-0 text-xs font-medium shadow-sm",
+                    class: "h-6 gap-1 rounded-md px-2 py-0 text-[10px] font-medium shadow-sm",
                     disabled: repository.branch.is_empty(),
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: repository.repo_root.clone() });
@@ -1050,12 +1244,12 @@ fn BranchLogCard(branch: String, branch_log: Signal<Option<GitBranchLogEvent>>) 
 
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-violet-400/30 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-10 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-gradient-to-r from-violet-400/[0.065] to-transparent px-3",
-                div { class: "flex size-6 shrink-0 items-center justify-center rounded-lg bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
-                    LineIconView { icon: LineIcon::GitCommit, class: "h-3.5 w-3.5" }
+            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-violet-400/[0.065] to-transparent px-2",
+                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
+                    LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3" }
                 }
-                span { class: "font-mono text-[10px] font-semibold text-muted-foreground", "[0]" }
-                span { class: "text-xs font-semibold tracking-[-0.01em]", {translate("git-log")} }
+                span { class: "font-mono text-[9px] font-semibold text-muted-foreground", "[0]" }
+                span { class: "text-[11px] font-semibold tracking-[-0.01em]", {translate("git-log")} }
                 span { class: "min-w-0 truncate rounded-full border border-violet-400/20 bg-violet-400/[0.07] px-2 py-0.5 font-mono text-[10px] text-violet-300", "{branch}" }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-4",
@@ -1126,7 +1320,7 @@ fn CommandLogCard(command_log: Signal<Vec<GitCommandLogEntry>>) -> Element {
 
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-3 min-h-36 border-t-sky-400/25 sm:col-start-2 sm:row-start-5 sm:min-h-0 sm:order-none",
-            div { class: "flex h-9 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-gradient-to-r from-sky-400/[0.055] to-transparent px-3",
+            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-sky-400/[0.055] to-transparent px-2",
                 div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-sky-400/10 text-sky-400 ring-1 ring-inset ring-sky-400/15",
                     LineIconView { icon: LineIcon::Terminal, class: "h-3 w-3" }
                 }
@@ -1178,9 +1372,17 @@ fn ChangesCard(
         Card {
             variant: CardVariant::Panel,
             class: if focused_panel() == GitPanel::Files {
-                "order-4 min-h-[22rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                if repository.files.is_empty() {
+                    "order-4 min-h-[13rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                } else {
+                    "order-4 min-h-[19rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                }
             } else {
-                "order-4 min-h-[22rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                if repository.files.is_empty() {
+                    "order-4 min-h-[13rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                } else {
+                    "order-4 min-h-[19rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
+                }
             },
             onclick: move |_| focused_panel.set(GitPanel::Files),
             PanelHeader {
@@ -1194,10 +1396,9 @@ fn ChangesCard(
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
                 if repository.files.is_empty() {
-                    div { class: "flex h-full min-h-40 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground",
-                        LineIconView { icon: LineIcon::ShieldCheck, class: "h-6 w-6 text-ansi-2" }
-                        div { class: "font-medium text-foreground", {translate("git-repository-clean")} }
-                        div { {translate("git-no-changes")} }
+                    div { class: "flex h-full min-h-16 items-center justify-center gap-2 px-3 text-center text-xs text-muted-foreground",
+                        LineIconView { icon: LineIcon::ShieldCheck, class: "h-4 w-4 shrink-0 text-ansi-2" }
+                        div { class: "truncate font-medium text-foreground", {translate("git-repository-clean")} }
                     }
                 } else {
                     if !staged.is_empty() {
@@ -1231,6 +1432,8 @@ fn ChangesCard(
             CommitPanel {
                 repo_root: repository.repo_root,
                 staged_count,
+                can_stash: !repository.files.is_empty(),
+                can_amend: staged_count > 0 && !repository.commits.is_empty(),
                 commit_message,
                 pending_commit_message,
             }
@@ -1388,6 +1591,8 @@ fn FileRow(
 fn CommitPanel(
     repo_root: String,
     staged_count: u32,
+    can_stash: bool,
+    can_amend: bool,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
 ) -> Element {
@@ -1396,20 +1601,34 @@ fn CommitPanel(
         && pending_commit_message().is_empty();
 
     rsx! {
-        div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-2",
+        div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-1.5",
             Textarea {
                 variant: TextareaVariant::Outline,
-                class: "min-h-11 w-full resize-none rounded-lg border border-foreground/[0.09] bg-background/65 px-2.5 py-2 text-xs shadow-inner outline-none placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-primary/10",
+                class: "min-h-8 w-full resize-none rounded-md border border-foreground/[0.09] bg-background/65 px-2 py-1.5 text-[11px] shadow-inner outline-none placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-primary/10",
                 placeholder: translate("git-commit-message"),
                 value: "{commit_message}",
                 oninput: move |event: Event<FormData>| commit_message.set(event.value()),
                 onkeydown: move |event: KeyboardEvent| event.stop_propagation(),
             }
-            div { class: "mt-2 flex items-center justify-between gap-2",
-                span { class: "truncate text-[10px] text-muted-foreground", {translate("git-staged-changes")} " · {staged_count}" }
+            div { class: "mt-1.5 flex items-center gap-1",
+                GitOperationButton {
+                    repo_root: repo_root.clone(),
+                    operation: GitOperation::StashPush,
+                    label: translate("git-stash"),
+                    disabled: !can_stash,
+                    danger: false,
+                }
+                GitOperationButton {
+                    repo_root: repo_root.clone(),
+                    operation: GitOperation::Amend,
+                    label: translate("git-amend"),
+                    disabled: !can_amend,
+                    danger: false,
+                }
+                span { class: "ml-auto truncate text-[9px] text-muted-foreground", {translate("git-staged-changes")} " · {staged_count}" }
                 Button {
                     variant: ButtonVariant::Primary,
-                    class: "h-7 shrink-0 rounded-lg px-2.5 text-xs font-medium shadow-sm disabled:opacity-40",
+                    class: "h-6 shrink-0 rounded-md px-2 text-[10px] font-medium shadow-sm disabled:opacity-40",
                     disabled: !can_commit,
                     onclick: move |_| {
                         let text = commit_message().trim().to_string();
@@ -1450,9 +1669,9 @@ fn BranchesCard(
         Card {
             variant: CardVariant::Panel,
             class: if focused_panel() == GitPanel::Branches {
-                "order-5 min-h-56 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
+                "order-5 min-h-44 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
             } else {
-                "order-5 min-h-56 border-t-violet-400/30 sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
+                "order-5 min-h-44 border-t-violet-400/30 sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
             },
             onclick: move |_| focused_panel.set(GitPanel::Branches),
             PanelHeader {
@@ -1474,9 +1693,9 @@ fn BranchesCard(
                         variant: ButtonVariant::Ghost,
                         key: "{branch.name}",
                         class: if selected_branch() == branch.name {
-                            "h-auto min-h-12 w-full justify-start gap-1 rounded-lg bg-primary/[0.10] px-2 py-1 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                            "h-auto min-h-9 w-full justify-start gap-1 rounded-md bg-primary/[0.10] px-1.5 py-0.5 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
                         } else {
-                            "h-auto min-h-12 w-full justify-start gap-1 rounded-lg px-2 py-1 text-left text-foreground hover:bg-foreground/[0.045]"
+                            "h-auto min-h-9 w-full justify-start gap-1 rounded-md px-1.5 py-0.5 text-left text-foreground hover:bg-foreground/[0.045]"
                         },
                         onclick: {
                             let name = branch.name.clone();
@@ -1519,12 +1738,36 @@ fn BranchesCard(
                         class: "mt-2 h-7 w-full rounded-lg px-2.5 text-xs font-medium",
                         onclick: {
                             let repo_root = repository.repo_root.clone();
+                            let branch = branch.clone();
                             move |event: Event<MouseData>| {
                                 event.stop_propagation();
                                 GitWorkspace::select_branch(&repo_root, &branch);
                             }
                         },
                         {translate("git-switch-workspace")}
+                    }
+                    div { class: "mt-1.5 grid grid-cols-3 gap-1.5",
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::Rebase { branch: branch.name.clone() },
+                            label: translate("git-rebase"),
+                            disabled: branch.current,
+                            danger: false,
+                        }
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::Merge { branch: branch.name.clone() },
+                            label: translate("git-merge"),
+                            disabled: branch.current,
+                            danger: false,
+                        }
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::FastForward { branch: branch.name.clone() },
+                            label: translate("git-fast-forward"),
+                            disabled: branch.current,
+                            danger: false,
+                        }
                     }
                 }
             }
@@ -1573,9 +1816,9 @@ fn HistoryCard(
         Card {
             variant: CardVariant::Panel,
             class: if focused_panel() == GitPanel::Commits {
-                "order-6 min-h-64 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-4 sm:row-span-2 sm:min-h-0 sm:order-none"
+                "order-6 min-h-48 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-4 sm:min-h-0 sm:order-none"
             } else {
-                "order-6 min-h-64 border-t-sky-400/30 sm:col-start-1 sm:row-start-4 sm:row-span-2 sm:min-h-0 sm:order-none"
+                "order-6 min-h-48 border-t-sky-400/30 sm:col-start-1 sm:row-start-4 sm:min-h-0 sm:order-none"
             },
             onclick: move |_| focused_panel.set(GitPanel::Commits),
             PanelHeader {
@@ -1597,9 +1840,9 @@ fn HistoryCard(
                         variant: ButtonVariant::Ghost,
                         key: "{commit.sha}",
                         class: if selected_commit() == commit.sha {
-                            "h-auto w-full justify-start gap-2 rounded-lg bg-primary/[0.10] px-2 py-1.5 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                            "h-auto w-full justify-start gap-1.5 rounded-md bg-primary/[0.10] px-1.5 py-1 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
                         } else {
-                            "h-auto w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                            "h-auto w-full justify-start gap-1.5 rounded-md px-1.5 py-1 text-left text-foreground hover:bg-foreground/[0.045]"
                         },
                         onclick: {
                             let sha = commit.sha.clone();
@@ -1627,6 +1870,114 @@ fn HistoryCard(
                         code { class: "truncate font-mono", "{commit.sha}" }
                         span { class: "ml-auto shrink-0", "{commit.date}" }
                     }
+                    div { class: "mt-2 grid grid-cols-3 gap-1.5",
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::CheckoutCommit { commit: commit.sha.clone() },
+                            label: translate("git-checkout-commit"),
+                            disabled: false,
+                            danger: false,
+                        }
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::CherryPick { commit: commit.sha.clone() },
+                            label: translate("git-cherry-pick"),
+                            disabled: false,
+                            danger: false,
+                        }
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::Revert { commit: commit.sha.clone() },
+                            label: translate("git-revert-commit"),
+                            disabled: false,
+                            danger: true,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StashCard(
+    repository: GitRepositoryEvent,
+    selected_stash: Signal<String>,
+    focused_panel: Signal<GitPanel>,
+) -> Element {
+    let selected = repository
+        .stashes
+        .iter()
+        .find(|entry| entry.reference == selected_stash())
+        .cloned();
+    let stashes = repository.stashes.clone();
+
+    rsx! {
+        Card {
+            variant: CardVariant::Panel,
+            class: if focused_panel() == GitPanel::Stash {
+                "order-7 min-h-40 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-5 sm:min-h-0 sm:order-none"
+            } else {
+                "order-7 min-h-40 border-t-rose-400/30 sm:col-start-1 sm:row-start-5 sm:min-h-0 sm:order-none"
+            },
+            onclick: move |_| focused_panel.set(GitPanel::Stash),
+            PanelHeader {
+                index: 5,
+                title: translate("git-stashes"),
+                count: Some(stashes.len()),
+                icon: PanelIcon::Line(LineIcon::Package),
+                icon_class: "bg-rose-400/10 text-rose-400 ring-1 ring-inset ring-rose-400/15",
+                badge_class: "border-rose-400/20 bg-rose-400/[0.08] text-rose-400",
+                focused: focused_panel() == GitPanel::Stash,
+            }
+            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+                if stashes.is_empty() {
+                    div { class: "flex h-full min-h-20 items-center justify-center p-4 text-center text-xs text-muted-foreground", {translate("git-no-stashes")} }
+                }
+                for (index, stash) in stashes.into_iter().enumerate() {
+                    Button {
+                        id: "git-stash-row-{index}",
+                        variant: ButtonVariant::Ghost,
+                        key: "{stash.reference}",
+                        class: if selected_stash() == stash.reference {
+                            "h-auto min-h-10 w-full justify-start gap-2 rounded-lg bg-primary/[0.10] px-2 py-1.5 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                        } else {
+                            "h-auto min-h-10 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                        },
+                        onclick: {
+                            let reference = stash.reference.clone();
+                            move |_| {
+                                focused_panel.set(GitPanel::Stash);
+                                selected_stash.set(reference.clone());
+                            }
+                        },
+                        span { class: "shrink-0 rounded-md border border-rose-400/20 bg-rose-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-rose-400", "{stash.index}" }
+                        div { class: "min-w-0 flex-1",
+                            div { class: "truncate text-xs font-medium", "{stash.message}" }
+                            div { class: "mt-0.5 truncate font-mono text-[9px] text-muted-foreground", "{stash.reference}" }
+                        }
+                    }
+                }
+            }
+            if let Some(stash) = selected {
+                div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] px-3 py-2",
+                    div { class: "truncate text-xs font-medium", "{stash.message}" }
+                    div { class: "mt-2 grid grid-cols-2 gap-1.5",
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::StashPop { reference: stash.reference.clone() },
+                            label: translate("git-stash-pop"),
+                            disabled: false,
+                            danger: false,
+                        }
+                        GitOperationButton {
+                            repo_root: repository.repo_root.clone(),
+                            operation: GitOperation::StashDrop { reference: stash.reference.clone() },
+                            label: translate("git-stash-drop"),
+                            disabled: false,
+                            danger: true,
+                        }
+                    }
                 }
             }
         }
@@ -1644,11 +1995,11 @@ fn DiffCard(
 ) -> Element {
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-10 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-gradient-to-r from-emerald-400/[0.055] to-transparent px-3",
-                div { class: "flex size-6 shrink-0 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/15",
-                    TypeIcon { path: selected_path(), is_dir: false, class: "h-3.5 w-3.5" }
+            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-emerald-400/[0.055] to-transparent px-2",
+                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-emerald-400/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/15",
+                    TypeIcon { path: selected_path(), is_dir: false, class: "h-3 w-3" }
                 }
-                span { class: "min-w-0 flex-1 truncate font-mono text-xs font-medium",
+                span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",
                     if selected_path().is_empty() { {translate("git-select-file")} } else { "{selected_path}" }
                 }
                 span { class: "rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-emerald-400", "Diff" }
@@ -1816,14 +2167,17 @@ mod tests {
         assert_eq!(GitPanel::from_key("2"), Some(GitPanel::Files));
         assert_eq!(GitPanel::from_key("3"), Some(GitPanel::Branches));
         assert_eq!(GitPanel::from_key("4"), Some(GitPanel::Commits));
-        assert_eq!(GitPanel::from_key("5"), None);
+        assert_eq!(GitPanel::from_key("5"), Some(GitPanel::Stash));
+        assert_eq!(GitPanel::from_key("6"), None);
     }
 
     #[test]
     fn tab_cycles_panels_in_both_directions() {
         assert_eq!(GitPanel::Status.next(false), GitPanel::Files);
-        assert_eq!(GitPanel::Commits.next(false), GitPanel::Status);
-        assert_eq!(GitPanel::Status.next(true), GitPanel::Commits);
+        assert_eq!(GitPanel::Commits.next(false), GitPanel::Stash);
+        assert_eq!(GitPanel::Stash.next(false), GitPanel::Status);
+        assert_eq!(GitPanel::Status.next(true), GitPanel::Stash);
+        assert_eq!(GitPanel::Stash.next(true), GitPanel::Commits);
         assert_eq!(GitPanel::Files.next(true), GitPanel::Status);
     }
 }

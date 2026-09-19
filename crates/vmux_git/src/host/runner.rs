@@ -350,6 +350,78 @@ impl GitBranchEntry {
     }
 }
 
+impl GitStashEntry {
+    fn list(root: &Path) -> Result<Vec<Self>, GitError> {
+        let (stdout, stderr, ok) = git_read(root, &["stash", "list", "--format=%gd%x00%gs"])?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let mut entries = Vec::new();
+        for line in stdout.lines() {
+            let Some((reference, message)) = line.split_once('\0') else {
+                continue;
+            };
+            let index = reference
+                .strip_prefix("stash@{")
+                .and_then(|value| value.strip_suffix('}'))
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or(entries.len() as u32);
+            entries.push(Self {
+                index,
+                reference: reference.to_string(),
+                message: message.to_string(),
+            });
+        }
+        Ok(entries)
+    }
+}
+
+impl GitOperation {
+    pub(crate) fn action(&self) -> &'static str {
+        match self {
+            Self::Amend => "amend",
+            Self::CheckoutCommit { .. } => "checkout commit",
+            Self::CherryPick { .. } => "cherry-pick",
+            Self::FastForward { .. } => "fast-forward",
+            Self::Merge { .. } => "merge",
+            Self::Rebase { .. } => "rebase",
+            Self::Revert { .. } => "revert",
+            Self::StashDrop { .. } => "stash drop",
+            Self::StashPop { .. } => "stash pop",
+            Self::StashPush => "stash",
+        }
+    }
+
+    pub(crate) fn run(&self, root: &Path) -> Result<String, GitError> {
+        let args = match self {
+            Self::Amend => vec!["commit", "--amend", "--no-edit"],
+            Self::CheckoutCommit { commit } => vec!["switch", "--detach", commit],
+            Self::CherryPick { commit } => vec!["cherry-pick", commit],
+            Self::FastForward { branch } => vec!["merge", "--ff-only", branch],
+            Self::Merge { branch } => vec!["merge", "--no-edit", branch],
+            Self::Rebase { branch } => vec!["rebase", branch],
+            Self::Revert { commit } => vec!["revert", "--no-edit", commit],
+            Self::StashDrop { reference } => vec!["stash", "drop", reference],
+            Self::StashPop { reference } => vec!["stash", "pop", reference],
+            Self::StashPush => vec!["stash", "push", "--include-untracked"],
+        };
+        let (stdout, stderr, ok) = git(root, &args)?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let message = if stdout.trim().is_empty() {
+            stderr.trim()
+        } else {
+            stdout.trim()
+        };
+        Ok(if message.is_empty() {
+            "ok".to_string()
+        } else {
+            message.to_string()
+        })
+    }
+}
+
 impl GitRepositoryEvent {
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
@@ -380,6 +452,7 @@ impl GitRepositoryEvent {
             .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
         let commits = GitCommitEntry::recent(&repo_root)?;
         let branches = GitBranchEntry::local(&repo_root, &branch)?;
+        let stashes = GitStashEntry::list(&repo_root)?;
         Ok(Self {
             path: requested_path,
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -391,6 +464,7 @@ impl GitRepositoryEvent {
             files,
             commits,
             branches,
+            stashes,
         })
     }
 }
@@ -936,6 +1010,158 @@ mod tests {
                 .iter()
                 .any(|branch| branch.name == "feature")
         );
+        assert!(repository.stashes.is_empty());
+    }
+
+    #[test]
+    fn stash_operations_preserve_and_restore_tracked_and_untracked_changes() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        test_repo::write(repo.path(), "tracked.txt", "two\n");
+        test_repo::write(repo.path(), "untracked.txt", "new\n");
+
+        GitOperation::StashPush.run(repo.path()).unwrap();
+
+        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        assert!(repository.files.is_empty());
+        assert_eq!(repository.stashes.len(), 1);
+        let reference = repository.stashes[0].reference.clone();
+
+        GitOperation::StashPop { reference }
+            .run(repo.path())
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+            "two\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "new\n"
+        );
+        assert!(
+            GitRepositoryEvent::load(repo.path())
+                .unwrap()
+                .stashes
+                .is_empty()
+        );
+
+        GitOperation::StashPush.run(repo.path()).unwrap();
+        let reference = GitRepositoryEvent::load(repo.path()).unwrap().stashes[0]
+            .reference
+            .clone();
+        GitOperation::StashDrop { reference }
+            .run(repo.path())
+            .unwrap();
+        assert!(
+            GitRepositoryEvent::load(repo.path())
+                .unwrap()
+                .stashes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn cherry_pick_and_revert_apply_selected_commit() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "feature.txt", "feature\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "feature"]);
+        let (commit, _, ok) = git_read(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(ok);
+        let commit = commit.trim().to_string();
+        test_repo::run(repo.path(), &["switch", "main"]);
+
+        GitOperation::CherryPick {
+            commit: commit.clone(),
+        }
+        .run(repo.path())
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+            "feature\n"
+        );
+
+        GitOperation::Revert { commit }.run(repo.path()).unwrap();
+        assert!(!repo.path().join("feature.txt").exists());
+    }
+
+    #[test]
+    fn rebase_moves_current_branch_onto_selected_branch() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["branch", "feature"]);
+        test_repo::write(repo.path(), "main.txt", "main\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "main"]);
+        test_repo::run(repo.path(), &["switch", "feature"]);
+        test_repo::write(repo.path(), "feature.txt", "feature\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "feature"]);
+
+        GitOperation::Rebase {
+            branch: "main".to_string(),
+        }
+        .run(repo.path())
+        .unwrap();
+
+        let (_, _, ancestor) = git_read(
+            repo.path(),
+            &["merge-base", "--is-ancestor", "main", "HEAD"],
+        )
+        .unwrap();
+        assert!(ancestor);
+        assert!(repo.path().join("main.txt").exists());
+        assert!(repo.path().join("feature.txt").exists());
+    }
+
+    #[test]
+    fn merge_and_fast_forward_integrate_selected_branch() {
+        let merge_repo = test_repo::init();
+        test_repo::write(merge_repo.path(), "base.txt", "base\n");
+        test_repo::run(merge_repo.path(), &["add", "."]);
+        test_repo::run(merge_repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(merge_repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(merge_repo.path(), "feature.txt", "feature\n");
+        test_repo::run(merge_repo.path(), &["add", "."]);
+        test_repo::run(merge_repo.path(), &["commit", "-qm", "feature"]);
+        test_repo::run(merge_repo.path(), &["switch", "main"]);
+
+        GitOperation::Merge {
+            branch: "feature".to_string(),
+        }
+        .run(merge_repo.path())
+        .unwrap();
+        assert!(merge_repo.path().join("feature.txt").exists());
+
+        let ff_repo = test_repo::init();
+        test_repo::write(ff_repo.path(), "base.txt", "base\n");
+        test_repo::run(ff_repo.path(), &["add", "."]);
+        test_repo::run(ff_repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(ff_repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(ff_repo.path(), "feature.txt", "feature\n");
+        test_repo::run(ff_repo.path(), &["add", "."]);
+        test_repo::run(ff_repo.path(), &["commit", "-qm", "feature"]);
+        let (feature_head, _, ok) = git_read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(ok);
+        test_repo::run(ff_repo.path(), &["switch", "main"]);
+
+        GitOperation::FastForward {
+            branch: "feature".to_string(),
+        }
+        .run(ff_repo.path())
+        .unwrap();
+        let (head, _, ok) = git_read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(ok);
+        assert_eq!(head.trim(), feature_head.trim());
     }
 
     #[test]

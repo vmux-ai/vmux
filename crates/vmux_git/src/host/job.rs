@@ -46,6 +46,10 @@ pub enum JobKind {
     Pull {
         path: PathBuf,
     },
+    Operation {
+        repo_root: PathBuf,
+        operation: GitOperation,
+    },
     Push {
         path: PathBuf,
     },
@@ -227,6 +231,24 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
                 message: e.0,
             })],
         },
+        JobKind::Operation {
+            repo_root,
+            operation,
+        } => {
+            let action = operation.action().to_string();
+            match operation.run(&repo_root) {
+                Ok(message) => vec![Emit::Result(GitResultEvent {
+                    action,
+                    ok: true,
+                    message,
+                })],
+                Err(error) => vec![Emit::Result(GitResultEvent {
+                    action,
+                    ok: false,
+                    message: error.0,
+                })],
+            }
+        }
         JobKind::Push { path } => match runner::push(&path) {
             Ok(()) => result_then_status(&path, &path, "push", "pushed"),
             Err(e) => vec![Emit::Result(GitResultEvent {

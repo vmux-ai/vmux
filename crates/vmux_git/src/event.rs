@@ -37,6 +37,7 @@ wire! {
     pub struct GitPullRequest { pub path: String }
     pub struct GitPushRequest { pub path: String }
     pub struct GitStageAllRequest { pub path: String }
+    pub struct GitOperationRequest { pub repo_root: String, pub operation: GitOperation }
     pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub hunk: u32, pub accept: bool }
 
     pub struct StyledSpan { pub text: String, pub fg: [u8; 3], pub bold: bool, pub italic: bool }
@@ -86,6 +87,12 @@ wire! {
         pub checkout: String,
     }
 
+    pub struct GitStashEntry {
+        pub index: u32,
+        pub reference: String,
+        pub message: String,
+    }
+
     pub struct GitRepositoryEvent {
         pub path: String,
         pub repo_root: String,
@@ -97,6 +104,7 @@ wire! {
         pub files: Vec<GitFileEntry>,
         pub commits: Vec<GitCommitEntry>,
         pub branches: Vec<GitBranchEntry>,
+        pub stashes: Vec<GitStashEntry>,
     }
 
     pub struct GitBranchLogEvent {
@@ -119,6 +127,30 @@ wire! {
         pub repo_root: String,
         pub preview: bool,
     }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum GitOperation {
+    Amend,
+    CheckoutCommit { commit: String },
+    CherryPick { commit: String },
+    FastForward { branch: String },
+    Merge { branch: String },
+    Rebase { branch: String },
+    Revert { commit: String },
+    StashDrop { reference: String },
+    StashPop { reference: String },
+    StashPush,
 }
 
 #[derive(
