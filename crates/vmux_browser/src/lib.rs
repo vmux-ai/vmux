@@ -131,7 +131,8 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::SETTINGS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE)
+                .takes::<vmux_core::PageMetadata>(),
         ))
         .add_plugins((
             native_page::NativePagePlugin::in_pane(&native_page::SHORTCUTS_PAGE),
