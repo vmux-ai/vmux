@@ -297,7 +297,7 @@ fn ExtensionPopupModal(
         ExtensionPopupSizeEvent {
             id: current.id.clone(),
             width: 360.0,
-            height: 240.0,
+            height: 600.0,
         }
     };
     let reporter = ExtensionPopupBoundsReporter {
