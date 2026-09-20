@@ -269,15 +269,13 @@ pub fn Page() -> Element {
                     class: "pointer-events-auto fixed inset-0 z-[900] cursor-col-resize",
                     onmousemove: move |event: Event<MouseData>| {
                         let x = event.client_coordinates().x as f32 - sheet_left;
-                        sheet_width.set(crate::event::SideSheetResizeEvent { width: x }.clamped());
+                        let width = crate::event::SideSheetResizeEvent::live(x).clamped();
+                        sheet_width.set(width);
+                        let _ = send(&crate::event::SideSheetResizeEvent::live(width));
                     },
                     onmouseup: move |_| {
                         sheet_resizing.set(false);
-                        let _ = send(
-                            &crate::event::SideSheetResizeEvent {
-                                width: sheet_width(),
-                            },
-                        );
+                        let _ = send(&crate::event::SideSheetResizeEvent::settled(sheet_width()));
                     },
                 }
             }

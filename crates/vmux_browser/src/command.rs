@@ -275,11 +275,14 @@ fn on_side_sheet_resize(
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<Messages<vmux_setting::SettingsSaveRequest>>>,
 ) {
-    let next = trigger.event().payload.clamped();
-    if width.0 == next {
+    let resize = trigger.event().payload;
+    let next = resize.clamped();
+    if width.0 != next {
+        width.apply(next, &mut sheets);
+    }
+    if !resize.settled {
         return;
     }
-    width.apply(next, &mut sheets);
     let Some(mut settings) = settings else {
         return;
     };
@@ -418,10 +421,12 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_core::page::HostHistory;
+    use vmux_flex::prelude::{Node, Val};
     use vmux_layout::pane::Pane;
     use vmux_layout::space::{Space, SpaceId};
     use vmux_layout::stack::stack_bundle;
     use vmux_layout::tab::Tab;
+    use vmux_setting::AppSettings;
 
     #[derive(Resource, Default)]
     struct CefNavigations(Vec<Entity>);
@@ -570,6 +575,79 @@ mod tests {
             app.world().get::<LastActivatedAt>(active).unwrap().0,
             2,
             "closing an inactive stack must not disturb activation"
+        );
+    }
+
+    #[test]
+    fn side_sheet_resize_is_live_but_saved_only_when_settled() {
+        let mut settings = AppSettings::embedded();
+        settings.layout.side_sheet.width = 220.0;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .insert_resource(SideSheetWidth(220.0))
+            .add_message::<vmux_setting::SettingsSaveRequest>()
+            .add_observer(on_side_sheet_resize);
+        let sheet = app
+            .world_mut()
+            .spawn((SideSheet, SideSheetPosition::Left, Node::default()))
+            .id();
+        let mut saves = app
+            .world()
+            .resource::<Messages<vmux_setting::SettingsSaveRequest>>()
+            .get_cursor();
+
+        app.world_mut().trigger(BinReceive::<SideSheetResizeEvent> {
+            webview: Entity::PLACEHOLDER,
+            payload: SideSheetResizeEvent::live(320.0),
+        });
+        app.world_mut().flush();
+
+        assert_eq!(app.world().resource::<SideSheetWidth>().0, 320.0);
+        assert_eq!(
+            app.world().get::<Node>(sheet).unwrap().width,
+            Val::Px(320.0)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<AppSettings>()
+                .layout
+                .side_sheet
+                .width,
+            220.0
+        );
+        assert_eq!(
+            saves
+                .read(
+                    app.world()
+                        .resource::<Messages<vmux_setting::SettingsSaveRequest>>(),
+                )
+                .count(),
+            0,
+        );
+
+        app.world_mut().trigger(BinReceive::<SideSheetResizeEvent> {
+            webview: Entity::PLACEHOLDER,
+            payload: SideSheetResizeEvent::settled(320.0),
+        });
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world()
+                .resource::<AppSettings>()
+                .layout
+                .side_sheet
+                .width,
+            320.0
+        );
+        assert_eq!(
+            saves
+                .read(
+                    app.world()
+                        .resource::<Messages<vmux_setting::SettingsSaveRequest>>(),
+                )
+                .count(),
+            1,
         );
     }
 

@@ -116,10 +116,7 @@ fn sync_side_sheet_visibility(
     mut removed: RemovedComponents<Open>,
 ) {
     if width_res.0 <= 0.0 {
-        width_res.0 = crate::event::SideSheetResizeEvent {
-            width: settings.side_sheet.width,
-        }
-        .clamped();
+        width_res.0 = crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     }
 
     let width = width_res.0;
