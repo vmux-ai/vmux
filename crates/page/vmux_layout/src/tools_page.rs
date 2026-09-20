@@ -17,17 +17,19 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
-    let route = try_consume_context::<vmux_core::PageMetadata>()
+    let initial_route = try_consume_context::<vmux_core::PageMetadata>()
         .map(|metadata| ToolsRoute::of(&metadata.url))
         .unwrap_or_default();
+    let active_route = use_signal(|| initial_route);
+    let route = active_route();
     if route == ToolsRoute::Extensions {
-        return rsx! { crate::extensions_page::Page {} };
+        return rsx! { crate::extensions_page::ExtensionsManager { active_route } };
     }
-    rsx! { ToolManager { route } }
+    rsx! { ToolManager { route, active_route } }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ToolsRoute {
+pub(crate) enum ToolsRoute {
     #[default]
     Acp,
     Lsp,
@@ -100,7 +102,7 @@ impl ToolsRoute {
 }
 
 #[component]
-pub(crate) fn ToolsManagerTabs(active: String) -> Element {
+pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element {
     let routes = [
         (ToolsRoute::Acp, "tools-provider-acp-agents"),
         (ToolsRoute::Lsp, "tools-provider-lsp-servers"),
@@ -120,9 +122,10 @@ pub(crate) fn ToolsManagerTabs(active: String) -> Element {
         .collect();
     rsx! {
         ManagerTabs {
-            active,
+            active: active_route().id().to_string(),
             tabs,
-            onselect: move |url| {
+            onselect: move |url: String| {
+                active_route.set(ToolsRoute::of(&url));
                 let _ = send(&ToolsNavigateRequest { url });
             },
         }
@@ -130,7 +133,7 @@ pub(crate) fn ToolsManagerTabs(active: String) -> Element {
 }
 
 #[component]
-fn ToolManager(route: ToolsRoute) -> Element {
+fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     let locale = use_theme();
     let mut snapshot = use_signal(ToolsSnapshot::default);
     let mut loaded = use_signal(|| false);
@@ -167,7 +170,7 @@ fn ToolManager(route: ToolsRoute) -> Element {
         .count();
     rsx! {
         ManagerPage {
-            ToolsManagerTabs { active: route.id().to_string() }
+            ToolsManagerTabs { active_route }
             ManagerHeader {
                 title: route.title(),
                 count: visible_count,

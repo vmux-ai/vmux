@@ -426,7 +426,7 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
         "relative flex h-16 w-3 items-center justify-center rounded-full bg-primary/20 shadow-md ring-1 ring-primary/50"
     } else {
-        "relative flex h-12 w-2 items-center justify-center rounded-full bg-background/80 shadow-md ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-16 group-hover:w-3 group-hover:bg-primary/15 group-hover:ring-primary/45"
+        "relative flex h-12 w-2 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-md ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-16 group-hover:w-3 group-hover:bg-primary/15 group-hover:opacity-100 group-hover:ring-primary/45"
     };
     let line_class = if resizing() {
         "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45"
@@ -435,8 +435,8 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     };
     rsx! {
         div {
-            class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-start justify-center pt-8",
-            style: "right:-14px;",
+            class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-center justify-center",
+            style: "right:-8px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);

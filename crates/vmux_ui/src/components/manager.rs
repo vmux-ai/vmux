@@ -89,8 +89,8 @@ pub fn ManagerTabs(
     onselect: EventHandler<String>,
 ) -> Element {
     rsx! {
-        nav { class: "shrink-0 overflow-x-auto border-b border-foreground/[0.07] px-5 pt-2",
-            div { class: "flex min-w-max items-center gap-1",
+        nav { class: "flex shrink-0 overflow-x-auto border-b border-foreground/[0.07] px-5 py-2.5",
+            div { class: "mx-auto flex min-w-max items-center gap-0.5 rounded-xl bg-foreground/[0.06] p-1 ring-1 ring-inset ring-foreground/[0.06]",
                 for tab in tabs {
                     a {
                         href: "{tab.href}",
@@ -100,9 +100,9 @@ pub fn ManagerTabs(
                         },
                         aria_current: if tab.id == active { "page" } else { "false" },
                         class: if tab.id == active {
-                            "relative flex h-8 items-center rounded-t-lg bg-foreground/[0.07] px-3 text-xs font-semibold text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary"
+                            "flex h-7 items-center rounded-lg bg-background px-3 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08]"
                         } else {
-                            "flex h-8 items-center rounded-t-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
+                            "flex h-7 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                         },
                         "{tab.label}"
                     }

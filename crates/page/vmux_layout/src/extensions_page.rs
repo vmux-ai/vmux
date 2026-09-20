@@ -40,6 +40,12 @@ impl Approval {
 
 #[component]
 pub fn Page() -> Element {
+    let active_route = use_signal(|| crate::tools_page::ToolsRoute::Extensions);
+    rsx! { ExtensionsManager { active_route } }
+}
+
+#[component]
+pub(crate) fn ExtensionsManager(active_route: Signal<crate::tools_page::ToolsRoute>) -> Element {
     let locale = use_theme();
     let mut state = use_signal(ExtensionsEvent::default);
     let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
@@ -82,7 +88,7 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
-            crate::tools_page::ToolsManagerTabs { active: "extensions".to_string() }
+            crate::tools_page::ToolsManagerTabs { active_route }
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),
