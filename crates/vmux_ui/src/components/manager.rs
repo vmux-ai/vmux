@@ -191,6 +191,21 @@ pub fn ManagerRow(
 }
 
 #[component]
+pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
+    rsx! {
+        if let Some(src) = src.filter(|src| !src.is_empty()) {
+            img {
+                class: "h-6 w-6 rounded object-contain",
+                src,
+                draggable: "false",
+            }
+        } else {
+            span { class: "font-mono text-[10px] text-muted-foreground", "{fallback}" }
+        }
+    }
+}
+
+#[component]
 pub fn ManagerBadge(#[props(default)] tone: ManagerTone, children: Element) -> Element {
     rsx! {
         Badge { class: cn(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),

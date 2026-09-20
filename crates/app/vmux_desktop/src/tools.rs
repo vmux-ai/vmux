@@ -269,6 +269,7 @@ struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
 struct InventoryItem {
     id: String,
     name: String,
+    icon: Option<String>,
     version: Option<String>,
     detail: String,
     status: ToolStatus,
@@ -882,6 +883,7 @@ fn build_category(
                 actions: package_actions(item.status, managed, item.removable),
                 id: item.id,
                 name: item.name,
+                icon: item.icon,
                 version: item.version,
                 detail: item.detail,
                 status: item.status,
@@ -899,6 +901,7 @@ fn build_category(
                 provider,
                 id: name.clone(),
                 name,
+                icon: None,
                 version: None,
                 detail: "Declared in tools.toml".to_string(),
                 status: ToolStatus::Missing,
@@ -962,6 +965,7 @@ fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<InventoryItem>, String
             InventoryItem {
                 id: name.clone(),
                 name,
+                icon: None,
                 version,
                 detail: if cask {
                     "Homebrew cask".to_string()
@@ -1039,6 +1043,7 @@ fn parse_npm_inventory(
             InventoryItem {
                 id: name.clone(),
                 name,
+                icon: None,
                 version: metadata
                     .get("version")
                     .and_then(|version| version.as_str())
@@ -1080,6 +1085,7 @@ fn scan_acp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
                 name: agent
                     .map(|agent| agent.name.clone())
                     .unwrap_or_else(|| receipt.name.clone()),
+                icon: agent.and_then(|agent| agent.icon.clone()),
                 version: receipt.version.clone(),
                 detail: agent
                     .and_then(|agent| agent.description.clone())
@@ -1124,6 +1130,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
             InventoryItem {
                 id: receipt.name.clone(),
                 name: receipt.name.clone(),
+                icon: None,
                 version: receipt.version.clone(),
                 detail: package
                     .map(|package| package.description.clone())
@@ -1159,6 +1166,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
             inventory.push(InventoryItem {
                 id: package.name.clone(),
                 name: package.name,
+                icon: None,
                 version: None,
                 detail: "Available on PATH".to_string(),
                 status: ToolStatus::Installed,
@@ -1237,6 +1245,7 @@ fn scan_mcp(manifest: &mut ToolsManifest, errors: &mut Vec<String>) -> ToolCateg
                 provider: ToolProvider::Mcp,
                 id: name.clone(),
                 name,
+                icon: None,
                 version: None,
                 detail,
                 status,
@@ -1301,6 +1310,7 @@ fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
             provider: ToolProvider::Dotfiles,
             id: package.clone(),
             name: package,
+            icon: None,
             version: None,
             detail,
             status,
@@ -1837,6 +1847,28 @@ mod tests {
     }
 
     #[test]
+    fn category_preserves_inventory_icon() {
+        let category = build_category(
+            ToolProvider::Acp,
+            vec![InventoryItem {
+                id: "codex-acp".to_string(),
+                name: "Codex".to_string(),
+                icon: Some("https://cdn.example/codex.svg".to_string()),
+                version: Some("1.0.0".to_string()),
+                detail: String::new(),
+                status: ToolStatus::Installed,
+                removable: true,
+            }],
+            &ToolsManifest::default(),
+        );
+
+        assert_eq!(
+            category.items[0].icon.as_deref(),
+            Some("https://cdn.example/codex.svg")
+        );
+    }
+
+    #[test]
     fn parses_scoped_npm_packages_and_outdated_state() {
         let inventory = parse_npm_inventory(
         br#"{"dependencies":{"@scope/tool":{"version":"2.0.0"},"typescript":{"version":"5.9.0"}}}"#,
@@ -1862,6 +1894,7 @@ mod tests {
                 InventoryItem {
                     id: "installed".to_string(),
                     name: "installed".to_string(),
+                    icon: None,
                     version: Some("1".to_string()),
                     detail: String::new(),
                     status: ToolStatus::Installed,
@@ -1870,6 +1903,7 @@ mod tests {
                 InventoryItem {
                     id: "missing".to_string(),
                     name: "missing".to_string(),
+                    icon: None,
                     version: None,
                     detail: String::new(),
                     status: ToolStatus::Missing,

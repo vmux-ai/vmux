@@ -10,7 +10,7 @@ use vmux_core::tools::{
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
-    ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs,
+    ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail,
 };
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -296,10 +296,13 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
     let version = item.version.clone().unwrap_or_default();
     let provider = item.provider;
     let id = item.id.clone();
+    let show_icon = provider == ToolProvider::Acp;
     rsx! {
         ManagerRow {
-            show_icon: false,
-            icon: rsx! {},
+            show_icon,
+            icon: rsx! {
+                ManagerThumbnail { src: item.icon.clone(), fallback: "ACP".to_string() }
+            },
             title: item.name.clone(),
             subtitle: version,
             meta: rsx! {

@@ -122,6 +122,7 @@ pub struct ToolItem {
     pub provider: ToolProvider,
     pub id: String,
     pub name: String,
+    pub icon: Option<String>,
     pub version: Option<String>,
     pub detail: String,
     pub status: ToolStatus,
