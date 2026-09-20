@@ -434,7 +434,7 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     rsx! {
         div {
             class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-center justify-center",
-            style: "right:-12px;",
+            style: "right:-14px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
