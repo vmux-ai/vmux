@@ -424,9 +424,9 @@ impl ExtensionPopupBoundsReporter {
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
-        "relative flex h-16 w-3 items-center justify-center rounded-full bg-primary/20 shadow-md ring-1 ring-primary/50"
+        "relative flex h-10 w-2 items-center justify-center rounded-full bg-primary/20 shadow-sm ring-1 ring-primary/50"
     } else {
-        "relative flex h-12 w-2 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-md ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-16 group-hover:w-3 group-hover:bg-primary/15 group-hover:opacity-100 group-hover:ring-primary/45"
+        "relative flex h-8 w-1.5 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-10 group-hover:w-2 group-hover:bg-primary/15 group-hover:opacity-100 group-hover:ring-primary/45"
     };
     let line_class = if resizing() {
         "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45"
@@ -436,14 +436,14 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     rsx! {
         div {
             class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-center justify-center",
-            style: "right:-8px;",
+            style: "right:-12px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
             },
             div { class: "{line_class}" }
             div { class: "{handle_class}",
-                div { class: "h-7 w-0.5 rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
+                div { class: "h-5 w-px rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
             }
         }
     }
