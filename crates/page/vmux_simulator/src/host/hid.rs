@@ -61,6 +61,34 @@ impl HidRequest {
         }
     }
 
+    pub fn triple_tap(point: (f32, f32)) -> Self {
+        let mut primitives = Vec::with_capacity(11);
+        for tap in 0..3 {
+            primitives.push(HidPrimitive::touch(HidKind::Down, point));
+            primitives.push(HidPrimitive::delay(0.05));
+            primitives.push(HidPrimitive::touch(HidKind::Up, point));
+            if tap < 2 {
+                primitives.push(HidPrimitive::delay(0.05));
+            }
+        }
+        let step = format!("tap -x {:.0} -y {:.0}", point.0, point.1);
+        Self {
+            primitives,
+            fallback: vec![
+                "batch".into(),
+                "--tap-style".into(),
+                "physical".into(),
+                "--step".into(),
+                step.clone(),
+                "--step".into(),
+                step.clone(),
+                "--step".into(),
+                step,
+            ],
+            coalescible: false,
+        }
+    }
+
     pub fn down(point: (f32, f32)) -> Self {
         Self {
             primitives: vec![HidPrimitive::touch(HidKind::Down, point)],
@@ -528,6 +556,35 @@ mod tests {
         assert_eq!(primitives[1]["kind"], "delay");
         assert_eq!(primitives[1]["duration"], 0.1);
         assert_eq!(primitives[2]["kind"], "up");
+    }
+
+    #[test]
+    fn a_triple_tap_repeats_at_one_point() {
+        let request = HidRequest::triple_tap((120.0, 240.0));
+        let json = serde_json::to_value(HidBrokerRequest {
+            primitives: request.primitives,
+        })
+        .expect("request");
+        let primitives = json["primitives"].as_array().expect("primitives");
+
+        assert_eq!(primitives.len(), 11);
+        assert_eq!(
+            primitives
+                .iter()
+                .filter(|primitive| primitive["kind"] == "down")
+                .count(),
+            3
+        );
+        assert_eq!(
+            primitives
+                .iter()
+                .filter(|primitive| primitive["kind"] == "up")
+                .count(),
+            3
+        );
+        assert!(primitives.iter().all(|primitive| {
+            primitive["kind"] == "delay" || (primitive["x"] == 120.0 && primitive["y"] == 240.0)
+        }));
     }
 
     #[test]

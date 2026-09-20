@@ -58,6 +58,7 @@ struct SimulatorKeyRequest {
 pub(super) struct DeviceTouchSession {
     start: Option<(f32, f32)>,
     last: Option<(f32, f32)>,
+    focus: Option<(f32, f32)>,
     dragging: bool,
 }
 
@@ -225,6 +226,9 @@ fn on_touch(
             if session.start.take().is_none() {
                 return;
             }
+            if !session.dragging {
+                session.focus = Some(point);
+            }
             session.last = None;
             hid.dispatch(HidRequest::up(point));
             session.dragging = false;
@@ -240,6 +244,7 @@ fn on_touch(
         SimulatorTouchPhase::Tap => {
             session.start = None;
             session.last = None;
+            session.focus = Some(point);
             session.dragging = false;
             hid.dispatch(HidRequest::tap(point));
         }
@@ -308,20 +313,32 @@ fn handle_button_requests(
 fn handle_clipboard_requests(
     mut requests: MessageReader<SimulatorClipboardRequest>,
     active: Res<ActiveSimulatorView>,
-    attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
+    attachments: Query<(
+        Entity,
+        &SimulatorDevice,
+        &Axe,
+        &HidBroker,
+        &DeviceTouchSession,
+    )>,
     worker: Res<ClipboardWorker>,
 ) {
     for request in requests.read() {
         let target = request
             .view
             .filter(|entity| attachments.contains(*entity))
-            .or_else(|| active.select(attachments.iter().map(|(entity, _, _)| entity)));
+            .or_else(|| active.select(attachments.iter().map(|(entity, ..)| entity)));
         let Some(target) = target else {
             continue;
         };
-        let Ok((_, device, axe)) = attachments.get(target) else {
+        let Ok((_, device, axe, hid, touch)) = attachments.get(target) else {
             continue;
         };
+        if request.action == crate::event::SimulatorClipboardAction::SelectAll
+            && let Some(point) = touch.focus
+        {
+            hid.dispatch(HidRequest::triple_tap(point));
+            continue;
+        }
         let job = ClipboardJob {
             axe: axe.path().to_path_buf(),
             udid: device.udid.clone(),
