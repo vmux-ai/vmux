@@ -1,5 +1,6 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_api::VmuxRoute;
 use vmux_command::{AppCommand, BrowserBarCommand, BrowserCommand, ReadAppCommands};
 use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -99,17 +100,16 @@ pub(crate) fn sync_page_metadata_to_tab(
             continue;
         }
         let content_is_web = meta.url.starts_with("http://") || meta.url.starts_with("https://");
-        let content_is_agent =
-            meta.url.starts_with("vmux://sessions/") || meta.url.starts_with("vmux://agent/");
-        if parent_meta.as_ref().is_some_and(|m| {
-            m.url.starts_with("vmux://sessions/") || m.url.starts_with("vmux://agent/")
+        let content_is_agent = VmuxRoute::parse(&meta.url).is_some_and(|route| route.is_agent());
+        if parent_meta.as_ref().is_some_and(|metadata| {
+            VmuxRoute::parse(&metadata.url).is_some_and(|route| route.is_agent())
         }) && !content_is_web
             && !content_is_agent
         {
             continue;
         }
         if let Some(parent_url) = parent_meta.as_ref().map(|m| m.url.as_str())
-            && parent_url.starts_with("vmux://")
+            && VmuxRoute::parse(parent_url).is_some()
             && (meta.url.starts_with("data:") || meta.url.is_empty())
         {
             continue;
@@ -263,6 +263,7 @@ pub(crate) fn handle_browser_navigate_requests(
             new_stack,
             profile,
         } = request.clone();
+        let is_vmux_route = VmuxRoute::parse(&url).is_some();
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
@@ -271,11 +272,13 @@ pub(crate) fn handle_browser_navigate_requests(
                 let replace_start = !new_stack
                     && active_stack.is_some_and(|stack| {
                         stack_metadata.get(stack).is_ok_and(|metadata| {
-                            metadata.url.trim_end_matches('/')
-                                == vmux_start::START_PAGE_URL.trim_end_matches('/')
+                            VmuxRoute::parse(&metadata.url).is_some_and(|route| {
+                                VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                                    .is_some_and(|start| route.same_page(&start))
+                            })
                         })
                     });
-                if new_stack && !url.starts_with("vmux://") && !url.starts_with("file:") {
+                if new_stack && !is_vmux_route && !url.starts_with("file:") {
                     let activate_new =
                         active_stack.is_none_or(|stack| !recent_interaction.active(stack));
                     let stack = commands
@@ -307,10 +310,7 @@ pub(crate) fn handle_browser_navigate_requests(
                     });
                     continue;
                 }
-                let in_place = if replace_start
-                    || url.starts_with("vmux://")
-                    || url.starts_with("file:")
-                {
+                let in_place = if replace_start || is_vmux_route || url.starts_with("file:") {
                     None
                 } else {
                     vmux_layout::target::active_webview_for_tab(active_stack, &browsers, &terminals)
@@ -359,8 +359,10 @@ pub(crate) fn handle_browser_navigate_requests(
         } else if let Some(stack) = focus.stack.filter(|stack| {
             !new_stack
                 && stack_metadata.get(*stack).is_ok_and(|metadata| {
-                    metadata.url.trim_end_matches('/')
-                        == vmux_start::START_PAGE_URL.trim_end_matches('/')
+                    VmuxRoute::parse(&metadata.url).is_some_and(|route| {
+                        VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                            .is_some_and(|start| route.same_page(&start))
+                    })
                 })
         }) {
             page_open_writer.write(PageOpenRequest {
@@ -371,7 +373,7 @@ pub(crate) fn handle_browser_navigate_requests(
         } else if let Some(webview) =
             vmux_layout::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
         {
-            if url.starts_with("vmux://") || url.starts_with("file:") {
+            if is_vmux_route || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
                     send_page_open_response(
                         &service,

@@ -27,14 +27,8 @@ impl HostSpawnRegistry {
         {
             return true;
         }
-        vmux_host(url).is_some_and(|host| self.hosts.contains(host))
+        vmux_api::VmuxRoute::parse(url).is_some_and(|route| self.hosts.contains(route.host()))
     }
-}
-
-fn vmux_host(url: &str) -> Option<&str> {
-    let rest = url.strip_prefix("vmux://")?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    (!host.is_empty()).then_some(host)
 }
 
 pub fn register_host_spawn(app: &mut App, host: &'static str) {

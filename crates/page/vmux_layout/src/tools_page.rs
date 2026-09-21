@@ -41,13 +41,13 @@ pub(crate) enum ToolsRoute {
 
 impl From<&str> for ToolsRoute {
     fn from(url: &str) -> Self {
-        let path = url
-            .strip_prefix("vmux://tools/")
-            .unwrap_or_default()
-            .split(['?', '#'])
-            .next()
-            .unwrap_or_default()
-            .trim_matches('/');
+        let Some(route) = vmux_api::VmuxRoute::parse(url)
+            .map(|route| route.canonicalized())
+            .filter(|route| route.is_host("tools"))
+        else {
+            return Self::default();
+        };
+        let path = route.path_segments().next().unwrap_or_default();
         match path {
             "acp" => Self::Acp,
             "lsp" => Self::Lsp,

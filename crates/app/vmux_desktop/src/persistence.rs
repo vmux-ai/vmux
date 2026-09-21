@@ -13,7 +13,6 @@ use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
 };
 use vmux_flex::prelude::*;
-use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::{
@@ -511,27 +510,6 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
     tabs.into_iter().map(|(entity, _, _)| entity).collect()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct PageUrl<'a>(&'a str);
-
-impl<'a> From<&'a str> for PageUrl<'a> {
-    fn from(url: &'a str) -> Self {
-        let path = url.split(['?', '#']).next().unwrap_or(url);
-        Self(path.trim_end_matches('/'))
-    }
-}
-
-impl PageUrl<'_> {
-    fn hosted_by(self, pages: &Query<&NativelyHosted>) -> Option<NativelyHosted> {
-        for page in pages {
-            if page.answers_for(self.0) {
-                return Some(*page);
-            }
-        }
-        None
-    }
-}
-
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
     tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
@@ -659,14 +637,12 @@ pub(crate) fn rebuild_space_views(
             .unwrap_or(false);
 
         if !has_browser {
-            if let Some(page) = PageUrl::from(meta.url.as_str()).hosted_by(&native_pages) {
+            if let Some(page) = native_pages.iter().find(|page| page.answers_for(&meta.url)) {
                 commands.spawn((
                     vmux_layout::cef::Browser::native_page(&meta.url, page.title),
                     ChildOf(entity),
                 ));
-            } else if meta
-                .url
-                .starts_with(TERMINAL_PAGE_URL.trim_end_matches('/'))
+            } else if vmux_api::VmuxRoute::parse(&meta.url).is_some_and(|route| route.is_terminal())
             {
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
@@ -784,6 +760,7 @@ mod tests {
     use super::*;
     use bevy::ecs::entity::EntityHashMap;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_layout::event::TERMINAL_PAGE_URL;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -1244,22 +1221,11 @@ mod tests {
 
     #[test]
     fn a_neighbouring_url_does_not_claim_a_hosted_page() {
-        assert_eq!(
-            PageUrl::from("vmux://vault/"),
-            PageUrl::from("vmux://vault")
-        );
-        assert_eq!(
-            PageUrl::from("vmux://vault/?provider=github"),
-            PageUrl::from("vmux://vault/")
-        );
-        assert_ne!(
-            PageUrl::from("vmux://vaults/"),
-            PageUrl::from("vmux://vault/")
-        );
-        assert_ne!(
-            PageUrl::from("vmux://vault/deep"),
-            PageUrl::from("vmux://vault/")
-        );
+        let page = NativelyHosted::page("vmux://vault/", "Vault");
+        assert!(page.answers_for("vmux://vault"));
+        assert!(page.answers_for("vmux://vault/?provider=github"));
+        assert!(!page.answers_for("vmux://vaults/"));
+        assert!(!page.answers_for("vmux://vault/deep"));
     }
 
     #[test]

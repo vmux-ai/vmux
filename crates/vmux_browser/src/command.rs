@@ -4,6 +4,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_api::VmuxRoute;
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
     ReadAppCommands, open::OpenCommand,
@@ -28,7 +29,6 @@ use vmux_layout::{
 
 use vmux_terminal::{RestartPty, Terminal};
 
-use crate::normalize_vmux_url;
 pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
@@ -112,7 +112,8 @@ fn handle_browser_commands(
                     if resolved.is_empty() {
                         continue;
                     }
-                    let resolved = normalize_vmux_url(resolved.as_str());
+                    let resolved = VmuxRoute::canonical(resolved.as_str())
+                        .unwrap_or_else(|| resolved.as_str().trim().to_string());
                     let current_url = meta_q
                         .get(webview)
                         .map(|m| m.url.clone())

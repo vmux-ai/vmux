@@ -75,6 +75,15 @@ impl NativelyHosted {
                 .split_once(':')
                 .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme));
         }
+        if let (Some(base), Some(candidate)) = (
+            vmux_api::VmuxRoute::parse(self.url),
+            vmux_api::VmuxRoute::parse(url),
+        ) {
+            return match self.owns_subtree {
+                true => candidate.in_subtree(&base),
+                false => candidate.same_page(&base),
+            };
+        }
         let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(url)) else {
             return false;
         };
@@ -242,10 +251,10 @@ fn step_host_history(
 
 impl PageManifest {
     pub fn answers_for(&self, url: &str) -> bool {
-        let Ok(url) = url::Url::parse(url) else {
+        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
             return false;
         };
-        url.scheme() == "vmux" && url.host_str() == Some(self.host.trim().trim_matches('/'))
+        route.is_host(self.host.trim().trim_matches('/'))
     }
 
     pub fn metadata_for(&self, url: impl Into<String>) -> crate::PageMetadata {

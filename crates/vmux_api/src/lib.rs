@@ -18,6 +18,7 @@ pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
 pub mod room;
+pub mod route;
 pub mod service;
 pub mod space;
 pub mod team;
@@ -28,6 +29,7 @@ pub use agent::AgentKind;
 pub use bin_event::{BinEvent, BinEventTarget, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
+pub use route::{InvalidVmuxRoute, VmuxRoute};
 pub use terminal::{
     AnsiPalette, CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
     FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,

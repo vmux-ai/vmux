@@ -1,6 +1,7 @@
 use crate::pane::PaneSplitDirection;
 use bevy::math::Vec2;
 use bevy::prelude::Entity;
+use vmux_api::VmuxRoute;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageKind {
@@ -11,14 +12,18 @@ pub enum PageKind {
 }
 
 pub fn page_kind_for_url(url: &str) -> PageKind {
-    if url.starts_with("vmux://sessions/") || url.starts_with("vmux://agent/") {
-        PageKind::Agent
-    } else if url.starts_with("vmux://terminal/") {
-        PageKind::Terminal
-    } else if url.starts_with("file:") {
-        PageKind::File
-    } else {
-        PageKind::Browser
+    if let Some(route) = VmuxRoute::parse(url) {
+        if route.is_agent() {
+            return PageKind::Agent;
+        }
+        if route.is_terminal() {
+            return PageKind::Terminal;
+        }
+        return PageKind::Browser;
+    }
+    match url.starts_with("file:") {
+        true => PageKind::File,
+        false => PageKind::Browser,
     }
 }
 
@@ -77,19 +82,21 @@ fn file_reuse_key(url: &str) -> &str {
     url.split('#').next().unwrap_or(url)
 }
 
-fn agent_reuse_key(url: &str) -> &str {
-    url.strip_prefix("vmux://sessions/")
-        .or_else(|| url.strip_prefix("vmux://agent/"))
-        .unwrap_or(url)
-}
-
 pub fn reusable_page_match(request_url: &str, existing_url: &str) -> bool {
     let kind = page_kind_for_url(request_url);
     if page_kind_for_url(existing_url) != kind {
         return false;
     }
     match kind {
-        PageKind::Agent => agent_reuse_key(request_url) == agent_reuse_key(existing_url),
+        PageKind::Agent => {
+            let Some(request) = VmuxRoute::parse(request_url) else {
+                return false;
+            };
+            let Some(existing) = VmuxRoute::parse(existing_url) else {
+                return false;
+            };
+            request.same_page(&existing)
+        }
         PageKind::File => file_reuse_key(request_url) == file_reuse_key(existing_url),
         _ => request_url == existing_url,
     }

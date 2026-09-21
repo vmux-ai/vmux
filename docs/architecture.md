@@ -426,6 +426,11 @@ What fills a pane is decided by its URL scheme.
 `vmux://` pages are not fetched from a server. They are answered from embedded assets by a
 custom protocol handler, so a page loads instantly and offline.
 
+`vmux_api::VmuxRoute` is the single parser and canonicalizer for those URLs. Browser dispatch,
+history, layout placement, native-page ownership, and agent routing compare its host and path
+boundaries instead of string prefixes. Legacy aliases are accepted at ingress and rewritten to
+their canonical route before they enter page state.
+
 "The workspace is an API" invites the obvious question: can a random website drive it?
 
 ```mermaid

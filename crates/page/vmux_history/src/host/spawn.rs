@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use vmux_api::VmuxRoute;
 use vmux_core::{
     CreatedAt, LastVisitedAt, PageMetadata, TransitionType, Url, Visit, VisitCount, VisitedUrl,
     now_millis, page::PageReady,
@@ -103,7 +104,7 @@ fn spawn_visits(
         if !ev.is_main_frame {
             continue;
         }
-        if ev.url.starts_with("vmux://") || ev.url.is_empty() {
+        if VmuxRoute::parse(&ev.url).is_some() || ev.url.is_empty() {
             continue;
         }
         let now = now_millis();
@@ -159,7 +160,7 @@ pub(crate) fn record_requested_visits(
 ) {
     let now = now_millis();
     for req in reader.read() {
-        if req.url.is_empty() || req.url.starts_with("vmux://") {
+        if req.url.is_empty() || VmuxRoute::parse(&req.url).is_some() {
             continue;
         }
         record_visit(
@@ -195,10 +196,10 @@ fn record_vmux_pages(
 }
 
 fn recordable_vmux_url(url: &str) -> bool {
-    url.starts_with("vmux://")
-        && !url.starts_with("vmux://history")
-        && !url.starts_with("vmux://layout")
-        && !url.starts_with("vmux://command-bar")
+    let Some(route) = VmuxRoute::parse(url) else {
+        return false;
+    };
+    !matches!(route.host(), "history" | "layout" | "command-bar")
 }
 
 #[cfg(test)]

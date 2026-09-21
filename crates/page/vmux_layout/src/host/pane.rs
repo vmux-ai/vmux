@@ -1706,7 +1706,7 @@ fn spawn_beside_stack(
     open_stack(
         new_stack,
         req.url.clone(),
-        (!req.url.starts_with("file:") && !req.url.starts_with("vmux://"))
+        (!req.url.starts_with("file:") && vmux_api::VmuxRoute::parse(&req.url).is_none())
             .then_some(req.request_id),
         page_open_requests,
     );

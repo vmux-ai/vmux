@@ -161,7 +161,7 @@ struct AddressRoots<'a> {
 impl AddressRoots<'_> {
     fn resolve(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
         let Some(path) = vmux_core::file_url::FileUrl::parse(url).and_then(|url| url.path()) else {
-            return match url.starts_with("vmux://") {
+            return match vmux_api::VmuxRoute::parse(url).is_some() {
                 true => vmux_layout::event::AddressParts::internal(url),
                 false => vmux_layout::event::AddressParts::web(url, title),
             };

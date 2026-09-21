@@ -182,7 +182,7 @@ fn broadcast_history_changed(
         return;
     }
     for (e, page) in &pages {
-        if !page.url.starts_with("vmux://history") {
+        if !vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_host("history")) {
             continue;
         }
         if !browsers.can_emit_to(&e) {
