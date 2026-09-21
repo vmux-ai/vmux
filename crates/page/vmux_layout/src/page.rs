@@ -607,11 +607,13 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
     };
     rsx! {
         div {
-            class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2 rounded-md glass px-3 py-2 text-foreground",
-            div { class: "flex items-center gap-2",
+            class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2.5 rounded-md glass px-3 py-2.5 text-foreground",
+            div { class: "flex min-w-0 items-center gap-2.5",
                 span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-success" }
-                span { class: "min-w-0 flex-1 text-ui font-medium", "{label}" }
-                span { class: "shrink-0 text-xs text-muted-foreground", "{version}" }
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate text-ui font-medium leading-tight", "{label}" }
+                    div { class: "mt-0.5 truncate text-xs leading-tight text-muted-foreground", "{version}" }
+                }
             }
             {match phase {
                 UpdatePhase::Downloading { downloaded, total, .. } => rsx! {
