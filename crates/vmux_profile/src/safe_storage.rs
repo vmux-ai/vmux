@@ -8,10 +8,8 @@ mod macos;
 mod root;
 
 use std::fmt::{Display, Formatter};
-#[cfg(target_os = "macos")]
-use std::path::Path;
 #[cfg(any(target_os = "macos", test))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "macos", test))]
 use zeroize::Zeroizing;
