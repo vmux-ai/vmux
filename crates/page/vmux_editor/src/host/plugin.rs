@@ -88,6 +88,7 @@ impl Plugin for EditorFileLifecyclePlugin {
                         drain_file_changes,
                         reload_changed_files,
                         load_file_buffers,
+                        apply_loaded_file_buffers,
                     )
                         .chain(),
                     flush_lsp_changes,
@@ -128,19 +129,19 @@ impl Plugin for EditorPresentationPlugin {
             .add_systems(
                 Update,
                 (
-                    send_initial_meta.after(load_file_buffers),
-                    send_initial_text_meta.after(load_file_buffers),
-                    send_initial_dir.after(load_file_buffers),
-                    sync_media_allowlist.after(load_file_buffers),
+                    send_initial_meta.after(apply_loaded_file_buffers),
+                    send_initial_text_meta.after(apply_loaded_file_buffers),
+                    send_initial_dir.after(apply_loaded_file_buffers),
+                    sync_media_allowlist.after(apply_loaded_file_buffers),
                     send_initial_media
-                        .after(load_file_buffers)
+                        .after(apply_loaded_file_buffers)
                         .after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     (resend_file_theme_on_change, send_file_theme).chain(),
                     apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
                     send_file_keymap,
-                    sync_editor_wrap_settings.after(load_file_buffers),
+                    sync_editor_wrap_settings.after(apply_loaded_file_buffers),
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
                     apply_lsp_folds,
@@ -309,6 +310,7 @@ impl FileView {
             .remove::<FileDir>()
             .remove::<FileBuffer>()
             .remove::<FileMedia>()
+            .remove::<FileLoadTask>()
             .remove::<EditorKeymap>()
             .remove::<NoteSent>()
             .remove::<LspEditDirty>()
@@ -406,6 +408,115 @@ pub struct FileDir {
 pub struct FileMedia {
     pub kind: vmux_core::media::MediaKind,
     pub mime: String,
+}
+
+#[derive(Component)]
+struct FileLoadTask {
+    path: PathBuf,
+    task: Task<FileLoad>,
+}
+
+#[cfg(test)]
+impl FileLoadTask {
+    fn settle(app: &mut App, entity: Entity) {
+        for _ in 0..10_000 {
+            app.update();
+            let world = app.world();
+            let loaded = world.get::<FileLoadTask>(entity).is_none()
+                && (world.get::<FileBuffer>(entity).is_some()
+                    || world.get::<FileDir>(entity).is_some()
+                    || world.get::<FileMedia>(entity).is_some()
+                    || world.get::<EditState>(entity).is_some());
+            if loaded {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("file load did not settle");
+    }
+}
+
+enum FileLoad {
+    Directory(Vec<FileDirEntry>),
+    Media {
+        kind: vmux_core::media::MediaKind,
+        mime: String,
+    },
+    Text {
+        decoded: crate::encoding::DecodedText,
+        heavy: bool,
+    },
+    Failed {
+        reason: LoadFailure,
+        message: String,
+        missing: bool,
+    },
+}
+
+impl FileLoad {
+    fn read(path: &Path, forced: Option<FileEncoding>) -> Self {
+        let metadata = std::fs::metadata(path);
+        if metadata.as_ref().is_ok_and(|metadata| metadata.is_dir()) {
+            return Self::Directory(list_dir(path));
+        }
+
+        let path_text = path.to_string_lossy();
+        if let Some(kind) = vmux_core::media::media_kind(&path_text) {
+            let mime = vmux_core::media::media_mime(&path_text)
+                .unwrap_or("application/octet-stream")
+                .to_string();
+            return Self::Media { kind, mime };
+        }
+
+        let size = match metadata {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                return Self::Failed {
+                    reason: LoadFailure::Fatal,
+                    message: format!("cannot open {}: {error}", path.display()),
+                    missing: error.kind() == std::io::ErrorKind::NotFound,
+                };
+            }
+        };
+        if size > crate::highlight::FILE_VIEW_MAX_BYTES {
+            return Self::Failed {
+                reason: LoadFailure::Fatal,
+                message: format!(
+                    "file too large ({size} bytes, max {})",
+                    crate::highlight::FILE_VIEW_MAX_BYTES
+                ),
+                missing: false,
+            };
+        }
+
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return Self::Failed {
+                    reason: LoadFailure::Fatal,
+                    message: format!("cannot read {}: {error}", path.display()),
+                    missing: error.kind() == std::io::ErrorKind::NotFound,
+                };
+            }
+        };
+        let decoded = match forced {
+            Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
+            None => match crate::encoding::DecodedText::decode(&bytes) {
+                Some(decoded) => decoded,
+                None => {
+                    return Self::Failed {
+                        reason: LoadFailure::Undecodable,
+                        message: format!("not a text file: {}", path.display()),
+                        missing: false,
+                    };
+                }
+            },
+        };
+        Self::Text {
+            decoded,
+            heavy: size > crate::highlight::HIGHLIGHT_MAX_BYTES,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -806,6 +917,7 @@ type UnloadedFileView = (
     Without<FileDir>,
     Without<FileMedia>,
     Without<EditState>,
+    Without<FileLoadTask>,
 );
 type UnloadedFile = (
     Entity,
@@ -1062,63 +1174,11 @@ fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_co
 fn load_file_buffers(
     mut q: Query<UnloadedFile, UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    store: Option<NonSend<crate::fold_store::FoldStore>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for (entity, fv, mut parked, forced) in &mut q {
         let forced = forced.and_then(|f| f.for_path(&fv.path));
-        if fv.path.is_dir() {
-            let entries = list_dir(&fv.path);
-            commands
-                .entity(entity)
-                .remove::<MissingFileView>()
-                .insert(FileDir { entries });
-            continue;
-        }
-        let path_str = fv.path.to_string_lossy();
-        if let Some(kind) = vmux_core::media::media_kind(&path_str) {
-            let mime = vmux_core::media::media_mime(&path_str)
-                .unwrap_or("application/octet-stream")
-                .to_string();
-            commands
-                .entity(entity)
-                .remove::<MissingFileView>()
-                .insert(FileMedia { kind, mime });
-            continue;
-        }
-        let size = std::fs::metadata(&fv.path).map(|m| m.len());
-        let heavy = size
-            .as_ref()
-            .is_ok_and(|len| *len > crate::highlight::HIGHLIGHT_MAX_BYTES);
-        match size {
-            Ok(len) if len > crate::highlight::FILE_VIEW_MAX_BYTES => {
-                commands
-                    .entity(entity)
-                    .remove::<MissingFileView>()
-                    .insert(FileBuffer::failed(
-                        LoadFailure::Fatal,
-                        format!(
-                            "file too large ({len} bytes, max {})",
-                            crate::highlight::FILE_VIEW_MAX_BYTES
-                        ),
-                    ));
-                continue;
-            }
-            Err(e) => {
-                let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::failed(
-                    LoadFailure::Fatal,
-                    format!("cannot open {}: {e}", fv.path.display()),
-                ));
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    entity_commands.insert(MissingFileView);
-                } else {
-                    entity_commands.remove::<MissingFileView>();
-                }
-                continue;
-            }
-            _ => {}
-        }
         let kind = settings_keymap(&settings);
         let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
@@ -1139,70 +1199,101 @@ fn load_file_buffers(
             }
             continue;
         }
-        let decoded = match std::fs::read(&fv.path) {
-            Ok(bytes) => match forced {
-                Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
-                None => match crate::encoding::DecodedText::decode(&bytes) {
-                    Some(decoded) => decoded,
-                    None => {
-                        commands.entity(entity).remove::<MissingFileView>().insert(
-                            FileBuffer::failed(
-                                LoadFailure::Undecodable,
-                                format!("not a text file: {}", fv.path.display()),
-                            ),
-                        );
-                        continue;
-                    }
-                },
-            },
-            Err(e) => {
-                let mut entity_commands = commands.entity(entity);
-                entity_commands.insert(FileBuffer::failed(
-                    LoadFailure::Fatal,
-                    format!("cannot read {}: {e}", fv.path.display()),
-                ));
-                if e.kind() == std::io::ErrorKind::NotFound {
+        let path = fv.path.clone();
+        let task_path = path.clone();
+        let wake = proxy.as_deref().map(|wrapper| (**wrapper).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let loaded = FileLoad::read(&path, forced);
+            if let Some(proxy) = wake {
+                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            loaded
+        });
+        commands.entity(entity).insert(FileLoadTask {
+            path: task_path,
+            task,
+        });
+    }
+}
+
+fn apply_loaded_file_buffers(
+    mut q: Query<(Entity, &FileView, &mut FileLoadTask)>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    store: Option<NonSend<crate::fold_store::FoldStore>>,
+    mut commands: Commands,
+) {
+    for (entity, view, mut pending) in &mut q {
+        let Some(loaded) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        if pending.path != view.path {
+            commands.entity(entity).remove::<FileLoadTask>();
+            continue;
+        }
+        let mut entity_commands = commands.entity(entity);
+        entity_commands.remove::<FileLoadTask>();
+        match loaded {
+            FileLoad::Directory(entries) => {
+                entity_commands
+                    .remove::<MissingFileView>()
+                    .insert(FileDir { entries });
+            }
+            FileLoad::Media { kind, mime } => {
+                entity_commands
+                    .remove::<MissingFileView>()
+                    .insert(FileMedia { kind, mime });
+            }
+            FileLoad::Failed {
+                reason,
+                message,
+                missing,
+            } => {
+                entity_commands.insert(FileBuffer::failed(reason, message));
+                if missing {
                     entity_commands.insert(MissingFileView);
                 } else {
                     entity_commands.remove::<MissingFileView>();
                 }
-                continue;
             }
-        };
-        let crate::encoding::DecodedText { text, encoding } = decoded;
-        let hl = match heavy {
-            true => HighlightCache::plain(&fv.path),
-            false => HighlightCache::new(&fv.path),
-        };
-        let mut core = EditCore::new(
-            fv.path.clone(),
-            hl.language.clone(),
-            &text,
-            kind.initial_mode(),
-        );
-        core.buffer.encoding = encoding;
-        let mut folds = crate::fold::FoldState::default();
-        if !heavy {
-            folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
-            if let Some(store) = &store {
-                folds.collapsed.extend(store.get(&fv.path));
-                folds.reconcile();
+            FileLoad::Text { decoded, heavy } => {
+                let kind = settings_keymap(&settings);
+                let (maps, leader) = settings_mappings(&settings);
+                let markdown = crate::markdown::is_markdown_path(&view.path);
+                let crate::encoding::DecodedText { text, encoding } = decoded;
+                let hl = match heavy {
+                    true => HighlightCache::plain(&view.path),
+                    false => HighlightCache::new(&view.path),
+                };
+                let mut core = EditCore::new(
+                    view.path.clone(),
+                    hl.language.clone(),
+                    &text,
+                    kind.initial_mode(),
+                );
+                core.buffer.encoding = encoding;
+                let mut folds = crate::fold::FoldState::default();
+                if !heavy {
+                    folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+                    if let Some(store) = &store {
+                        folds.collapsed.extend(store.get(&view.path));
+                        folds.reconcile();
+                    }
+                }
+                core.fold_view = folds.view(core.buffer.len_lines() as u32);
+                entity_commands
+                    .insert((
+                        EditState::new(core, hl, folds),
+                        EditorKeymap(kind.make(&maps, &leader)),
+                        vmux_git::GitDiffSource {
+                            content: text,
+                            dirty: false,
+                        },
+                    ))
+                    .remove::<MissingFileView>();
+                if markdown {
+                    entity_commands.remove::<NoteSent>().insert(OutlineDirty);
+                }
             }
-        }
-        core.fold_view = folds.view(core.buffer.len_lines() as u32);
-        let mut entity_commands = commands.entity(entity);
-        entity_commands
-            .insert((
-                EditState::new(core, hl, folds),
-                EditorKeymap(kind.make(&maps, &leader)),
-                vmux_git::GitDiffSource {
-                    content: text,
-                    dirty: false,
-                },
-            ))
-            .remove::<MissingFileView>();
-        if markdown {
-            entity_commands.remove::<NoteSent>().insert(OutlineDirty);
         }
     }
 }
@@ -5397,6 +5488,7 @@ mod edit_flow_tests {
                     drain_file_changes,
                     reload_changed_files,
                     load_file_buffers,
+                    apply_loaded_file_buffers,
                 )
                     .chain(),
             );
@@ -5426,7 +5518,7 @@ mod edit_flow_tests {
             ))
             .id();
 
-        app.update();
+        FileLoadTask::settle(&mut app, entity);
         assert!(
             app.world()
                 .get::<FileBuffer>(entity)
@@ -5441,7 +5533,7 @@ mod edit_flow_tests {
             notify::Event::new(notify::EventKind::Any).add_path(parent)
         ))
         .unwrap();
-        app.update();
+        FileLoadTask::settle(&mut app, entity);
 
         assert_eq!(
             app.world()
@@ -6683,8 +6775,10 @@ mod page_open_tests {
         fs::write(b.join("f2"), "").unwrap();
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, load_file_buffers);
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (load_file_buffers, apply_loaded_file_buffers).chain(),
+        );
         let e = app
             .world_mut()
             .spawn((
@@ -6698,7 +6792,7 @@ mod page_open_tests {
                 },
             ))
             .id();
-        app.update();
+        FileLoadTask::settle(&mut app, e);
         assert!(
             app.world()
                 .get::<FileDir>(e)
@@ -6710,7 +6804,7 @@ mod page_open_tests {
 
         app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
         app.world_mut().entity_mut(e).remove::<FileDir>();
-        app.update();
+        FileLoadTask::settle(&mut app, e);
         let dir = app.world().get::<FileDir>(e).unwrap();
         assert!(dir.entries.iter().any(|x| x.name == "f2"));
         assert!(!dir.entries.iter().any(|x| x.name == "f1"));
@@ -6875,7 +6969,10 @@ mod parked_edit_tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_systems(Update, load_file_buffers)
+                .add_systems(
+                    Update,
+                    (load_file_buffers, apply_loaded_file_buffers).chain(),
+                )
                 .add_observer(on_file_open)
                 .add_observer(on_file_encoding_set);
             app.world_mut().insert_non_send(SelfWrites::default());
@@ -6938,7 +7035,7 @@ mod parked_edit_tests {
                 webview: self.entity,
                 payload: FileEncodingSet { encoding, action },
             });
-            self.app.update();
+            self.settle();
         }
 
         fn navigate_to(&mut self, name: &str) {
@@ -6947,7 +7044,11 @@ mod parked_edit_tests {
                 webview: self.entity,
                 payload: FileOpenEvent { path },
             });
-            self.app.update();
+            self.settle();
+        }
+
+        fn settle(&mut self) {
+            FileLoadTask::settle(&mut self.app, self.entity);
         }
 
         fn type_into_buffer(&mut self, text: &str) {
@@ -6988,7 +7089,7 @@ mod parked_edit_tests {
     fn a_shift_jis_file_opens_and_saves_back_as_shift_jis() {
         let mut s = Session::open("main.txt");
         s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.app.update();
+        s.settle();
 
         assert_eq!(s.text(), "日本語のテキスト\n", "decoded on load");
         assert_eq!(s.encoding(), FileEncoding::ShiftJis);
@@ -7009,7 +7110,7 @@ mod parked_edit_tests {
     fn saving_a_character_the_encoding_cannot_hold_leaves_the_file_untouched() {
         let mut s = Session::open("main.txt");
         s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.app.update();
+        s.settle();
 
         s.type_into_buffer("€");
         s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
@@ -7025,11 +7126,10 @@ mod parked_edit_tests {
     fn reopening_with_an_encoding_redecodes_the_same_bytes() {
         let mut s = Session::open("main.txt");
         s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.app.update();
+        s.settle();
         assert_eq!(s.encoding(), FileEncoding::ShiftJis);
 
         s.encoding_action(FileEncoding::EucJp, FileEncodingAction::Reopen);
-        s.app.update();
 
         assert_eq!(s.encoding(), FileEncoding::EucJp);
         assert_ne!(
@@ -7043,7 +7143,7 @@ mod parked_edit_tests {
     fn a_file_that_would_not_decode_can_be_reopened_from_the_failure_itself() {
         let mut s = Session::open("main.log");
         s.write_bytes("main.log", b"caf\xe9\x00\x00 log\x00");
-        s.app.update();
+        s.settle();
 
         assert_eq!(s.failure(), Some(LoadFailure::Undecodable));
         assert!(
@@ -7052,7 +7152,6 @@ mod parked_edit_tests {
         );
 
         s.encoding_action(FileEncoding::Iso8859_1, FileEncodingAction::Reopen);
-        s.app.update();
 
         assert_eq!(s.failure(), None, "the failure is cleared, not repeated");
         assert_eq!(s.encoding(), FileEncoding::Iso8859_1);
@@ -7062,7 +7161,7 @@ mod parked_edit_tests {
     #[test]
     fn a_failure_no_encoding_can_rescue_is_not_offered_one() {
         let mut s = Session::open("gone.log");
-        s.app.update();
+        s.settle();
 
         assert_eq!(s.failure(), Some(LoadFailure::Fatal));
     }
@@ -7072,10 +7171,9 @@ mod parked_edit_tests {
         let mut s = Session::open("main.txt");
         s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
         s.write("plain.txt", "ascii\n");
-        s.app.update();
+        s.settle();
 
         s.encoding_action(FileEncoding::Utf16Le, FileEncodingAction::Reopen);
-        s.app.update();
         assert_eq!(s.encoding(), FileEncoding::Utf16Le);
 
         s.navigate_to("plain.txt");
@@ -7089,7 +7187,7 @@ mod parked_edit_tests {
         let mut s = Session::open("main.rs");
         s.write("main.rs", "one\n");
         s.write("lib.rs", "two\n");
-        s.app.update();
+        s.settle();
         assert_eq!(s.text(), "one\n");
 
         s.type_into_buffer("EDIT");
@@ -7113,7 +7211,7 @@ mod parked_edit_tests {
         let mut s = Session::open("main.rs");
         s.write("main.rs", "before\n");
         s.write("lib.rs", "other\n");
-        s.app.update();
+        s.settle();
         assert_eq!(s.text(), "before\n");
 
         s.navigate_to("lib.rs");
@@ -7129,7 +7227,7 @@ mod parked_edit_tests {
         let mut s = Session::open("main.rs");
         s.write("main.rs", "before\n");
         s.write("lib.rs", "other\n");
-        s.app.update();
+        s.settle();
 
         s.type_into_buffer("MINE");
         s.navigate_to("lib.rs");
