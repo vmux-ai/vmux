@@ -2,6 +2,8 @@
 
 .DEFAULT_GOAL := dev
 
+include tool-versions.env
+
 VMUX_PROFILE ?= personal
 VMUX_TEST ?=
 VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full
@@ -13,9 +15,6 @@ EXPORT_CEF_BIN := $(or $(shell command -v export-cef-dir 2>/dev/null),$(HOME)/.c
 DX_BIN := $(or $(shell command -v dx 2>/dev/null),$(HOME)/.cargo/bin/dx)
 CARGO_PACKAGER_BIN := $(or $(shell command -v cargo-packager 2>/dev/null),$(HOME)/.cargo/bin/cargo-packager)
 BEVY_CEF_BUNDLE_APP_BIN := $(or $(shell command -v bevy_cef_bundle_app 2>/dev/null),$(HOME)/.cargo/bin/bevy_cef_bundle_app)
-DX_VERSION := 0.7.9
-CARGO_PACKAGER_VERSION := 0.11.9
-BEVY_CEF_BUNDLE_APP_VERSION := 0.8.1
 CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' Cargo.lock)
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
@@ -257,9 +256,9 @@ ensure-dioxus-deps:
 		exit 1; \
 	fi
 	@dx_version="$$( ("$(DX_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
-	if [ "$$dx_version" != "$(DX_VERSION)" ]; then \
-		echo "Installing dioxus-cli $(DX_VERSION) (found: $${dx_version:-missing})..."; \
-		"$(CARGO_BIN)" install dioxus-cli --locked --version "$(DX_VERSION)"; \
+	if [ "$$dx_version" != "$(DIOXUS_CLI_VERSION)" ]; then \
+		echo "Installing dioxus-cli $(DIOXUS_CLI_VERSION) (found: $${dx_version:-missing})..."; \
+		"$(CARGO_BIN)" install dioxus-cli --locked --version "$(DIOXUS_CLI_VERSION)"; \
 	fi
 
 ensure-mobile-ios-deps: ensure-dioxus-deps

@@ -15,9 +15,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAILWINDCSS_VERSION: "4.2.4"
-  DIOXUS_CLI_VERSION: "0.7.9"
-  BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
@@ -78,7 +75,7 @@ jobs:
             libxdo-dev \
             libvulkan-dev
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
 
@@ -155,7 +152,7 @@ jobs:
             libxdo-dev \
             libvulkan-dev
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -249,7 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
 
       - name: No crate on the headless path links bevy_cef
         run: |
@@ -323,7 +320,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           targets: aarch64-apple-ios
 
@@ -491,7 +488,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
 
@@ -539,9 +536,17 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          TAG="v$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          . ./scripts/release-artifacts.sh
+          vmux_release_artifacts "$VERSION"
+          {
+            echo "VERSION=$VERSION"
+            echo "TAG=$VMUX_RELEASE_TAG"
+            echo "DMG_NAME=$VMUX_DMG_NAME"
+            echo "BINARY_ARCHIVE_NAME=$VMUX_BINARY_ARCHIVE_NAME"
+            echo "APP_ARCHIVE_NAME=$VMUX_APP_ARCHIVE_NAME"
+            echo "APP_SIGNATURE_NAME=$VMUX_APP_SIGNATURE_NAME"
+            echo "DMG_URL=$VMUX_DMG_URL"
+          } >> "$GITHUB_ENV"
 
           if [ -z "${BASE_SHA:-}" ]; then
             echo "Not a pull_request event; skipping release prep."
@@ -559,17 +564,16 @@ jobs:
           echo "Release PR detected: $BASE_VERSION -> $VERSION"
           echo "IS_RELEASE_PR=1" >> "$GITHUB_ENV"
 
-          if gh release view "$TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
+          if gh release view "$VMUX_RELEASE_TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
             asset_count=$(jq '.assets | length' /tmp/r.json)
             CASK_URL=$(grep -m1 '^  url' Casks/vmux.rb | sed 's/.*"\(.*\)".*/\1/')
-            EXPECTED_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Vmux_${VERSION}_aarch64.dmg"
-            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$EXPECTED_URL" ]; then
+            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
               echo "Draft release ready and cask matches; release prep already complete."
               echo "PREP_DONE=1" >> "$GITHUB_ENV"
             fi
           fi
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
 
@@ -581,7 +585,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.9-cef${{ env.CEF_VERSION }}-v3
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache binaryen
         uses: actions/cache@v5
@@ -616,11 +620,14 @@ jobs:
         run: ./scripts/install-dioxus-binaryen.sh
 
       - name: Install bevy_cef bundle tool
-        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
+        run: |
+          if ! bevy_cef_bundle_app --version 2>/dev/null | grep -q "$BEVY_CEF_BUNDLE_APP_VERSION"; then
+            cargo install bevy_cef_bundle_app --locked --version "$BEVY_CEF_BUNDLE_APP_VERSION"
+          fi
 
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: |
-          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.9'; then
+          if ! cargo-packager --version 2>/dev/null | grep -q "$CARGO_PACKAGER_VERSION"; then
             cargo install --path patches/cargo-packager-0.11.8 --locked --force
           fi
 
@@ -691,20 +698,20 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: Vmux-${{ github.sha }}.dmg
-          path: target/release/Vmux_*.dmg
+          path: target/release/${{ env.DMG_NAME }}
           retention-days: 7
 
       - name: Create binary tarball
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         run: |
           cd target/release/Vmux.app/Contents/MacOS
-          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" vmux_desktop
+          tar czf "$GITHUB_WORKSPACE/target/release/${BINARY_ARCHIVE_NAME}" vmux_desktop
 
       - name: Create app bundle tarball
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         run: |
           cd target/release
-          tar czf "Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" Vmux.app
+          tar czf "$APP_ARCHIVE_NAME" Vmux.app
 
       - name: Sign update artifact (minisign)
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
@@ -712,7 +719,7 @@ jobs:
           VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
           VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
         run: |
-          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          TARBALL="target/release/${APP_ARCHIVE_NAME}"
           cargo packager signer sign "${TARBALL}" \
             --private-key "${VMUX_UPDATE_PRIVATE_KEY}" \
             --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
@@ -725,10 +732,10 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS=(
-            "target/release/Vmux_${VERSION}_aarch64.dmg"
-            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
+            "target/release/${DMG_NAME}"
+            "target/release/${BINARY_ARCHIVE_NAME}"
+            "target/release/${APP_ARCHIVE_NAME}"
+            "target/release/${APP_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${BINARYEN_VERSION:-127}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../tool-versions.env"
+VERSION="$BINARYEN_VERSION"
 
 case "$(uname -s)-$(uname -m)" in
     Linux-x86_64)

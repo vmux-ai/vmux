@@ -7,6 +7,11 @@ on:
       - "website/**"
       - "scripts/install.sh"
       - "scripts/install-dioxus-cli.sh"
+      - "scripts/install-dioxus-binaryen.sh"
+      - "scripts/install-tailwindcss.sh"
+      - "rust-toolchain.toml"
+      - "tool-versions.env"
+      - ".github/actions/setup-rust/action.yml"
       - ".github/workflows/deploy-website.yml"
   workflow_dispatch:
 
@@ -21,9 +26,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  TAILWINDCSS_VERSION: "4.2.4"
-  DIOXUS_CLI_VERSION: "0.7.9"
-  BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
@@ -37,7 +39,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
 
