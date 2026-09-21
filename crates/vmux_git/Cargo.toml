@@ -17,6 +17,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "../vmux_core" }
+vmux_path = { path = "../vmux_path" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

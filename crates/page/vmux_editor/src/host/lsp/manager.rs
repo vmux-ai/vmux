@@ -1236,7 +1236,7 @@ use vmux_core::event::{FILE_DIAGNOSTICS_EVENT, FileDiagnosticsEvent};
 use crate::lsp::LintOutbox;
 
 fn canon(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+    vmux_path::PathIdentity::resolve(p).into_path_buf()
 }
 
 #[derive(Resource, Default)]

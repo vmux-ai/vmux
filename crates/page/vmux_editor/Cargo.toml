@@ -50,6 +50,7 @@ url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_path = { path = "../../vmux_path" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_wire = { path = "../../vmux_wire" }

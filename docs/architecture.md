@@ -160,7 +160,10 @@ app.add_plugins((TerminalPlugin, EditorPlugin, ServicePlugin, BrowserPlugin, ...
 
 Plugins do not call each other. Cross-crate behaviour flows through messages and
 components. Composition all the way up: components compose an entity, plugins compose the
-app.
+app. Large capabilities follow the same rule internally: their root plugin is a table of
+contents that composes lifecycle, interaction, presentation, and persistence plugins. A
+system stays private beside the plugin that schedules it, so ordering and run conditions
+cannot be bypassed by another module.
 
 ---
 
@@ -565,6 +568,11 @@ workspace the way a person does.
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
 The daemon owns the sessions, so work keeps running even if the agent process exits.
 
+MCP tool identity and execution route live in one registry. `ToolKind` identifies the
+published operation; `ToolRoute` states whether it becomes an agent command, an agent query,
+or protocol-local work. Names, aliases, schemas, availability, and dispatch therefore cannot
+drift into separate lists.
+
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
 
@@ -634,8 +642,10 @@ crates/
 ├── vmux_git
 ├── vmux_macro
 ├── vmux_native             the VirtualDom driver and its wry webview
+├── vmux_path               canonical and scoped path identities
 ├── vmux_profile
 ├── vmux_session
+├── vmux_tools              tool manifests, imports, and dotfile state
 ├── vmux_ui
 └── vmux_wire
 ```
@@ -648,3 +658,13 @@ Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depend
 `host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
+
+`vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
+capability in `vmux_tools`; consumers depend on it directly instead of reaching through a
+`vmux_core` re-export. `vmux_path` gives filesystem boundaries one shared identity rule and
+rejects scoped paths that traverse or resolve outside their root.
+
+Repository tool versions live in `tool-versions.env`; CI loads the same values used by local
+scripts and the Makefile. Release asset names and URLs come from
+`scripts/release-artifacts.sh`, while the standalone installer selects the matching asset from
+the published release instead of reconstructing its name.

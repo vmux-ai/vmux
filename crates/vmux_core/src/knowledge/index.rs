@@ -218,12 +218,7 @@ fn relative_without_extension(root: &Path, path: &Path) -> String {
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| {
-        path.parent()
-            .and_then(|parent| parent.canonicalize().ok())
-            .and_then(|parent| path.file_name().map(|name| parent.join(name)))
-            .unwrap_or_else(|| path.to_path_buf())
-    })
+    vmux_path::PathIdentity::resolve(path).into_path_buf()
 }
 
 fn note_title(path: &Path, metadata: &MarkdownMetadata, text: &str) -> String {

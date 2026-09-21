@@ -284,6 +284,17 @@ pub struct Stack {
     pub scroll_y: f32,
 }
 
+impl Stack {
+    pub fn clear_children(entity: Entity, children: &Query<&Children>, commands: &mut Commands) {
+        let Ok(children) = children.get(entity) else {
+            return;
+        };
+        for child in children.iter() {
+            commands.entity(child).try_despawn();
+        }
+    }
+}
+
 pub fn active_among<'a>(
     entities: impl Iterator<Item = (Entity, &'a LastActivatedAt)>,
 ) -> Option<Entity> {
@@ -653,6 +664,29 @@ mod tests {
         let stack = world.spawn(Stack::default()).id();
 
         assert!(world.get::<LastActivatedAt>(stack).is_some());
+    }
+
+    #[test]
+    fn clear_children_despawns_only_owned_content() {
+        #[derive(Resource)]
+        struct Target(Entity);
+
+        fn clear(target: Res<Target>, children: Query<&Children>, mut commands: Commands) {
+            Stack::clear_children(target.0, &children, &mut commands);
+        }
+
+        let mut app = App::new();
+        app.add_systems(Update, clear);
+        let stack = app.world_mut().spawn(Stack::default()).id();
+        let child = app.world_mut().spawn(ChildOf(stack)).id();
+        let unrelated = app.world_mut().spawn_empty().id();
+        app.insert_resource(Target(stack));
+
+        app.update();
+
+        assert!(app.world().get_entity(stack).is_ok());
+        assert!(app.world().get_entity(child).is_err());
+        assert!(app.world().get_entity(unrelated).is_ok());
     }
 
     #[test]

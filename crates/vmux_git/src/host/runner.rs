@@ -142,14 +142,7 @@ pub fn repo_root(file: &Path) -> Result<PathBuf, GitError> {
 }
 
 fn canon(path: &Path) -> PathBuf {
-    path.canonicalize()
-        .unwrap_or_else(|_| match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => parent
-                .canonicalize()
-                .unwrap_or_else(|_| parent.to_path_buf())
-                .join(name),
-            _ => path.to_path_buf(),
-        })
+    vmux_path::PathIdentity::resolve(path).into_path_buf()
 }
 
 fn rel(root: &Path, file: &Path) -> PathBuf {

@@ -653,7 +653,7 @@ fn handle_swap_stack_session(
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();
-        clear_stack_children(ev.stack, &children_q, &mut commands);
+        vmux_layout::stack::Stack::clear_children(ev.stack, &children_q, &mut commands);
 
         match target {
             crate::AgentUrl::Cli { kind, sid } => {
@@ -727,7 +727,7 @@ fn handle_agent_page_open_task(
             sid,
         }) => {
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::Stack::clear_children(task.stack, children_q, commands);
             }
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             attach_page_agent_to_stack_with_webview(
@@ -752,7 +752,7 @@ fn handle_agent_page_open_task(
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::Stack::clear_children(task.stack, children_q, commands);
             }
             attach_page_agent_to_stack_with_webview(
                 task.stack,
@@ -832,7 +832,7 @@ fn handle_agent_page_open_task(
                 return Ok(());
             }
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::Stack::clear_children(task.stack, children_q, commands);
             }
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
@@ -917,18 +917,6 @@ fn stack_has_agent_of_kind(
         .unwrap_or(false)
 }
 
-pub(crate) fn clear_stack_children(
-    stack: Entity,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
-}
-
 pub(crate) fn attach_agent_spawn_error_to_stack(
     stack: Entity,
     kind: AgentKind,
@@ -936,7 +924,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
     let title = "Agent failed to start";
     let url = format!("vmux://error/agent/{}/", kind.as_url_segment());
     let message = html_escape(message);
@@ -967,7 +955,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
     commands
         .entity(stack)
         .remove::<crate::vibe::setup::AgentSetupNavigated>();
