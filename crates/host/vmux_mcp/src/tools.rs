@@ -193,6 +193,459 @@ pub enum DispatchTarget {
     Query(vmux_client::protocol::AgentQuery),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolKind {
+    ReadLayout,
+    UpdateLayout,
+    GetSettings,
+    ListSpaces,
+    OpenPage,
+    OpenFile,
+    ReadFile,
+    Grep,
+    ResumeInAcp,
+    Run,
+    RequestUserChoice,
+    VaultStatus,
+    OpenVault,
+    SetConversationTitle,
+    SearchKnowledge,
+    ReadKnowledge,
+    WriteKnowledge,
+    SelectProject,
+    CreateWorktree,
+    ReadTerminal,
+    Screenshot,
+    SimulatorScreenshot,
+    SimulatorTap,
+    SimulatorSwipe,
+    SimulatorType,
+    SimulatorKey,
+    SimulatorButton,
+    BrowserSnapshot,
+    BrowserScroll,
+    RecordStart,
+    RecordStop,
+    BookmarkList,
+    BookmarkAdd,
+    BookmarkRemove,
+    BookmarkPin,
+    BookmarkUnpin,
+    BookmarkFolderCreate,
+}
+
+#[derive(Clone, Copy)]
+enum ToolAvailability {
+    Always,
+    OutsideAcpSession,
+    WithoutAcpTerminals,
+}
+
+struct ToolSpec {
+    kind: ToolKind,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    definition: fn() -> ToolDefinition,
+    route: ToolRoute,
+    availability: ToolAvailability,
+    shell_note: bool,
+}
+
+impl ToolSpec {
+    fn find(name: &str) -> Option<&'static Self> {
+        TOOL_SPECS
+            .iter()
+            .find(|spec| spec.name == name || spec.aliases.contains(&name))
+    }
+
+    fn available(&self, acp_session: bool, acp_terminals: bool) -> bool {
+        match self.availability {
+            ToolAvailability::Always => true,
+            ToolAvailability::OutsideAcpSession => !acp_session,
+            ToolAvailability::WithoutAcpTerminals => !acp_terminals,
+        }
+    }
+
+    fn definition(&self, shell: &str) -> ToolDefinition {
+        let mut definition = (self.definition)();
+        definition.name = self.name.to_string();
+        if self.shell_note {
+            definition
+                .description
+                .push_str(&ShellNote::for_shell(shell));
+        }
+        definition
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProtocolTool {
+    ReadFile,
+    Grep,
+    VaultStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolRoute {
+    Command,
+    Query,
+    Protocol(ProtocolTool),
+}
+
+pub(crate) fn canonical_tool_name(name: &str) -> &str {
+    name.strip_prefix("vmux_").unwrap_or(name)
+}
+
+pub(crate) fn protocol_tool(name: &str) -> Option<ProtocolTool> {
+    match ToolSpec::find(canonical_tool_name(name))?.route {
+        ToolRoute::Protocol(tool) => Some(tool),
+        ToolRoute::Command | ToolRoute::Query => None,
+    }
+}
+
+pub(crate) fn tool_available(name: &str, acp_session: bool, acp_terminals: bool) -> bool {
+    let name = canonical_tool_name(name);
+    ToolSpec::find(name).is_none_or(|spec| spec.available(acp_session, acp_terminals))
+}
+
+const ALWAYS: ToolAvailability = ToolAvailability::Always;
+
+const TOOL_SPECS: &[ToolSpec] = &[
+    ToolSpec {
+        kind: ToolKind::ReadLayout,
+        name: "read_layout",
+        aliases: &[],
+        definition: read_layout_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::UpdateLayout,
+        name: "update_layout",
+        aliases: &[],
+        definition: update_layout_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::GetSettings,
+        name: "get_settings",
+        aliases: &[],
+        definition: get_settings_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::ListSpaces,
+        name: "list_spaces",
+        aliases: &[],
+        definition: list_spaces_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::OpenPage,
+        name: "open_page",
+        aliases: &[],
+        definition: open_page_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::OpenFile,
+        name: "open_file",
+        aliases: &[],
+        definition: open_file_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::ReadFile,
+        name: "read_file",
+        aliases: &[],
+        definition: read_file_definition,
+        route: ToolRoute::Protocol(ProtocolTool::ReadFile),
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::Grep,
+        name: "grep",
+        aliases: &[],
+        definition: grep_definition,
+        route: ToolRoute::Protocol(ProtocolTool::Grep),
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::ResumeInAcp,
+        name: "resume_in_acp",
+        aliases: &[],
+        definition: resume_in_acp_definition,
+        route: ToolRoute::Command,
+        availability: ToolAvailability::OutsideAcpSession,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::Run,
+        name: "run",
+        aliases: &[],
+        definition: run_definition,
+        route: ToolRoute::Command,
+        availability: ToolAvailability::WithoutAcpTerminals,
+        shell_note: true,
+    },
+    ToolSpec {
+        kind: ToolKind::RequestUserChoice,
+        name: "request_user_choice",
+        aliases: &[],
+        definition: request_user_choice_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::VaultStatus,
+        name: "vault_status",
+        aliases: &[],
+        definition: vault_status_definition,
+        route: ToolRoute::Protocol(ProtocolTool::VaultStatus),
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::OpenVault,
+        name: "open_vault",
+        aliases: &[],
+        definition: open_vault_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SetConversationTitle,
+        name: "set_conversation_title",
+        aliases: &[],
+        definition: set_conversation_title_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SearchKnowledge,
+        name: "search_knowledge",
+        aliases: &[],
+        definition: search_knowledge_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::ReadKnowledge,
+        name: "read_knowledge",
+        aliases: &[],
+        definition: read_knowledge_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::WriteKnowledge,
+        name: "write_knowledge",
+        aliases: &[],
+        definition: write_knowledge_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SelectProject,
+        name: "select_project",
+        aliases: &["select_workspace", "choose_workspace"],
+        definition: select_project_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::CreateWorktree,
+        name: "create_worktree",
+        aliases: &[],
+        definition: create_worktree_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::ReadTerminal,
+        name: "read_terminal",
+        aliases: &[],
+        definition: read_terminal_definition,
+        route: ToolRoute::Query,
+        availability: ToolAvailability::WithoutAcpTerminals,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::Screenshot,
+        name: "screenshot",
+        aliases: &[],
+        definition: screenshot_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorScreenshot,
+        name: "simulator_screenshot",
+        aliases: &[],
+        definition: simulator_screenshot_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorTap,
+        name: "simulator_tap",
+        aliases: &[],
+        definition: simulator_tap_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorSwipe,
+        name: "simulator_swipe",
+        aliases: &[],
+        definition: simulator_swipe_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorType,
+        name: "simulator_type",
+        aliases: &[],
+        definition: simulator_type_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorKey,
+        name: "simulator_key",
+        aliases: &[],
+        definition: simulator_key_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::SimulatorButton,
+        name: "simulator_button",
+        aliases: &[],
+        definition: simulator_button_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BrowserSnapshot,
+        name: "browser_snapshot",
+        aliases: &[],
+        definition: browser_snapshot_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BrowserScroll,
+        name: "browser_scroll",
+        aliases: &[],
+        definition: browser_scroll_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::RecordStart,
+        name: "record_start",
+        aliases: &[],
+        definition: record_start_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::RecordStop,
+        name: "record_stop",
+        aliases: &[],
+        definition: record_stop_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkList,
+        name: "bookmark_list",
+        aliases: &[],
+        definition: bookmark_list_definition,
+        route: ToolRoute::Query,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkAdd,
+        name: "bookmark_add",
+        aliases: &[],
+        definition: bookmark_add_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkRemove,
+        name: "bookmark_remove",
+        aliases: &[],
+        definition: bookmark_remove_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkPin,
+        name: "bookmark_pin",
+        aliases: &[],
+        definition: bookmark_pin_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkUnpin,
+        name: "bookmark_unpin",
+        aliases: &[],
+        definition: bookmark_unpin_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+    ToolSpec {
+        kind: ToolKind::BookmarkFolderCreate,
+        name: "bookmark_folder_create",
+        aliases: &[],
+        definition: bookmark_folder_create_definition,
+        route: ToolRoute::Command,
+        availability: ALWAYS,
+        shell_note: false,
+    },
+];
+
 fn read_layout_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_layout".into(),
@@ -986,51 +1439,11 @@ pub fn tool_definitions_filtered(
             input_schema: schema,
         })
         .collect();
-    defs.push(read_layout_definition());
-    defs.push(update_layout_definition());
-    defs.push(get_settings_definition());
-    defs.push(list_spaces_definition());
-    defs.push(open_page_definition());
-    defs.push(open_file_definition());
-    defs.push(read_file_definition());
-    defs.push(grep_definition());
-    if !acp_session {
-        defs.push(resume_in_acp_definition());
+    for spec in TOOL_SPECS {
+        if spec.available(acp_session, acp_terminals) {
+            defs.push(spec.definition(shell));
+        }
     }
-    if !acp_terminals {
-        let mut run = run_definition();
-        run.description.push_str(&ShellNote::for_shell(shell));
-        defs.push(run);
-    }
-    defs.push(request_user_choice_definition());
-    defs.push(vault_status_definition());
-    defs.push(open_vault_definition());
-    defs.push(set_conversation_title_definition());
-    defs.push(search_knowledge_definition());
-    defs.push(read_knowledge_definition());
-    defs.push(write_knowledge_definition());
-    defs.push(select_project_definition());
-    defs.push(create_worktree_definition());
-    if !acp_terminals {
-        defs.push(read_terminal_definition());
-    }
-    defs.push(screenshot_definition());
-    defs.push(simulator_screenshot_definition());
-    defs.push(simulator_tap_definition());
-    defs.push(simulator_swipe_definition());
-    defs.push(simulator_type_definition());
-    defs.push(simulator_key_definition());
-    defs.push(simulator_button_definition());
-    defs.push(browser_snapshot_definition());
-    defs.push(browser_scroll_definition());
-    defs.push(record_start_definition());
-    defs.push(record_stop_definition());
-    defs.push(bookmark_list_definition());
-    defs.push(bookmark_add_definition());
-    defs.push(bookmark_remove_definition());
-    defs.push(bookmark_pin_definition());
-    defs.push(bookmark_unpin_definition());
-    defs.push(bookmark_folder_create_definition());
     defs
 }
 
@@ -1053,7 +1466,7 @@ pub fn dispatch_in_shell(
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
     use vmux_client::protocol::AgentPaneDirection;
-    let name = name.strip_prefix("vmux_").unwrap_or(name);
+    let name = canonical_tool_name(name);
     fn parse_direction(arguments: &Value) -> Result<Option<AgentPaneDirection>, String> {
         match arguments.get("direction").and_then(Value::as_str) {
             None => Ok(None),
@@ -1071,14 +1484,15 @@ pub fn dispatch_in_shell(
             .ok_or_else(|| format!("{tool}.{key} must be a non-negative integer"))?;
         u32::try_from(value).map_err(|_| format!("{tool}.{key} is out of range"))
     }
-    if name == "resume_in_acp" {
+    let tool = ToolSpec::find(name).map(|spec| spec.kind);
+    if tool == Some(ToolKind::ResumeInAcp) {
         let anchor = anchor
             .ok_or("resume_in_acp requires an agent anchor (not available to this client)")?;
         return Ok(DispatchTarget::Command(AgentCommand::ResumeInAcp {
             anchor,
         }));
     }
-    if name == "open_page" {
+    if tool == Some(ToolKind::OpenPage) {
         let anchor =
             anchor.ok_or("open_page requires an agent anchor (not available to this client)")?;
         let url = arguments
@@ -1101,7 +1515,7 @@ pub fn dispatch_in_shell(
             focus,
         }));
     }
-    if name == "open_file" {
+    if tool == Some(ToolKind::OpenFile) {
         let anchor =
             anchor.ok_or("open_file requires an agent anchor (not available to this client)")?;
         let path = arguments
@@ -1130,7 +1544,7 @@ pub fn dispatch_in_shell(
             focus,
         }));
     }
-    if name == "run" {
+    if tool == Some(ToolKind::Run) {
         let anchor = anchor.ok_or("run requires an agent anchor (not available to this client)")?;
         let command = arguments
             .get("command")
@@ -1203,7 +1617,7 @@ pub fn dispatch_in_shell(
         };
         return Ok(DispatchTarget::Command(command));
     }
-    if name == "create_worktree" {
+    if tool == Some(ToolKind::CreateWorktree) {
         let anchor = anchor
             .ok_or("create_worktree requires an agent anchor (not available to this client)")?;
         let branch = arguments
@@ -1238,7 +1652,7 @@ pub fn dispatch_in_shell(
                 .unwrap_or(false),
         }));
     }
-    if name == "request_user_choice" {
+    if tool == Some(ToolKind::RequestUserChoice) {
         let anchor = anchor
             .ok_or("request_user_choice requires an agent anchor (not available to this client)")?;
         let question = arguments
@@ -1272,7 +1686,7 @@ pub fn dispatch_in_shell(
             options,
         }));
     }
-    if name == "open_vault" {
+    if tool == Some(ToolKind::OpenVault) {
         let anchor =
             anchor.ok_or("open_vault requires an agent anchor (not available to this client)")?;
         let provider = arguments
@@ -1294,7 +1708,7 @@ pub fn dispatch_in_shell(
             focus: true,
         }));
     }
-    if name == "set_conversation_title" {
+    if tool == Some(ToolKind::SetConversationTitle) {
         let anchor = anchor.ok_or(
             "set_conversation_title requires an agent anchor (not available to this client)",
         )?;
@@ -1314,7 +1728,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "search_knowledge" {
+    if tool == Some(ToolKind::SearchKnowledge) {
         let anchor = anchor
             .ok_or("search_knowledge requires an agent anchor (not available to this client)")?;
         let query = arguments
@@ -1333,7 +1747,7 @@ pub fn dispatch_in_shell(
             limit: limit as u16,
         }));
     }
-    if name == "read_knowledge" {
+    if tool == Some(ToolKind::ReadKnowledge) {
         let anchor = anchor
             .ok_or("read_knowledge requires an agent anchor (not available to this client)")?;
         let path = arguments
@@ -1360,7 +1774,7 @@ pub fn dispatch_in_shell(
             limit: limit as u32,
         }));
     }
-    if name == "write_knowledge" {
+    if tool == Some(ToolKind::WriteKnowledge) {
         let anchor = anchor
             .ok_or("write_knowledge requires an agent anchor (not available to this client)")?;
         let path = arguments
@@ -1388,10 +1802,7 @@ pub fn dispatch_in_shell(
             content: content.to_string(),
         }));
     }
-    if matches!(
-        name,
-        "select_project" | "select_workspace" | "choose_workspace"
-    ) {
+    if tool == Some(ToolKind::SelectProject) {
         let anchor = anchor
             .ok_or("select_project requires an agent anchor (not available to this client)")?;
         if let Some(path) = arguments
@@ -1411,7 +1822,7 @@ pub fn dispatch_in_shell(
             anchor,
         }));
     }
-    if name == "read_terminal" {
+    if tool == Some(ToolKind::ReadTerminal) {
         let process_id = arguments
             .get("terminal")
             .and_then(Value::as_str)
@@ -1422,7 +1833,7 @@ pub fn dispatch_in_shell(
             vmux_client::protocol::AgentQuery::ReadTerminal { process_id },
         ));
     }
-    if name == "screenshot" {
+    if tool == Some(ToolKind::Screenshot) {
         let pane = match arguments.get("pane") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => {
@@ -1435,12 +1846,12 @@ pub fn dispatch_in_shell(
             vmux_client::protocol::AgentQuery::Screenshot { pane },
         ));
     }
-    if name == "simulator_screenshot" {
+    if tool == Some(ToolKind::SimulatorScreenshot) {
         return Ok(DispatchTarget::Query(
             vmux_client::protocol::AgentQuery::SimulatorScreenshot,
         ));
     }
-    if name == "simulator_tap" {
+    if tool == Some(ToolKind::SimulatorTap) {
         let x = required_u32(&arguments, "x", name)?;
         let y = required_u32(&arguments, "y", name)?;
         return Ok(DispatchTarget::Query(
@@ -1449,7 +1860,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "simulator_swipe" {
+    if tool == Some(ToolKind::SimulatorSwipe) {
         let start_x = required_u32(&arguments, "start_x", name)?;
         let start_y = required_u32(&arguments, "start_y", name)?;
         let end_x = required_u32(&arguments, "end_x", name)?;
@@ -1473,7 +1884,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "simulator_type" {
+    if tool == Some(ToolKind::SimulatorType) {
         let text = arguments
             .get("text")
             .and_then(Value::as_str)
@@ -1485,7 +1896,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "simulator_key" {
+    if tool == Some(ToolKind::SimulatorKey) {
         let keycode = required_u32(&arguments, "keycode", name)?;
         let keycode = u8::try_from(keycode)
             .map_err(|_| "simulator_key.keycode must be between 0 and 255".to_string())?;
@@ -1495,7 +1906,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "simulator_button" {
+    if tool == Some(ToolKind::SimulatorButton) {
         let button = match arguments.get("button").and_then(Value::as_str) {
             Some("home") => vmux_client::protocol::SimulatorButton::Home,
             Some("lock") => vmux_client::protocol::SimulatorButton::Lock,
@@ -1509,7 +1920,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "browser_snapshot" {
+    if tool == Some(ToolKind::BrowserSnapshot) {
         let pane = match arguments.get("target") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => {
@@ -1522,7 +1933,7 @@ pub fn dispatch_in_shell(
             vmux_client::protocol::AgentQuery::BrowserSnapshot { pane, anchor },
         ));
     }
-    if name == "browser_scroll" {
+    if tool == Some(ToolKind::BrowserScroll) {
         let pane = match arguments.get("target") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => {
@@ -1563,7 +1974,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "record_start" {
+    if tool == Some(ToolKind::RecordStart) {
         let gif = arguments
             .get("gif")
             .and_then(Value::as_bool)
@@ -1588,7 +1999,7 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "record_stop" {
+    if tool == Some(ToolKind::RecordStop) {
         let parse_opt = |key: &str| match arguments.get(key) {
             None | Some(Value::Null) => Ok(None),
             Some(Value::String(s)) => {
@@ -1606,12 +2017,12 @@ pub fn dispatch_in_shell(
             },
         ));
     }
-    if name == "read_layout" {
+    if tool == Some(ToolKind::ReadLayout) {
         return Ok(DispatchTarget::Query(
             vmux_client::protocol::AgentQuery::ReadLayout { anchor },
         ));
     }
-    if name == "update_layout" {
+    if tool == Some(ToolKind::UpdateLayout) {
         let layout: vmux_client::protocol::layout::LayoutSnapshot =
             serde_json::from_value(arguments)
                 .map_err(|e| format!("update_layout: invalid layout payload: {e}"))?;
@@ -1619,17 +2030,17 @@ pub fn dispatch_in_shell(
             layout,
         }));
     }
-    if name == "get_settings" {
+    if tool == Some(ToolKind::GetSettings) {
         return Ok(DispatchTarget::Query(
             vmux_client::protocol::AgentQuery::GetSettings,
         ));
     }
-    if name == "list_spaces" {
+    if tool == Some(ToolKind::ListSpaces) {
         return Ok(DispatchTarget::Query(
             vmux_client::protocol::AgentQuery::ListSpaces,
         ));
     }
-    if name == "bookmark_list" {
+    if tool == Some(ToolKind::BookmarkList) {
         return Ok(DispatchTarget::Query(
             vmux_client::protocol::AgentQuery::BookmarkList,
         ));
@@ -1651,8 +2062,8 @@ pub fn dispatch_in_shell(
                 favicon_url: str_arg("favicon_url"),
             })
         };
-        match name {
-            "bookmark_add" => {
+        match tool {
+            Some(ToolKind::BookmarkAdd) => {
                 if str_arg("url").unwrap_or_default().is_empty() {
                     return Err("bookmark_add.url is required".to_string());
                 }
@@ -1665,10 +2076,10 @@ pub fn dispatch_in_shell(
                     favicon_url: str_arg("favicon_url"),
                 }));
             }
-            "bookmark_remove" => return Ok(bookmark_cmd("remove")),
-            "bookmark_pin" => return Ok(bookmark_cmd("pin")),
-            "bookmark_unpin" => return Ok(bookmark_cmd("unpin")),
-            "bookmark_folder_create" => {
+            Some(ToolKind::BookmarkRemove) => return Ok(bookmark_cmd("remove")),
+            Some(ToolKind::BookmarkPin) => return Ok(bookmark_cmd("pin")),
+            Some(ToolKind::BookmarkUnpin) => return Ok(bookmark_cmd("unpin")),
+            Some(ToolKind::BookmarkFolderCreate) => {
                 if str_arg("name").unwrap_or_default().is_empty() {
                     return Err("bookmark_folder_create.name is required".to_string());
                 }
@@ -1676,6 +2087,14 @@ pub fn dispatch_in_shell(
             }
             _ => {}
         }
+    }
+    if let Some(spec) = ToolSpec::find(name) {
+        return Err(match spec.route {
+            ToolRoute::Protocol(_) => format!("tool {name} requires MCP protocol context"),
+            ToolRoute::Command | ToolRoute::Query => {
+                format!("tool {name} has no registered dispatcher")
+            }
+        });
     }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
         return parsed
@@ -1700,6 +2119,8 @@ pub fn dispatch_in_shell(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use vmux_client::protocol::{AgentCommand, AgentQuery, SimulatorAction, SimulatorButton};
 
     #[test]
     fn the_run_tool_teaches_the_shell_it_will_actually_use() {
@@ -1713,8 +2134,96 @@ mod tests {
         assert_eq!(super::ShellNote::for_shell(""), "");
         assert_eq!(super::ShellNote::for_shell("   "), "");
     }
-    use super::*;
-    use vmux_client::protocol::{AgentCommand, AgentQuery, SimulatorAction, SimulatorButton};
+
+    #[test]
+    fn manual_registry_has_the_exact_definition_and_dispatch_set() {
+        let expected = [
+            "read_layout",
+            "update_layout",
+            "get_settings",
+            "list_spaces",
+            "open_page",
+            "open_file",
+            "read_file",
+            "grep",
+            "resume_in_acp",
+            "run",
+            "request_user_choice",
+            "vault_status",
+            "open_vault",
+            "set_conversation_title",
+            "search_knowledge",
+            "read_knowledge",
+            "write_knowledge",
+            "select_project",
+            "create_worktree",
+            "read_terminal",
+            "screenshot",
+            "simulator_screenshot",
+            "simulator_tap",
+            "simulator_swipe",
+            "simulator_type",
+            "simulator_key",
+            "simulator_button",
+            "browser_snapshot",
+            "browser_scroll",
+            "record_start",
+            "record_stop",
+            "bookmark_list",
+            "bookmark_add",
+            "bookmark_remove",
+            "bookmark_pin",
+            "bookmark_unpin",
+            "bookmark_folder_create",
+        ];
+        let registered = TOOL_SPECS.iter().map(|spec| spec.name).collect::<Vec<_>>();
+        assert_eq!(registered, expected);
+
+        let definitions = tool_definitions()
+            .into_iter()
+            .filter(|definition| expected.contains(&definition.name.as_str()))
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        assert_eq!(definitions, expected);
+
+        let anchor = Some(vmux_client::protocol::ProcessId::new());
+        for spec in TOOL_SPECS {
+            match spec.route {
+                ToolRoute::Protocol(expected) => {
+                    assert_eq!(protocol_tool(spec.name), Some(expected));
+                }
+                ToolRoute::Command | ToolRoute::Query => {
+                    if let Err(error) =
+                        dispatch_with_anchor(spec.name, serde_json::json!({}), anchor)
+                    {
+                        assert!(
+                            !error.contains("no registered dispatcher"),
+                            "{}: {error}",
+                            spec.name
+                        );
+                        assert!(!error.contains("unknown tool"), "{}: {error}", spec.name);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn aliases_use_the_same_registry_entry() {
+        let select = ToolSpec::find("select_project").unwrap();
+        assert_eq!(
+            ToolSpec::find("select_workspace").unwrap().kind,
+            select.kind
+        );
+        assert_eq!(
+            ToolSpec::find("choose_workspace").unwrap().kind,
+            select.kind
+        );
+        assert_eq!(
+            protocol_tool("vmux_read_file"),
+            Some(ProtocolTool::ReadFile)
+        );
+    }
 
     fn tool_names() -> Vec<String> {
         tool_definitions()

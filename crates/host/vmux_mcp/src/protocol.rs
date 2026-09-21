@@ -135,11 +135,8 @@ async fn tool_call_result(
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "tools/call missing name".to_string())?;
-    let normalized_name = name.strip_prefix("vmux_").unwrap_or(name);
-    if acp_session && normalized_name == "resume_in_acp" {
-        return Err("tool resume_in_acp is unavailable for ACP sessions".to_string());
-    }
-    if acp_terminals && matches!(normalized_name, "run" | "read_terminal") {
+    let normalized_name = crate::tools::canonical_tool_name(name);
+    if !crate::tools::tool_available(name, acp_session, acp_terminals) {
         return Err(format!(
             "tool {normalized_name} is unavailable for ACP sessions"
         ));
@@ -149,12 +146,17 @@ async fn tool_call_result(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    if normalized_name == "read_file" {
-        return read_file_result(&arguments, anchor).await;
-    }
-
-    if normalized_name == "grep" {
-        return grep_result(&arguments, anchor).await;
+    match crate::tools::protocol_tool(name) {
+        Some(crate::tools::ProtocolTool::ReadFile) => {
+            return read_file_result(&arguments, anchor).await;
+        }
+        Some(crate::tools::ProtocolTool::Grep) => {
+            return grep_result(&arguments, anchor).await;
+        }
+        Some(crate::tools::ProtocolTool::VaultStatus) => {
+            return run_agent_query(AgentQuery::VaultStatus).await;
+        }
+        None => {}
     }
 
     if normalized_name == "open_file" {
@@ -166,10 +168,6 @@ async fn tool_call_result(
             return Err("open_file.path must be an absolute path".to_string());
         }
         scoped_existing_path(anchor, Path::new(path), "open_file").await?;
-    }
-
-    if normalized_name == "vault_status" {
-        return run_agent_query(AgentQuery::VaultStatus).await;
     }
 
     match crate::tools::dispatch_in_shell(name, arguments, anchor, host_shell)? {
