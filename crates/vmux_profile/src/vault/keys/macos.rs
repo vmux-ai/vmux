@@ -2,42 +2,48 @@ use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
 use super::LOCKED;
-use crate::safe_storage::{ProtectedFile, SafeStorage, encoded_file_name};
+use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, encoded_file_name};
 use crate::vault::{KEY_LEN, validate_key};
 
 const LEGACY_KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 
 struct VaultKeyFile {
+    context: SafeStorageContext,
     vault_id: String,
     file: ProtectedFile,
 }
 
 impl VaultKeyFile {
     fn new(vault_id: &str) -> Self {
-        let path = crate::application_data_dir()
-            .join("safe-storage")
-            .join("vault")
-            .join(format!("{}.bin", encoded_file_name(vault_id)));
+        let context = SafeStorageContext::current();
+        let file = context.protected_file(
+            std::path::PathBuf::from("vault").join(format!("{}.bin", encoded_file_name(vault_id))),
+        );
         Self {
+            context,
             vault_id: vault_id.to_string(),
-            file: ProtectedFile::new(path),
+            file,
         }
     }
 
     fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        let Some(envelope) = self.file.read()? else {
+        let Some(envelope) = self.file.read().map_err(|error| error.to_string())? else {
             return Ok(None);
         };
-        let key = SafeStorage::unwrap_vault_key(&self.vault_id, &envelope)?;
+        let key = SafeStorage::unwrap_vault_key(&self.context, &self.vault_id, &envelope)
+            .map_err(|error| error.to_string())?;
         validate_key(&key)?;
         Ok(Some(key))
     }
 
     fn load_silent(&self) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        let Some(envelope) = self.file.read()? else {
+        let Some(envelope) = self.file.read().map_err(|error| error.to_string())? else {
             return Ok(None);
         };
-        let Some(key) = SafeStorage::unwrap_vault_key_silent(&self.vault_id, &envelope)? else {
+        let Some(key) =
+            SafeStorage::unwrap_vault_key_silent(&self.context, &self.vault_id, &envelope)
+                .map_err(|error| error.to_string())?
+        else {
             return Ok(None);
         };
         validate_key(&key)?;
@@ -46,8 +52,11 @@ impl VaultKeyFile {
 
     fn store(&self, key: &[u8]) -> Result<(), String> {
         validate_key(key)?;
-        let envelope = SafeStorage::wrap_vault_key(&self.vault_id, key)?;
-        self.file.write(&envelope)
+        let envelope = SafeStorage::wrap_vault_key(&self.context, &self.vault_id, key)
+            .map_err(|error| error.to_string())?;
+        self.file
+            .write(&envelope)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -97,7 +106,9 @@ fn load_legacy_keychain_key(
     vault_id: &str,
     silent: bool,
 ) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    crate::safe_storage::require_desktop_process()?;
+    SafeStorageContext::current()
+        .require_desktop_process()
+        .map_err(|error| error.to_string())?;
     if silent {
         return load_legacy_keychain_key_silent(vault_id);
     }

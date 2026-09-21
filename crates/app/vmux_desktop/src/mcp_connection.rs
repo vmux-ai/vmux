@@ -13,7 +13,9 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
-use vmux_core::profile::mcp_credentials::McpOauthCredentials;
+use vmux_core::profile::mcp_credentials::{
+    McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
+};
 use vmux_core::profile::tools::{McpServerManifest, McpTransport, load_manifest, write_manifest};
 use vmux_wire::mcp::{
     MCP_SERVER_ACTION_RESULT_EVENT, MCP_SERVERS_EVENT, McpServerAction, McpServerActionRequest,
@@ -255,7 +257,7 @@ impl McpCatalog {
                 .is_some_and(|server| entry.owns(server));
             let occupied = manifest.mcp.servers.contains_key(entry.id);
             let authenticated = configured
-                && McpOauthCredentials::load(entry.id)
+                && McpCredentialStorage::load(entry.id)
                     .ok()
                     .flatten()
                     .is_some_and(|credentials| credentials.authorizes(entry.url));
@@ -356,15 +358,15 @@ impl McpConnection {
             scope: token.scope.unwrap_or_else(|| entry.scopes.join(" ")),
             resource: entry.url.to_string(),
         };
-        McpOauthCredentials::write_transaction(|| {
+        McpCredentialAccess::write(|| {
             Self::ensure_catalog_slot(entry)?;
-            let original_credentials = McpOauthCredentials::load(id)?;
-            credentials.store(id)?;
+            let original_credentials = McpCredentialStorage::load(id)?;
+            McpCredentialStorage::store(id, &credentials)?;
             if let Err(error) = Self::write_manifest(entry) {
                 let credentials_rollback = original_credentials
                     .as_ref()
-                    .map(|credentials| credentials.store(id))
-                    .unwrap_or_else(|| McpOauthCredentials::remove(id));
+                    .map(|credentials| McpCredentialStorage::store(id, credentials))
+                    .unwrap_or_else(|| McpCredentialStorage::remove(id));
                 return Err(Self::rollback_error(error, Ok(()), credentials_rollback));
             }
             Ok(())
@@ -373,8 +375,8 @@ impl McpConnection {
 
     fn disconnect(id: &str) -> Result<(), String> {
         let entry = McpCatalog::get(id).ok_or_else(|| format!("Unknown MCP server: {id}"))?;
-        McpOauthCredentials::write_transaction(|| {
-            let credentials = McpOauthCredentials::load(id)?;
+        McpCredentialAccess::write(|| {
+            let credentials = McpCredentialStorage::load(id)?;
             let original = load_manifest()?;
             let server = original
                 .mcp
@@ -389,11 +391,11 @@ impl McpConnection {
             let mut updated = original.clone();
             updated.mcp.servers.remove(id);
             write_manifest(&updated)?;
-            if let Err(error) = McpOauthCredentials::remove(id) {
+            if let Err(error) = McpCredentialStorage::remove(id) {
                 let manifest_rollback = write_manifest(&original);
                 let credentials_rollback = credentials
                     .as_ref()
-                    .map(|credentials| credentials.store(id))
+                    .map(|credentials| McpCredentialStorage::store(id, credentials))
                     .unwrap_or(Ok(()));
                 return Err(Self::rollback_error(
                     error,

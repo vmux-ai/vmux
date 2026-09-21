@@ -261,10 +261,11 @@ fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
 
 #[cfg(target_os = "macos")]
 fn cef_os_crypt_keys() -> Result<bevy_cef::CefOsCryptKeys, String> {
-    let keys = vmux_core::profile::safe_storage::SafeStorage::browser_keys()?;
+    let keys = vmux_core::profile::safe_storage::SafeStorage::browser_keys()
+        .map_err(|error| error.to_string())?;
     Ok(bevy_cef::CefOsCryptKeys {
-        current: keys.current.to_vec(),
-        legacy: keys.legacy.map(|key| key.to_vec()),
+        current: keys.current.as_bytes().to_vec(),
+        legacy: keys.legacy.map(|key| key.as_bytes().to_vec()),
     })
 }
 

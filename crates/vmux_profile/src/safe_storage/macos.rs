@@ -5,7 +5,9 @@ use security_framework::passwords::{
 use security_framework_sys::base::errSecItemNotFound;
 use zeroize::Zeroizing;
 
-use super::{RootKeyStore, derive_legacy_browser_key, require_desktop_process};
+use super::cipher::derive_legacy_browser_key;
+use super::root::RootKeyStore;
+use super::{BrowserKey, SafeStorageContext, SafeStorageError};
 
 const ROOT_SERVICE: &str = "ai.vmux.safe-storage";
 const ROOT_ACCOUNT: &str = "root";
@@ -14,26 +16,39 @@ const LEGACY_BROWSER_SERVICE: &str = "Chromium Safe Storage";
 const LEGACY_BROWSER_ACCOUNT: &str = "Chromium";
 
 impl RootKeyStore {
-    pub(super) fn read(silent: bool) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        require_desktop_process()?;
+    pub(super) fn read(
+        context: &SafeStorageContext,
+        silent: bool,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, SafeStorageError> {
+        context.require_desktop_process()?;
         if silent {
             return Self::read_silent();
         }
         match generic_password(Self::options()) {
             Ok(payload) => Ok(Some(Zeroizing::new(payload))),
             Err(error) if error.code() == errSecItemNotFound => Ok(None),
-            Err(error) => Err(format!("failed to unlock Vmux Safe Storage: {error}")),
+            Err(error) => Err(SafeStorageError::KeychainDenied(format!(
+                "failed to unlock Vmux Safe Storage: {error}"
+            ))),
         }
     }
 
-    pub(super) fn write(payload: &[u8]) -> Result<(), String> {
-        require_desktop_process()?;
-        set_generic_password_options(payload, Self::options())
-            .map_err(|error| format!("failed to store Vmux Safe Storage root key: {error}"))
+    pub(super) fn write(
+        context: &SafeStorageContext,
+        payload: &[u8],
+    ) -> Result<(), SafeStorageError> {
+        context.require_desktop_process()?;
+        set_generic_password_options(payload, Self::options()).map_err(|error| {
+            SafeStorageError::KeychainDenied(format!(
+                "failed to store Vmux Safe Storage root key: {error}"
+            ))
+        })
     }
 
-    pub(super) fn legacy_browser_key() -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-        require_desktop_process()?;
+    pub(super) fn legacy_browser_key(
+        context: &SafeStorageContext,
+    ) -> Result<Option<BrowserKey>, SafeStorageError> {
+        context.require_desktop_process()?;
         let mut options =
             PasswordOptions::new_generic_password(LEGACY_BROWSER_SERVICE, LEGACY_BROWSER_ACCOUNT);
         options.set_access_synchronized(Some(false));
@@ -43,7 +58,9 @@ impl RootKeyStore {
                 Ok(Some(derive_legacy_browser_key(&password)))
             }
             Err(error) if error.code() == errSecItemNotFound => Ok(None),
-            Err(error) => Err(format!("failed to migrate browser Safe Storage: {error}")),
+            Err(error) => Err(SafeStorageError::KeychainDenied(format!(
+                "failed to migrate browser Safe Storage: {error}"
+            ))),
         }
     }
 
@@ -54,7 +71,7 @@ impl RootKeyStore {
         options
     }
 
-    fn read_silent() -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    fn read_silent() -> Result<Option<Zeroizing<Vec<u8>>>, SafeStorageError> {
         let mut search = ItemSearchOptions::new();
         let results = search
             .class(ItemClass::generic_password())

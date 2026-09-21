@@ -1070,7 +1070,7 @@ fn drain_acp_installs(
                             .and_then(|settings| settings.agent.effort_for(&session.agent_id))
                             .map(str::to_string),
                     };
-                    match vmux_core::profile::mcp_credentials::McpOauthCredentials::with_revision(
+                    match vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
                         mcp_revision,
                         || service.0.send(message),
                     ) {
