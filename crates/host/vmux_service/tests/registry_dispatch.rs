@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use vmux_service::bundle::{EMBEDDED_AGENT_LABEL, EMBEDDED_AGENT_PLIST};
-use vmux_service::registry::{Backend, choose_backend};
+use vmux_service::registry::{Backend, RegistrationStep, choose_backend};
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
@@ -17,36 +17,30 @@ fn unbundled_path_chooses_launchctl() {
 }
 
 #[test]
-fn ensure_running_calls_legacy_cleanup_for_sm_app_service_path() {
-    let source = include_str!("../src/host/registry.rs");
-    assert!(
-        source.contains("cleanup_legacy_registrations"),
-        "SmAppService branch must invoke legacy cleanup"
+fn sm_app_service_registration_plan_is_complete_and_ordered() {
+    let exe = PathBuf::from(
+        "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
+    );
+
+    assert_eq!(
+        choose_backend(&exe).registration_steps(),
+        [
+            RegistrationStep::CleanupLegacy,
+            RegistrationStep::UnregisterMainApp,
+            RegistrationStep::UnregisterEmbeddedAgent,
+            RegistrationStep::RegisterEmbeddedAgent,
+            RegistrationStep::KickstartEmbeddedAgent,
+        ]
     );
 }
 
 #[test]
-fn ensure_running_replaces_embedded_agent_registration() {
-    let source = include_str!("../src/host/registry.rs");
-    let unregister = source
-        .find("unregister_agent(bundle::EMBEDDED_AGENT_PLIST)")
-        .expect("SmAppService branch must unregister the embedded agent before re-registering it");
-    let register = source
-        .find("register_agent(bundle::EMBEDDED_AGENT_PLIST)")
-        .expect("SmAppService branch must register the embedded agent");
+fn launchctl_registration_plan_uses_profile_agent() {
+    let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
 
-    assert!(
-        unregister < register,
-        "SmAppService branch must replace stale embedded agent registrations before kickstart"
-    );
-}
-
-#[test]
-fn ensure_running_kickstarts_after_register_for_sm_app_service_path() {
-    let source = include_str!("../src/host/registry.rs");
-    assert!(
-        source.contains("crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)"),
-        "SmAppService branch must kickstart the embedded agent so it actually runs after registration"
+    assert_eq!(
+        choose_backend(&exe).registration_steps(),
+        [RegistrationStep::EnsureLaunchAgent]
     );
 }
 
