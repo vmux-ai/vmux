@@ -19,8 +19,6 @@ pub use recovery::{GeneratedRecoveryKey, RecoveryKeyCreation, VaultRecovery};
 pub use status::{VaultStatus, status, status_with_repositories};
 pub use sync::{initialize, sync};
 
-use snapshot::{KEY_LEN, validate_key};
-
 pub fn root_dir() -> PathBuf {
     super::config_dir()
 }

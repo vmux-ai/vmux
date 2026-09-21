@@ -1,9 +1,9 @@
 use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
+use super::super::snapshot::{KEY_LEN, validate_key};
 use super::LOCKED;
 use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, encoded_file_name};
-use crate::vault::{KEY_LEN, validate_key};
 
 const LEGACY_KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 

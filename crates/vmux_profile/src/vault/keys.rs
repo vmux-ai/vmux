@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use zeroize::Zeroizing;
 
-use super::validate_key;
+use super::snapshot::validate_key;
 
 const LOCKED: &str = "This Vault is locked on this device. Unlock it with a passkey.";
 
@@ -106,7 +106,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::KEY_LEN;
+    use crate::vault::snapshot::KEY_LEN;
     use std::sync::Arc;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
