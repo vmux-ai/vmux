@@ -10361,6 +10361,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_flex",
+ "vmux_path",
  "vmux_profile",
  "vmux_wire",
  "zip",
@@ -10483,6 +10484,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_path",
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
@@ -10519,6 +10521,7 @@ dependencies = [
  "url",
  "vmux_core",
  "vmux_native",
+ "vmux_path",
  "vmux_ui",
 ]
 
@@ -10677,6 +10680,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_path"
+version = "0.0.34"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "vmux_profile"
 version = "0.0.34"
 dependencies = [
@@ -10749,6 +10759,7 @@ dependencies = [
  "vmux_client",
  "vmux_core",
  "vmux_git",
+ "vmux_path",
  "vmux_remote",
  "vmux_ui",
  "vmux_wire",
@@ -10938,6 +10949,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+ "vmux_path",
  "vmux_profile",
 ]
 

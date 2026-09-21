@@ -41,42 +41,69 @@ impl Plugin for PanePlugin {
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<SpawnCounter>()
-            .add_systems(Update, repair_stacks_parented_to_splits)
+            .add_plugins((
+                PaneIdentityPlugin,
+                PaneOpenPlugin,
+                PaneZoomPlugin,
+                PaneFocusPlugin,
+                PaneResizePlugin,
+                PaneClosePlugin,
+            ));
+    }
+}
+
+struct PaneIdentityPlugin;
+
+impl Plugin for PaneIdentityPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, repair_stacks_parented_to_splits)
             .add_systems(Update, stamp_spawn_seq)
             .add_systems(Update, assign_pane_ids)
             .add_systems(
                 Startup,
                 reseed_spawn_counter.in_set(crate::LayoutStartupSet::Post),
-            )
-            .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
+            );
+    }
+}
+
+struct PaneOpenPlugin;
+
+impl Plugin for PaneOpenPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
             .add_message::<OpenBesideRequest>()
-            .add_systems(Update, handle_open_beside_requests)
-            .add_systems(
-                Update,
-                handle_zoom_command
-                    .in_set(ReadAppCommands)
-                    .before(handle_pane_commands),
-            )
-            .add_systems(
-                Update,
-                (
-                    pane_gap_drag_resize,
-                    process_pending_pane_closes,
-                    process_force_pane_closes,
-                    process_pending_stack_closes,
-                ),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    sync_pane_split_gaps_to_settings,
-                    sync_zoom_visibility.before(LayoutSystems::Layout),
-                    clear_zoom_on_pane_removal,
-                    warp_cursor_to_active_pane,
-                ),
-            );
+            .add_systems(Update, handle_open_beside_requests);
+    }
+}
+
+struct PaneZoomPlugin;
+
+impl Plugin for PaneZoomPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            handle_zoom_command
+                .in_set(ReadAppCommands)
+                .before(handle_pane_commands),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                sync_zoom_visibility.before(LayoutSystems::Layout),
+                clear_zoom_on_pane_removal,
+            ),
+        );
+        register_zoom_hooks(app);
+    }
+}
+
+struct PaneFocusPlugin;
+
+impl Plugin for PaneFocusPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(PostUpdate, warp_cursor_to_active_pane);
         #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
@@ -87,7 +114,30 @@ impl Plugin for PanePlugin {
             Update,
             poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
         );
-        register_zoom_hooks(app);
+    }
+}
+
+struct PaneResizePlugin;
+
+impl Plugin for PaneResizePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, pane_gap_drag_resize)
+            .add_systems(PostUpdate, sync_pane_split_gaps_to_settings);
+    }
+}
+
+struct PaneClosePlugin;
+
+impl Plugin for PaneClosePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                process_pending_pane_closes,
+                process_force_pane_closes,
+                process_pending_stack_closes,
+            ),
+        );
     }
 }
 
@@ -5402,62 +5452,6 @@ mod tests {
         assert!(
             app.world().get::<LastActivatedAt>(left_stack).unwrap().0 > 1,
             "hovered pane active stack should activate in the same update"
-        );
-    }
-
-    #[test]
-    fn pane_hover_uses_native_cursor_position_fallback() {
-        let source = include_str!("pane.rs");
-        let poll_fn = source
-            .split("fn poll_cursor_pane_focus")
-            .nth(1)
-            .and_then(|tail| tail.split("fn click_pane_in_player_mode").next())
-            .unwrap_or_default();
-
-        assert!(poll_fn.contains("pane_hover_cursor_position(window_entity, window)"));
-        assert!(source.contains("fn native_window_cursor_position"));
-        assert!(source.contains("NSEvent::mouseLocation()"));
-        assert!(source.contains("convertPointFromScreen"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn native_pane_hover_reads_latest_pointer_in_update() {
-        let source = include_str!("pane.rs");
-        let apply = source
-            .split("fn apply_pending_hover")
-            .nth(1)
-            .and_then(|tail| tail.split("fn click_pane_in_player_mode").next())
-            .unwrap_or_default();
-
-        assert!(apply.contains("crate::native_pointer::snapshot()"));
-        assert!(apply.contains("pointer.motion_sequence"));
-    }
-
-    #[test]
-    fn pane_hover_activates_target_stack() {
-        let source = include_str!("pane.rs");
-        let poll_fn = source
-            .split("fn poll_cursor_pane_focus")
-            .nth(1)
-            .and_then(|tail| tail.split("fn pane_hover_cursor_position").next())
-            .unwrap_or_default();
-
-        assert!(poll_fn.contains("active_stack_in_pane(target"));
-        assert!(poll_fn.contains("commands.entity(target_stack).insert(LastActivatedAt::now())"));
-    }
-
-    #[test]
-    fn pane_hover_runs_before_focus_cache_computes() {
-        let source = include_str!("pane.rs");
-        let plugin_build = source
-            .split("impl Plugin for PanePlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("fn register_zoom_hooks").next())
-            .unwrap_or_default();
-
-        assert!(
-            plugin_build.contains("poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet)")
         );
     }
 

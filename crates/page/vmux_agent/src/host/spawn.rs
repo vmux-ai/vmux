@@ -24,8 +24,7 @@ use crate::strategy::AgentStrategies;
 use super::attach::attach_page_agent_to_stack;
 use super::command::ProcessStackSpawnRequest;
 use super::page_open::{
-    attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, clear_stack_children,
-    cli_initial_prompt,
+    attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
 use super::provider::{AgentExecutableOverride, resolve_agent_executable};
 
@@ -325,7 +324,11 @@ fn drain_agent_launches(
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             prepared.mcp_revision,
             || {
-                clear_stack_children(request.stack, &children_q, &mut commands);
+                vmux_layout::stack::Stack::clear_children(
+                    request.stack,
+                    &children_q,
+                    &mut commands,
+                );
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),

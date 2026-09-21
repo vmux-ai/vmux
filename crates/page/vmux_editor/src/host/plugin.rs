@@ -31,6 +31,24 @@ impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(FILES_PAGE_MANIFEST);
         app.world_mut().spawn(PROJECTS_PAGE_MANIFEST);
+        app.add_plugins((
+            crate::contract::EditorContractPlugin,
+            crate::lsp::LspPlugin,
+            crate::app_key::FileKeyPlugin,
+            crate::search::ProjectSearchPlugin,
+            EditorFileLifecyclePlugin,
+            EditorPresentationPlugin,
+            EditorEditingPlugin,
+            EditorHistoryPlugin,
+            EditorExplorerPlugin,
+        ));
+    }
+}
+
+struct EditorFileLifecyclePlugin;
+
+impl Plugin for EditorFileLifecyclePlugin {
+    fn build(&self, app: &mut App) {
         let (tx, rx) = mpsc::channel();
         let proxy = app
             .world()
@@ -54,72 +72,10 @@ impl Plugin for EditorPlugin {
             }
             Err(e) => tracing::warn!("file watcher init failed: {e}"),
         }
-        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
-            .insert_non_send(SelfWrites::default())
+        app.insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
-            .insert_resource(ExplorerChrome {
-                default_visible: false,
-                width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
-            })
-            .register_type::<StackExplorerVisibility>()
-            .init_resource::<ExplorerChromeSynced>()
-            .init_resource::<PendingGlobalSearch>()
-            .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_message::<vmux_layout::CloseStackRequest>()
-            .add_plugins(crate::contract::EditorContractPlugin)
-            .add_plugins(EditorHistoryPlugin)
-            .add_plugins(crate::lsp::LspPlugin)
-            .add_plugins(crate::app_key::FileKeyPlugin)
-            .add_plugins(crate::search::ProjectSearchPlugin)
-            .add_plugins(ExplorerTreePlugin)
-            .add_plugins(BinEventEmitterPlugin::<(
-                FileResizeEvent,
-                FileScrollEvent,
-                FilePreviewRequest,
-                FileOpenEvent,
-                FileTextInput,
-                FilePointerEvent,
-                FileHoverRequest,
-                FileDefinitionRequest,
-                FileReferencesRequest,
-                FileFoldToggle,
-                FileRenameRequest,
-                FileEditorAction,
-            )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
-                FileCodeActionPick,
-                FileCompletionRequest,
-                FileGotoRequest,
-                FileCompletionCommit,
-                FileOpenExternalRequest,
-                FileVideoRect,
-                FileViewModeSet,
-                FileKeymapSet,
-                FileShapeSet,
-                KnowledgeLinkOpen,
-                FilePropertyEdit,
-                FileFindRequest,
-            )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
-                ExplorerTreeToggle,
-                ExplorerTreePrefetch,
-                ExplorerTreeRefresh,
-                ExplorerRevealCurrent,
-                ExplorerCreate,
-                ExplorerRename,
-                ExplorerDelete,
-                ExplorerCloseEditor,
-                ExplorerPanelSetVisible,
-                ExplorerPanelWidth,
-                ExplorerGoto,
-                ExplorerSearchOpen,
-            )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
-                FileEncodingSet,
-                ExplorerCollapseAll,
-            )>::default())
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -134,6 +90,44 @@ impl Plugin for EditorPlugin {
                         load_file_buffers,
                     )
                         .chain(),
+                    flush_lsp_changes,
+                    apply_goto,
+                    apply_pending_goto,
+                    reapply_keymap_on_change,
+                ),
+            )
+            .add_systems(
+                Update,
+                apply_lsp_workspace_edit
+                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
+            )
+            .add_observer(reset_file_sent_markers_on_page_ready)
+            .add_observer(on_file_open)
+            .add_observer(on_knowledge_link_open);
+    }
+}
+
+struct EditorPresentationPlugin;
+
+impl Plugin for EditorPresentationPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+            .init_resource::<SharedFileViewMode>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_plugins(BinEventEmitterPlugin::<(
+                FileResizeEvent,
+                FileScrollEvent,
+                FilePreviewRequest,
+                FileOpenExternalRequest,
+                FileVideoRect,
+                FileViewModeSet,
+                FileKeymapSet,
+                FileShapeSet,
+                FileEncodingSet,
+            )>::default())
+            .add_systems(
+                Update,
+                (
                     send_initial_meta.after(load_file_buffers),
                     send_initial_text_meta.after(load_file_buffers),
                     send_initial_dir.after(load_file_buffers),
@@ -149,18 +143,9 @@ impl Plugin for EditorPlugin {
                     sync_editor_wrap_settings.after(load_file_buffers),
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
-                    flush_lsp_changes,
-                    apply_goto,
-                    apply_pending_goto,
-                    reapply_keymap_on_change,
                     apply_lsp_folds,
                     persist_folds,
                 ),
-            )
-            .add_systems(
-                Update,
-                apply_lsp_workspace_edit
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             )
             .add_systems(
                 Update,
@@ -169,28 +154,42 @@ impl Plugin for EditorPlugin {
                     send_note.after(mark_notes_on_knowledge_change),
                 ),
             )
-            .add_systems(Update, drain_explorer_mutations)
-            .add_systems(
-                Update,
-                (
-                    emit_explorer_tree.after(mark_explorer_tree_dirty),
-                    sync_explorer_chrome,
-                    emit_explorer_chrome,
-                    sync_open_editors,
-                    emit_open_editors,
-                    emit_outline_markdown,
-                    clear_outline_on_file_change,
-                    apply_global_search_requests,
-                    emit_global_search.after(apply_global_search_requests),
-                ),
-            )
-            .add_observer(reset_file_sent_markers_on_page_ready)
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
             .add_observer(on_file_preview_request)
-            .add_observer(on_file_open)
             .add_observer(on_file_open_external)
             .add_observer(on_file_video_rect)
+            .add_observer(on_file_fold_toggle)
+            .add_observer(on_file_view_mode_set)
+            .add_observer(on_file_keymap_set)
+            .add_observer(on_file_shape_set)
+            .add_observer(on_file_encoding_set);
+    }
+}
+
+struct EditorEditingPlugin;
+
+impl Plugin for EditorEditingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(BinEventEmitterPlugin::<(
+            FileOpenEvent,
+            FileTextInput,
+            FilePointerEvent,
+            FileHoverRequest,
+            FileDefinitionRequest,
+            FileReferencesRequest,
+            FileRenameRequest,
+            FileEditorAction,
+            FileCodeActionPick,
+            FileCompletionRequest,
+            FileGotoRequest,
+            FileCompletionCommit,
+        )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                KnowledgeLinkOpen,
+                FilePropertyEdit,
+                FileFindRequest,
+            )>::default())
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
@@ -205,21 +204,60 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
-            .add_observer(on_knowledge_link_open)
-            .add_observer(on_file_property_edit)
-            .add_observer(on_file_fold_toggle)
-            .add_observer(on_file_view_mode_set)
-            .add_observer(on_file_keymap_set)
-            .add_observer(on_file_shape_set)
-            .add_observer(on_file_encoding_set)
-            .add_observer(on_explorer_create)
-            .add_observer(on_explorer_rename)
-            .add_observer(on_explorer_delete)
-            .add_observer(on_explorer_panel_set_visible)
-            .add_observer(on_explorer_panel_width)
-            .add_observer(on_explorer_close_editor)
-            .add_observer(on_explorer_goto)
-            .add_observer(on_explorer_search_open);
+            .add_observer(on_file_property_edit);
+    }
+}
+
+struct EditorExplorerPlugin;
+
+impl Plugin for EditorExplorerPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ExplorerChrome {
+            default_visible: false,
+            width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+        })
+        .register_type::<StackExplorerVisibility>()
+        .init_resource::<ExplorerChromeSynced>()
+        .init_resource::<PendingGlobalSearch>()
+        .add_plugins(ExplorerTreePlugin)
+        .add_plugins(BinEventEmitterPlugin::<(
+            ExplorerTreeToggle,
+            ExplorerTreePrefetch,
+            ExplorerTreeRefresh,
+            ExplorerRevealCurrent,
+            ExplorerCreate,
+            ExplorerRename,
+            ExplorerDelete,
+            ExplorerCloseEditor,
+            ExplorerPanelSetVisible,
+            ExplorerPanelWidth,
+            ExplorerGoto,
+            ExplorerSearchOpen,
+        )>::default())
+        .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default())
+        .add_systems(Update, drain_explorer_mutations)
+        .add_systems(
+            Update,
+            (
+                emit_explorer_tree.after(mark_explorer_tree_dirty),
+                sync_explorer_chrome,
+                emit_explorer_chrome,
+                sync_open_editors,
+                emit_open_editors,
+                emit_outline_markdown,
+                clear_outline_on_file_change,
+                apply_global_search_requests,
+                emit_global_search.after(apply_global_search_requests),
+            ),
+        )
+        .add_observer(on_explorer_create)
+        .add_observer(on_explorer_rename)
+        .add_observer(on_explorer_delete)
+        .add_observer(on_explorer_panel_set_visible)
+        .add_observer(on_explorer_panel_width)
+        .add_observer(on_explorer_close_editor)
+        .add_observer(on_explorer_goto)
+        .add_observer(on_explorer_search_open);
     }
 }
 
@@ -890,14 +928,6 @@ pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
     Some(new_file_view_bundle(url, path))
 }
 
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
-}
-
 pub fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
@@ -966,7 +996,7 @@ pub fn handle_file_page_open(
                 view
             }
             None => {
-                clear_stack_children(task.stack, &children_q, &mut commands);
+                vmux_layout::stack::Stack::clear_children(task.stack, &children_q, &mut commands);
                 commands
                     .spawn((new_file_view_bundle(&page_url, path), ChildOf(task.stack)))
                     .id()
@@ -2615,7 +2645,7 @@ struct FileWatch {
 }
 
 pub(crate) fn canon(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+    vmux_path::PathIdentity::resolve(p).into_path_buf()
 }
 
 fn watch_dir_for(path: &Path) -> Option<PathBuf> {

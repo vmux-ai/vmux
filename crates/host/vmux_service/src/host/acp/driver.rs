@@ -2106,27 +2106,9 @@ fn is_permissionless_host_tool(name: &str) -> bool {
 }
 
 fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
-    if path
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return None;
-    }
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    if !abs.starts_with(cwd) {
-        return None;
-    }
-    if let Ok(real_cwd) = cwd.canonicalize()
-        && let Some(anchor) = abs.ancestors().find_map(|a| a.canonicalize().ok())
-        && !anchor.starts_with(&real_cwd)
-    {
-        return None;
-    }
-    Some(abs)
+    vmux_path::ScopedPath::resolve(cwd, path)
+        .ok()
+        .map(vmux_path::ScopedPath::into_path_buf)
 }
 
 fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {

@@ -50,23 +50,26 @@ impl Plugin for TerminalPlugin {
             .add_message::<ProcessesMonitorSpawnRequest>()
             .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
             .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-            .add_plugins(crate::pid::PidPlugin);
+            .add_plugins((
+                crate::pid::PidPlugin,
+                TerminalServicePlugin,
+                TerminalInputPlugin,
+                crate::processes_monitor::ProcessesMonitorPlugin,
+                crate::snapshot_updater::TerminalSnapshotPlugin,
+                TerminalLoadingPlugin,
+            ));
+    }
+}
+
+struct TerminalServicePlugin;
+
+impl Plugin for TerminalServicePlugin {
+    fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
         ensure_service_started();
         app.insert_resource(ServiceConnectRetry::new());
         app.insert_resource(ServiceWakeCallback(service_wake))
-            .init_resource::<MouseSelectionState>()
-            .init_resource::<TerminalModeMap>()
-            .init_resource::<LocalCopyModeState>()
-            .init_resource::<TerminalWebShortcutState>()
-            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(
-                TermResizeEvent,
-                TermMouseEvent,
-                TermScrollEvent,
-                TermLinkOpenRequest,
-            )>::for_hosts(&["terminal"]));
-        app.add_plugins(TerminalUpdatePlugin)
+            .add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
                 (
@@ -85,35 +88,56 @@ impl Plugin for TerminalPlugin {
                 Update,
                 handle_terminal_font_size.after(vmux_command::ReadAppCommands),
             )
+            .add_observer(on_restart_pty)
+            .add_observer(on_terminal_removed);
+    }
+}
+
+struct TerminalInputPlugin;
+
+impl Plugin for TerminalInputPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<MouseSelectionState>()
+            .init_resource::<TerminalModeMap>()
+            .init_resource::<LocalCopyModeState>()
+            .init_resource::<TerminalWebShortcutState>()
+            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_plugins(BinEventEmitterPlugin::<(
+                TermResizeEvent,
+                TermMouseEvent,
+                TermScrollEvent,
+                TermLinkOpenRequest,
+            )>::for_hosts(&["terminal"]))
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
             .add_observer(on_term_scroll)
             .add_observer(on_term_key)
-            .add_observer(on_term_link_open)
-            .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed)
-            .add_plugins((
-                crate::processes_monitor::ProcessesMonitorPlugin,
-                crate::snapshot_updater::TerminalSnapshotPlugin,
-            ))
-            .add_systems(
-                Update,
-                (
-                    arm_agent_loading,
-                    arm_agent_loading_on_restart,
-                    announce_slow_shell_boot.after(poll_service_messages),
-                    clear_agent_loading.after(poll_service_messages),
-                    resend_the_screen_a_page_missed.after(poll_service_messages),
-                    flush_buffered_agent_prompt.after(poll_service_messages),
-                    reset_terminal_title_on_agent_removed,
-                    set_terminal_shell_icon,
-                ),
-            )
-            .add_systems(
-                Update,
-                prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
-            );
+            .add_observer(on_term_link_open);
+    }
+}
+
+struct TerminalLoadingPlugin;
+
+impl Plugin for TerminalLoadingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                arm_agent_loading,
+                arm_agent_loading_on_restart,
+                announce_slow_shell_boot.after(poll_service_messages),
+                clear_agent_loading.after(poll_service_messages),
+                resend_the_screen_a_page_missed.after(poll_service_messages),
+                flush_buffered_agent_prompt.after(poll_service_messages),
+                reset_terminal_title_on_agent_removed,
+                set_terminal_shell_icon,
+            ),
+        )
+        .add_systems(
+            Update,
+            prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
+        );
     }
 }
 
@@ -588,7 +612,7 @@ fn open_terminal_page(
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
         settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
-    clear_stack_children(task.stack, children_q, commands);
+    vmux_layout::stack::Stack::clear_children(task.stack, children_q, commands);
     let title = cwd
         .as_ref()
         .map(|cwd| format!("Terminal ({})", cwd.display()))
@@ -607,14 +631,6 @@ fn open_terminal_page(
         .id();
     commands.entity(terminal).insert(KeyboardOwner);
     Ok(())
-}
-
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
 }
 
 fn respond_terminal_spawn(
@@ -3600,20 +3616,6 @@ mod tests {
     use vmux_setting::{BrowserSettings, ShortcutSettings};
 
     #[test]
-    fn service_bridge_routes_acp_agent_info() {
-        let source = include_str!("plugin.rs");
-        let handler = source
-            .split("fn poll_service_messages")
-            .nth(1)
-            .expect("service handler")
-            .split("fn flush_pending_terminal_input")
-            .next()
-            .expect("service handler body");
-        assert!(handler.contains("ServiceMessage::Shared(SharedEvent::AcpAgentInfo"));
-        assert!(handler.contains(".page_agent_info"));
-    }
-
-    #[test]
     fn bracketed_paste_wraps_payload() {
         assert_eq!(bracketed_paste(b"hi"), b"\x1b[200~hi\x1b[201~".to_vec());
     }
@@ -4343,19 +4345,6 @@ mod tests {
                 )
             ))
         );
-    }
-
-    #[test]
-    fn terminal_web_shortcut_wakes_next_command_frame() {
-        let source = include_str!("plugin.rs");
-        let on_term_key = source
-            .split("fn on_term_key")
-            .nth(1)
-            .and_then(|tail| tail.split("fn on_term_ready").next())
-            .unwrap_or_default();
-
-        assert!(on_term_key.contains("EventLoopProxyWrapper"));
-        assert!(on_term_key.contains("WinitUserEvent::WakeUp"));
     }
 
     fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {

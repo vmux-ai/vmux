@@ -130,7 +130,7 @@ fn handle_registered_page_open(
             continue;
         };
         if handled_stacks.insert((task.stack, page.url)) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
+            crate::stack::Stack::clear_children(task.stack, &children_q, &mut commands);
             commands.entity(task.stack).insert(PageMetadata {
                 url: page.url.to_string(),
                 title: page.title.to_string(),
@@ -215,7 +215,7 @@ fn handle_warm_page_open<M: WarmPage>(
             continue;
         }
         if handled_stacks.insert(task.stack) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
+            crate::stack::Stack::clear_children(task.stack, &children_q, &mut commands);
             commands.entity(task.stack).insert(PageMetadata {
                 url: M::URL.to_string(),
                 title: M::TITLE.to_string(),
@@ -297,18 +297,6 @@ fn pool_node_for(
                 ))
                 .id()
         })
-}
-
-pub(crate) fn clear_stack_children(
-    stack: Entity,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
 }
 
 #[cfg(test)]

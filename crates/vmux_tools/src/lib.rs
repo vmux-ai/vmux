@@ -1232,15 +1232,11 @@ fn link_state(source: &Path, target: &Path) -> DotfileLinkState {
     } else {
         target.parent().unwrap_or(Path::new("/")).join(link)
     };
-    if canonical_or_normalized(&resolved) == canonical_or_normalized(source) {
+    if vmux_path::PathIdentity::resolve(&resolved) == vmux_path::PathIdentity::resolve(source) {
         DotfileLinkState::Linked
     } else {
         DotfileLinkState::Conflict
     }
-}
-
-fn canonical_or_normalized(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| normalize(path))
 }
 
 fn normalize(path: &Path) -> PathBuf {

@@ -45,6 +45,7 @@ futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_core = { path = "../../vmux_core" }
 vmux_git = { path = "../../vmux_git" }
+vmux_path = { path = "../../vmux_path" }
 vmux_client = { path = "../vmux_client" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }

@@ -516,14 +516,7 @@ impl RepoInfoCache {
 }
 
 fn canon(path: &Path) -> PathBuf {
-    path.canonicalize()
-        .unwrap_or_else(|_| match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => parent
-                .canonicalize()
-                .unwrap_or_else(|_| parent.to_path_buf())
-                .join(name),
-            _ => path.to_path_buf(),
-        })
+    vmux_path::PathIdentity::resolve(path).into_path_buf()
 }
 
 fn resolve_git_path(root: &Path, value: &str) -> PathBuf {

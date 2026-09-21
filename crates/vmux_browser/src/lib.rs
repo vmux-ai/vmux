@@ -793,7 +793,7 @@ fn attach_cef_page_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) -> Entity {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
         url: url.to_string(),
         title: title.to_string(),
@@ -813,7 +813,7 @@ fn attach_error_page_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
         url: failure.url.clone(),
         title: failure.title.clone(),
@@ -824,14 +824,6 @@ fn attach_error_page_to_stack(
         failure,
         ChildOf(stack),
     ));
-}
-
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
 }
 
 pub struct NavPending {
@@ -1217,11 +1209,19 @@ mod tests {
         ) {
             for (entity, task) in &tasks {
                 if task.url.starts_with("vmux://terminal/") {
-                    crate::clear_stack_children(task.stack, &children_q, &mut commands);
+                    vmux_layout::stack::Stack::clear_children(
+                        task.stack,
+                        &children_q,
+                        &mut commands,
+                    );
                     commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                     commands.entity(entity).insert(PageOpenHandled);
                 } else if task.url.starts_with("vmux://sessions/") {
-                    crate::clear_stack_children(task.stack, &children_q, &mut commands);
+                    vmux_layout::stack::Stack::clear_children(
+                        task.stack,
+                        &children_q,
+                        &mut commands,
+                    );
                     commands.entity(entity).insert(PageOpenHandled);
                 }
             }

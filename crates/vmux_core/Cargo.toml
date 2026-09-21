@@ -12,6 +12,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 vmux_profile = { path = "../vmux_profile" }
+vmux_path = { path = "../vmux_path" }
 vmux_wire = { path = "../vmux_wire", features = ["bevy"] }
 
 [dev-dependencies]
