@@ -9,12 +9,14 @@ mod root;
 
 use std::fmt::{Display, Formatter};
 #[cfg(target_os = "macos")]
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(target_os = "macos", test))]
+use std::path::PathBuf;
 
 #[cfg(any(target_os = "macos", test))]
 use zeroize::Zeroizing;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 use cipher::SafeStorageCipher;
 #[cfg(target_os = "macos")]
 pub(crate) use file::ProtectedFile;
@@ -136,22 +138,23 @@ impl VaultWrappingKey {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 enum RootKeySource {
     Keychain,
     #[cfg(any(test, debug_assertions))]
     FixedTest,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 pub struct SafeStorageContext {
     directory: PathBuf,
     root_key_source: RootKeySource,
     desktop_process_required: bool,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 impl SafeStorageContext {
+    #[cfg(target_os = "macos")]
     pub fn current() -> Self {
         #[cfg(any(test, debug_assertions))]
         let test_session = crate::is_test_session();
@@ -179,6 +182,7 @@ impl SafeStorageContext {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn protected_file(&self, relative: impl AsRef<Path>) -> ProtectedFile {
         ProtectedFile::new(self.directory.clone(), self.directory.join(relative))
     }
@@ -187,6 +191,7 @@ impl SafeStorageContext {
         &self.directory
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn require_desktop_process(&self) -> Result<(), SafeStorageError> {
         if !self.desktop_process_required {
             return Ok(());
