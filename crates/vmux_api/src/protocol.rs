@@ -986,7 +986,7 @@ mod tests {
                 sid: "s".into(),
                 call_id: "c".into(),
                 name: "n".into(),
-                args_json: "{}".into(),
+                args: crate::json::JsonValue::Object(Vec::new()),
             }),
             ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
                 sid: "s".into(),
@@ -1000,7 +1000,7 @@ mod tests {
             },
             ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: "s".into(),
-                messages_json: "[]".into(),
+                messages: Vec::new(),
             }),
         ];
         for msg in messages {

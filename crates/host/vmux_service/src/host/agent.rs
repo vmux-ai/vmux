@@ -204,10 +204,9 @@ fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
 
 async fn snapshot_message(sid: &str, messages: &Arc<Mutex<Vec<Message>>>) -> ServiceMessage {
     let msgs = messages.lock().await;
-    let messages_json = serde_json::to_string(&*msgs).unwrap_or_else(|_| "[]".to_string());
     ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
         sid: sid.to_string(),
-        messages_json,
+        messages: msgs.clone(),
     })
 }
 
@@ -451,7 +450,7 @@ async fn run_session(
                 let next_approval = RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
-                    args_json: args_json.clone(),
+                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 };
                 *approval.lock().unwrap() = Some(next_approval.clone());
                 let _ =
@@ -459,7 +458,7 @@ async fn run_session(
                         sid: sid.clone(),
                         call_id: call_id.clone(),
                         name: name.clone(),
-                        args_json: args_json.clone(),
+                        args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                     }));
                 match await_decision(&mut input_rx, &call_id).await {
                     Decision::Closed => return,
@@ -557,10 +556,9 @@ mod tests {
         .unwrap();
         match mgr.snapshot("s").await {
             Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
-                messages_json,
-                ..
+                messages, ..
             })) => {
-                assert_eq!(messages_json, "[]");
+                assert!(messages.is_empty());
             }
             other => panic!("expected snapshot, got {other:?}"),
         }
@@ -651,7 +649,7 @@ mod tests {
         *handle.approval.lock().unwrap() = Some(RemoteApproval {
             call_id: "call-1".into(),
             name: "run".into(),
-            args_json: "{}".into(),
+            args: vmux_api::json::JsonValue::Object(Vec::new()),
         });
         let mut receiver = mgr.subscribe("s").unwrap();
 

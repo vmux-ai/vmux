@@ -1606,9 +1606,10 @@ fn poll_service_messages(
                 sid,
                 call_id,
                 name,
-                args_json,
+                args,
             }) => {
-                let args = serde_json::from_str(&args_json)
+                let args = args
+                    .to_serde()
                     .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
                 writers.page_agent_awaiting.write(
                     vmux_service::agent_events::PageAgentAwaitingApproval {
@@ -1624,11 +1625,7 @@ fn poll_service_messages(
                     .page_agent_approval_resolved
                     .write(vmux_service::agent_events::PageAgentApprovalResolved { sid, call_id });
             }
-            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages_json }) => {
-                let Ok(messages) = serde_json::from_str(&messages_json) else {
-                    tracing::warn!(%sid, "dropping malformed agent snapshot");
-                    continue;
-                };
+            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages }) => {
                 writers
                     .page_agent_snapshot
                     .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages });

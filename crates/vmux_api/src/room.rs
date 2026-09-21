@@ -383,7 +383,7 @@ impl From<&AgentRunStatus> for RemoteStatus {
 pub struct RemoteApproval {
     pub call_id: String,
     pub name: String,
-    pub args_json: String,
+    pub args: crate::json::JsonValue,
 }
 
 #[derive(

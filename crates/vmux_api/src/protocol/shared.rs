@@ -2,7 +2,8 @@ use super::{
     AcpModelOption, AgentAttachment, AgentCommand, AgentRunStatus, ApprovalDecision, ClientMessage,
     ServiceMessage,
 };
-use crate::room::{ClientOpId, RemoteAgent, RemoteMediaEntry, RemoteSession};
+use crate::json::JsonValue;
+use crate::room::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
 use vmux_macro::VariantNames;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
@@ -90,7 +91,7 @@ pub enum SharedEvent {
         sid: String,
         call_id: String,
         name: String,
-        args_json: String,
+        args: JsonValue,
     },
     AgentApprovalResolved {
         sid: String,
@@ -98,7 +99,7 @@ pub enum SharedEvent {
     },
     AgentMessagesSnapshot {
         sid: String,
-        messages_json: String,
+        messages: Vec<Message>,
     },
     AcpAgentInfo {
         sid: String,
