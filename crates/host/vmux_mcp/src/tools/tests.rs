@@ -22,7 +22,7 @@ fn the_run_tool_teaches_the_shell_it_will_actually_use() {
 
 #[test]
 fn manual_registry_has_the_exact_definition_and_dispatch_set() {
-    let expected = [
+    let mut expected = [
         "read_layout",
         "update_layout",
         "get_settings",
@@ -61,31 +61,23 @@ fn manual_registry_has_the_exact_definition_and_dispatch_set() {
         "bookmark_unpin",
         "bookmark_folder_create",
     ];
-    let registered = TOOL_SPECS.iter().map(|spec| spec.name).collect::<Vec<_>>();
-    assert_eq!(registered, expected);
-
-    let definitions = tool_definitions()
+    let mut definitions = tool_definitions()
         .into_iter()
         .filter(|definition| expected.contains(&definition.name.as_str()))
         .map(|definition| definition.name)
         .collect::<Vec<_>>();
+    expected.sort_unstable();
+    definitions.sort_unstable();
     assert_eq!(definitions, expected);
 
     let anchor = Some(vmux_client::protocol::ProcessId::new());
-    for spec in TOOL_SPECS {
-        match spec.route {
-            ToolRoute::Protocol(expected) => {
-                assert_eq!(protocol_tool(spec.name), Some(expected));
-            }
-            ToolRoute::Local(_) => {
-                if let Err(error) = dispatch_with_anchor(spec.name, serde_json::json!({}), anchor) {
-                    assert!(
-                        !error.contains("no registered dispatcher"),
-                        "{}: {error}",
-                        spec.name
-                    );
-                    assert!(!error.contains("unknown tool"), "{}: {error}", spec.name);
-                }
+    let mut catalog = ToolCatalog::default();
+    for name in expected {
+        match catalog.dispatch(name, serde_json::json!({}), anchor, "", false, false) {
+            Ok(_) => {}
+            Err(error) => {
+                assert!(!error.contains("did not produce"), "{name}: {error}");
+                assert!(!error.contains("unknown tool"), "{name}: {error}");
             }
         }
     }
@@ -93,19 +85,27 @@ fn manual_registry_has_the_exact_definition_and_dispatch_set() {
 
 #[test]
 fn aliases_use_the_same_registry_entry() {
-    let select = ToolSpec::find("select_project").unwrap();
-    assert!(std::ptr::eq(
-        ToolSpec::find("select_workspace").unwrap(),
-        select
+    let mut catalog = ToolCatalog::default();
+    let select = catalog.find("select_project").unwrap().0;
+    assert_eq!(catalog.find("select_workspace").unwrap().0, select);
+    assert_eq!(catalog.find("choose_workspace").unwrap().0, select);
+    let execution = catalog
+        .dispatch(
+            "vmux_read_file",
+            serde_json::json!({}),
+            None,
+            "",
+            false,
+            false,
+        )
+        .unwrap();
+    assert!(matches!(
+        execution,
+        ToolExecution::Protocol {
+            tool: ProtocolTool::ReadFile,
+            ..
+        }
     ));
-    assert!(std::ptr::eq(
-        ToolSpec::find("choose_workspace").unwrap(),
-        select
-    ));
-    assert_eq!(
-        protocol_tool("vmux_read_file"),
-        Some(ProtocolTool::ReadFile)
-    );
 }
 
 fn tool_names() -> Vec<String> {

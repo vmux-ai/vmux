@@ -1,3 +1,6 @@
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::name::Name;
+use bevy_ecs::prelude::*;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -9,6 +12,162 @@ use vmux_client::protocol::{
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+pub struct McpPlugin;
+
+impl Plugin for McpPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(crate::tools::ToolsPlugin)
+            .init_resource::<NextRequestSequence>()
+            .add_systems(
+                Update,
+                (
+                    route_request,
+                    start_tool_tasks,
+                    poll_tool_tasks,
+                    build_responses,
+                )
+                    .chain(),
+            );
+    }
+}
+
+pub struct McpServer {
+    app: App,
+}
+
+impl McpServer {
+    pub fn new(
+        anchor: Option<vmux_client::protocol::ProcessId>,
+        acp_session: bool,
+        acp_terminals: bool,
+        run_block_timeout: Duration,
+        shell: String,
+    ) -> Self {
+        let mut app = App::new();
+        app.insert_resource(McpConfig {
+            anchor,
+            acp_session,
+            acp_terminals,
+            run_block_timeout,
+            shell,
+        })
+        .add_plugins(McpPlugin);
+        Self { app }
+    }
+
+    pub async fn handle(&mut self, message: Value) -> Option<Value> {
+        let id = message.get("id").cloned()?;
+        let method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+        let sequence = {
+            let mut next = self.app.world_mut().resource_mut::<NextRequestSequence>();
+            let sequence = next.0;
+            next.0 += 1;
+            sequence
+        };
+        let request = self
+            .app
+            .world_mut()
+            .spawn((
+                McpRequest,
+                Name::new(format!("MCP request {sequence}")),
+                McpRequestId(id),
+                McpMethod(method),
+                McpParams(params),
+                McpRequestSequence(sequence),
+            ))
+            .id();
+
+        loop {
+            self.app.update();
+            if let Some(response) = self
+                .app
+                .world()
+                .get::<McpResponse>(request)
+                .map(|response| response.0.clone())
+            {
+                self.app.world_mut().despawn(request);
+                return Some(response);
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+#[derive(Resource, Clone)]
+struct McpConfig {
+    anchor: Option<vmux_client::protocol::ProcessId>,
+    acp_session: bool,
+    acp_terminals: bool,
+    run_block_timeout: Duration,
+    shell: String,
+}
+
+#[derive(Resource, Default)]
+struct NextRequestSequence(u64);
+
+#[derive(Component)]
+struct McpRequest;
+
+#[derive(Component)]
+struct McpRequestId(Value);
+
+#[derive(Component)]
+struct McpMethod(String);
+
+#[derive(Component)]
+struct McpParams(Value);
+
+#[derive(Component)]
+struct McpRequestSequence(u64);
+
+#[derive(Component)]
+struct McpRouted;
+
+#[derive(Component)]
+struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
+
+#[derive(Component)]
+enum McpReply {
+    Result(Result<Value, String>),
+    ProtocolError { code: i64, message: String },
+}
+
+#[derive(Component)]
+struct McpResponse(Value);
+
+type PendingRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static McpMethod,
+        &'static McpParams,
+        &'static McpRequestSequence,
+    ),
+    (With<McpRequest>, Without<McpRouted>),
+>;
+
+type RegisteredTools<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Name,
+        &'static crate::tools::ToolAliases,
+        &'static crate::tools::ToolDescription,
+        &'static crate::tools::ToolInputSchema,
+        &'static crate::tools::ToolAccess,
+        &'static crate::tools::ToolOrder,
+        Option<&'static crate::tools::ShellAware>,
+    ),
+    With<crate::tools::McpTool>,
+>;
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut line = String::new();
@@ -32,18 +191,10 @@ pub async fn run_stdio(
     let mut reader = stdin.lock();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
+    let mut server = McpServer::new(anchor, acp_session, acp_terminals, run_block_timeout, shell);
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(
-            message,
-            anchor,
-            acp_session,
-            acp_terminals,
-            run_block_timeout,
-            &shell,
-        )
-        .await
-        {
+        if let Some(response) = server.handle(message).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -52,6 +203,7 @@ pub async fn run_stdio(
     Ok(())
 }
 
+#[cfg(test)]
 async fn handle_message(
     message: Value,
     anchor: Option<vmux_client::protocol::ProcessId>,
@@ -60,49 +212,186 @@ async fn handle_message(
     run_block_timeout: Duration,
     shell: &str,
 ) -> Option<Value> {
-    let id = message.get("id").cloned()?;
-    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
-    let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+    McpServer::new(
+        anchor,
+        acp_session,
+        acp_terminals,
+        run_block_timeout,
+        shell.to_string(),
+    )
+    .handle(message)
+    .await
+}
 
-    let result = match method {
-        "initialize" => Ok(initialize_result(&params)),
-        "tools/list" => Ok(json!({
-            "tools": crate::tools::tool_definitions_filtered(acp_session, acp_terminals, shell)
-        })),
-        "tools/call" => {
-            tool_call_result(
-                &params,
-                anchor,
-                acp_session,
-                acp_terminals,
-                run_block_timeout,
-                shell,
-            )
-            .await
-        }
-        _ => {
-            return Some(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {
-                    "code": -32601,
-                    "message": format!("method not found: {method}")
-                }
-            }));
-        }
+fn route_request(
+    mut commands: Commands,
+    requests: PendingRequests,
+    tools: RegisteredTools,
+    config: Res<McpConfig>,
+) {
+    let Some((entity, method, params, _)) =
+        requests.iter().min_by_key(|(_, _, _, sequence)| sequence.0)
+    else {
+        return;
     };
+    commands.entity(entity).insert(McpRouted);
 
-    match result {
-        Ok(result) => Some(json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": result
-        })),
-        Err(message) => Some(json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": tool_error(&message)
-        })),
+    match method.0.as_str() {
+        "initialize" => {
+            commands
+                .entity(entity)
+                .insert(McpReply::Result(Ok(initialize_result(&params.0))));
+        }
+        "tools/list" => {
+            let mut definitions = Vec::new();
+            for (_, name, _, description, schema, access, order, shell_aware) in &tools {
+                if !access.0.allows(config.acp_session, config.acp_terminals) {
+                    continue;
+                }
+                let mut description = description.0.clone();
+                if shell_aware.is_some() {
+                    description.push_str(&crate::tools::ShellNote::for_shell(&config.shell));
+                }
+                definitions.push((
+                    order.0,
+                    crate::tools::ToolDefinition {
+                        name: name.as_str().to_string(),
+                        description,
+                        input_schema: schema.0.clone(),
+                    },
+                ));
+            }
+            definitions.sort_by_key(|(order, _)| *order);
+            let definitions = definitions
+                .into_iter()
+                .map(|(_, definition)| definition)
+                .collect::<Vec<_>>();
+            commands
+                .entity(entity)
+                .insert(McpReply::Result(Ok(json!({ "tools": definitions }))));
+        }
+        "tools/call" => {
+            let Some(name) = params.0.get("name").and_then(Value::as_str) else {
+                commands
+                    .entity(entity)
+                    .insert(McpReply::Result(Err("tools/call missing name".to_string())));
+                return;
+            };
+            let normalized = crate::tools::canonical_tool_name(name);
+            let tool = tools.iter().find(|(_, registered, aliases, ..)| {
+                registered.as_str() == normalized
+                    || aliases.0.iter().any(|alias| alias == normalized)
+            });
+            let Some((tool, registered, _, _, _, access, _, _)) = tool else {
+                commands
+                    .entity(entity)
+                    .insert(McpReply::Result(Err(format!("unknown tool: {normalized}"))));
+                return;
+            };
+            if !access.0.allows(config.acp_session, config.acp_terminals) {
+                commands.entity(entity).insert(McpReply::Result(Err(format!(
+                    "tool {normalized} is unavailable for ACP sessions"
+                ))));
+                return;
+            }
+            let arguments = params
+                .0
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            commands.trigger(crate::tools::ToolCall {
+                entity: tool,
+                request: entity,
+                name: registered.as_str().to_string(),
+                arguments,
+                anchor: config.anchor,
+                host_shell: config.shell.clone(),
+            });
+        }
+        method => {
+            commands.entity(entity).insert(McpReply::ProtocolError {
+                code: -32601,
+                message: format!("method not found: {method}"),
+            });
+        }
+    }
+}
+
+fn start_tool_tasks(world: &mut World) {
+    let entities = {
+        let mut query = world.query_filtered::<Entity, With<crate::tools::ToolOutcome>>();
+        query.iter(world).collect::<Vec<_>>()
+    };
+    let config = world.resource::<McpConfig>().clone();
+    for entity in entities {
+        let Some(outcome) = world.entity_mut(entity).take::<crate::tools::ToolOutcome>() else {
+            continue;
+        };
+        let execution = match outcome.0 {
+            Ok(execution) => execution,
+            Err(message) => {
+                world
+                    .entity_mut(entity)
+                    .insert(McpReply::Result(Err(message)));
+                continue;
+            }
+        };
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let task_config = config.clone();
+        drop(tokio::spawn(async move {
+            let _ = sender.send(execution.execute(task_config).await);
+        }));
+        world.entity_mut(entity).insert(McpTask(receiver));
+    }
+}
+
+fn poll_tool_tasks(world: &mut World) {
+    let mut completed = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &mut McpTask)>();
+        for (entity, mut task) in query.iter_mut(world) {
+            match task.0.try_recv() {
+                Ok(result) => completed.push((entity, result)),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => completed.push((
+                    entity,
+                    Err("MCP tool task stopped before producing a response".to_string()),
+                )),
+            }
+        }
+    }
+    for (entity, result) in completed {
+        world.entity_mut(entity).remove::<McpTask>();
+        world.entity_mut(entity).insert(McpReply::Result(result));
+    }
+}
+
+fn build_responses(
+    mut commands: Commands,
+    replies: Query<(Entity, &McpRequestId, &McpReply), Without<McpResponse>>,
+) {
+    for (entity, id, reply) in &replies {
+        let response = match reply {
+            McpReply::Result(Ok(result)) => json!({
+                "jsonrpc": "2.0",
+                "id": id.0,
+                "result": result
+            }),
+            McpReply::Result(Err(message)) => json!({
+                "jsonrpc": "2.0",
+                "id": id.0,
+                "result": tool_error(message)
+            }),
+            McpReply::ProtocolError { code, message } => json!({
+                "jsonrpc": "2.0",
+                "id": id.0,
+                "error": {
+                    "code": code,
+                    "message": message
+                }
+            }),
+        };
+        commands.entity(entity).insert(McpResponse(response));
     }
 }
 
@@ -123,60 +412,52 @@ fn initialize_result(params: &Value) -> Value {
     })
 }
 
-async fn tool_call_result(
-    params: &Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
-    acp_session: bool,
-    acp_terminals: bool,
-    run_block_timeout: Duration,
-    host_shell: &str,
-) -> Result<Value, String> {
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "tools/call missing name".to_string())?;
-    let normalized_name = crate::tools::canonical_tool_name(name);
-    if !crate::tools::tool_available(name, acp_session, acp_terminals) {
-        return Err(format!(
-            "tool {normalized_name} is unavailable for ACP sessions"
-        ));
-    }
-    let arguments = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+impl crate::tools::ToolExecution {
+    async fn execute(self, config: McpConfig) -> Result<Value, String> {
+        match self {
+            Self::Protocol {
+                tool: crate::tools::ProtocolTool::ReadFile,
+                arguments,
+                anchor,
+            } => read_file_result(&arguments, anchor).await,
+            Self::Protocol {
+                tool: crate::tools::ProtocolTool::Grep,
+                arguments,
+                anchor,
+            } => grep_result(&arguments, anchor).await,
+            Self::Protocol {
+                tool: crate::tools::ProtocolTool::VaultStatus,
+                ..
+            } => run_agent_query(AgentQuery::VaultStatus).await,
+            Self::Dispatch {
+                target,
+                name,
+                arguments,
+                anchor,
+            } => {
+                if name == "open_file" {
+                    let path = arguments
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or("open_file.path is required")?;
+                    if !Path::new(path).is_absolute() {
+                        return Err("open_file.path must be an absolute path".to_string());
+                    }
+                    scoped_existing_path(anchor, Path::new(path), "open_file").await?;
+                }
 
-    match crate::tools::protocol_tool(name) {
-        Some(crate::tools::ProtocolTool::ReadFile) => {
-            return read_file_result(&arguments, anchor).await;
+                match target {
+                    crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
+                    | crate::tools::DispatchTarget::Command(
+                        command @ AgentCommand::RunWithPlacementOverride { .. },
+                    ) => run_blocking(command, config.run_block_timeout).await,
+                    crate::tools::DispatchTarget::Command(command) => {
+                        run_agent_command(command, anchor).await
+                    }
+                    crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
+                }
+            }
         }
-        Some(crate::tools::ProtocolTool::Grep) => {
-            return grep_result(&arguments, anchor).await;
-        }
-        Some(crate::tools::ProtocolTool::VaultStatus) => {
-            return run_agent_query(AgentQuery::VaultStatus).await;
-        }
-        None => {}
-    }
-
-    if normalized_name == "open_file" {
-        let path = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or("open_file.path is required")?;
-        if !Path::new(path).is_absolute() {
-            return Err("open_file.path must be an absolute path".to_string());
-        }
-        scoped_existing_path(anchor, Path::new(path), "open_file").await?;
-    }
-
-    match crate::tools::dispatch_in_shell(name, arguments, anchor, host_shell)? {
-        crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
-        | crate::tools::DispatchTarget::Command(
-            command @ AgentCommand::RunWithPlacementOverride { .. },
-        ) => run_blocking(command, run_block_timeout).await,
-        crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
-        crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
 }
 

@@ -1,25 +1,37 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition};
+use super::{DispatchTarget, ToolCall, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
-pub(super) fn read_layout(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) struct StateToolsPlugin;
+
+impl Plugin for StateToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(read_layout_definition()).local(app, read_layout);
+        ToolRegistration::from_definition(update_layout_definition()).local(app, update_layout);
+        ToolRegistration::from_definition(get_settings_definition()).local(app, get_settings);
+        ToolRegistration::from_definition(list_spaces_definition()).local(app, list_spaces);
+    }
+}
+
+pub(super) fn read_layout(call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::ReadLayout {
         anchor: call.anchor,
     }))
 }
 
-pub(super) fn update_layout(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
-    let layout = serde_json::from_value(call.arguments)
+pub(super) fn update_layout(call: &ToolCall) -> Result<DispatchTarget, String> {
+    let layout = serde_json::from_value(call.arguments.clone())
         .map_err(|error| format!("update_layout: invalid layout payload: {error}"))?;
     Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
         layout,
     }))
 }
 
-pub(super) fn get_settings(_call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn get_settings(_call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::GetSettings))
 }
 
-pub(super) fn list_spaces(_call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn list_spaces(_call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::ListSpaces))
 }
 

@@ -1,8 +1,34 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition};
+use super::{DispatchTarget, ToolAvailability, ToolCall, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::{
     AgentCommand, AgentPaneDirection, AgentQuery, PlacementMode, ProcessId,
 };
+
+pub(super) struct WorkspaceToolsPlugin;
+
+impl Plugin for WorkspaceToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(open_page_definition()).local(app, open_page);
+        ToolRegistration::from_definition(open_file_definition()).local(app, open_file);
+        ToolRegistration::from_definition(resume_in_acp_definition())
+            .availability(ToolAvailability::OutsideAcpSession)
+            .local(app, resume_in_acp);
+        ToolRegistration::from_definition(run_definition())
+            .availability(ToolAvailability::WithoutAcpTerminals)
+            .shell_aware()
+            .local(app, run);
+        ToolRegistration::from_definition(request_user_choice_definition())
+            .local(app, request_user_choice);
+        ToolRegistration::from_definition(select_project_definition())
+            .aliases(&["select_workspace", "choose_workspace"])
+            .local(app, select_project);
+        ToolRegistration::from_definition(create_worktree_definition()).local(app, create_worktree);
+        ToolRegistration::from_definition(read_terminal_definition())
+            .availability(ToolAvailability::WithoutAcpTerminals)
+            .local(app, read_terminal);
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -95,14 +121,14 @@ struct ReadTerminalArgs {
     terminal: Option<String>,
 }
 
-pub(super) fn resume_in_acp(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn resume_in_acp(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("resume_in_acp")?;
     Ok(DispatchTarget::Command(AgentCommand::ResumeInAcp {
         anchor,
     }))
 }
 
-pub(super) fn open_page(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn open_page(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("open_page")?;
     let args: OpenPageArgs = call.parse("open_page")?;
     let url = args.url.unwrap_or_default();
@@ -117,7 +143,7 @@ pub(super) fn open_page(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }))
 }
 
-pub(super) fn open_file(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn open_file(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("open_file")?;
     let args: OpenFileArgs = call.parse("open_file")?;
     let path = args.path.unwrap_or_default().trim().to_string();
@@ -137,7 +163,7 @@ pub(super) fn open_file(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }))
 }
 
-pub(super) fn run(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn run(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("run")?;
     let placement_override = ["mode", "direction", "beside"].iter().any(|key| {
         call.arguments
@@ -151,7 +177,7 @@ pub(super) fn run(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }
     if let Some(interpreter) = args.shell.filter(|value| !value.trim().is_empty()) {
         command =
-            crate::host_quote::HostQuote::handing_to(call.host_shell, &interpreter, &command)?;
+            crate::host_quote::HostQuote::handing_to(&call.host_shell, &interpreter, &command)?;
     }
     let direction = args
         .direction
@@ -208,7 +234,7 @@ impl ProcessTarget {
     }
 }
 
-pub(super) fn create_worktree(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn create_worktree(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("create_worktree")?;
     let args: CreateWorktreeArgs = call.parse("create_worktree")?;
     if let Some(branch) = args.branch.and_then(Trimmed::into_option) {
@@ -237,7 +263,7 @@ impl Trimmed {
     }
 }
 
-pub(super) fn request_user_choice(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn request_user_choice(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("request_user_choice")?;
     let args: RequestUserChoiceArgs = call.parse("request_user_choice")?;
     let question = args
@@ -261,7 +287,7 @@ pub(super) fn request_user_choice(call: ToolCall<'_>) -> Result<DispatchTarget, 
     }))
 }
 
-pub(super) fn select_project(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn select_project(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("select_project")?;
     let args: SelectProjectArgs = call.parse("select_project")?;
     let Some(path) = args.path.and_then(Trimmed::into_option) else {
@@ -274,7 +300,7 @@ pub(super) fn select_project(call: ToolCall<'_>) -> Result<DispatchTarget, Strin
     ))
 }
 
-pub(super) fn read_terminal(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn read_terminal(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: ReadTerminalArgs = call.parse("read_terminal")?;
     let process_id = args
         .terminal

@@ -10629,6 +10629,8 @@ name = "vmux_mcp"
 version = "0.0.34"
 dependencies = [
  "base64 0.22.1",
+ "bevy_app",
+ "bevy_ecs",
  "serde",
  "serde_json",
  "tempfile",
