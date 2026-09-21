@@ -1,4 +1,4 @@
-use super::{DispatchTarget, ProtocolTool, ToolCall, ToolDefinition, ToolRegistration};
+use super::{DispatchTarget, ProtocolTool, ToolCall, ToolManifest};
 use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::AgentCommand;
@@ -7,14 +7,14 @@ pub(super) struct KnowledgeToolsPlugin;
 
 impl Plugin for KnowledgeToolsPlugin {
     fn build(&self, app: &mut App) {
-        ToolRegistration::from_definition(vault_status_definition())
-            .protocol(app, ProtocolTool::VaultStatus);
-        ToolRegistration::from_definition(open_vault_definition()).local(app, open_vault);
-        ToolRegistration::from_definition(set_conversation_title_definition())
-            .local(app, set_conversation_title);
-        ToolRegistration::from_definition(search_knowledge_definition()).local(app, search);
-        ToolRegistration::from_definition(read_knowledge_definition()).local(app, read);
-        ToolRegistration::from_definition(write_knowledge_definition()).local(app, write);
+        let mut tools = ToolManifest::from_ron(include_str!("knowledge.ron"));
+        tools.protocol(app, "vault_status", ProtocolTool::VaultStatus);
+        tools.local(app, "open_vault", open_vault);
+        tools.local(app, "set_conversation_title", set_conversation_title);
+        tools.local(app, "search_knowledge", search);
+        tools.local(app, "read_knowledge", read);
+        tools.local(app, "write_knowledge", write);
+        tools.finish();
     }
 }
 
@@ -145,106 +145,5 @@ impl Text {
         value
             .and_then(Self::trimmed)
             .ok_or_else(|| error.to_string())
-    }
-}
-
-pub(super) fn vault_status_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "vault_status".into(),
-        description: "Read the local Vault sync state without connecting, uploading, or discovering remote repositories. Use this first when the user asks to back up, upload, sync, or migrate vmux. If Vault is not connected and the user did not already choose a provider, call request_user_choice with GitHub and Cloud folder. If changes need upload, ask the user to confirm syncing before opening Vault. Never claim data was uploaded until a later status reports no local changes and no commits ahead."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-    }
-}
-
-pub(super) fn open_vault_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_vault".into(),
-        description: "Open the user-facing Vault page for the final connection or sync confirmation. This tool never uploads by itself. First call vault_status. If the user did not already specify the provider or sync action, call request_user_choice and stop the turn; call open_vault only after the user selects GitHub, Cloud folder, or confirms Sync. The user completes the final repository/folder choice and clicks Create, Use, or Sync in Vault."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "provider": {"enum": ["overview", "github", "cloud_folder"]}
-            }
-        }),
-    }
-}
-
-pub(super) fn set_conversation_title_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "set_conversation_title".into(),
-        description: "Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["title"],
-            "additionalProperties": false,
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 120
-                }
-            }
-        }),
-    }
-}
-
-pub(super) fn write_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "write_knowledge".into(),
-        description: "Create or replace a Markdown note in the user's vmux Knowledge base, then open it beside the conversation. Use this when the user asks to save, copy, or organize information in Knowledge. Provide a relative path under skills/, memories/, projects/, meetings/, or handbook/; omit path to create projects/<title-slug>.md. Never write directly to ~/.vmux/knowledge with shell commands."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["title", "content"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "title": {"type": "string"},
-                "content": {"type": "string"}
-            }
-        }),
-    }
-}
-
-pub(super) fn search_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "search_knowledge".into(),
-        description: "Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["query"],
-            "additionalProperties": false,
-            "properties": {
-                "query": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 100}
-            }
-        }),
-    }
-}
-
-pub(super) fn read_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_knowledge".into(),
-        description: "Read a Markdown note from the user's vmux Knowledge base by relative path, title, or alias. line is 1-based and defaults to 1; limit defaults to 200 lines. Use source references returned by search_knowledge. No permission is required."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "line": {"type": "integer", "minimum": 1},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 2000}
-            }
-        }),
     }
 }

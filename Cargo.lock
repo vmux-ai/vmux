@@ -10631,6 +10631,7 @@ dependencies = [
  "base64 0.22.1",
  "bevy_app",
  "bevy_ecs",
+ "ron 0.8.1",
  "serde",
  "serde_json",
  "tempfile",

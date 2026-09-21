@@ -1,4 +1,4 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition, ToolRegistration};
+use super::{DispatchTarget, ToolCall, ToolManifest};
 use bevy_app::{App, Plugin};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
@@ -6,10 +6,12 @@ pub(super) struct StateToolsPlugin;
 
 impl Plugin for StateToolsPlugin {
     fn build(&self, app: &mut App) {
-        ToolRegistration::from_definition(read_layout_definition()).local(app, read_layout);
-        ToolRegistration::from_definition(update_layout_definition()).local(app, update_layout);
-        ToolRegistration::from_definition(get_settings_definition()).local(app, get_settings);
-        ToolRegistration::from_definition(list_spaces_definition()).local(app, list_spaces);
+        let mut tools = ToolManifest::from_ron(include_str!("state.ron"));
+        tools.local(app, "read_layout", read_layout);
+        tools.local(app, "update_layout", update_layout);
+        tools.local(app, "get_settings", get_settings);
+        tools.local(app, "list_spaces", list_spaces);
+        tools.finish();
     }
 }
 
@@ -33,122 +35,4 @@ pub(super) fn get_settings(_call: &ToolCall) -> Result<DispatchTarget, String> {
 
 pub(super) fn list_spaces(_call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::ListSpaces))
-}
-
-pub(super) fn read_layout_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_layout".into(),
-        description: "Returns the full vmux layout (tabs, recursive pane tree, focused). \
-Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
-Useful for: answering questions about what's open; finding the focused tab/pane/stack; \
-reading a stack's url/kind so you can duplicate it elsewhere. \
-Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind=\"browser\"."
-            .into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
-}
-
-pub(super) fn update_layout_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "update_layout".into(),
-        description: "Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). \
-Use this for compound or structural changes that the per-action tools can't express. \
-\
-Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
-\
-Recipes: \
-- Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present. \
-- Duplicate/mirror a stack: add a new pane (id: null) under the same parent, with a stack carrying the source stack's url. \
-- Swap two panes: reorder their entries in the parent split's children array. \
-- Move a stack to another pane: remove from source pane's stacks, add (same id) to target pane's stacks. \
-- Close a pane/stack: omit it from the submitted tree. \
-- Resize a split: change flex_weights on the parent split. \
-- Equalize a split: set all flex_weights to the same value. \
-- Group an agent's parallel terminals (keep the agent's own pane readable): make the tab root a row split with two children - the agent's own pane on one side, and on the other either a split holding the terminal panes (when there are a few, so all are visible) or a single pane whose stacks are all the terminals (tabs, when there are many). Move existing terminal stacks by id into the grouped pane(s) rather than recreating them, and set flex_weights so the agent keeps a fair share (e.g. [1, 1] or [2, 3]). \
-- Change focus: set the top-level focused triple. \
-- Toggle zoom: flip the pane's is_zoomed flag. \
-\
-Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied. \
-\
-Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one stack, a new tab needs name."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["tabs", "focused"],
-            "$defs": {
-                "Tab": {
-                    "type": "object",
-                    "required": ["name", "root"],
-                    "properties": {
-                        "id": {"type": "string", "description": "tab:<id>; omit to create"},
-                        "name": {"type": "string"},
-                        "is_active": {"type": "boolean"},
-                        "root": {"$ref": "#/$defs/LayoutNode"}
-                    }
-                },
-                "LayoutNode": {
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "required": ["kind", "direction", "children"],
-                            "properties": {
-                                "kind": {"const": "split"},
-                                "id": {"type": "string", "description": "split:<id>; omit to create"},
-                                "direction": {"enum": ["row", "column"]},
-                                "flex_weights": {"type": "array", "items": {"type": "number"}},
-                                "children": {"type": "array", "items": {"$ref": "#/$defs/LayoutNode"}}
-                            }
-                        },
-                        {
-                            "type": "object",
-                            "required": ["kind"],
-                            "properties": {
-                                "kind": {"const": "pane"},
-                                "id": {"type": "string", "description": "pane:<id>; omit to create"},
-                                "is_zoomed": {"type": "boolean"},
-                                "stacks": {"type": "array", "items": {"$ref": "#/$defs/Stack"}}
-                            }
-                        }
-                    ]
-                },
-                "Stack": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "stack:<id>; omit to create"},
-                        "title": {"type": "string"},
-                        "url": {"type": "string", "description": "Required when id is omitted"},
-                        "is_loading": {"type": "boolean"},
-                        "favicon_url": {"type": "string"}
-                    }
-                }
-            },
-            "properties": {
-                "tabs": {"type": "array", "items": {"$ref": "#/$defs/Tab"}},
-                "focused": {
-                    "type": "object",
-                    "properties": {
-                        "tab": {"type": "string"},
-                        "pane": {"type": "string"},
-                        "stack": {"type": "string"}
-                    }
-                }
-            }
-        }),
-    }
-}
-
-pub(super) fn get_settings_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "get_settings".into(),
-        description: "Return the full vmux settings as a JSON snapshot.".into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
-}
-
-pub(super) fn list_spaces_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "list_spaces".into(),
-        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.".into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
 }

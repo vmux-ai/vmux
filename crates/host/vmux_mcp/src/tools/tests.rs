@@ -1,6 +1,3 @@
-use super::workspace::{
-    create_worktree_definition, request_user_choice_definition, select_project_definition,
-};
 use super::*;
 use vmux_client::protocol::{
     AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, SimulatorAction,
@@ -21,7 +18,7 @@ fn the_run_tool_teaches_the_shell_it_will_actually_use() {
 }
 
 #[test]
-fn manual_registry_has_the_exact_definition_and_dispatch_set() {
+fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     let mut expected = [
         "read_layout",
         "update_layout",
@@ -71,9 +68,17 @@ fn manual_registry_has_the_exact_definition_and_dispatch_set() {
     assert_eq!(definitions, expected);
 
     let anchor = Some(vmux_client::protocol::ProcessId::new());
-    let mut catalog = ToolCatalog::default();
+    let mut app = ToolsPlugin::app();
     for name in expected {
-        match catalog.dispatch(name, serde_json::json!({}), anchor, "", false, false) {
+        match ToolCall::dispatch(
+            app.world_mut(),
+            name,
+            serde_json::json!({}),
+            anchor,
+            "",
+            false,
+            false,
+        ) {
             Ok(_) => {}
             Err(error) => {
                 assert!(!error.contains("did not produce"), "{name}: {error}");
@@ -84,21 +89,31 @@ fn manual_registry_has_the_exact_definition_and_dispatch_set() {
 }
 
 #[test]
-fn aliases_use_the_same_registry_entry() {
-    let mut catalog = ToolCatalog::default();
-    let select = catalog.find("select_project").unwrap().0;
-    assert_eq!(catalog.find("select_workspace").unwrap().0, select);
-    assert_eq!(catalog.find("choose_workspace").unwrap().0, select);
-    let execution = catalog
-        .dispatch(
-            "vmux_read_file",
-            serde_json::json!({}),
-            None,
-            "",
-            false,
-            false,
-        )
-        .unwrap();
+fn aliases_resolve_to_the_same_tool_entity() {
+    let mut app = ToolsPlugin::app();
+    let select = ToolCall::find(app.world_mut(), "select_project").unwrap().0;
+    assert_eq!(
+        ToolCall::find(app.world_mut(), "select_workspace")
+            .unwrap()
+            .0,
+        select
+    );
+    assert_eq!(
+        ToolCall::find(app.world_mut(), "choose_workspace")
+            .unwrap()
+            .0,
+        select
+    );
+    let execution = ToolCall::dispatch(
+        app.world_mut(),
+        "vmux_read_file",
+        serde_json::json!({}),
+        None,
+        "",
+        false,
+        false,
+    )
+    .unwrap();
     assert!(matches!(
         execution,
         ToolExecution::Protocol {
@@ -668,9 +683,13 @@ fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
 #[test]
 fn project_tools_dispatch_with_anchor_and_branch() {
     let anchor = vmux_client::protocol::ProcessId::new();
-    let worktree_definition = create_worktree_definition();
-    let select_definition = select_project_definition();
-    let choice_definition = request_user_choice_definition();
+    let definitions = tool_definitions()
+        .into_iter()
+        .map(|definition| (definition.name.clone(), definition))
+        .collect::<std::collections::HashMap<_, _>>();
+    let worktree_definition = &definitions["create_worktree"];
+    let select_definition = &definitions["select_project"];
+    let choice_definition = &definitions["request_user_choice"];
     assert!(
         worktree_definition
             .description
