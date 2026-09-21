@@ -19,6 +19,11 @@ if [[ ! -x "$BINARY" ]]; then
     exit 1
 fi
 
+if ! lipo -archs "$BINARY" | tr ' ' '\n' | grep -qx arm64; then
+    echo "CEF framework is not ARM64: $BINARY" >&2
+    exit 1
+fi
+
 ACTUAL_DYLIB_VERSION="$(otool -L "$BINARY" | awk '
     /compatibility version/ {
         sub(/^.*compatibility version /, "")
