@@ -15,6 +15,7 @@ use bevy::{
         lifecycle::HookContext, message::Messages, relationship::Relationship, world::DeferredWorld,
     },
     prelude::*,
+    tasks::{IoTaskPool, Task, futures_lite::future},
 };
 use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
@@ -130,14 +131,8 @@ struct PaneClosePlugin;
 
 impl Plugin for PaneClosePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                process_pending_pane_closes,
-                process_force_pane_closes,
-                process_pending_stack_closes,
-            ),
-        );
+        app.init_resource::<CloseDialog>()
+            .add_systems(Update, (process_close_dialogs, process_force_pane_closes));
     }
 }
 
@@ -146,6 +141,154 @@ pub struct PendingPaneClose;
 
 #[derive(Component)]
 pub struct ForcePaneClose;
+
+#[derive(Clone, Copy)]
+enum CloseTarget {
+    Pane(Entity),
+    Stack(Entity),
+}
+
+impl CloseTarget {
+    fn confirm(self, world: &mut World) {
+        match self {
+            Self::Pane(pane) => {
+                let Ok(mut entity_mut) = world.get_entity_mut(pane) else {
+                    return;
+                };
+                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+
+                let mut current = pane;
+                for _ in 0..10 {
+                    if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
+                        if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                            entity_mut.insert(LastActivatedAt::now());
+                        }
+                        break;
+                    }
+                    if let Some(child_of) = world.get::<ChildOf>(current) {
+                        current = child_of.get();
+                    } else {
+                        break;
+                    }
+                }
+                world
+                    .resource_mut::<Messages<AppCommand>>()
+                    .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+            }
+            Self::Stack(stack) => {
+                let Some(parent_pane) = world.get::<ChildOf>(stack).map(|child| child.get()) else {
+                    return;
+                };
+                let sibling_stacks: Vec<Entity> = world
+                    .get::<Children>(parent_pane)
+                    .map(|children| {
+                        children
+                            .iter()
+                            .filter(|&entity| {
+                                entity != stack && world.get::<Stack>(entity).is_some()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let was_active = {
+                    let mut query = world.query::<(Entity, &LastActivatedAt)>();
+                    let stacks_with_timestamp: Vec<(Entity, LastActivatedAt)> = world
+                        .get::<Children>(parent_pane)
+                        .map(|children| {
+                            children
+                                .iter()
+                                .filter_map(|entity| query.get(world, entity).ok())
+                                .filter(|(entity, _)| world.get::<Stack>(*entity).is_some())
+                                .map(|(entity, timestamp)| (entity, *timestamp))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    stacks_with_timestamp
+                        .iter()
+                        .max_by_key(|(_, timestamp)| timestamp.0)
+                        .map(|(entity, _)| *entity)
+                        == Some(stack)
+                };
+
+                world.despawn(stack);
+                if was_active
+                    && let Some(&next) = sibling_stacks.first()
+                    && let Ok(mut entity_mut) = world.get_entity_mut(next)
+                {
+                    entity_mut.insert(LastActivatedAt::now());
+                }
+            }
+        }
+    }
+}
+
+enum CloseDialogTask {
+    Pending {
+        target: CloseTarget,
+        task: Task<bool>,
+    },
+    #[cfg(test)]
+    Ready {
+        target: CloseTarget,
+        confirmed: bool,
+    },
+}
+
+impl CloseDialogTask {
+    fn target(&self) -> CloseTarget {
+        match self {
+            Self::Pending { target, .. } => *target,
+            #[cfg(test)]
+            Self::Ready { target, .. } => *target,
+        }
+    }
+
+    fn poll(&mut self) -> Option<bool> {
+        match self {
+            Self::Pending { task, .. } => future::block_on(future::poll_once(task)),
+            #[cfg(test)]
+            Self::Ready { confirmed, .. } => Some(*confirmed),
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+struct CloseDialog(Option<CloseDialogTask>);
+
+impl CloseDialog {
+    fn start(
+        &mut self,
+        target: CloseTarget,
+        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+    ) {
+        let task = IoTaskPool::get().spawn(async move {
+            let result = rfd::AsyncMessageDialog::new()
+                .set_title("Close terminal?")
+                .set_description("A process is still running in this terminal. Close anyway?")
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+                .await;
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            matches!(result, rfd::MessageDialogResult::Yes)
+        });
+        self.0 = Some(CloseDialogTask::Pending { target, task });
+    }
+
+    fn poll(&mut self) -> Option<(CloseTarget, bool)> {
+        let task = self.0.as_mut()?;
+        let confirmed = task.poll()?;
+        let target = task.target();
+        self.0 = None;
+        Some((target, confirmed))
+    }
+
+    #[cfg(test)]
+    fn ready(target: CloseTarget, confirmed: bool) -> Self {
+        Self(Some(CloseDialogTask::Ready { target, confirmed }))
+    }
+}
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 const HOVER_COOLDOWN_MS: u64 = 300;
@@ -2492,56 +2635,44 @@ fn entity_tree_has_close_confirmation(
         })
 }
 
-fn show_close_dialog() -> bool {
-    let result = rfd::MessageDialog::new()
-        .set_title("Close terminal?")
-        .set_description("A process is still running in this terminal. Close anyway?")
-        .set_buttons(rfd::MessageButtons::YesNo)
-        .show();
-
-    matches!(result, rfd::MessageDialogResult::Yes)
-}
-
-fn process_pending_pane_closes(world: &mut World) {
-    let pending: Vec<Entity> = world
-        .query_filtered::<Entity, (With<PendingPaneClose>, With<Pane>)>()
-        .iter(world)
-        .collect();
-
-    if pending.is_empty() {
+fn process_close_dialogs(world: &mut World) {
+    let resolved = world.resource_mut::<CloseDialog>().poll();
+    if let Some((target, confirmed)) = resolved
+        && confirmed
+    {
+        target.confirm(world);
+    }
+    if world.resource::<CloseDialog>().0.is_some() {
         return;
     }
 
-    for pane in pending {
-        let confirmed = show_close_dialog();
-
-        if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
-            entity_mut.remove::<PendingPaneClose>();
-        }
-
-        if confirmed {
-            if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
-                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
-            }
-            let mut current = pane;
-            for _ in 0..10 {
-                if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
-                    if let Ok(mut entity_mut) = world.get_entity_mut(current) {
-                        entity_mut.insert(LastActivatedAt::now());
-                    }
-                    break;
-                }
-                if let Some(co) = world.get::<ChildOf>(current) {
-                    current = co.get();
-                } else {
-                    break;
-                }
-            }
+    let target = world
+        .query_filtered::<Entity, (With<PendingPaneClose>, With<Pane>)>()
+        .iter(world)
+        .next()
+        .map(CloseTarget::Pane)
+        .or_else(|| {
             world
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
-        }
+                .query_filtered::<Entity, (With<PendingStackClose>, With<Stack>)>()
+                .iter(world)
+                .next()
+                .map(CloseTarget::Stack)
+        });
+    let Some(target) = target else {
+        return;
+    };
+    let entity = match target {
+        CloseTarget::Pane(entity) | CloseTarget::Stack(entity) => entity,
+    };
+    if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+        entity_mut
+            .remove::<PendingPaneClose>()
+            .remove::<PendingStackClose>();
     }
+    let wake = world
+        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+        .map(|proxy| (**proxy).clone());
+    world.resource_mut::<CloseDialog>().start(target, wake);
 }
 
 fn process_force_pane_closes(world: &mut World) {
@@ -2578,72 +2709,6 @@ fn process_force_pane_closes(world: &mut World) {
         world
             .resource_mut::<Messages<AppCommand>>()
             .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
-    }
-}
-
-fn process_pending_stack_closes(world: &mut World) {
-    let pending: Vec<Entity> = world
-        .query_filtered::<Entity, (With<PendingStackClose>, With<Stack>)>()
-        .iter(world)
-        .collect();
-
-    if pending.is_empty() {
-        return;
-    }
-
-    for stack in pending {
-        let confirmed = show_close_dialog();
-
-        if let Ok(mut entity_mut) = world.get_entity_mut(stack) {
-            entity_mut.remove::<PendingStackClose>();
-        }
-
-        if !confirmed {
-            continue;
-        }
-
-        let Some(parent_pane) = world.get::<ChildOf>(stack).map(|c| c.get()) else {
-            continue;
-        };
-
-        let sibling_stacks: Vec<Entity> = world
-            .get::<Children>(parent_pane)
-            .map(|children| {
-                children
-                    .iter()
-                    .filter(|&e| e != stack && world.get::<Stack>(e).is_some())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let was_active = {
-            let mut q = world.query::<(Entity, &LastActivatedAt)>();
-            let stacks_with_ts: Vec<(Entity, LastActivatedAt)> = world
-                .get::<Children>(parent_pane)
-                .map(|children| {
-                    children
-                        .iter()
-                        .filter_map(|e| q.get(world, e).ok())
-                        .filter(|(e, _)| world.get::<Stack>(*e).is_some())
-                        .map(|(e, ts)| (e, *ts))
-                        .collect()
-                })
-                .unwrap_or_default();
-            stacks_with_ts
-                .iter()
-                .max_by_key(|(_, ts)| ts.0)
-                .map(|(e, _)| *e)
-                == Some(stack)
-        };
-
-        world.despawn(stack);
-
-        if was_active
-            && let Some(&next) = sibling_stacks.first()
-            && let Ok(mut entity_mut) = world.get_entity_mut(next)
-        {
-            entity_mut.insert(LastActivatedAt::now());
-        }
     }
 }
 
@@ -4704,6 +4769,38 @@ mod tests {
             })
             .collect();
         assert_eq!(closes.len(), 1, "exactly one PaneCommand::Close dispatched");
+    }
+
+    #[test]
+    fn confirmed_close_dialog_dispatches_pane_close() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, PaneClosePlugin));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .insert_resource(CloseDialog::ready(CloseTarget::Pane(pane), true));
+
+        app.update();
+
+        assert!(app.world().get::<CloseConfirmed>(pane).is_some());
+        let closes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .filter(|command| {
+                matches!(
+                    command,
+                    AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
+                )
+            })
+            .collect();
+        assert_eq!(closes.len(), 1);
     }
 
     #[test]

@@ -208,22 +208,6 @@ pub fn has_live_terminal(
     }
 }
 
-pub fn confirm_quit_dialog(count: usize) -> bool {
-    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-    let msg = if count == 1 {
-        "A terminal is still running. Quit anyway?".to_string()
-    } else {
-        format!("{count} terminals are still running. Quit anyway?")
-    };
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Quit Vmux?")
-        .set_description(&msg)
-        .set_buttons(MessageButtons::OkCancel)
-        .show();
-    matches!(result, MessageDialogResult::Ok)
-}
-
 pub use vmux_service::client::ServiceClient;
 
 #[derive(Resource, Clone)]

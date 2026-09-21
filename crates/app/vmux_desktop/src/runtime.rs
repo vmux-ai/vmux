@@ -15,6 +15,8 @@ pub(crate) use macos::ensure_native_window_active;
 
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
+#[cfg(feature = "tray")]
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_cef_core::prelude::{
@@ -22,8 +24,6 @@ use bevy_cef_core::prelude::{
 };
 use std::time::Duration;
 
-#[cfg(feature = "tray")]
-use vmux_terminal as terminal;
 #[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
 
@@ -36,6 +36,11 @@ impl Plugin for RuntimePlugin {
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
             .add_systems(Update, keep_awake_while_revealing);
+        #[cfg(feature = "tray")]
+        app.add_systems(
+            Update,
+            resolve_quit_confirmation.after(handle_lifecycle_events),
+        );
     }
 }
 
@@ -51,6 +56,44 @@ pub enum LifecycleEvent {
     ShowAllWindows,
     #[cfg(feature = "tray")]
     QuitVmux,
+}
+
+#[cfg(feature = "tray")]
+#[derive(Resource)]
+struct QuitConfirmation {
+    task: Task<bool>,
+}
+
+#[cfg(feature = "tray")]
+impl QuitConfirmation {
+    fn start(
+        count: usize,
+        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+    ) -> Self {
+        let task = IoTaskPool::get().spawn(async move {
+            let description = if count == 1 {
+                "A terminal is still running. Quit anyway?".to_string()
+            } else {
+                format!("{count} terminals are still running. Quit anyway?")
+            };
+            let result = rfd::AsyncMessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("Quit Vmux?")
+                .set_description(description)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                .await;
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            matches!(result, rfd::MessageDialogResult::Ok)
+        });
+        Self { task }
+    }
+
+    fn poll(&mut self) -> Option<bool> {
+        future::block_on(future::poll_once(&mut self.task))
+    }
 }
 
 pub(crate) fn foreground_winit_settings(
@@ -177,7 +220,14 @@ fn handle_lifecycle_events(world: &mut World) {
                     let mut q = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
                     q.iter(world).count()
                 };
-                if live > 0 && !terminal::confirm_quit_dialog(live) {
+                if live > 0 {
+                    if world.contains_resource::<QuitConfirmation>() {
+                        continue;
+                    }
+                    let wake = world
+                        .get_resource::<EventLoopProxyWrapper>()
+                        .map(|proxy| (**proxy).clone());
+                    world.insert_resource(QuitConfirmation::start(live, wake));
                     continue;
                 }
                 world
@@ -185,6 +235,25 @@ fn handle_lifecycle_events(world: &mut World) {
                     .write(AppExit::Success);
             }
         }
+    }
+}
+
+#[cfg(feature = "tray")]
+fn resolve_quit_confirmation(world: &mut World) {
+    let confirmed = {
+        let Some(mut confirmation) = world.get_resource_mut::<QuitConfirmation>() else {
+            return;
+        };
+        confirmation.poll()
+    };
+    let Some(confirmed) = confirmed else {
+        return;
+    };
+    world.remove_resource::<QuitConfirmation>();
+    if confirmed {
+        world
+            .resource_mut::<Messages<AppExit>>()
+            .write(AppExit::Success);
     }
 }
 
@@ -198,19 +267,25 @@ fn hide_all_osr_webviews(world: &mut World) {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "tray")]
     #[test]
-    fn handle_lifecycle_events_uses_world_for_confirm_dialog() {
-        let source = include_str!("runtime.rs");
-        let exclusive_marker = ["world", ": ", "&mut", " World"].concat();
-        assert!(
-            source.contains(&exclusive_marker),
-            "handle_lifecycle_events must be an exclusive &mut World system to call confirm_quit_dialog"
-        );
-        let confirm_call = ["confirm", "_quit_dialog"].concat();
-        assert!(
-            source.contains(&confirm_call),
-            "QuitVmux arm must call terminal::confirm_quit_dialog"
-        );
+    fn quit_without_live_terminal_exits_immediately() {
+        let mut app = App::new();
+        app.add_message::<LifecycleEvent>()
+            .add_message::<AppExit>()
+            .add_systems(Update, handle_lifecycle_events);
+        app.world_mut()
+            .resource_mut::<Messages<LifecycleEvent>>()
+            .write(LifecycleEvent::QuitVmux);
+
+        app.update();
+
+        let exits: Vec<AppExit> = app
+            .world_mut()
+            .resource_mut::<Messages<AppExit>>()
+            .drain()
+            .collect();
+        assert_eq!(exits, vec![AppExit::Success]);
     }
 
     #[test]
