@@ -328,10 +328,10 @@ mod tests {
         }
     }
 
-    impl Agents {
-        fn named(named: &[(&str, &str)]) -> Self {
+    impl<const N: usize> From<[(&str, &str); N]> for Agents {
+        fn from(named: [(&str, &str); N]) -> Self {
             let mut agents = Vec::with_capacity(named.len());
-            for (name, icon) in named {
+            for (name, icon) in &named {
                 agents.push(RemoteAgent {
                     id: name.to_string(),
                     name: name.to_string(),
@@ -515,7 +515,7 @@ mod tests {
         let mut started = Started::open();
         assert!(started.snapshot().agent_icon.is_empty());
 
-        started.insert(Agents::named(&[("grace", "G"), ("ada", "A")]));
+        started.insert(Agents::from([("grace", "G"), ("ada", "A")]));
         assert_eq!(
             started.snapshot().agent_icon,
             "A",
