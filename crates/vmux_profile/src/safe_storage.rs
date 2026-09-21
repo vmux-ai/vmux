@@ -94,6 +94,7 @@ impl RootKey {
         Self(Zeroizing::new(bytes))
     }
 
+    #[cfg(target_os = "macos")]
     fn duplicate(&self) -> Self {
         Self::new(*self.0)
     }
