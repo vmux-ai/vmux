@@ -11,19 +11,10 @@ impl PathIdentity {
             return Self(canonical);
         }
 
-        let mut ancestor = path;
-        let mut suffix = Vec::<OsString>::new();
-        while let Some(parent) = ancestor.parent() {
-            if let Some(name) = ancestor.file_name() {
-                suffix.push(name.to_os_string());
-            }
-            if let Ok(mut canonical) = parent.canonicalize() {
-                for component in suffix.iter().rev() {
-                    canonical.push(component);
-                }
-                return Self(Self::normalize(&canonical));
-            }
-            ancestor = parent;
+        if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
+            && let Ok(canonical_parent) = parent.canonicalize()
+        {
+            return Self(canonical_parent.join(name));
         }
         Self(Self::normalize(path))
     }
@@ -55,6 +46,28 @@ impl PathIdentity {
         }
         normalized
     }
+
+    fn through_existing_ancestor(path: &Path) -> Self {
+        if let Ok(canonical) = path.canonicalize() {
+            return Self(canonical);
+        }
+
+        let mut ancestor = path;
+        let mut suffix = Vec::<OsString>::new();
+        while let Some(parent) = ancestor.parent() {
+            if let Some(name) = ancestor.file_name() {
+                suffix.push(name.to_os_string());
+            }
+            if let Ok(mut canonical) = parent.canonicalize() {
+                for component in suffix.iter().rev() {
+                    canonical.push(component);
+                }
+                return Self(Self::normalize(&canonical));
+            }
+            ancestor = parent;
+        }
+        Self(Self::normalize(path))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,9 +88,9 @@ impl ScopedPath {
 
         let root = PathIdentity::resolve(root);
         let candidate = if path.is_absolute() {
-            PathIdentity::resolve(path)
+            PathIdentity::through_existing_ancestor(path)
         } else {
-            PathIdentity::resolve(root.as_path().join(path))
+            PathIdentity::through_existing_ancestor(&root.as_path().join(path))
         };
         if !candidate.as_path().starts_with(root.as_path()) {
             return Err(ScopedPathError::OutsideRoot);
