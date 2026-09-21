@@ -1,6 +1,9 @@
-use super::{DispatchTarget, ProtocolTool, ToolCall, ToolManifest};
-use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::{Commands, On};
+use super::{
+    DispatchTarget, ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution,
+    ToolManifest, ToolRegistrationSet,
+};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
 use serde::Deserialize;
 use vmux_client::protocol::AgentCommand;
 
@@ -8,15 +11,49 @@ pub(super) struct KnowledgeToolsPlugin;
 
 impl Plugin for KnowledgeToolsPlugin {
     fn build(&self, app: &mut App) {
-        let mut tools = ToolManifest::from_ron(include_str!("knowledge.ron"));
-        tools.protocol(app, "vault_status", ProtocolTool::VaultStatus);
-        tools.observe(app, "open_vault", open_vault);
-        tools.observe(app, "set_conversation_title", set_conversation_title);
-        tools.observe(app, "search_knowledge", search);
-        tools.observe(app, "read_knowledge", read);
-        tools.observe(app, "write_knowledge", write);
-        tools.finish();
+        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Knowledge))
+            .add_systems(
+                Update,
+                (
+                    vault_status,
+                    open_vault,
+                    set_conversation_title,
+                    search,
+                    read,
+                    write,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
+}
+
+#[derive(Component)]
+struct VaultStatus;
+
+#[derive(Component)]
+struct OpenVault;
+
+#[derive(Component)]
+struct SetConversationTitle;
+
+#[derive(Component)]
+struct SearchKnowledge;
+
+#[derive(Component)]
+struct ReadKnowledge;
+
+#[derive(Component)]
+struct WriteKnowledge;
+
+fn register(world: &mut World) {
+    let mut tools = ToolManifest::from_ron(include_str!("knowledge.ron"));
+    tools.system(world, "vault_status", VaultStatus);
+    tools.system(world, "open_vault", OpenVault);
+    tools.system(world, "set_conversation_title", SetConversationTitle);
+    tools.system(world, "search_knowledge", SearchKnowledge);
+    tools.system(world, "read_knowledge", ReadKnowledge);
+    tools.system(world, "write_knowledge", WriteKnowledge);
+    tools.finish();
 }
 
 #[derive(Deserialize)]
@@ -57,7 +94,21 @@ struct WriteArgs {
     content: Option<String>,
 }
 
-fn open_vault(trigger: On<ToolCall>, mut commands: Commands) {
+fn vault_status(mut commands: Commands, calls: ToolCalls<VaultStatus>) {
+    for (request, call, _) in calls.iter() {
+        call.finish(
+            request,
+            &mut commands,
+            Ok(ToolExecution::Protocol {
+                tool: ProtocolTool::VaultStatus,
+                arguments: call.arguments.clone(),
+                anchor: call.anchor,
+            }),
+        );
+    }
+}
+
+fn open_vault(mut commands: Commands, calls: ToolCalls<OpenVault>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_vault")?;
         let args: OpenVaultArgs = call.parse("open_vault")?;
@@ -74,10 +125,12 @@ fn open_vault(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn set_conversation_title(trigger: On<ToolCall>, mut commands: Commands) {
+fn set_conversation_title(mut commands: Commands, calls: ToolCalls<SetConversationTitle>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("set_conversation_title")?;
         let args: SetConversationTitleArgs = call.parse("set_conversation_title")?;
@@ -90,10 +143,12 @@ fn set_conversation_title(trigger: On<ToolCall>, mut commands: Commands) {
         ))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn search(trigger: On<ToolCall>, mut commands: Commands) {
+fn search(mut commands: Commands, calls: ToolCalls<SearchKnowledge>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("search_knowledge")?;
         let args: SearchArgs = call.parse("search_knowledge")?;
@@ -109,10 +164,12 @@ fn search(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn read(trigger: On<ToolCall>, mut commands: Commands) {
+fn read(mut commands: Commands, calls: ToolCalls<ReadKnowledge>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("read_knowledge")?;
         let args: ReadArgs = call.parse("read_knowledge")?;
@@ -133,10 +190,12 @@ fn read(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn write(trigger: On<ToolCall>, mut commands: Commands) {
+fn write(mut commands: Commands, calls: ToolCalls<WriteKnowledge>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("write_knowledge")?;
         let args: WriteArgs = call.parse("write_knowledge")?;
@@ -151,7 +210,9 @@ fn write(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
 struct Text;

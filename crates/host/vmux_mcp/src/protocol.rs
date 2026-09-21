@@ -19,17 +19,35 @@ impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::tools::ToolsPlugin)
             .init_resource::<NextRequestSequence>()
+            .configure_sets(
+                Update,
+                (
+                    McpSet::Route,
+                    crate::tools::ToolDispatchSet,
+                    McpSet::StartTasks,
+                    McpSet::PollTasks,
+                    McpSet::BuildResponses,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
                 (
-                    route_request,
-                    start_tool_tasks,
-                    poll_tool_tasks,
-                    build_responses,
-                )
-                    .chain(),
+                    route_request.in_set(McpSet::Route),
+                    start_tool_tasks.in_set(McpSet::StartTasks),
+                    poll_tool_tasks.in_set(McpSet::PollTasks),
+                    build_responses.in_set(McpSet::BuildResponses),
+                ),
             );
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+enum McpSet {
+    Route,
+    StartTasks,
+    PollTasks,
+    BuildResponses,
 }
 
 pub struct McpServer {
@@ -299,9 +317,8 @@ fn route_request(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            commands.trigger(crate::tools::ToolCall {
-                entity: tool,
-                request: entity,
+            commands.entity(entity).insert(crate::tools::ToolCall {
+                tool,
                 name: registered.as_str().to_string(),
                 arguments,
                 anchor: config.anchor,

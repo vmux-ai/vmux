@@ -1,6 +1,8 @@
-use super::{DispatchTarget, ToolCall, ToolManifest};
-use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::{Commands, On};
+use super::{
+    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
 use serde::Deserialize;
 use vmux_client::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
 
@@ -8,15 +10,41 @@ pub(super) struct BookmarkToolsPlugin;
 
 impl Plugin for BookmarkToolsPlugin {
     fn build(&self, app: &mut App) {
-        let mut tools = ToolManifest::from_ron(include_str!("bookmark.ron"));
-        tools.observe(app, "bookmark_list", list);
-        tools.observe(app, "bookmark_add", add);
-        tools.observe(app, "bookmark_remove", remove);
-        tools.observe(app, "bookmark_pin", pin);
-        tools.observe(app, "bookmark_unpin", unpin);
-        tools.observe(app, "bookmark_folder_create", create_folder);
-        tools.finish();
+        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Bookmark))
+            .add_systems(
+                Update,
+                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+            );
     }
+}
+
+#[derive(Component)]
+struct ListBookmarks;
+
+#[derive(Component)]
+struct AddBookmark;
+
+#[derive(Component)]
+struct RemoveBookmark;
+
+#[derive(Component)]
+struct PinBookmark;
+
+#[derive(Component)]
+struct UnpinBookmark;
+
+#[derive(Component)]
+struct CreateBookmarkFolder;
+
+fn register(world: &mut World) {
+    let mut tools = ToolManifest::from_ron(include_str!("bookmark.ron"));
+    tools.system(world, "bookmark_list", ListBookmarks);
+    tools.system(world, "bookmark_add", AddBookmark);
+    tools.system(world, "bookmark_remove", RemoveBookmark);
+    tools.system(world, "bookmark_pin", PinBookmark);
+    tools.system(world, "bookmark_unpin", UnpinBookmark);
+    tools.system(world, "bookmark_folder_create", CreateBookmarkFolder);
+    tools.finish();
 }
 
 #[derive(Deserialize)]
@@ -45,14 +73,17 @@ struct FolderArgs {
     name: Option<String>,
 }
 
-fn list(trigger: On<ToolCall>, mut commands: Commands) {
-    trigger.finish_dispatch(
-        &mut commands,
-        Ok(DispatchTarget::Query(AgentQuery::BookmarkList)),
-    );
+fn list(mut commands: Commands, calls: ToolCalls<ListBookmarks>) {
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(
+            request,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::BookmarkList)),
+        );
+    }
 }
 
-fn add(trigger: On<ToolCall>, mut commands: Commands) {
+fn add(mut commands: Commands, calls: ToolCalls<AddBookmark>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: PageArgs = call.parse("bookmark_add")?;
         let url = RequiredText::get(args.url, "bookmark_add.url is required")?;
@@ -68,10 +99,12 @@ fn add(trigger: On<ToolCall>, mut commands: Commands) {
         )))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn remove(trigger: On<ToolCall>, mut commands: Commands) {
+fn remove(mut commands: Commands, calls: ToolCalls<RemoveBookmark>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: UuidArgs = call.parse("bookmark_remove")?;
         let uuid = RequiredText::get(args.uuid, "bookmark_remove.uuid is required")?;
@@ -80,10 +113,12 @@ fn remove(trigger: On<ToolCall>, mut commands: Commands) {
         )))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn pin(trigger: On<ToolCall>, mut commands: Commands) {
+fn pin(mut commands: Commands, calls: ToolCalls<PinBookmark>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: PinArgs = call.parse("bookmark_pin")?;
         if let Some(uuid) = RequiredText::optional(args.uuid) {
@@ -103,10 +138,12 @@ fn pin(trigger: On<ToolCall>, mut commands: Commands) {
         )))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn unpin(trigger: On<ToolCall>, mut commands: Commands) {
+fn unpin(mut commands: Commands, calls: ToolCalls<UnpinBookmark>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: UuidArgs = call.parse("bookmark_unpin")?;
         let uuid = RequiredText::get(args.uuid, "bookmark_unpin.uuid is required")?;
@@ -115,10 +152,12 @@ fn unpin(trigger: On<ToolCall>, mut commands: Commands) {
         )))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn create_folder(trigger: On<ToolCall>, mut commands: Commands) {
+fn create_folder(mut commands: Commands, calls: ToolCalls<CreateBookmarkFolder>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: FolderArgs = call.parse("bookmark_folder_create")?;
         let name = RequiredText::get(args.name, "bookmark_folder_create.name is required")?;
@@ -127,7 +166,9 @@ fn create_folder(trigger: On<ToolCall>, mut commands: Commands) {
         )))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
 struct RequiredText;
