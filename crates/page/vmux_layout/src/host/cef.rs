@@ -72,10 +72,13 @@ pub(crate) fn apply_cef_state_to_meta(
     meta: &mut vmux_core::PageMetadata,
     ev: bevy_cef_core::prelude::WebviewCefStateEvent,
 ) {
-    let on_native_view = meta.url.starts_with("vmux://");
-    let accepts_dynamic_title =
-        meta.url.starts_with("vmux://sessions/") || meta.url.starts_with("vmux://agent/");
-    let navigating_away = ev.url.as_deref().is_some_and(|u| !u.starts_with("vmux://"));
+    let route = vmux_api::VmuxRoute::parse(&meta.url);
+    let on_native_view = route.is_some();
+    let accepts_dynamic_title = route.is_some_and(|route| route.is_agent());
+    let navigating_away = ev
+        .url
+        .as_deref()
+        .is_some_and(|url| vmux_api::VmuxRoute::parse(url).is_none());
     if on_native_view && !navigating_away {
         if accepts_dynamic_title && let Some(title) = ev.title {
             meta.title = title;

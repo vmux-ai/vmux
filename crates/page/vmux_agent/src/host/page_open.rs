@@ -499,7 +499,7 @@ fn handle_agent_page_open(
         .map(|(entity, task)| (entity, task.clone()))
         .collect();
     for (entity, task) in tasks {
-        if !task.url.starts_with("vmux://sessions/") && !task.url.starts_with("vmux://agent/") {
+        if !vmux_api::VmuxRoute::parse(&task.url).is_some_and(|route| route.is_agent()) {
             continue;
         }
         let tab = ancestor_agent_tab(task.stack, &child_of_q, &workspace.tabs);

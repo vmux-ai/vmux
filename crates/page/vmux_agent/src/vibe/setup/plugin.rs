@@ -70,7 +70,13 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
 }
 
 fn close_install_pane_after_success(url: &str) -> bool {
-    url.trim_end_matches('/') == "vmux://tools/acp"
+    let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+        return false;
+    };
+    let Some(install) = vmux_api::VmuxRoute::parse("vmux://tools/acp") else {
+        return false;
+    };
+    route.same_page(&install)
 }
 
 fn detect_agent_install_outcome(

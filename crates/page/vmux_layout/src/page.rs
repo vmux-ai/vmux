@@ -1561,14 +1561,6 @@ fn pairing_qr_svg(value: &str) -> Option<String> {
     )
 }
 
-struct PageUrl;
-
-impl PageUrl {
-    fn matches(left: &str, right: &str) -> bool {
-        left.trim_end_matches('/') == right.trim_end_matches('/')
-    }
-}
-
 #[component]
 fn BookmarksSection(
     bookmarks: BookmarksHostEvent,
@@ -1704,7 +1696,13 @@ fn BookmarksSection(
                                         row: pin.clone(),
                                         index,
                                         pin_order: rendered_pin_order.clone(),
-                                        active: active_url.as_ref().is_some_and(|active_url| PageUrl::matches(active_url, &pin.metadata.url)),
+                                        active: active_url.as_ref().is_some_and(|active_url| {
+                                            let Some(active) = vmux_api::VmuxRoute::parse(active_url) else {
+                                                return false;
+                                            };
+                                            vmux_api::VmuxRoute::parse(&pin.metadata.url)
+                                                .is_some_and(|pin| active.same_page(&pin))
+                                        }),
                                     }
                                 }
                             }
@@ -3259,7 +3257,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                             }
                         },
                         title: "{row.metadata.title}",
-                        if row.metadata.url.starts_with("vmux://") {
+                        if vmux_api::VmuxRoute::parse(&row.metadata.url).is_some() {
                             Favicon {
                                 favicon_url: row.metadata.icon.favicon_url().to_string(),
                                 url: row.metadata.url.clone(),
@@ -4368,12 +4366,18 @@ impl StackTitle {
 }
 
 fn localized_stack_title(stack: &StackNode) -> String {
-    match stack.url.trim_end_matches('/') {
-        "vmux://start" => translate("start-title"),
-        "vmux://settings" => translate("settings-title"),
-        _ if stack.url.is_empty() && stack.title == "New Stack" => translate("layout-new-stack"),
-        _ => stack.title.clone(),
+    if let Some(route) = vmux_api::VmuxRoute::parse(&stack.url) {
+        if route.is_host("start") && route.is_root() {
+            return translate("start-title");
+        }
+        if route.is_host("settings") && route.is_root() {
+            return translate("settings-title");
+        }
     }
+    if stack.url.is_empty() && stack.title == "New Stack" {
+        return translate("layout-new-stack");
+    }
+    stack.title.clone()
 }
 
 fn download_pct(downloaded: u64, total: u64) -> u64 {
@@ -4414,13 +4418,6 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn page_url_matches_with_or_without_a_trailing_slash() {
-        assert!(PageUrl::matches("vmux://start", "vmux://start/"));
-        assert!(PageUrl::matches("vmux://start/", "vmux://start"));
-        assert!(!PageUrl::matches("vmux://start", "vmux://projects"));
-    }
 
     #[test]
     fn active_session_matches_the_agent_by_session_id() {

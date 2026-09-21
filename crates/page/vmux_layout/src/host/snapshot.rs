@@ -132,7 +132,7 @@ fn build_node(
 }
 
 fn stack_kind_for_url(url: &str) -> &'static str {
-    if url.starts_with("vmux://terminal/") {
+    if vmux_api::VmuxRoute::parse(url).is_some_and(|route| route.is_terminal()) {
         "terminal"
     } else if url.starts_with("file:") {
         "files"

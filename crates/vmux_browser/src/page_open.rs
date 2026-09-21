@@ -1,5 +1,5 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_api::error::ErrorPageData;
+use vmux_api::{VmuxRoute, error::ErrorPageData};
 
 use vmux_core::{
     CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
@@ -14,8 +14,7 @@ use vmux_layout::{
 
 use crate::{
     NavPending, PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavSnapshots,
-    attach_cef_page_to_stack, attach_error_page_to_stack, normalize_vmux_url,
-    send_page_open_response,
+    attach_cef_page_to_stack, attach_error_page_to_stack, send_page_open_response,
 };
 
 pub(crate) struct PageOpenPlugin;
@@ -64,7 +63,8 @@ pub(crate) fn handle_page_open_requests(
         let task = PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: normalize_vmux_url(&request.url),
+            url: VmuxRoute::canonical(&request.url)
+                .unwrap_or_else(|| request.url.trim().to_string()),
             request_id: request.request_id,
         };
         if request.request_id.is_some() {
@@ -170,7 +170,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 &mut commands,
             );
             commands.entity(entity).insert(PageOpenHandled);
-        } else if task.url.starts_with("vmux://error/") {
+        } else if VmuxRoute::parse(&task.url).is_some_and(|route| route.is_host("error")) {
             attach_error_page_to_stack(
                 task.stack,
                 ErrorPageData::failed_to_load(&task.url, &task.url),
@@ -178,7 +178,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 &mut commands,
             );
             commands.entity(entity).insert(PageOpenHandled);
-        } else if task.url.starts_with("vmux://") {
+        } else if VmuxRoute::parse(&task.url).is_some() {
             if deferred_once.is_none() {
                 commands.entity(entity).insert(PageOpenFallbackDeferred);
                 continue;

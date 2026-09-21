@@ -116,10 +116,11 @@ pub struct RestartAgentPty {
 }
 
 pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>)> {
-    let body = url
-        .strip_prefix("vmux://sessions/")
-        .or_else(|| url.strip_prefix("vmux://agent/"))?;
-    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    let route = vmux_api::VmuxRoute::parse(url)?;
+    if !route.is_agent() {
+        return None;
+    }
+    let segs: Vec<&str> = route.path_segments().collect();
     match segs.as_slice() {
         [provider, model] => Some(((*provider).to_string(), (*model).to_string(), None)),
         [provider, model, sid] => Some((
@@ -132,10 +133,11 @@ pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>
 }
 
 pub fn parse_acp_agent_url(url: &str) -> Option<String> {
-    let body = url
-        .strip_prefix("vmux://sessions/")
-        .or_else(|| url.strip_prefix("vmux://agent/"))?;
-    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    let route = vmux_api::VmuxRoute::parse(url)?;
+    if !route.is_agent() {
+        return None;
+    }
+    let segs: Vec<&str> = route.path_segments().collect();
     match segs.as_slice() {
         [id] => Some((*id).to_string()),
         _ => None,

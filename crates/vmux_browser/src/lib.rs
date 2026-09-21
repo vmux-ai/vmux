@@ -725,38 +725,6 @@ fn should_emit_update(
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
 }
 
-fn normalize_vmux_url(url: &str) -> String {
-    let url = url.trim();
-    if matches!(url, "vmux://tools" | "vmux://tools/") {
-        return "vmux://tools/acp".to_string();
-    }
-    if matches!(url, "vmux://agents" | "vmux://agents/") {
-        return "vmux://tools/acp".to_string();
-    }
-    if matches!(url, "vmux://lsp" | "vmux://lsp/") {
-        return "vmux://tools/lsp".to_string();
-    }
-    if matches!(url, "vmux://extensions" | "vmux://extensions/") {
-        return "vmux://tools/extensions".to_string();
-    }
-    if let Some(canonical) = vmux_shortcut::ShortcutUrl::canonical(url) {
-        return canonical.to_string();
-    }
-    if let Some(rest) = url.strip_prefix("vmux://agent")
-        && (rest.is_empty() || rest.starts_with('/'))
-    {
-        return normalize_vmux_url(&format!("vmux://sessions{rest}"));
-    }
-    if let Some(rest) = url.strip_prefix("vmux://")
-        && !rest.is_empty()
-        && !rest.contains('/')
-        && !rest.contains('?')
-    {
-        return format!("vmux://{rest}/");
-    }
-    url.to_string()
-}
-
 #[derive(Component, Clone, Debug)]
 struct PageOpenFallbackDeferred;
 
@@ -851,52 +819,6 @@ mod tests {
             cef_command_line_config()
                 .switch_values
                 .contains(&("disable-features", "BackForwardCache"))
-        );
-    }
-
-    #[test]
-    fn normalize_vmux_url_trims_and_adds_trailing_slash_to_bare_host() {
-        assert_eq!(normalize_vmux_url("vmux://tools"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://tools/"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://agents/"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://tools/lsp");
-        assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
-        assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://tools/lsp");
-        assert_eq!(
-            normalize_vmux_url("vmux://extensions/"),
-            "vmux://tools/extensions"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://shortcuts"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://cheatsheet/"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://cheetsheet"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://sessions/vibe/"),
-            "vmux://sessions/vibe/"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://error/?title=x"),
-            "vmux://error/?title=x"
-        );
-        assert_eq!(
-            normalize_vmux_url("file:///tmp/main.rs"),
-            "file:///tmp/main.rs"
-        );
-        assert_eq!(
-            normalize_vmux_url("  vmux://sessions/codex/session-id  "),
-            "vmux://sessions/codex/session-id"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://agent/codex/session-id"),
-            "vmux://sessions/codex/session-id"
         );
     }
 
