@@ -8,6 +8,7 @@ mod workspace;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::name::Name;
+use bevy_ecs::observer::IntoEntityObserver;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,7 +110,7 @@ impl ToolAvailability {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Component, Debug, PartialEq, Eq)]
 pub(crate) enum ProtocolTool {
     ReadFile,
     Grep,
@@ -183,6 +184,20 @@ impl ToolCall {
         commands.entity(self.request).insert(ToolOutcome(result));
     }
 
+    pub(super) fn finish_dispatch(
+        &self,
+        commands: &mut Commands,
+        result: Result<DispatchTarget, String>,
+    ) {
+        let result = result.map(|target| ToolExecution::Dispatch {
+            target,
+            name: self.name.clone(),
+            arguments: self.arguments.clone(),
+            anchor: self.anchor,
+        });
+        self.finish(commands, result);
+    }
+
     fn dispatch(
         world: &mut World,
         name: &str,
@@ -229,8 +244,6 @@ impl ToolCall {
     }
 }
 
-type ToolDispatch = fn(&ToolCall) -> Result<DispatchTarget, String>;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ToolSeed {
@@ -261,33 +274,17 @@ impl ToolSeed {
         }
     }
 
-    pub(super) fn local(self, app: &mut App, dispatch: ToolDispatch) {
+    pub(super) fn observe<M>(self, app: &mut App, observer: impl IntoEntityObserver<M>) {
         let entity = self.spawn(app);
-        app.world_mut().entity_mut(entity).observe(
-            move |trigger: On<ToolCall>, mut commands: Commands| {
-                let result = dispatch(&trigger).map(|target| ToolExecution::Dispatch {
-                    target,
-                    name: trigger.name.clone(),
-                    arguments: trigger.arguments.clone(),
-                    anchor: trigger.anchor,
-                });
-                trigger.finish(&mut commands, result);
-            },
-        );
+        app.world_mut().entity_mut(entity).observe(observer);
     }
 
     pub(super) fn protocol(self, app: &mut App, tool: ProtocolTool) {
         let entity = self.spawn(app);
-        app.world_mut().entity_mut(entity).observe(
-            move |trigger: On<ToolCall>, mut commands: Commands| {
-                let execution = ToolExecution::Protocol {
-                    tool,
-                    arguments: trigger.arguments.clone(),
-                    anchor: trigger.anchor,
-                };
-                trigger.finish(&mut commands, Ok(execution));
-            },
-        );
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(tool)
+            .observe(dispatch_protocol_tool);
     }
 
     fn spawn(self, app: &mut App) -> Entity {
@@ -320,8 +317,13 @@ impl ToolManifest {
         Self(ron::from_str(source).expect("embedded MCP tool definitions must be valid RON"))
     }
 
-    pub(super) fn local(&mut self, app: &mut App, name: &str, dispatch: ToolDispatch) {
-        self.take(name).local(app, dispatch);
+    pub(super) fn observe<M>(
+        &mut self,
+        app: &mut App,
+        name: &str,
+        observer: impl IntoEntityObserver<M>,
+    ) {
+        self.take(name).observe(app, observer);
     }
 
     pub(super) fn protocol(&mut self, app: &mut App, name: &str, tool: ProtocolTool) {
@@ -355,37 +357,61 @@ struct GeneratedTools;
 impl GeneratedTools {
     fn register(app: &mut App) {
         for (name, description, schema) in vmux_command_mcp::tool_entries() {
-            ToolSeed::new(name, description, schema).local(app, Self::dispatch_command);
+            ToolSeed::new(name, description, schema).observe(app, Self::dispatch_command);
         }
         for (name, description, schema) in McpParamTool::mcp_tool_entries() {
-            ToolSeed::new(name, description, schema).local(app, Self::dispatch_param);
+            ToolSeed::new(name, description, schema).observe(app, Self::dispatch_param);
         }
     }
 
-    fn dispatch_command(call: &ToolCall) -> Result<DispatchTarget, String> {
-        if vmux_command_mcp::accepts_id(&call.name) {
-            return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
-                id: call.name.clone(),
-                args_json: String::new(),
-            }));
+    fn dispatch_command(trigger: On<ToolCall>, mut commands: Commands) {
+        fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+            if vmux_command_mcp::accepts_id(&call.name) {
+                return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+                    id: call.name.clone(),
+                    args_json: String::new(),
+                }));
+            }
+            if vmux_command_mcp::accepts_call(&call.name, call.arguments.clone()) {
+                let args_json = serde_json::to_string(&call.arguments).unwrap_or_default();
+                return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+                    id: call.name.clone(),
+                    args_json,
+                }));
+            }
+            Err(format!("unknown tool: {}", call.name))
         }
-        if vmux_command_mcp::accepts_call(&call.name, call.arguments.clone()) {
-            let args_json = serde_json::to_string(&call.arguments).unwrap_or_default();
-            return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
-                id: call.name.clone(),
-                args_json,
-            }));
-        }
-        Err(format!("unknown tool: {}", call.name))
+
+        trigger.finish_dispatch(&mut commands, target(&trigger));
     }
 
-    fn dispatch_param(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let parsed = McpParamTool::from_mcp_call(&call.name, call.arguments.clone())
-            .ok_or_else(|| format!("unknown tool: {}", call.name))?;
-        parsed
-            .and_then(McpParamTool::to_agent_command)
-            .map(DispatchTarget::Command)
+    fn dispatch_param(trigger: On<ToolCall>, mut commands: Commands) {
+        fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+            let parsed = McpParamTool::from_mcp_call(&call.name, call.arguments.clone())
+                .ok_or_else(|| format!("unknown tool: {}", call.name))?;
+            parsed
+                .and_then(McpParamTool::to_agent_command)
+                .map(DispatchTarget::Command)
+        }
+
+        trigger.finish_dispatch(&mut commands, target(&trigger));
     }
+}
+
+fn dispatch_protocol_tool(
+    trigger: On<ToolCall>,
+    tools: Query<&ProtocolTool>,
+    mut commands: Commands,
+) {
+    let result = tools
+        .get(trigger.entity)
+        .map(|tool| ToolExecution::Protocol {
+            tool: *tool,
+            arguments: trigger.arguments.clone(),
+            anchor: trigger.anchor,
+        })
+        .map_err(|_| format!("protocol tool component missing: {}", trigger.name));
+    trigger.finish(&mut commands, result);
 }
 
 pub(crate) fn canonical_tool_name(name: &str) -> &str {
