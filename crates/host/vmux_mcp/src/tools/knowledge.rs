@@ -1,6 +1,22 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition};
+use super::{DispatchTarget, ProtocolTool, ToolCall, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::AgentCommand;
+
+pub(super) struct KnowledgeToolsPlugin;
+
+impl Plugin for KnowledgeToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(vault_status_definition())
+            .protocol(app, ProtocolTool::VaultStatus);
+        ToolRegistration::from_definition(open_vault_definition()).local(app, open_vault);
+        ToolRegistration::from_definition(set_conversation_title_definition())
+            .local(app, set_conversation_title);
+        ToolRegistration::from_definition(search_knowledge_definition()).local(app, search);
+        ToolRegistration::from_definition(read_knowledge_definition()).local(app, read);
+        ToolRegistration::from_definition(write_knowledge_definition()).local(app, write);
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,7 +56,7 @@ struct WriteArgs {
     content: Option<String>,
 }
 
-pub(super) fn open_vault(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn open_vault(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("open_vault")?;
     let args: OpenVaultArgs = call.parse("open_vault")?;
     let url = match args.provider.unwrap_or(VaultProvider::Overview) {
@@ -56,7 +72,7 @@ pub(super) fn open_vault(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }))
 }
 
-pub(super) fn set_conversation_title(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn set_conversation_title(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("set_conversation_title")?;
     let args: SetConversationTitleArgs = call.parse("set_conversation_title")?;
     let title = Text::required(args.title, "set_conversation_title.title is empty")?;
@@ -68,7 +84,7 @@ pub(super) fn set_conversation_title(call: ToolCall<'_>) -> Result<DispatchTarge
     ))
 }
 
-pub(super) fn search(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn search(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("search_knowledge")?;
     let args: SearchArgs = call.parse("search_knowledge")?;
     let query = Text::required(args.query, "search_knowledge.query is empty")?;
@@ -83,7 +99,7 @@ pub(super) fn search(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }))
 }
 
-pub(super) fn read(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn read(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("read_knowledge")?;
     let args: ReadArgs = call.parse("read_knowledge")?;
     let path = Text::required(args.path, "read_knowledge.path is empty")?;
@@ -103,7 +119,7 @@ pub(super) fn read(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     }))
 }
 
-pub(super) fn write(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn write(call: &ToolCall) -> Result<DispatchTarget, String> {
     let anchor = call.require_anchor("write_knowledge")?;
     let args: WriteArgs = call.parse("write_knowledge")?;
     let path = args.path.and_then(Text::trimmed);

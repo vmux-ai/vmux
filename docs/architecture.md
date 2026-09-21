@@ -589,10 +589,15 @@ workspace the way a person does.
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
 The daemon owns the sessions, so work keeps running even if the agent process exits.
 
-MCP tool identity and execution route live in one registry. Each handwritten feature owns its
-schema, typed arguments, validation, and command or query dispatcher; `ToolRoute` binds that
-dispatcher to its published name, aliases, and availability, or marks protocol-local work.
-The exact registry set is tested so publication and dispatch cannot drift into separate lists.
+The MCP server is a headless Bevy app. Each decoded JSON-RPC request becomes an entity carrying
+its id, method, parameters, and FIFO sequence; systems route it, attach an asynchronous task when
+needed, build the response, and despawn it after stdout delivery. Stdio framing stays outside the
+world as the transport adapter.
+
+Tools are long-lived entities. Their name, aliases, schema, availability, and publication order
+are components, and each handwritten feature plugin attaches a targeted observer that owns typed
+argument validation and command or query dispatch. Publication and execution therefore read the
+same entities instead of maintaining parallel lists or a central function-pointer table.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.

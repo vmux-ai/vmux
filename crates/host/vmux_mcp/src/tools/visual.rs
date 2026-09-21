@@ -1,6 +1,28 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition};
+use super::{DispatchTarget, ToolCall, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
+
+pub(super) struct VisualToolsPlugin;
+
+impl Plugin for VisualToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(screenshot_definition()).local(app, screenshot);
+        ToolRegistration::from_definition(simulator_screenshot_definition())
+            .local(app, simulator_screenshot);
+        ToolRegistration::from_definition(simulator_tap_definition()).local(app, simulator_tap);
+        ToolRegistration::from_definition(simulator_swipe_definition()).local(app, simulator_swipe);
+        ToolRegistration::from_definition(simulator_type_definition()).local(app, simulator_type);
+        ToolRegistration::from_definition(simulator_key_definition()).local(app, simulator_key);
+        ToolRegistration::from_definition(simulator_button_definition())
+            .local(app, simulator_button);
+        ToolRegistration::from_definition(browser_snapshot_definition())
+            .local(app, browser_snapshot);
+        ToolRegistration::from_definition(browser_scroll_definition()).local(app, browser_scroll);
+        ToolRegistration::from_definition(record_start_definition()).local(app, record_start);
+        ToolRegistration::from_definition(record_stop_definition()).local(app, record_stop);
+    }
+}
 
 #[derive(Deserialize)]
 struct ScreenshotArgs {
@@ -97,18 +119,18 @@ struct RecordStopArgs {
     name: Option<String>,
 }
 
-pub(super) fn screenshot(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn screenshot(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: ScreenshotArgs = call.parse("screenshot")?;
     Ok(DispatchTarget::Query(AgentQuery::Screenshot {
         pane: OptionalText::trim(args.pane),
     }))
 }
 
-pub(super) fn simulator_screenshot(_call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_screenshot(_call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::SimulatorScreenshot))
 }
 
-pub(super) fn simulator_tap(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_tap(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: SimulatorTapArgs = call.parse("simulator_tap")?;
     Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
         action: SimulatorAction::Tap {
@@ -118,7 +140,7 @@ pub(super) fn simulator_tap(call: ToolCall<'_>) -> Result<DispatchTarget, String
     }))
 }
 
-pub(super) fn simulator_swipe(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_swipe(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: SimulatorSwipeArgs = call.parse("simulator_swipe")?;
     let duration_ms = args.duration_ms.unwrap_or(300);
     if !(1..=10_000).contains(&duration_ms) {
@@ -135,7 +157,7 @@ pub(super) fn simulator_swipe(call: ToolCall<'_>) -> Result<DispatchTarget, Stri
     }))
 }
 
-pub(super) fn simulator_type(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_type(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: SimulatorTypeArgs = call.parse("simulator_type")?;
     let text = args
         .text
@@ -146,7 +168,7 @@ pub(super) fn simulator_type(call: ToolCall<'_>) -> Result<DispatchTarget, Strin
     }))
 }
 
-pub(super) fn simulator_key(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_key(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: SimulatorKeyArgs = call.parse("simulator_key")?;
     let keycode = u8::try_from(args.keycode)
         .map_err(|_| "simulator_key.keycode must be between 0 and 255".to_string())?;
@@ -155,14 +177,14 @@ pub(super) fn simulator_key(call: ToolCall<'_>) -> Result<DispatchTarget, String
     }))
 }
 
-pub(super) fn simulator_button(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn simulator_button(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: SimulatorButtonArgs = call.parse("simulator_button")?;
     Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
         action: SimulatorAction::Button(args.button.into()),
     }))
 }
 
-pub(super) fn browser_snapshot(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn browser_snapshot(call: &ToolCall) -> Result<DispatchTarget, String> {
     if call
         .arguments
         .get("target")
@@ -177,7 +199,7 @@ pub(super) fn browser_snapshot(call: ToolCall<'_>) -> Result<DispatchTarget, Str
     }))
 }
 
-pub(super) fn browser_scroll(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn browser_scroll(call: &ToolCall) -> Result<DispatchTarget, String> {
     if call
         .arguments
         .get("delta")
@@ -203,7 +225,7 @@ pub(super) fn browser_scroll(call: ToolCall<'_>) -> Result<DispatchTarget, Strin
     }))
 }
 
-pub(super) fn record_start(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn record_start(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: RecordStartArgs = call.parse("record_start")?;
     Ok(DispatchTarget::Query(AgentQuery::RecordStart {
         gif: args.gif,
@@ -212,7 +234,7 @@ pub(super) fn record_start(call: ToolCall<'_>) -> Result<DispatchTarget, String>
     }))
 }
 
-pub(super) fn record_stop(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn record_stop(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: RecordStopArgs = call.parse("record_stop")?;
     Ok(DispatchTarget::Query(AgentQuery::RecordStop {
         dir: OptionalText::trim(args.dir),

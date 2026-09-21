@@ -1,4 +1,15 @@
-use super::ToolDefinition;
+use super::{ProtocolTool, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
+
+pub(super) struct FileToolsPlugin;
+
+impl Plugin for FileToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(read_file_definition())
+            .protocol(app, ProtocolTool::ReadFile);
+        ToolRegistration::from_definition(grep_definition()).protocol(app, ProtocolTool::Grep);
+    }
+}
 
 pub(super) fn read_file_definition() -> ToolDefinition {
     ToolDefinition {

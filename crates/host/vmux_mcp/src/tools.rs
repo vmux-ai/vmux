@@ -6,11 +6,31 @@ mod state;
 mod visual;
 mod workspace;
 
+use bevy_app::{App, Plugin};
+use bevy_ecs::name::Name;
+use bevy_ecs::prelude::*;
 use serde::Serialize;
 use serde_json::Value;
-use vmux_client::protocol::{AgentCommand, ProcessId};
+use vmux_client::protocol::{AgentCommand, AgentQuery, ProcessId};
 
 pub use param::McpParamTool;
+
+pub struct ToolsPlugin;
+
+impl Plugin for ToolsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<NextToolOrder>();
+        GeneratedTools::register(app);
+        app.add_plugins((
+            state::StateToolsPlugin,
+            workspace::WorkspaceToolsPlugin,
+            files::FileToolsPlugin,
+            knowledge::KnowledgeToolsPlugin,
+            visual::VisualToolsPlugin,
+            bookmark::BookmarkToolsPlugin,
+        ));
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,70 +43,23 @@ pub struct ToolDefinition {
 #[derive(Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
-    Query(vmux_client::protocol::AgentQuery),
+    Query(AgentQuery),
 }
 
 #[derive(Clone, Copy)]
-enum ToolAvailability {
+pub(crate) enum ToolAvailability {
     Always,
     OutsideAcpSession,
     WithoutAcpTerminals,
 }
 
-struct ToolSpec {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    definition: fn() -> ToolDefinition,
-    route: ToolRoute,
-    availability: ToolAvailability,
-    shell_note: bool,
-}
-
-struct ToolCall<'a> {
-    arguments: Value,
-    anchor: Option<ProcessId>,
-    host_shell: &'a str,
-}
-
-impl ToolCall<'_> {
-    fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
-        serde_json::from_value(self.arguments.clone())
-            .map_err(|error| format!("{name}: invalid arguments: {error}"))
-    }
-
-    fn require_anchor(&self, name: &str) -> Result<ProcessId, String> {
-        self.anchor.ok_or_else(|| {
-            format!("{name} requires an agent anchor (not available to this client)")
-        })
-    }
-}
-
-type ToolDispatch = for<'a> fn(ToolCall<'a>) -> Result<DispatchTarget, String>;
-
-impl ToolSpec {
-    fn find(name: &str) -> Option<&'static Self> {
-        TOOL_SPECS
-            .iter()
-            .find(|spec| spec.name == name || spec.aliases.contains(&name))
-    }
-
-    fn available(&self, acp_session: bool, acp_terminals: bool) -> bool {
-        match self.availability {
-            ToolAvailability::Always => true,
-            ToolAvailability::OutsideAcpSession => !acp_session,
-            ToolAvailability::WithoutAcpTerminals => !acp_terminals,
+impl ToolAvailability {
+    pub(crate) fn allows(self, acp_session: bool, acp_terminals: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::OutsideAcpSession => !acp_session,
+            Self::WithoutAcpTerminals => !acp_terminals,
         }
-    }
-
-    fn definition(&self, shell: &str) -> ToolDefinition {
-        let mut definition = (self.definition)();
-        definition.name = self.name.to_string();
-        if self.shell_note {
-            definition
-                .description
-                .push_str(&ShellNote::for_shell(shell));
-        }
-        definition
     }
 }
 
@@ -97,331 +70,357 @@ pub(crate) enum ProtocolTool {
     VaultStatus,
 }
 
-#[derive(Clone, Copy)]
-enum ToolRoute {
-    Local(ToolDispatch),
-    Protocol(ProtocolTool),
+pub(crate) enum ToolExecution {
+    Dispatch {
+        target: DispatchTarget,
+        name: String,
+        arguments: Value,
+        anchor: Option<ProcessId>,
+    },
+    Protocol {
+        tool: ProtocolTool,
+        arguments: Value,
+        anchor: Option<ProcessId>,
+    },
+}
+
+#[derive(Component)]
+pub(crate) struct McpTool;
+
+#[derive(Component)]
+pub(crate) struct ToolAliases(pub(crate) Vec<String>);
+
+#[derive(Component)]
+pub(crate) struct ToolDescription(pub(crate) String);
+
+#[derive(Component)]
+pub(crate) struct ToolInputSchema(pub(crate) Value);
+
+#[derive(Component)]
+pub(crate) struct ToolAccess(pub(crate) ToolAvailability);
+
+#[derive(Component)]
+pub(crate) struct ToolOrder(pub(crate) u32);
+
+#[derive(Component)]
+pub(crate) struct ShellAware;
+
+#[derive(Component)]
+pub(crate) struct ToolOutcome(pub(crate) Result<ToolExecution, String>);
+
+#[derive(Resource, Default)]
+struct NextToolOrder(u32);
+
+#[derive(EntityEvent)]
+pub(super) struct ToolCall {
+    pub(crate) entity: Entity,
+    pub(crate) request: Entity,
+    pub(crate) name: String,
+    pub(crate) arguments: Value,
+    pub(crate) anchor: Option<ProcessId>,
+    pub(crate) host_shell: String,
+}
+
+impl ToolCall {
+    fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+        serde_json::from_value(self.arguments.clone())
+            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+    }
+
+    fn require_anchor(&self, name: &str) -> Result<ProcessId, String> {
+        self.anchor.ok_or_else(|| {
+            format!("{name} requires an agent anchor (not available to this client)")
+        })
+    }
+
+    fn finish(&self, commands: &mut Commands, result: Result<ToolExecution, String>) {
+        commands.entity(self.request).insert(ToolOutcome(result));
+    }
+}
+
+type ToolDispatch = fn(&ToolCall) -> Result<DispatchTarget, String>;
+
+pub(super) struct ToolRegistration {
+    name: String,
+    aliases: Vec<String>,
+    description: String,
+    input_schema: Value,
+    availability: ToolAvailability,
+    shell_aware: bool,
+}
+
+impl ToolRegistration {
+    pub(super) fn from_definition(definition: ToolDefinition) -> Self {
+        Self::new(
+            definition.name,
+            definition.description,
+            definition.input_schema,
+        )
+    }
+
+    pub(super) fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            aliases: Vec::new(),
+            description: description.into(),
+            input_schema,
+            availability: ToolAvailability::Always,
+            shell_aware: false,
+        }
+    }
+
+    pub(super) fn aliases(mut self, aliases: &[&str]) -> Self {
+        self.aliases = aliases.iter().map(|alias| (*alias).to_string()).collect();
+        self
+    }
+
+    pub(super) fn availability(mut self, availability: ToolAvailability) -> Self {
+        self.availability = availability;
+        self
+    }
+
+    pub(super) fn shell_aware(mut self) -> Self {
+        self.shell_aware = true;
+        self
+    }
+
+    pub(super) fn local(self, app: &mut App, dispatch: ToolDispatch) {
+        let entity = self.spawn(app);
+        app.world_mut().entity_mut(entity).observe(
+            move |trigger: On<ToolCall>, mut commands: Commands| {
+                let result = dispatch(&trigger).map(|target| ToolExecution::Dispatch {
+                    target,
+                    name: trigger.name.clone(),
+                    arguments: trigger.arguments.clone(),
+                    anchor: trigger.anchor,
+                });
+                trigger.finish(&mut commands, result);
+            },
+        );
+    }
+
+    pub(super) fn protocol(self, app: &mut App, tool: ProtocolTool) {
+        let entity = self.spawn(app);
+        app.world_mut().entity_mut(entity).observe(
+            move |trigger: On<ToolCall>, mut commands: Commands| {
+                let execution = ToolExecution::Protocol {
+                    tool,
+                    arguments: trigger.arguments.clone(),
+                    anchor: trigger.anchor,
+                };
+                trigger.finish(&mut commands, Ok(execution));
+            },
+        );
+    }
+
+    fn spawn(self, app: &mut App) -> Entity {
+        let order = {
+            let mut next = app.world_mut().resource_mut::<NextToolOrder>();
+            let order = next.0;
+            next.0 += 1;
+            order
+        };
+        let mut entity = app.world_mut().spawn((
+            McpTool,
+            Name::new(self.name),
+            ToolAliases(self.aliases),
+            ToolDescription(self.description),
+            ToolInputSchema(self.input_schema),
+            ToolAccess(self.availability),
+            ToolOrder(order),
+        ));
+        if self.shell_aware {
+            entity.insert(ShellAware);
+        }
+        entity.id()
+    }
+}
+
+pub(crate) struct ToolCatalog {
+    app: App,
+}
+
+impl Default for ToolCatalog {
+    fn default() -> Self {
+        let mut app = App::new();
+        app.add_plugins(ToolsPlugin);
+        Self { app }
+    }
+}
+
+impl ToolCatalog {
+    pub(crate) fn definitions(
+        &mut self,
+        acp_session: bool,
+        acp_terminals: bool,
+        shell: &str,
+    ) -> Vec<ToolDefinition> {
+        let world = self.app.world_mut();
+        let mut query = world.query_filtered::<(
+            &Name,
+            &ToolDescription,
+            &ToolInputSchema,
+            &ToolAccess,
+            &ToolOrder,
+            Option<&ShellAware>,
+        ), With<McpTool>>();
+        let mut definitions = Vec::new();
+        for (name, description, schema, access, order, shell_aware) in query.iter(world) {
+            if !access.0.allows(acp_session, acp_terminals) {
+                continue;
+            }
+            let mut description = description.0.clone();
+            if shell_aware.is_some() {
+                description.push_str(&ShellNote::for_shell(shell));
+            }
+            definitions.push((
+                order.0,
+                ToolDefinition {
+                    name: name.as_str().to_string(),
+                    description,
+                    input_schema: schema.0.clone(),
+                },
+            ));
+        }
+        definitions.sort_by_key(|(order, _)| *order);
+        definitions
+            .into_iter()
+            .map(|(_, definition)| definition)
+            .collect()
+    }
+
+    pub(crate) fn dispatch(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        anchor: Option<ProcessId>,
+        host_shell: &str,
+        acp_session: bool,
+        acp_terminals: bool,
+    ) -> Result<ToolExecution, String> {
+        let normalized = canonical_tool_name(name);
+        let Some((tool, registered_name, availability)) = self.find(normalized) else {
+            return Err(format!("unknown tool: {normalized}"));
+        };
+        if !availability.allows(acp_session, acp_terminals) {
+            return Err(format!("tool {normalized} is unavailable for ACP sessions"));
+        }
+        let request = self.app.world_mut().spawn_empty().id();
+        self.app.world_mut().trigger(ToolCall {
+            entity: tool,
+            request,
+            name: registered_name,
+            arguments,
+            anchor,
+            host_shell: host_shell.to_string(),
+        });
+        self.app.world_mut().flush();
+        let outcome = self
+            .app
+            .world_mut()
+            .entity_mut(request)
+            .take::<ToolOutcome>()
+            .ok_or_else(|| format!("tool {normalized} did not produce an execution"))?;
+        self.app.world_mut().despawn(request);
+        outcome.0
+    }
+
+    fn find(&mut self, name: &str) -> Option<(Entity, String, ToolAvailability)> {
+        let world = self.app.world_mut();
+        let mut query =
+            world.query_filtered::<(Entity, &Name, &ToolAliases, &ToolAccess), With<McpTool>>();
+        for (entity, registered_name, aliases, access) in query.iter(world) {
+            if registered_name.as_str() == name || aliases.0.iter().any(|alias| alias == name) {
+                return Some((entity, registered_name.as_str().to_string(), access.0));
+            }
+        }
+        None
+    }
+}
+
+struct GeneratedTools;
+
+impl GeneratedTools {
+    fn register(app: &mut App) {
+        for (name, description, schema) in vmux_command_mcp::tool_entries() {
+            ToolRegistration::new(name, description, schema).local(app, Self::dispatch_command);
+        }
+        for (name, description, schema) in McpParamTool::mcp_tool_entries() {
+            ToolRegistration::new(name, description, schema).local(app, Self::dispatch_param);
+        }
+    }
+
+    fn dispatch_command(call: &ToolCall) -> Result<DispatchTarget, String> {
+        if vmux_command_mcp::accepts_id(&call.name) {
+            return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+                id: call.name.clone(),
+                args_json: String::new(),
+            }));
+        }
+        if vmux_command_mcp::accepts_call(&call.name, call.arguments.clone()) {
+            let args_json = serde_json::to_string(&call.arguments).unwrap_or_default();
+            return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+                id: call.name.clone(),
+                args_json,
+            }));
+        }
+        Err(format!("unknown tool: {}", call.name))
+    }
+
+    fn dispatch_param(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let parsed = McpParamTool::from_mcp_call(&call.name, call.arguments.clone())
+            .ok_or_else(|| format!("unknown tool: {}", call.name))?;
+        parsed
+            .and_then(McpParamTool::to_agent_command)
+            .map(DispatchTarget::Command)
+    }
 }
 
 pub(crate) fn canonical_tool_name(name: &str) -> &str {
     name.strip_prefix("vmux_").unwrap_or(name)
 }
 
-pub(crate) fn protocol_tool(name: &str) -> Option<ProtocolTool> {
-    match ToolSpec::find(canonical_tool_name(name))?.route {
-        ToolRoute::Protocol(tool) => Some(tool),
-        ToolRoute::Local(_) => None,
-    }
-}
-
-pub(crate) fn tool_available(name: &str, acp_session: bool, acp_terminals: bool) -> bool {
-    let name = canonical_tool_name(name);
-    ToolSpec::find(name).is_none_or(|spec| spec.available(acp_session, acp_terminals))
-}
-
-const ALWAYS: ToolAvailability = ToolAvailability::Always;
-
-const TOOL_SPECS: &[ToolSpec] = &[
-    ToolSpec {
-        name: "read_layout",
-        aliases: &[],
-        definition: state::read_layout_definition,
-        route: ToolRoute::Local(state::read_layout),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "update_layout",
-        aliases: &[],
-        definition: state::update_layout_definition,
-        route: ToolRoute::Local(state::update_layout),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "get_settings",
-        aliases: &[],
-        definition: state::get_settings_definition,
-        route: ToolRoute::Local(state::get_settings),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "list_spaces",
-        aliases: &[],
-        definition: state::list_spaces_definition,
-        route: ToolRoute::Local(state::list_spaces),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "open_page",
-        aliases: &[],
-        definition: workspace::open_page_definition,
-        route: ToolRoute::Local(workspace::open_page),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "open_file",
-        aliases: &[],
-        definition: workspace::open_file_definition,
-        route: ToolRoute::Local(workspace::open_file),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "read_file",
-        aliases: &[],
-        definition: files::read_file_definition,
-        route: ToolRoute::Protocol(ProtocolTool::ReadFile),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "grep",
-        aliases: &[],
-        definition: files::grep_definition,
-        route: ToolRoute::Protocol(ProtocolTool::Grep),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "resume_in_acp",
-        aliases: &[],
-        definition: workspace::resume_in_acp_definition,
-        route: ToolRoute::Local(workspace::resume_in_acp),
-        availability: ToolAvailability::OutsideAcpSession,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "run",
-        aliases: &[],
-        definition: workspace::run_definition,
-        route: ToolRoute::Local(workspace::run),
-        availability: ToolAvailability::WithoutAcpTerminals,
-        shell_note: true,
-    },
-    ToolSpec {
-        name: "request_user_choice",
-        aliases: &[],
-        definition: workspace::request_user_choice_definition,
-        route: ToolRoute::Local(workspace::request_user_choice),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "vault_status",
-        aliases: &[],
-        definition: knowledge::vault_status_definition,
-        route: ToolRoute::Protocol(ProtocolTool::VaultStatus),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "open_vault",
-        aliases: &[],
-        definition: knowledge::open_vault_definition,
-        route: ToolRoute::Local(knowledge::open_vault),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "set_conversation_title",
-        aliases: &[],
-        definition: knowledge::set_conversation_title_definition,
-        route: ToolRoute::Local(knowledge::set_conversation_title),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "search_knowledge",
-        aliases: &[],
-        definition: knowledge::search_knowledge_definition,
-        route: ToolRoute::Local(knowledge::search),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "read_knowledge",
-        aliases: &[],
-        definition: knowledge::read_knowledge_definition,
-        route: ToolRoute::Local(knowledge::read),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "write_knowledge",
-        aliases: &[],
-        definition: knowledge::write_knowledge_definition,
-        route: ToolRoute::Local(knowledge::write),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "select_project",
-        aliases: &["select_workspace", "choose_workspace"],
-        definition: workspace::select_project_definition,
-        route: ToolRoute::Local(workspace::select_project),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "create_worktree",
-        aliases: &[],
-        definition: workspace::create_worktree_definition,
-        route: ToolRoute::Local(workspace::create_worktree),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "read_terminal",
-        aliases: &[],
-        definition: workspace::read_terminal_definition,
-        route: ToolRoute::Local(workspace::read_terminal),
-        availability: ToolAvailability::WithoutAcpTerminals,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "screenshot",
-        aliases: &[],
-        definition: visual::screenshot_definition,
-        route: ToolRoute::Local(visual::screenshot),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_screenshot",
-        aliases: &[],
-        definition: visual::simulator_screenshot_definition,
-        route: ToolRoute::Local(visual::simulator_screenshot),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_tap",
-        aliases: &[],
-        definition: visual::simulator_tap_definition,
-        route: ToolRoute::Local(visual::simulator_tap),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_swipe",
-        aliases: &[],
-        definition: visual::simulator_swipe_definition,
-        route: ToolRoute::Local(visual::simulator_swipe),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_type",
-        aliases: &[],
-        definition: visual::simulator_type_definition,
-        route: ToolRoute::Local(visual::simulator_type),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_key",
-        aliases: &[],
-        definition: visual::simulator_key_definition,
-        route: ToolRoute::Local(visual::simulator_key),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "simulator_button",
-        aliases: &[],
-        definition: visual::simulator_button_definition,
-        route: ToolRoute::Local(visual::simulator_button),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "browser_snapshot",
-        aliases: &[],
-        definition: visual::browser_snapshot_definition,
-        route: ToolRoute::Local(visual::browser_snapshot),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "browser_scroll",
-        aliases: &[],
-        definition: visual::browser_scroll_definition,
-        route: ToolRoute::Local(visual::browser_scroll),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "record_start",
-        aliases: &[],
-        definition: visual::record_start_definition,
-        route: ToolRoute::Local(visual::record_start),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "record_stop",
-        aliases: &[],
-        definition: visual::record_stop_definition,
-        route: ToolRoute::Local(visual::record_stop),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_list",
-        aliases: &[],
-        definition: bookmark::bookmark_list_definition,
-        route: ToolRoute::Local(bookmark::list),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_add",
-        aliases: &[],
-        definition: bookmark::bookmark_add_definition,
-        route: ToolRoute::Local(bookmark::add),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_remove",
-        aliases: &[],
-        definition: bookmark::bookmark_remove_definition,
-        route: ToolRoute::Local(bookmark::remove),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_pin",
-        aliases: &[],
-        definition: bookmark::bookmark_pin_definition,
-        route: ToolRoute::Local(bookmark::pin),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_unpin",
-        aliases: &[],
-        definition: bookmark::bookmark_unpin_definition,
-        route: ToolRoute::Local(bookmark::unpin),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-    ToolSpec {
-        name: "bookmark_folder_create",
-        aliases: &[],
-        definition: bookmark::bookmark_folder_create_definition,
-        route: ToolRoute::Local(bookmark::create_folder),
-        availability: ALWAYS,
-        shell_note: false,
-    },
-];
-
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     tool_definitions_filtered(false, false, "")
+}
+
+pub fn tool_definitions_filtered(
+    acp_session: bool,
+    acp_terminals: bool,
+    shell: &str,
+) -> Vec<ToolDefinition> {
+    ToolCatalog::default().definitions(acp_session, acp_terminals, shell)
+}
+
+pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
+    dispatch_with_anchor(name, arguments, None)
+}
+
+pub fn dispatch_with_anchor(
+    name: &str,
+    arguments: Value,
+    anchor: Option<ProcessId>,
+) -> Result<DispatchTarget, String> {
+    dispatch_in_shell(name, arguments, anchor, "")
+}
+
+pub fn dispatch_in_shell(
+    name: &str,
+    arguments: Value,
+    anchor: Option<ProcessId>,
+    host_shell: &str,
+) -> Result<DispatchTarget, String> {
+    match ToolCatalog::default().dispatch(name, arguments, anchor, host_shell, false, false)? {
+        ToolExecution::Dispatch { target, .. } => Ok(target),
+        ToolExecution::Protocol { .. } => Err(format!(
+            "tool {} requires MCP protocol context",
+            canonical_tool_name(name)
+        )),
+    }
 }
 
 pub struct ShellNote;
@@ -456,78 +455,6 @@ impl ShellNote {
             " The shell is {base}.{differences} To run a POSIX script instead, invoke `bash -c \"...\"` as the command."
         )
     }
-}
-
-pub fn tool_definitions_filtered(
-    acp_session: bool,
-    acp_terminals: bool,
-    shell: &str,
-) -> Vec<ToolDefinition> {
-    let mut defs: Vec<ToolDefinition> = vmux_command_mcp::tool_entries()
-        .into_iter()
-        .chain(McpParamTool::mcp_tool_entries())
-        .map(|(name, description, schema)| ToolDefinition {
-            name: name.to_string(),
-            description: description.to_string(),
-            input_schema: schema,
-        })
-        .collect();
-    for spec in TOOL_SPECS {
-        if spec.available(acp_session, acp_terminals) {
-            defs.push(spec.definition(shell));
-        }
-    }
-    defs
-}
-
-pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
-    dispatch_with_anchor(name, arguments, None)
-}
-
-pub fn dispatch_with_anchor(
-    name: &str,
-    arguments: Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
-) -> Result<DispatchTarget, String> {
-    dispatch_in_shell(name, arguments, anchor, "")
-}
-
-pub fn dispatch_in_shell(
-    name: &str,
-    arguments: Value,
-    anchor: Option<ProcessId>,
-    host_shell: &str,
-) -> Result<DispatchTarget, String> {
-    let name = canonical_tool_name(name);
-    if let Some(spec) = ToolSpec::find(name) {
-        return match spec.route {
-            ToolRoute::Local(dispatch) => dispatch(ToolCall {
-                arguments,
-                anchor,
-                host_shell,
-            }),
-            ToolRoute::Protocol(_) => Err(format!("tool {name} requires MCP protocol context")),
-        };
-    }
-    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
-        return parsed
-            .and_then(McpParamTool::to_agent_command)
-            .map(DispatchTarget::Command);
-    }
-    if vmux_command_mcp::accepts_id(name) {
-        return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
-            id: name.to_string(),
-            args_json: String::new(),
-        }));
-    }
-    if vmux_command_mcp::accepts_call(name, arguments.clone()) {
-        let args_json = serde_json::to_string(&arguments).unwrap_or_default();
-        return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
-            id: name.to_string(),
-            args_json,
-        }));
-    }
-    Err(format!("unknown tool: {name}"))
 }
 
 #[cfg(test)]

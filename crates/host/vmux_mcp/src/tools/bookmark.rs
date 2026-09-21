@@ -1,6 +1,21 @@
-use super::{DispatchTarget, ToolCall, ToolDefinition};
+use super::{DispatchTarget, ToolCall, ToolDefinition, ToolRegistration};
+use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
+
+pub(super) struct BookmarkToolsPlugin;
+
+impl Plugin for BookmarkToolsPlugin {
+    fn build(&self, app: &mut App) {
+        ToolRegistration::from_definition(bookmark_list_definition()).local(app, list);
+        ToolRegistration::from_definition(bookmark_add_definition()).local(app, add);
+        ToolRegistration::from_definition(bookmark_remove_definition()).local(app, remove);
+        ToolRegistration::from_definition(bookmark_pin_definition()).local(app, pin);
+        ToolRegistration::from_definition(bookmark_unpin_definition()).local(app, unpin);
+        ToolRegistration::from_definition(bookmark_folder_create_definition())
+            .local(app, create_folder);
+    }
+}
 
 #[derive(Deserialize)]
 struct PageArgs {
@@ -28,11 +43,11 @@ struct FolderArgs {
     name: Option<String>,
 }
 
-pub(super) fn list(_call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn list(_call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::BookmarkList))
 }
 
-pub(super) fn add(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn add(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: PageArgs = call.parse("bookmark_add")?;
     let url = RequiredText::get(args.url, "bookmark_add.url is required")?;
     Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
@@ -47,7 +62,7 @@ pub(super) fn add(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     )))
 }
 
-pub(super) fn remove(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn remove(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: UuidArgs = call.parse("bookmark_remove")?;
     let uuid = RequiredText::get(args.uuid, "bookmark_remove.uuid is required")?;
     Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
@@ -55,7 +70,7 @@ pub(super) fn remove(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     )))
 }
 
-pub(super) fn pin(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn pin(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: PinArgs = call.parse("bookmark_pin")?;
     if let Some(uuid) = RequiredText::optional(args.uuid) {
         return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
@@ -74,7 +89,7 @@ pub(super) fn pin(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     )))
 }
 
-pub(super) fn unpin(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn unpin(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: UuidArgs = call.parse("bookmark_unpin")?;
     let uuid = RequiredText::get(args.uuid, "bookmark_unpin.uuid is required")?;
     Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
@@ -82,7 +97,7 @@ pub(super) fn unpin(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
     )))
 }
 
-pub(super) fn create_folder(call: ToolCall<'_>) -> Result<DispatchTarget, String> {
+pub(super) fn create_folder(call: &ToolCall) -> Result<DispatchTarget, String> {
     let args: FolderArgs = call.parse("bookmark_folder_create")?;
     let name = RequiredText::get(args.name, "bookmark_folder_create.name is required")?;
     Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
