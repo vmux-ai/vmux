@@ -1,55 +1,13 @@
-use super::{ProtocolTool, ToolDefinition, ToolRegistration};
+use super::{ProtocolTool, ToolManifest};
 use bevy_app::{App, Plugin};
 
 pub(super) struct FileToolsPlugin;
 
 impl Plugin for FileToolsPlugin {
     fn build(&self, app: &mut App) {
-        ToolRegistration::from_definition(read_file_definition())
-            .protocol(app, ProtocolTool::ReadFile);
-        ToolRegistration::from_definition(grep_definition()).protocol(app, ProtocolTool::Grep);
-    }
-}
-
-pub(super) fn read_file_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_file".into(),
-        description: "Read a local file and show it in the vmux editor through auto placement, \
-preferring an existing file page/bucket. Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
-via run (that dumps into a terminal). path is an absolute filesystem path inside the selected \
-project; call select_project first to request access elsewhere. offset is the 1-based line to start \
-at; limit is the number of lines (default: the whole file)."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "offset": {"type": "integer"},
-                "limit": {"type": "integer"}
-            }
-        }),
-    }
-}
-
-pub(super) fn grep_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "grep".into(),
-        description: "Search files with ripgrep and open each matching file in the vmux editor \
-through auto placement, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
-run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
-regex; path is a directory or file inside the selected project (default: the selected project). \
-Call select_project first to request access elsewhere."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["query"],
-            "additionalProperties": false,
-            "properties": {
-                "query": {"type": "string"},
-                "path": {"type": "string"}
-            }
-        }),
+        let mut tools = ToolManifest::from_ron(include_str!("files.ron"));
+        tools.protocol(app, "read_file", ProtocolTool::ReadFile);
+        tools.protocol(app, "grep", ProtocolTool::Grep);
+        tools.finish();
     }
 }

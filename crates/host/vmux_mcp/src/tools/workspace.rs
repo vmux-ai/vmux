@@ -1,4 +1,4 @@
-use super::{DispatchTarget, ToolAvailability, ToolCall, ToolDefinition, ToolRegistration};
+use super::{DispatchTarget, ToolCall, ToolManifest};
 use bevy_app::{App, Plugin};
 use serde::Deserialize;
 use vmux_client::protocol::{
@@ -9,24 +9,16 @@ pub(super) struct WorkspaceToolsPlugin;
 
 impl Plugin for WorkspaceToolsPlugin {
     fn build(&self, app: &mut App) {
-        ToolRegistration::from_definition(open_page_definition()).local(app, open_page);
-        ToolRegistration::from_definition(open_file_definition()).local(app, open_file);
-        ToolRegistration::from_definition(resume_in_acp_definition())
-            .availability(ToolAvailability::OutsideAcpSession)
-            .local(app, resume_in_acp);
-        ToolRegistration::from_definition(run_definition())
-            .availability(ToolAvailability::WithoutAcpTerminals)
-            .shell_aware()
-            .local(app, run);
-        ToolRegistration::from_definition(request_user_choice_definition())
-            .local(app, request_user_choice);
-        ToolRegistration::from_definition(select_project_definition())
-            .aliases(&["select_workspace", "choose_workspace"])
-            .local(app, select_project);
-        ToolRegistration::from_definition(create_worktree_definition()).local(app, create_worktree);
-        ToolRegistration::from_definition(read_terminal_definition())
-            .availability(ToolAvailability::WithoutAcpTerminals)
-            .local(app, read_terminal);
+        let mut tools = ToolManifest::from_ron(include_str!("workspace.ron"));
+        tools.local(app, "open_page", open_page);
+        tools.local(app, "open_file", open_file);
+        tools.local(app, "resume_in_acp", resume_in_acp);
+        tools.local(app, "run", run);
+        tools.local(app, "request_user_choice", request_user_choice);
+        tools.local(app, "select_project", select_project);
+        tools.local(app, "create_worktree", create_worktree);
+        tools.local(app, "read_terminal", read_terminal);
+        tools.finish();
     }
 }
 
@@ -310,187 +302,4 @@ pub(super) fn read_terminal(call: &ToolCall) -> Result<DispatchTarget, String> {
     Ok(DispatchTarget::Query(AgentQuery::ReadTerminal {
         process_id,
     }))
-}
-
-pub(super) fn open_page_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_page".into(),
-        description: "Open a page using vmux auto placement. Omit `direction` so vmux reuses \
-the existing matching bucket first (terminal pages with terminals, browser pages with browsers) \
-and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate \
-(vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override \
-for a forced adjacent open: right|left|top|bottom. focus defaults false."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["url"],
-            "additionalProperties": false,
-            "properties": {
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "url": {"type": "string"},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-pub(super) fn open_file_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_file".into(),
-        description: "Open a local file (or directory) in the vmux editor using vmux auto \
-placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses \
-the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute \
-filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; \
-directories show a listing. direction is an override for a forced adjacent open: \
-right|left|top|bottom. focus defaults false. The path must be inside the selected project; call \
-select_project first to request access elsewhere."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-pub(super) fn run_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "run".into(),
-        description:
-            "Run a shell command in a visible terminal pane the user can watch live and take over. \
-Blocks until the command finishes and returns its full output plus the exit code \
-(`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns \
-the output so far with a note to call read_terminal for the rest. \
-\
-PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
-beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
-into your project on every run; the shell stays where it was. The first `run` opens it; later ones run \
-in that same shell. Rule of thumb: don't open a new pane unless you actually need one. \
-Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects \
-them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. \
-When enabled, override only when you mean to: \
-- `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` \
-(force a new stacked terminal in the anchor's pane). \
-- `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
-pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it. \
-- `direction`: only for `split`; Omit `direction` in auto mode so vmux keeps terminal runs in the \
-terminal bucket and spirals new panes predictably. \
-- `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / \
-sequential steps that share one shell, in order). \
-\
-`focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command \
-is typed into an interactive shell, so the terminal stays usable afterwards. \
-\
-`shell`: hand the command to a named interpreter instead of writing it in the user's shell — \
-`bash`, `sh`, `python3`, `node`, `ruby`, anything on PATH. Name the program ALONE: vmux adds the \
-flag that makes it read a script (`-c`, `-e`, `eval`) and quotes the script for the user's shell, \
-so `command` is the script itself, newlines and all, and never carries `-c` or `-e` of its own. \
-Omit `shell` to write in the user's own shell."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["command"],
-            "additionalProperties": false,
-            "properties": {
-                "command": {"type": "string"},
-                "shell": {"type": "string"},
-                "terminal": {"type": "string"},
-                "beside": {"type": "string"},
-                "mode": {"enum": ["auto", "split", "stack"]},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-pub(super) fn create_worktree_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "create_worktree".into(),
-        description: "Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "branch": {"type": "string"},
-                "task": {"type": "string"},
-                "create": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-pub(super) fn select_project_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "select_project".into(),
-        description: "Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"}
-            }
-        }),
-    }
-}
-
-pub(super) fn request_user_choice_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/projects path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["question", "options"],
-            "additionalProperties": false,
-            "properties": {
-                "question": {"type": "string"},
-                "options": {
-                    "type": "array",
-                    "minItems": 2,
-                    "maxItems": 9,
-                    "items": {"type": "string"}
-                }
-            }
-        }),
-    }
-}
-
-pub(super) fn resume_in_acp_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "resume_in_acp".into(),
-        description: "Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {}
-        }),
-    }
-}
-
-pub(super) fn read_terminal_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_terminal".into(),
-        description:
-            "Return the current visible scrollback text of a terminal (the same text the user sees). \
-Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["terminal"],
-            "additionalProperties": false,
-            "properties": {
-                "terminal": {"type": "string"}
-            }
-        }),
-    }
 }

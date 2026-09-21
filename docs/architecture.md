@@ -595,9 +595,10 @@ needed, build the response, and despawn it after stdout delivery. Stdio framing 
 world as the transport adapter.
 
 Tools are long-lived entities. Their name, aliases, schema, availability, and publication order
-are components, and each handwritten feature plugin attaches a targeted observer that owns typed
-argument validation and command or query dispatch. Publication and execution therefore read the
-same entities instead of maintaining parallel lists or a central function-pointer table.
+are components seeded from feature-local RON manifests, and each handwritten feature plugin
+attaches a targeted observer that owns typed argument validation and command or query dispatch.
+Publication and execution query those entities directly; there is no separate runtime registry or
+central function-pointer table.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
