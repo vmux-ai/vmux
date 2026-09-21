@@ -18,7 +18,7 @@ use vmux_core::host::page::NativelyHosted;
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{
-    GitAppAction, GitAppActionRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest,
+    GitAppAction, GitAppRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest,
     GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest, GitDiscardRequest, GitFetchRequest,
     GitHunkRequest, GitOperationRequest, GitPullRequest, GitPushRequest, GitRepositoryPickedEvent,
     GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest, GitStageRequest,
@@ -95,14 +95,14 @@ impl Plugin for GitPlugin {
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 GitFetchRequest,
-                GitAppActionRequest,
+                GitAppRequest,
                 GitOperationRequest,
                 GitPullRequest,
                 GitStageAllRequest,
             )>::default())
             .add_observer(on_repository_request)
             .add_observer(on_repository_picker_request)
-            .add_observer(on_app_action_request)
+            .add_observer(on_app_request)
             .add_observer(on_branch_log_request)
             .add_observer(on_directory_request)
             .add_observer(on_status_request)
@@ -957,8 +957,8 @@ fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, outbox: R
     );
 }
 
-fn on_app_action_request(
-    trigger: On<BinReceive<GitAppActionRequest>>,
+fn on_app_request(
+    trigger: On<BinReceive<GitAppRequest>>,
     child_of: Query<&ChildOf>,
     mut page_open: MessageWriter<PageOpenRequest>,
     mut update_requests: MessageWriter<GitCheckForUpdatesRequest>,

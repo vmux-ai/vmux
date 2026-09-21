@@ -9,10 +9,10 @@ use bevy_cef::prelude::{
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
-    EXTENSIONS_PAGE_URL, ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase,
-    ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus,
-    ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest,
-    ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
+    EXTENSIONS_PAGE_URL, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress,
+    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus, ExtStatusEvent,
+    ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
+    ExtensionPopupEvent, ExtensionPopupOpenRequest, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::overlay::WindowOverlay;
@@ -44,7 +44,7 @@ impl Plugin for ExtensionsPlugin {
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtListRequest,
-                ExtActionRequest,
+                ExtensionPopupOpenRequest,
                 ExtPinRequest,
                 ExtOpenManagerRequest,
                 ExtensionPopupBoundsRequest,
@@ -57,7 +57,7 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_list_request)
             .add_observer(on_toggle_request)
             .add_observer(on_uninstall_request)
-            .add_observer(on_action_request)
+            .add_observer(on_popup_open_request)
             .add_observer(on_popup_bounds_request)
             .add_observer(on_popup_close_request)
             .add_observer(on_pin_request)
@@ -326,8 +326,8 @@ fn on_uninstall_request(
     broadcast_list(&outbox, &subs);
 }
 
-fn on_action_request(
-    trigger: On<BinReceive<ExtActionRequest>>,
+fn on_popup_open_request(
+    trigger: On<BinReceive<ExtensionPopupOpenRequest>>,
     layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
     host_windows: Query<&HostWindow>,
     popups: Query<(Entity, &ExtensionPopup)>,

@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tools::{
-    ToolAction, ToolActionRequest, ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider,
-    ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult, ToolStatus,
+    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
@@ -140,13 +140,13 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     let mut loaded = use_signal(|| false);
     let mut query = use_signal(String::new);
     let mut pending = use_signal(BTreeSet::<String>::new);
-    let mut notice = use_signal(|| None::<ToolActionResult>);
+    let mut notice = use_signal(|| None::<ToolResult>);
 
     let _snapshot_listener = use_listener::<ToolsSnapshot, _>(move |event| {
         snapshot.set(event);
         loaded.set(true);
     });
-    let _action_listener = use_listener::<ToolActionResult, _>(move |result| {
+    let _result_listener = use_listener::<ToolResult, _>(move |result| {
         pending
             .write()
             .remove(&action_key(result.provider, result.action, &result.id));
@@ -356,7 +356,7 @@ fn send_action(
     value: String,
 ) {
     pending.write().insert(action_key(provider, action, &id));
-    let _ = send(&ToolActionRequest {
+    let _ = send(&ToolRequest {
         provider,
         action,
         id,
@@ -432,7 +432,7 @@ fn action_label(action: ToolAction) -> String {
     })
 }
 
-fn action_result_message(result: &ToolActionResult) -> String {
+fn action_result_message(result: &ToolResult) -> String {
     let id = result.id.as_str();
     match result.action {
         ToolAction::Apply => translate("tools-result-applied"),

@@ -167,8 +167,8 @@ pub struct ExtUninstallRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "ext", name = "action_request", targets = ["extensions", "layout", "tools"])]
-pub struct ExtActionRequest {
+#[vmux_api::ui_event(namespace = "ext", name = "popup_open_request", targets = ["extensions", "layout", "tools"])]
+pub struct ExtensionPopupOpenRequest {
     pub id: String,
     pub anchor: ExtensionPopupAnchor,
 }

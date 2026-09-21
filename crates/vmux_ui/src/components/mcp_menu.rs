@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{
-    McpServerAction, McpServerActionResult, McpServerEntry, McpServerRequest, McpServerStatus,
+    McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
     McpServers, McpServersRequest,
 };
 
@@ -35,7 +35,7 @@ pub fn use_mcp_connections() -> McpConnections {
     });
     let mut pending = connections.pending;
     let mut error = connections.error;
-    let _result = use_listener::<McpServerActionResult, _>(move |result| {
+    let _result = use_listener::<McpServerResult, _>(move |result| {
         if *pending.peek() == result.id {
             pending.set(String::new());
         }

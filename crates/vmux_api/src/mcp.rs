@@ -134,10 +134,10 @@ pub struct McpServerRequest {
 )]
 #[vmux_api::host_event(
     namespace = "mcp",
-    name = "server_action_result",
+    name = "server_result",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
-pub struct McpServerActionResult {
+pub struct McpServerResult {
     pub id: String,
     pub action: McpServerAction,
     pub success: bool,

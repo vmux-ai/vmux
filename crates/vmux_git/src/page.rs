@@ -667,7 +667,7 @@ impl GitWorkspace {
     }
 
     fn app_action(repo_root: &str, action: GitAppAction) {
-        let _ = send(&GitAppActionRequest {
+        let _ = send(&GitAppRequest {
             repo_root: repo_root.to_string(),
             action,
         });

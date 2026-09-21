@@ -14,9 +14,9 @@ use dioxus::prelude::*;
 use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_core::event::{
-    ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow,
-    ExtensionPopupAnchor, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
-    ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
+    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
+    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
+    ExtensionPopupOpenRequest, ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -3105,7 +3105,7 @@ impl ExtensionActionState {
                     .unwrap_or_default(),
                 None => ExtensionPopupAnchor::default(),
             };
-            let _ = send(&ExtActionRequest {
+            let _ = send(&ExtensionPopupOpenRequest {
                 id: self.id,
                 anchor,
             });

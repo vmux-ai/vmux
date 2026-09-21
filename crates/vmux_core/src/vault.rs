@@ -104,8 +104,8 @@ pub enum VaultAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "vault", name = "action_request", target = "vault")]
-pub struct VaultActionRequest {
+#[vmux_api::ui_event(namespace = "vault", name = "request", target = "vault")]
+pub struct VaultRequest {
     pub action: VaultAction,
     pub repository: String,
     pub private: bool,
@@ -124,8 +124,8 @@ pub struct VaultActionRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "vault", name = "action_result", target = "vault")]
-pub struct VaultActionResult {
+#[vmux_api::host_event(namespace = "vault", name = "result", target = "vault")]
+pub struct VaultResult {
     pub action: VaultAction,
     pub success: bool,
     pub message: String,
