@@ -365,7 +365,7 @@ pub fn Page() -> Element {
 
     let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
         let Some(line_height) =
-            ScrolledLineHeight::of(file_view_mode(), &git_path(), cell_dims().height)
+            ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
         else {
             return;
         };
@@ -1476,7 +1476,7 @@ pub fn Page() -> Element {
                             let cursor_key =
                                 format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
                             let spacer = total_rows() as f64 * ch;
-                            let preedit = PreeditField::of(ime);
+                            let preedit = PreeditField::from(ime);
                             let txtcol = preedit.text_color();
                             let field_caret = preedit.caret_class();
                             rsx! {
@@ -2492,7 +2492,7 @@ fn FileStatusInfo(
         }
         if scope.shows_indent() {
             StatusItemButton {
-                label: IndentChoice::of(indent).label(),
+                label: IndentChoice::from(indent).label(),
                 title: translate("editor-status-indent-title"),
                 extra: "",
                 picker: CommandBarPicker::Indent,
@@ -2528,7 +2528,7 @@ fn StatusItemButton(
             class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
             title,
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::of(picker));
+                let _ = send(&FileStatusPickerOpen::from(picker));
             },
             "{label}"
         }
@@ -2541,7 +2541,7 @@ fn EncodingRecovery() -> Element {
         button {
             class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::of(CommandBarPicker::EncodingReopen));
+                let _ = send(&FileStatusPickerOpen::from(CommandBarPicker::EncodingReopen));
             },
             {translate("editor-status-encoding-reopen")}
         }
@@ -2584,14 +2584,16 @@ struct IndentChoice {
     width: u16,
 }
 
-impl IndentChoice {
-    fn of(indent: vmux_core::event::FileIndent) -> Self {
+impl From<vmux_core::event::FileIndent> for IndentChoice {
+    fn from(indent: vmux_core::event::FileIndent) -> Self {
         Self {
             spaces: indent.spaces,
             width: indent.width,
         }
     }
+}
 
+impl IndentChoice {
     fn label(self) -> String {
         let id = match self.spaces {
             true => "editor-status-spaces",
@@ -2891,7 +2893,7 @@ struct ScrolledLineHeight;
 impl ScrolledLineHeight {
     const NOTE: f64 = 28.0;
 
-    fn of(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
+    fn resolve(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
         let height = match mode == FileViewMode::Note && is_markdown_file(path) {
             true => Self::NOTE,
             false => cell_height,
@@ -4936,7 +4938,7 @@ impl FileViewport {
 struct NoteCaretAnchor([String; 4]);
 
 impl NoteCaretAnchor {
-    fn of(block_index: usize, line: u32) -> Self {
+    fn new(block_index: usize, line: u32) -> Self {
         Self([
             NOTE_CARET_ID.to_string(),
             format!("note-line-{line}"),
@@ -4955,11 +4957,11 @@ impl NoteCaretAnchor {
 }
 
 fn ensure_note_caret_visible(block_index: usize, line: u32) {
-    NoteCaretAnchor::of(block_index, line).reveal();
+    NoteCaretAnchor::new(block_index, line).reveal();
 }
 
 fn center_note_caret(block_index: usize, line: u32) {
-    NoteCaretAnchor::of(block_index, line).center();
+    NoteCaretAnchor::new(block_index, line).center();
 }
 
 fn send_committed_text(mut field: Signal<String>, text: String) {
@@ -4985,11 +4987,13 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct PreeditField(bool);
 
-impl PreeditField {
-    fn of(ime: ImeGuard) -> Self {
+impl From<ImeGuard> for PreeditField {
+    fn from(ime: ImeGuard) -> Self {
         Self(ime.active())
     }
+}
 
+impl PreeditField {
     fn text_color(self) -> &'static str {
         match self.0 {
             true => "inherit",
@@ -5107,17 +5111,17 @@ mod scrolled_line_height_tests {
     #[test]
     fn a_code_file_scrolls_by_the_cell_height_its_rows_are_drawn_at() {
         assert_eq!(
-            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 18.0),
             Some(18.0),
             "a non-markdown file shows the editor even while the shared view mode is Note, \
              so an announced scroll moves by the row height the editor lays rows out with"
         );
         assert_eq!(
-            ScrolledLineHeight::of(FileViewMode::Editor, "/w/notes/a.md", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Editor, "/w/notes/a.md", 18.0),
             Some(18.0)
         );
         assert_eq!(
-            ScrolledLineHeight::of(FileViewMode::Note, "/w/notes/a.md", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/notes/a.md", 18.0),
             Some(ScrolledLineHeight::NOTE)
         );
     }
@@ -5125,7 +5129,7 @@ mod scrolled_line_height_tests {
     #[test]
     fn an_unmeasured_cell_refuses_the_scroll_rather_than_landing_at_zero() {
         assert_eq!(
-            ScrolledLineHeight::of(FileViewMode::Note, "/w/src/main.rs", 0.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 0.0),
             None
         );
     }

@@ -12,7 +12,7 @@ use vmux_ui::hooks::send;
 
 #[component]
 pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
-    let menus = ChatMenuSet::of(chat);
+    let menus = ChatMenuSet::from(chat);
     rsx! {
         ComposerMenus {
             menu: chat.menu,
@@ -32,8 +32,8 @@ pub(crate) struct ChatMenuSet {
     branch: BranchMenuData,
 }
 
-impl ChatMenuSet {
-    pub(crate) fn of(chat: Chat) -> Self {
+impl From<Chat> for ChatMenuSet {
+    fn from(chat: Chat) -> Self {
         let context = (chat.slash.composer_context)();
         let agent_key = (chat.effort.agent_key)();
         let mut current = chat.effort.current;
@@ -79,7 +79,9 @@ impl ChatMenuSet {
             branch,
         }
     }
+}
 
+impl ChatMenuSet {
     pub(crate) fn rows(&self, kind: ComposerMenuKind) -> usize {
         match kind {
             ComposerMenuKind::Agent | ComposerMenuKind::Model => 0,

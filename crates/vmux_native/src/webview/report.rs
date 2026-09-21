@@ -21,8 +21,8 @@ enum PageReport<'a> {
     Emitted(&'a str),
 }
 
-impl<'a> PageReport<'a> {
-    fn of(body: &'a str) -> Self {
+impl<'a> From<&'a str> for PageReport<'a> {
+    fn from(body: &'a str) -> Self {
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
             return Self::Console { level, text };
@@ -45,7 +45,9 @@ impl<'a> PageReport<'a> {
 
         Self::Emitted(body)
     }
+}
 
+impl PageReport<'_> {
     fn numbers(values: &str) -> Option<Measured> {
         let mut measured = [0.0; 4];
         let mut counted = 0;
@@ -82,7 +84,7 @@ impl PageMessage {
     }
 
     pub(crate) fn receive(&self, body: &str) {
-        match PageReport::of(body) {
+        match PageReport::from(body) {
             PageReport::Console { level, text } => self.log(level, text),
             PageReport::Measured { token, measured } => self.measured(token, measured),
             PageReport::Link(href) => self.link(href),
@@ -140,7 +142,7 @@ mod tests {
 
     impl PageReport<'_> {
         fn described(body: &str) -> String {
-            match PageReport::of(body) {
+            match PageReport::from(body) {
                 PageReport::Console { level, text } => format!("console {level} {text}"),
                 PageReport::Measured { token, measured } => match measured {
                     Some([a, b, c, d]) => format!("measured {token} {a},{b},{c},{d}"),

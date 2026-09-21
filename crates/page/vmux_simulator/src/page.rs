@@ -107,12 +107,12 @@ fn Mirror(
                     let _ = send(&SimulatorSoftwareKeyboard);
                     return;
                 }
-                if let Some(action) = ClipboardShortcut::of(&event) {
+                if let Some(action) = ClipboardShortcut::from_event(&event) {
                     event.prevent_default();
                     let _ = send(&SimulatorClipboard { action });
                     return;
                 }
-                let Some(key) = Keystroke::of(&event) else {
+                let Some(key) = Keystroke::from_event(&event) else {
                     return;
                 };
                 event.prevent_default();
@@ -332,7 +332,7 @@ impl SoftwareKeyboardShortcut {
 struct ClipboardShortcut;
 
 impl ClipboardShortcut {
-    fn of(event: &Event<KeyboardData>) -> Option<SimulatorClipboardAction> {
+    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorClipboardAction> {
         let modifiers = event.modifiers();
         if !modifiers.meta() || modifiers.ctrl() || modifiers.alt() || modifiers.shift() {
             return None;
@@ -354,7 +354,7 @@ impl ClipboardShortcut {
 struct Keystroke;
 
 impl Keystroke {
-    fn of(event: &Event<KeyboardData>) -> Option<SimulatorKey> {
+    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorKey> {
         let modifiers = event.modifiers();
         let key = event.key().to_string();
         if modifiers.meta() && !modifiers.ctrl() && !modifiers.alt() && !modifiers.shift() {

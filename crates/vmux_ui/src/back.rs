@@ -9,7 +9,7 @@ impl PageBack {
         Self(on_back)
     }
 
-    pub fn of() -> Option<Self> {
+    pub fn current() -> Option<Self> {
         try_consume_context::<Self>()
     }
 
@@ -20,7 +20,7 @@ impl PageBack {
 
 #[component]
 pub fn BackButton() -> Element {
-    let Some(back) = PageBack::of() else {
+    let Some(back) = PageBack::current() else {
         return rsx! {};
     };
     rsx! {

@@ -210,7 +210,7 @@ fn on_chat_branches_request(
         return;
     }
     let root = std::path::PathBuf::from(&project);
-    let wake = vmux_core::host::wake::Wake::of(proxy);
+    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {

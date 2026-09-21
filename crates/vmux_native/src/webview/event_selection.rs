@@ -4,11 +4,8 @@ pub(crate) struct EventSelection {
     document: bool,
 }
 
-impl EventSelection {
-    const DOCUMENT: &'static str = "x-vmux-selected";
-    const FIELD: &'static str = "x-vmux-caret";
-
-    pub(crate) fn of(headers: &wry::http::HeaderMap) -> Self {
+impl From<&wry::http::HeaderMap> for EventSelection {
+    fn from(headers: &wry::http::HeaderMap) -> Self {
         Self {
             field: Self::field_in(headers),
             document: headers
@@ -16,6 +13,11 @@ impl EventSelection {
                 .is_some_and(|value| value == "1"),
         }
     }
+}
+
+impl EventSelection {
+    const DOCUMENT: &'static str = "x-vmux-selected";
+    const FIELD: &'static str = "x-vmux-caret";
 
     pub(crate) fn in_field(&self, element_id: &str) -> (usize, usize) {
         match &self.field {
@@ -47,7 +49,7 @@ mod tests {
             headers.insert(Self::FIELD, field.parse().expect("a header value"));
             headers.insert(Self::DOCUMENT, document.parse().expect("a header value"));
 
-            Self::of(&headers)
+            Self::from(&headers)
         }
     }
 
@@ -62,7 +64,7 @@ mod tests {
 
     #[test]
     fn an_event_that_reports_nothing_has_nothing_selected() {
-        let selection = EventSelection::of(&wry::http::HeaderMap::new());
+        let selection = EventSelection::from(&wry::http::HeaderMap::new());
 
         assert_eq!(selection.in_field("vmux:prompt"), (0, 0));
         assert!(!selection.in_document());

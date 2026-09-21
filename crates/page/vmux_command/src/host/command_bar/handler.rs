@@ -570,7 +570,7 @@ fn handle_open_command_bar(
     );
     payload.picker = picker;
     if let Some(picker) = picker {
-        payload.picks = CommandBarPicks::of(picker, &locale);
+        payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         layout_e,
@@ -1133,7 +1133,7 @@ fn on_path_complete_request(
     if roots.is_empty() {
         index.forget(asking);
     } else {
-        let bias = RankBias::of(
+        let bias = RankBias::new(
             ProjectQuery::favoured(
                 projects.active.as_deref(),
                 workspace.project_root.as_deref(),
@@ -1187,7 +1187,7 @@ fn answer_settled_project_index(
     if pending.is_empty() {
         return;
     }
-    let bias = RankBias::of(
+    let bias = RankBias::new(
         ProjectQuery::favoured(
             projects.active.as_deref(),
             workspace.project_root.as_deref(),
@@ -1464,7 +1464,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Visible);
-        assert!(!OverlayState::of(node.display, visibility, false, false).owns_input());
+        assert!(!OverlayState::resolve(node.display, visibility, false, false).owns_input());
     }
 
     #[test]
@@ -2154,7 +2154,7 @@ mod tests {
             "KeyboardOwner must not return after prewarm"
         );
         assert!(
-            !OverlayState::of(
+            !OverlayState::resolve(
                 display_after_prewarm,
                 Visibility::Hidden,
                 has_kb_after_prewarm,

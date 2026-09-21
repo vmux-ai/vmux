@@ -81,7 +81,7 @@ impl Media {
         if media.0.request_id == 0 {
             return;
         }
-        let Some(emit) = PageEmit::of(CHAT_MEDIA_ENTRIES_EVENT, &media.0) else {
+        let Some(emit) = PageEmit::encode(CHAT_MEDIA_ENTRIES_EVENT, &media.0) else {
             return;
         };
         emits.write(emit);
@@ -96,7 +96,7 @@ impl Attachments {
         let payload = ChatAttachments {
             attachments: attachments.0.clone(),
         };
-        let Some(emit) = PageEmit::of(CHAT_ATTACHMENTS_EVENT, &payload) else {
+        let Some(emit) = PageEmit::encode(CHAT_ATTACHMENTS_EVENT, &payload) else {
             return;
         };
         emits.write(emit);

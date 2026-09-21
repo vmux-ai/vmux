@@ -11,7 +11,7 @@ pub struct BufferShape {
 }
 
 impl BufferShape {
-    pub fn of(rope: &Rope) -> Self {
+    pub fn detect(rope: &Rope) -> Self {
         let total = rope.len_lines().min(SAMPLE_LINES);
         let mut crlf = 0usize;
         let mut tabs = 0usize;
@@ -135,7 +135,7 @@ mod tests {
     fn two_space_source_is_not_read_as_four() {
         let rope = Rope::from_str("fn a() {\n  let x = 1;\n  if x {\n    y();\n  }\n}\n");
 
-        let shape = BufferShape::of(&rope);
+        let shape = BufferShape::detect(&rope);
 
         assert!(shape.indent.spaces);
         assert_eq!(shape.indent.width, 2);
@@ -148,7 +148,7 @@ mod tests {
             "fn a() {\n    let x = 1;\n    if x {\n        y();\n    }\n}\n\nfn b() {\n    z();\n}\n",
         );
 
-        let shape = BufferShape::of(&rope);
+        let shape = BufferShape::detect(&rope);
 
         assert!(shape.indent.spaces);
         assert_eq!(shape.indent.width, 4);
@@ -158,14 +158,14 @@ mod tests {
     fn eight_space_source_is_not_read_as_four() {
         let rope = Rope::from_str("fn a() {\n        x();\n}\n");
 
-        assert_eq!(BufferShape::of(&rope).indent.width, 8);
+        assert_eq!(BufferShape::detect(&rope).indent.width, 8);
     }
 
     #[test]
     fn a_tab_indented_file_reports_tabs() {
         let rope = Rope::from_str("fn a() {\n\tlet x = 1;\n\tlet y = 2;\n}\n");
 
-        let shape = BufferShape::of(&rope);
+        let shape = BufferShape::detect(&rope);
 
         assert!(!shape.indent.spaces);
     }
@@ -174,7 +174,7 @@ mod tests {
     fn windows_line_endings_are_reported_as_crlf() {
         let rope = Rope::from_str("a\r\nb\r\nc\r\n");
 
-        assert_eq!(BufferShape::of(&rope).line_ending, FileLineEnding::Crlf);
+        assert_eq!(BufferShape::detect(&rope).line_ending, FileLineEnding::Crlf);
     }
 
     impl BufferShape {
@@ -200,15 +200,15 @@ mod tests {
     }
 
     impl Reindent {
-        fn of(text: &str, to: BufferShape) -> String {
-            let from = BufferShape::of(&Rope::from_str(text)).indent;
+        fn apply_to(text: &str, to: BufferShape) -> String {
+            let from = BufferShape::detect(&Rope::from_str(text)).indent;
             Self { from, to }.applied(text)
         }
     }
 
     #[test]
     fn converting_tabs_to_spaces_widens_each_level_to_the_target_width() {
-        let out = Reindent::of("fn a() {\n\tb();\n\t\tc();\n}\n", BufferShape::spaces(4));
+        let out = Reindent::apply_to("fn a() {\n\tb();\n\t\tc();\n}\n", BufferShape::spaces(4));
 
         assert_eq!(out, "fn a() {\n    b();\n        c();\n}\n");
     }
@@ -229,14 +229,14 @@ mod tests {
 
     #[test]
     fn a_new_width_reindents_every_level_rather_than_retyping_the_same_columns() {
-        let out = Reindent::of("a\n  b\n    c\n", BufferShape::spaces(4));
+        let out = Reindent::apply_to("a\n  b\n    c\n", BufferShape::spaces(4));
 
         assert_eq!(out, "a\n    b\n        c\n");
     }
 
     #[test]
     fn conversion_leaves_text_after_the_indentation_untouched() {
-        let out = Reindent::of("\tlet s = \"\tkeep\tthese\";\n", BufferShape::spaces(4));
+        let out = Reindent::apply_to("\tlet s = \"\tkeep\tthese\";\n", BufferShape::spaces(4));
 
         assert_eq!(out, "    let s = \"\tkeep\tthese\";\n");
     }
@@ -251,21 +251,24 @@ mod tests {
             line_ending: FileLineEnding::Crlf,
         };
 
-        assert_eq!(Reindent::of("a\nb\n", crlf), "a\r\nb\r\n");
-        assert_eq!(Reindent::of("a\r\nb\r\n", BufferShape::spaces(4)), "a\nb\n");
+        assert_eq!(Reindent::apply_to("a\nb\n", crlf), "a\r\nb\r\n");
+        assert_eq!(
+            Reindent::apply_to("a\r\nb\r\n", BufferShape::spaces(4)),
+            "a\nb\n"
+        );
     }
 
     #[test]
     fn a_file_without_a_trailing_newline_does_not_gain_one() {
-        assert_eq!(Reindent::of("a\nb", BufferShape::spaces(4)), "a\nb");
-        assert_eq!(Reindent::of("", BufferShape::spaces(4)), "");
+        assert_eq!(Reindent::apply_to("a\nb", BufferShape::spaces(4)), "a\nb");
+        assert_eq!(Reindent::apply_to("", BufferShape::spaces(4)), "");
     }
 
     #[test]
     fn reshaping_to_the_shape_a_buffer_already_has_is_a_no_op() {
         let text = "fn a() {\n    b();\n        c();\n}\n";
-        let shape = BufferShape::of(&Rope::from_str(text));
+        let shape = BufferShape::detect(&Rope::from_str(text));
 
-        assert_eq!(Reindent::of(text, shape), text);
+        assert_eq!(Reindent::apply_to(text, shape), text);
     }
 }

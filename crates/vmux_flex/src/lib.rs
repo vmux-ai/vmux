@@ -82,7 +82,7 @@ fn compute_layout(
         let Some(window) = window_entity.and_then(|entity| windows.get(entity).ok()) else {
             continue;
         };
-        let context = LayoutContext::of(window);
+        let context = LayoutContext::from(window);
         if context.physical_size.x <= 0.0 || context.physical_size.y <= 0.0 {
             continue;
         }

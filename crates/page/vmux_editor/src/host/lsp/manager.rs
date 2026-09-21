@@ -1190,7 +1190,7 @@ fn apply_semantic_tokens(
             continue;
         }
         edit.hl
-            .set_semantic(crate::lsp::semantic::SemanticHighlight::of(
+            .set_semantic(crate::lsp::semantic::SemanticHighlight::from(
                 message.tokens.clone(),
             ));
         crate::host::plugin::repaint_window(

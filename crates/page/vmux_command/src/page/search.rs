@@ -147,7 +147,7 @@ impl PaletteFeeds {
             let typed = query();
             let id = (*request_id.peek()).wrapping_add(1).max(1);
             request_id.set(id);
-            let Some(path_query) = CompletionQuery::of(&typed) else {
+            let Some(path_query) = CompletionQuery::parse(&typed) else {
                 timer.cancel();
                 completions.set(Vec::new());
                 partial.set(false);
@@ -193,7 +193,7 @@ impl PaletteFeeds {
             let trimmed = typed.trim();
             let id = (*request_id.peek()).wrapping_add(1).max(1);
             request_id.set(id);
-            if HistoryQuery::of(trimmed).is_none() {
+            if HistoryQuery::parse(trimmed).is_none() {
                 timer.cancel();
                 suggestions.set(Vec::new());
                 return;
@@ -216,7 +216,7 @@ impl PaletteFeeds {
 pub struct HistoryQuery;
 
 impl HistoryQuery {
-    pub fn of(trimmed: &str) -> Option<&str> {
+    pub fn parse(trimmed: &str) -> Option<&str> {
         if trimmed.is_empty()
             || trimmed.starts_with('>')
             || trimmed.starts_with('/')
@@ -236,13 +236,13 @@ mod tests {
 
     #[test]
     fn history_is_asked_only_for_text_that_could_be_a_visited_page() {
-        assert_eq!(HistoryQuery::of("rust docs"), Some("rust docs"));
-        assert_eq!(HistoryQuery::of("example.com"), Some("example.com"));
-        assert_eq!(HistoryQuery::of(""), None);
-        assert_eq!(HistoryQuery::of("> close"), None);
-        assert_eq!(HistoryQuery::of("/usr/bin"), None);
-        assert_eq!(HistoryQuery::of("~/notes"), None);
-        assert_eq!(HistoryQuery::of("vmux://settings/"), None);
-        assert_eq!(HistoryQuery::of("file:///tmp/a"), None);
+        assert_eq!(HistoryQuery::parse("rust docs"), Some("rust docs"));
+        assert_eq!(HistoryQuery::parse("example.com"), Some("example.com"));
+        assert_eq!(HistoryQuery::parse(""), None);
+        assert_eq!(HistoryQuery::parse("> close"), None);
+        assert_eq!(HistoryQuery::parse("/usr/bin"), None);
+        assert_eq!(HistoryQuery::parse("~/notes"), None);
+        assert_eq!(HistoryQuery::parse("vmux://settings/"), None);
+        assert_eq!(HistoryQuery::parse("file:///tmp/a"), None);
     }
 }

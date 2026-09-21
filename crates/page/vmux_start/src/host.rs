@@ -268,7 +268,7 @@ struct StartBranchRead {
 }
 
 impl StartBranchRead {
-    fn of(webview: Entity, project: &str, wake: vmux_core::host::wake::Wake) -> Option<Self> {
+    fn start(webview: Entity, project: &str, wake: vmux_core::host::wake::Wake) -> Option<Self> {
         let project = project.trim().to_string();
         if project.is_empty() {
             return None;
@@ -306,10 +306,10 @@ fn on_start_branches_request(
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Some(read) = StartBranchRead::of(
+    let Some(read) = StartBranchRead::start(
         trigger.event().webview,
         &trigger.event().payload.project,
-        vmux_core::host::wake::Wake::of(proxy),
+        vmux_core::host::wake::Wake::from_resource(proxy),
     ) else {
         return;
     };
@@ -504,14 +504,14 @@ fn sync_live_start_pages(
         prompt_context.agent_modes.agents.clone(),
         &locale,
     );
-    let project = vmux_ui::launcher::palette::ActiveProject::of(&payload.prompt_context);
+    let project = vmux_ui::launcher::palette::ActiveProject::resolve(&payload.prompt_context);
     let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
     if warm_branches {
         *prompt_context.warmed_branches_for = project.clone();
     }
     for (e, focus_requested) in targets {
         if warm_branches
-            && let Some(read) = StartBranchRead::of(
+            && let Some(read) = StartBranchRead::start(
                 e,
                 &project,
                 vmux_core::host::wake::Wake::beside(prompt_context.proxy.as_deref()),

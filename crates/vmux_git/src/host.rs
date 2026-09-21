@@ -369,14 +369,16 @@ struct GuessedPath {
     made_at: Instant,
 }
 
-impl GuessedPath {
-    fn of(path: &Path) -> Self {
+impl From<&Path> for GuessedPath {
+    fn from(path: &Path) -> Self {
         Self {
             guess: canon(path),
             made_at: Instant::now(),
         }
     }
+}
 
+impl GuessedPath {
     fn worth_reusing(&self) -> bool {
         self.made_at.elapsed() < UNRESOLVED_RETRY
     }
@@ -414,7 +416,7 @@ impl RepoInfoCache {
             return guessed.guess.clone();
         }
         let Ok(resolved) = path.canonicalize() else {
-            let guessed = GuessedPath::of(path);
+            let guessed = GuessedPath::from(path);
             let guess = guessed.guess.clone();
             self.guessed.insert(path.to_path_buf(), guessed);
             return guess;

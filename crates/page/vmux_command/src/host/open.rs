@@ -102,7 +102,7 @@ impl OpenCommand {
 pub struct OpenUrl(String);
 
 impl OpenUrl {
-    pub fn of(command: &OpenCommand, startup_url: Option<&str>) -> Self {
+    pub fn from_command(command: &OpenCommand, startup_url: Option<&str>) -> Self {
         Self::resolve(command.url(), startup_url)
     }
 
@@ -201,7 +201,7 @@ mod tests {
         );
         for command in &commands {
             assert_eq!(
-                OpenUrl::of(command, Some("https://startup")).as_str(),
+                OpenUrl::from_command(command, Some("https://startup")).as_str(),
                 command.url().expect("every variant was given a url")
             );
         }
@@ -211,7 +211,7 @@ mod tests {
     fn a_command_without_a_url_opens_the_startup_url() {
         let command = OpenCommand::InNewTab { url: None };
         assert_eq!(
-            OpenUrl::of(&command, Some("https://startup")).as_str(),
+            OpenUrl::from_command(&command, Some("https://startup")).as_str(),
             "https://startup"
         );
     }

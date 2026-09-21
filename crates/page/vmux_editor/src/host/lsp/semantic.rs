@@ -33,7 +33,7 @@ pub struct SemanticLegend {
 }
 
 impl SemanticLegend {
-    pub fn of(capabilities: &lsp_types::ServerCapabilities) -> Option<Self> {
+    pub fn from_capabilities(capabilities: &lsp_types::ServerCapabilities) -> Option<Self> {
         let provider = capabilities.semantic_tokens_provider.as_ref()?;
         let legend = match provider {
             lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(o) => &o.legend,
@@ -44,7 +44,7 @@ impl SemanticLegend {
         let kinds = legend
             .token_types
             .iter()
-            .map(|t| SemanticKind::of(t.as_str()))
+            .map(|t| SemanticKind::parse(t.as_str()))
             .collect();
         Some(Self { kinds })
     }
@@ -98,7 +98,7 @@ pub enum SemanticKind {
 }
 
 impl SemanticKind {
-    fn of(name: &str) -> Option<Self> {
+    fn parse(name: &str) -> Option<Self> {
         Some(match name {
             "type" | "struct" | "class" | "enum" | "interface" | "typeParameter" | "typeAlias"
             | "union" | "builtinType" => Self::Type,
@@ -147,7 +147,7 @@ impl SemanticKind {
         static LIGHT: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
         let cell = if dark { &DARK } else { &LIGHT };
         cell.get_or_init(|| {
-            let theme = crate::palette::Palette::of(dark).theme();
+            let theme = crate::palette::Palette::for_scheme(dark).theme();
             let highlighter = Highlighter::new(&theme);
             let mut out = [[0u8; 3]; 7];
             for (slot, kind) in Self::ALL.iter().enumerate() {
@@ -168,8 +168,8 @@ pub struct SemanticHighlight {
     by_line: HashMap<u32, Vec<(u32, u32, SemanticKind)>>,
 }
 
-impl SemanticHighlight {
-    pub fn of(tokens: Vec<SemanticToken>) -> Self {
+impl From<Vec<SemanticToken>> for SemanticHighlight {
+    fn from(tokens: Vec<SemanticToken>) -> Self {
         let mut by_line: HashMap<u32, Vec<(u32, u32, SemanticKind)>> = HashMap::new();
         for token in tokens {
             by_line.entry(token.line).or_default().push((
@@ -180,7 +180,9 @@ impl SemanticHighlight {
         }
         Self { by_line }
     }
+}
 
+impl SemanticHighlight {
     pub fn is_empty(&self) -> bool {
         self.by_line.is_empty()
     }
@@ -254,7 +256,7 @@ mod tests {
 
     fn legend(types: &[&str]) -> SemanticLegend {
         SemanticLegend {
-            kinds: types.iter().map(|t| SemanticKind::of(t)).collect(),
+            kinds: types.iter().map(|t| SemanticKind::parse(t)).collect(),
         }
     }
 
@@ -299,7 +301,7 @@ mod tests {
 
     #[test]
     fn a_token_recolours_only_what_it_covers() {
-        let hl = SemanticHighlight::of(vec![SemanticToken {
+        let hl = SemanticHighlight::from(vec![SemanticToken {
             line: 0,
             utf16_start: 4,
             utf16_len: 3,
@@ -318,7 +320,7 @@ mod tests {
 
     #[test]
     fn a_token_spanning_two_syntect_spans_is_coloured_throughout() {
-        let hl = SemanticHighlight::of(vec![SemanticToken {
+        let hl = SemanticHighlight::from(vec![SemanticToken {
             line: 0,
             utf16_start: 0,
             utf16_len: 6,
@@ -335,7 +337,7 @@ mod tests {
 
     #[test]
     fn columns_are_utf16() {
-        let hl = SemanticHighlight::of(vec![SemanticToken {
+        let hl = SemanticHighlight::from(vec![SemanticToken {
             line: 0,
             utf16_start: 9,
             utf16_len: 3,
@@ -352,7 +354,7 @@ mod tests {
 
     #[test]
     fn a_line_with_no_tokens_is_left_alone() {
-        let hl = SemanticHighlight::of(vec![SemanticToken {
+        let hl = SemanticHighlight::from(vec![SemanticToken {
             line: 5,
             utf16_start: 0,
             utf16_len: 3,

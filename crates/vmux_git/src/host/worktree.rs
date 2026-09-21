@@ -70,7 +70,7 @@ impl BranchChange {
     const WORKERS: usize = 8;
 
     fn fill(root: &Path, holders: &mut [BranchHolder]) {
-        let Some(base) = BaseRef::of(root) else {
+        let Some(base) = BaseRef::resolve(root) else {
             return;
         };
         let mut measured = Vec::new();
@@ -140,7 +140,7 @@ impl BaseRef {
         "refs/heads/master",
     ];
 
-    pub fn of(root: &Path) -> Option<Self> {
+    pub fn resolve(root: &Path) -> Option<Self> {
         if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
             let name = stdout.trim();
             if !name.is_empty() {
@@ -630,7 +630,7 @@ pub struct RepoLabel {
 }
 
 impl RepoLabel {
-    pub fn of(dir: &Path) -> Option<Self> {
+    pub fn read(dir: &Path) -> Option<Self> {
         let git_dir = Self::git_dir_of(dir)?;
         let common = Self::common_dir_of(&git_dir);
         let project = common
@@ -689,7 +689,7 @@ impl RepoLabel {
 pub struct LinkedRepoRoot;
 
 impl LinkedRepoRoot {
-    pub fn of(dir: &Path) -> Option<PathBuf> {
+    pub fn find(dir: &Path) -> Option<PathBuf> {
         let (dirs, _, ok) = git_read(
             dir,
             &[
@@ -765,7 +765,7 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
             .to_string_lossy()
             .into_owned()
     });
-    let base = BaseRef::of(&repo_root);
+    let base = BaseRef::resolve(&repo_root);
     let change = if branch.is_empty() {
         BranchChange::default()
     } else {

@@ -62,10 +62,10 @@ impl ChatKeys {
     }
 
     fn moves_list_locally(&self, event: &KeyboardEvent) -> bool {
-        if ChatList::of(self.chat).is_none() {
+        if ChatList::current(self.chat).is_none() {
             return false;
         }
-        let Some(direction) = MenuDirection::of(&event.data()) else {
+        let Some(direction) = MenuDirection::from_key(&event.data()) else {
             return false;
         };
         event.prevent_default();
@@ -101,7 +101,7 @@ impl ChatKeys {
         if !Self::moves_the_caret(stroke) {
             return false;
         }
-        if ChatList::of(self.chat).is_some() {
+        if ChatList::current(self.chat).is_some() {
             return false;
         }
         self.recall_direction(&stroke.key, stroke.mods.ctrl)
@@ -143,14 +143,14 @@ impl ChatKeys {
     }
 
     fn move_list(&self, direction: MenuDirection) {
-        let Some(list) = ChatList::of(self.chat) else {
+        let Some(list) = ChatList::current(self.chat) else {
             return;
         };
         list.move_by(self.chat, direction);
     }
 
     fn choose(&self) {
-        let Some(list) = ChatList::of(self.chat) else {
+        let Some(list) = ChatList::current(self.chat) else {
             return;
         };
         let index = *list.selection(self.chat).peek();
@@ -197,7 +197,7 @@ impl ChatKeys {
         if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
             return false;
         }
-        let list = match ChatList::of(self.chat) {
+        let list = match ChatList::current(self.chat) {
             Some(list @ (ChatList::Approval | ChatList::Choice)) => list,
             _ => return false,
         };
@@ -217,7 +217,7 @@ impl ChatKeys {
             || modifiers.meta()
             || modifiers.ctrl()
             || modifiers.alt()
-            || ChatList::of(self.chat).is_some()
+            || ChatList::current(self.chat).is_some()
         {
             return false;
         }
@@ -261,7 +261,7 @@ enum ChatList {
 }
 
 impl ChatList {
-    fn of(chat: Chat) -> Option<Self> {
+    fn current(chat: Chat) -> Option<Self> {
         if chat.run.approval.read().is_some() {
             return Some(Self::Approval);
         }
@@ -297,7 +297,7 @@ impl ChatList {
         match self {
             Self::Approval => APPROVAL_OPTION_COUNT,
             Self::Choice => chat.run.choice_options.read().len(),
-            Self::ComposerMenu(kind) => ChatMenuSet::of(chat).rows(kind),
+            Self::ComposerMenu(kind) => ChatMenuSet::from(chat).rows(kind),
             Self::Media => chat.media.entries.read().len(),
             Self::Mcp => chat.filtered_mcp_servers().len(),
             Self::Session => chat.filtered_sessions().len(),
@@ -315,7 +315,8 @@ impl ChatList {
 
     fn move_by(self, chat: Chat, direction: MenuDirection) {
         if let Self::ComposerMenu(kind) = self {
-            chat.menu.step(direction, ChatMenuSet::of(chat).rows(kind));
+            chat.menu
+                .step(direction, ChatMenuSet::from(chat).rows(kind));
             return;
         }
         let mut selection = self.selection(chat);
@@ -340,7 +341,7 @@ impl ChatList {
                 }
             }
             Self::ComposerMenu(kind) => {
-                if ChatMenuSet::of(chat).choose(kind, index) {
+                if ChatMenuSet::from(chat).choose(kind, index) {
                     chat.menu.close();
                 }
             }
@@ -373,7 +374,7 @@ impl ChatList {
 impl Chat {
     fn key_context(&self) -> Vec<String> {
         let mut keys = vec!["chat".to_string()];
-        let Some(list) = ChatList::of(*self) else {
+        let Some(list) = ChatList::current(*self) else {
             return keys;
         };
         keys.push("chat.list".to_string());

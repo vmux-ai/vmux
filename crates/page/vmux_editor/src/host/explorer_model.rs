@@ -111,7 +111,7 @@ fn push_symbol(item: &serde_json::Value, depth: u16, out: &mut Vec<OutlineRow>) 
         return;
     }
     let kind = item.get("kind").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
-    let span = SymbolSpan::of(item);
+    let span = SymbolSpan::from(item);
     out.push(OutlineRow {
         name,
         kind,
@@ -131,8 +131,8 @@ struct SymbolSpan {
     end_line: u32,
 }
 
-impl SymbolSpan {
-    fn of(item: &serde_json::Value) -> Self {
+impl From<&serde_json::Value> for SymbolSpan {
+    fn from(item: &serde_json::Value) -> Self {
         let line = Self::pick(
             item,
             &[
@@ -157,7 +157,9 @@ impl SymbolSpan {
         }
         Self { line, end_line }
     }
+}
 
+impl SymbolSpan {
     fn pick(item: &serde_json::Value, paths: &[&str]) -> Option<u32> {
         for path in paths {
             if let Some(found) = item.pointer(path).and_then(|v| v.as_u64()) {

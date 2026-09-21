@@ -43,7 +43,7 @@ fn log_command_bar_keyboard_input(
     mut events: MessageReader<KeyboardInput>,
     overlay_q: OverlayStateQuery,
 ) {
-    if !OverlayState::of_any(&overlay_q).owns_input() {
+    if !OverlayState::from_query(&overlay_q).owns_input() {
         return;
     }
     for event in events.read() {

@@ -38,18 +38,20 @@ pub struct Capabilities {
     semantic: Option<crate::lsp::semantic::SemanticLegend>,
 }
 
-impl Capabilities {
-    fn of(reply: &serde_json::Value) -> Self {
+impl From<&serde_json::Value> for Capabilities {
+    fn from(reply: &serde_json::Value) -> Self {
         let server: lsp_types::ServerCapabilities = reply
             .get("result")
             .and_then(|result| result.get("capabilities"))
             .cloned()
             .and_then(|caps| serde_json::from_value(caps).ok())
             .unwrap_or_default();
-        let semantic = crate::lsp::semantic::SemanticLegend::of(&server);
+        let semantic = crate::lsp::semantic::SemanticLegend::from_capabilities(&server);
         Self { server, semantic }
     }
+}
 
+impl Capabilities {
     pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
         self.semantic.as_ref()
     }
@@ -222,7 +224,7 @@ impl ServerClient {
         });
         let reply = self.request("initialize", params, Duration::from_secs(10))?;
         self.notify("initialized", serde_json::json!({}));
-        Ok(Capabilities::of(&reply))
+        Ok(Capabilities::from(&reply))
     }
 
     fn capabilities() -> lsp_types::ClientCapabilities {
@@ -331,7 +333,7 @@ mod tests {
     use serde_json::json;
 
     fn advertising(capabilities: serde_json::Value) -> Capabilities {
-        Capabilities::of(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
+        Capabilities::from(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
     }
 
     #[test]
@@ -371,7 +373,7 @@ mod tests {
 
     #[test]
     fn an_unparseable_reply_provides_nothing() {
-        let caps = Capabilities::of(&json!({ "id": 1, "result": "not an object" }));
+        let caps = Capabilities::from(&json!({ "id": 1, "result": "not an object" }));
         assert!(!caps.allows("textDocument/hover"));
     }
 }

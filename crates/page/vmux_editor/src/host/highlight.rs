@@ -40,7 +40,7 @@ pub fn is_dark_theme() -> bool {
 }
 
 pub fn default_theme() -> syntect::highlighting::Theme {
-    crate::palette::Palette::of(is_dark_theme()).theme()
+    crate::palette::Palette::for_scheme(is_dark_theme()).theme()
 }
 
 pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
@@ -48,7 +48,7 @@ pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
         .settings
         .foreground
         .map(|c| [c.r, c.g, c.b])
-        .unwrap_or_else(|| crate::palette::Palette::of(is_dark_theme()).foreground_rgb())
+        .unwrap_or_else(|| crate::palette::Palette::for_scheme(is_dark_theme()).foreground_rgb())
 }
 
 pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
@@ -166,7 +166,7 @@ impl Highlighter {
         }
         let bytes = std::fs::read(path)
             .map_err(|e| LoadError::Unreadable(format!("cannot read {}: {e}", path.display())))?;
-        let Some(decoded) = crate::encoding::DecodedText::of(&bytes) else {
+        let Some(decoded) = crate::encoding::DecodedText::decode(&bytes) else {
             return Err(LoadError::Binary);
         };
         let mut out = match meta.len() > HIGHLIGHT_MAX_BYTES {

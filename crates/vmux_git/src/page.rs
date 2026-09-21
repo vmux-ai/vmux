@@ -866,7 +866,7 @@ impl GitPanel {
                 _ => {}
             }
         }
-        MenuDirection::of(event)
+        MenuDirection::from_key(event)
     }
 
     fn from_key(key: &str) -> Option<Self> {

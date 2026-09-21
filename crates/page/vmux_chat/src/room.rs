@@ -155,7 +155,7 @@ pub struct Snapshot(pub ChatSnapshot);
 
 impl Snapshot {
     fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
+        let Some(emit) = PageEmit::encode(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
             return;
         };
         emits.write(emit);
@@ -329,7 +329,7 @@ mod tests {
     }
 
     impl Agents {
-        fn of(named: &[(&str, &str)]) -> Self {
+        fn named(named: &[(&str, &str)]) -> Self {
             let mut agents = Vec::with_capacity(named.len());
             for (name, icon) in named {
                 agents.push(RemoteAgent {
@@ -515,7 +515,7 @@ mod tests {
         let mut started = Started::open();
         assert!(started.snapshot().agent_icon.is_empty());
 
-        started.insert(Agents::of(&[("grace", "G"), ("ada", "A")]));
+        started.insert(Agents::named(&[("grace", "G"), ("ada", "A")]));
         assert_eq!(
             started.snapshot().agent_icon,
             "A",

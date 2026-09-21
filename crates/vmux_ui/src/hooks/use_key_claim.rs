@@ -51,7 +51,7 @@ impl KeyClaim {
         if stroke.is_modifier_key() {
             return;
         }
-        let verdict = KeyVerdict::of(
+        let verdict = KeyVerdict::decide(
             &self.claims.read(),
             self.unclaimed,
             &stroke,

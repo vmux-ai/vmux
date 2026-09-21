@@ -127,7 +127,7 @@ impl PaletteKeys {
 pub struct TypedDigit;
 
 impl TypedDigit {
-    pub fn of(event: &KeyboardEvent) -> Option<usize> {
+    pub fn from_event(event: &KeyboardEvent) -> Option<usize> {
         let Key::Character(typed) = event.key() else {
             return None;
         };

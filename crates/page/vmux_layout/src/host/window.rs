@@ -571,7 +571,7 @@ pub fn spawn_requested_tab_layouts(
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
-                    url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+                    url: vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref()),
                     request_id: None,
                 });
             }

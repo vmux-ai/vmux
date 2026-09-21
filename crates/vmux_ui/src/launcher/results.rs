@@ -12,7 +12,7 @@ pub struct SlashRows;
 impl SlashRows {
     const PENDING_ROWS: usize = 7;
 
-    pub fn of(
+    pub fn for_query(
         query: &str,
         commands: &[vmux_wire::chat::SlashCommandEntry],
         sessions: &[ResumableSessionEntry],
@@ -74,8 +74,8 @@ pub struct ResumeSection {
     pub count: usize,
 }
 
-impl ResumeSection {
-    fn of(entry: &ResumableSessionEntry) -> Self {
+impl From<&ResumableSessionEntry> for ResumeSection {
+    fn from(entry: &ResumableSessionEntry) -> Self {
         let agent = match entry.agent_name.is_empty() {
             true => entry.kind.clone(),
             false => entry.agent_name.clone(),
@@ -96,7 +96,7 @@ impl ResumeSection {
 pub struct ResumeRows;
 
 impl ResumeRows {
-    pub fn of(sessions: &[ResumableSessionEntry]) -> Vec<CommandBarResultItem> {
+    pub fn all(sessions: &[ResumableSessionEntry]) -> Vec<CommandBarResultItem> {
         Self::filtered("", sessions)
     }
 
@@ -114,7 +114,7 @@ impl ResumeRows {
             {
                 continue;
             }
-            let section = ResumeSection::of(entry);
+            let section = ResumeSection::from(entry);
             if let Some((_, entries)) = groups.iter_mut().find(|(held, _)| *held == section) {
                 entries.push(entry.clone());
             } else {
@@ -140,7 +140,7 @@ impl ResumeRows {
 pub struct PickerRows;
 
 impl PickerRows {
-    pub fn of(
+    pub fn filtered(
         picker: CommandBarPicker,
         picks: &[CommandBarPickRow],
         query: &str,
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn resume_rows_group_sessions_under_shared_context() {
-        let rows = ResumeRows::of(&[
+        let rows = ResumeRows::all(&[
             resume("first", "Codex", "vmux", "main"),
             resume("second", "Claude", "vmux", "main"),
             resume("third", "Codex", "vmux", "main"),

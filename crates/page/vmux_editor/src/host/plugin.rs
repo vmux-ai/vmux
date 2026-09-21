@@ -316,7 +316,7 @@ impl LoadFailure {
         }
     }
 
-    fn of(language: &str) -> Option<(Self, &str)> {
+    fn parse(language: &str) -> Option<(Self, &str)> {
         if let Some(message) = language.strip_prefix(Self::UNDECODABLE) {
             return Some((Self::Undecodable, message));
         }
@@ -392,7 +392,7 @@ impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
-        let indent_width = crate::shape::BufferShape::of(&core.buffer.rope)
+        let indent_width = crate::shape::BufferShape::detect(&core.buffer.rope)
             .indent
             .width;
         Self {
@@ -913,7 +913,7 @@ pub fn handle_file_page_open(
             .and_then(|effective| effective.0.as_ref())
             .and_then(|(_, path)| path.as_deref());
         let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
-        let Some(target) = FilePageTarget::of(&task.url, project_dir, &knowledge_root) else {
+        let Some(target) = FilePageTarget::resolve(&task.url, project_dir, &knowledge_root) else {
             continue;
         };
         let Some(path) = target.path else {
@@ -985,7 +985,7 @@ struct FilePageTarget {
 }
 
 impl FilePageTarget {
-    fn of(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
+    fn resolve(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
         if url.trim_end_matches('/') == vmux_wire::space::PROJECTS_PAGE_URL.trim_end_matches('/') {
             return Some(Self {
                 path: Some(
@@ -1037,7 +1037,7 @@ fn load_file_buffers(
     mut commands: Commands,
 ) {
     for (entity, fv, mut parked, forced) in &mut q {
-        let forced = forced.and_then(|f| f.of(&fv.path));
+        let forced = forced.and_then(|f| f.for_path(&fv.path));
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
             commands
@@ -1113,7 +1113,7 @@ fn load_file_buffers(
         let decoded = match std::fs::read(&fv.path) {
             Ok(bytes) => match forced {
                 Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
-                None => match crate::encoding::DecodedText::of(&bytes) {
+                None => match crate::encoding::DecodedText::decode(&bytes) {
                     Some(decoded) => decoded,
                     None => {
                         commands.entity(entity).remove::<MissingFileView>().insert(
@@ -1257,7 +1257,7 @@ fn send_initial_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        if let Some((reason, message)) = LoadFailure::of(&buf.language) {
+        if let Some((reason, message)) = LoadFailure::parse(&buf.language) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 FILE_ERROR_EVENT,
@@ -1289,7 +1289,7 @@ fn send_initial_text_meta(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
+        let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_META_EVENT,
@@ -1600,14 +1600,14 @@ fn emit_window(
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
-        &EditorWindow::of(edit, vp),
+        &EditorWindow::render(edit, vp),
     ));
 }
 
 struct EditorWindow;
 
 impl EditorWindow {
-    fn of(edit: &mut EditState, vp: &FileViewport) -> FileViewportPatch {
+    fn render(edit: &mut EditState, vp: &FileViewport) -> FileViewportPatch {
         let total = edit.core.buffer.len_lines() as u32;
         let wrap = wrapped_view(edit, vp);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
@@ -1633,7 +1633,7 @@ impl EditorWindow {
                 first_line as usize,
                 last_line as usize + 1,
             );
-            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
+            let guides = crate::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width);
             for layout in &layouts {
                 let index = (layout.line_no - first_line) as usize;
                 let Some(line) = window.get_mut(index) else {
@@ -1647,7 +1647,7 @@ impl EditorWindow {
         }
         let mut sticky = Vec::new();
         if let Some(top) = visible_top {
-            let guides = crate::fold::IndentGuides::of(&edit.core.buffer.rope, edit.indent_width);
+            let guides = crate::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width);
             for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
                 let at = header as usize;
                 let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
@@ -1675,7 +1675,7 @@ impl EditorWindow {
 struct HighlightedLines;
 
 impl HighlightedLines {
-    fn of(edit: &mut EditState, vp: &FileViewport) -> (u32, u16) {
+    fn window(edit: &mut EditState, vp: &FileViewport) -> (u32, u16) {
         let wrap = wrapped_view(edit, vp);
         let visible = wrap.total_rows();
         let (first_row, end_row) = window_range(visible, vp.top_row, vp.rows);
@@ -1709,7 +1709,7 @@ fn emit_cursor(
     let view = edit.folds.view(total);
     let source_primary = edit.core.cursor_pos();
     let mut primary = source_primary;
-    let (span_first, span_rows) = HighlightedLines::of(edit, vp);
+    let (span_first, span_rows) = HighlightedLines::window(edit, vp);
     let raw_selections = edit
         .core
         .sel_spans(span_first, span_rows)
@@ -1777,7 +1777,7 @@ struct DriftedWindow {
 }
 
 impl DriftedWindow {
-    fn of(top_before: u32, vp: &FileViewport) -> Self {
+    fn between(top_before: u32, vp: &FileViewport) -> Self {
         Self {
             rows: vp.top_row.abs_diff(top_before),
             overscan: vmux_core::scroll::overscan_for(
@@ -2020,7 +2020,7 @@ fn on_file_shape_set(
         &browsers,
         &mut commands,
     );
-    let shape = crate::shape::BufferShape::of(&edit.core.buffer.rope);
+    let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
     edit.indent_width = shape.indent.width;
     if !browsers.can_emit_to(&entity) {
         return;
@@ -2597,7 +2597,7 @@ struct ForcedEncoding {
 }
 
 impl ForcedEncoding {
-    fn of(&self, path: &Path) -> Option<FileEncoding> {
+    fn for_path(&self, path: &Path) -> Option<FileEncoding> {
         match self.path == path {
             true => Some(self.encoding),
             false => None,
@@ -3167,7 +3167,7 @@ fn run_commands(
         edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;
-    if text_changed || fold_changed || DriftedWindow::of(top_before, &vpc).left_the_band() {
+    if text_changed || fold_changed || DriftedWindow::between(top_before, &vpc).left_the_band() {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
     if text_changed || cursor_stale || fold_changed {
@@ -3419,7 +3419,8 @@ fn on_file_property_edit(
         return;
     }
     let text = edit.core.buffer.text();
-    let updated = match vmux_core::knowledge::Frontmatter::of(&text).apply(&trigger.event().payload)
+    let updated = match vmux_core::knowledge::Frontmatter::from(text.as_str())
+        .apply(&trigger.event().payload)
     {
         Ok(updated) => updated,
         Err(message) => {
@@ -3472,7 +3473,7 @@ fn apply_lsp_workspace_edit(
     mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
-        let refusal = match WorkspaceEditPlan::of(&awaiting.0.edit) {
+        let refusal = match WorkspaceEditPlan::try_from(&awaiting.0.edit) {
             Ok(plan) => apply_planned_documents(
                 plan,
                 &mut views,
@@ -3498,7 +3499,7 @@ fn apply_lsp_workspace_edit(
     for rename in renames.read() {
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
-            Ok(edit) => match WorkspaceEditPlan::of(edit) {
+            Ok(edit) => match WorkspaceEditPlan::try_from(edit) {
                 Ok(plan) => apply_planned_documents(
                     plan,
                     &mut views,
@@ -5651,7 +5652,7 @@ mod explorer_tests {
     }
 
     impl ExplorerTree {
-        fn of<'a>(app: &'a App, root: &Path) -> &'a Self {
+        fn in_app<'a>(app: &'a App, root: &Path) -> &'a Self {
             app.world()
                 .resource::<ExplorerTrees>()
                 .by_root
@@ -5713,7 +5714,7 @@ mod explorer_tests {
             app.world().get::<ExplorerState>(e).unwrap().root.as_path(),
             tmp.path()
         );
-        let tree = ExplorerTree::of(&app, tmp.path());
+        let tree = ExplorerTree::in_app(&app, tmp.path());
         assert!(tree.expanded.contains(&tmp.path().to_path_buf()));
         assert!(
             tree.children
@@ -5783,7 +5784,9 @@ mod explorer_tests {
         app.world_mut().entity_mut(first).despawn();
         app.update();
         assert!(
-            ExplorerTree::of(&app, tmp.path()).expanded.contains(&src),
+            ExplorerTree::in_app(&app, tmp.path())
+                .expanded
+                .contains(&src),
             "closing a page must not collapse the workspace tree the next one opens on"
         );
     }
@@ -5833,7 +5836,7 @@ mod explorer_tests {
             app.update();
             std::thread::yield_now();
         }
-        let tree = ExplorerTree::of(&app, tmp.path());
+        let tree = ExplorerTree::in_app(&app, tmp.path());
         assert!(
             !tree.expanded.contains(&tmp.path().join("src")),
             "warming must not expand anything on the user's behalf"
@@ -5857,7 +5860,7 @@ mod explorer_tests {
         let src = tmp.path().join("src");
         toggle(&mut app, e, &src);
         wait_for_children(&mut app, tmp.path(), &src);
-        let tree = ExplorerTree::of(&app, tmp.path());
+        let tree = ExplorerTree::in_app(&app, tmp.path());
         assert!(tree.expanded.contains(&src));
         assert!(
             tree.children
@@ -5867,7 +5870,11 @@ mod explorer_tests {
                 .any(|x| x.name == "lib.rs")
         );
         toggle(&mut app, e, &src);
-        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert!(
+            !ExplorerTree::in_app(&app, tmp.path())
+                .expanded
+                .contains(&src)
+        );
     }
 
     #[test]
@@ -5886,7 +5893,7 @@ mod explorer_tests {
         });
         let src = tmp.path().join("src");
         wait_for_children(&mut app, tmp.path(), &src);
-        let tree = ExplorerTree::of(&app, tmp.path());
+        let tree = ExplorerTree::in_app(&app, tmp.path());
         assert!(tree.expanded.contains(tmp.path()));
         assert!(tree.expanded.contains(&src));
         assert_eq!(
@@ -5949,10 +5956,18 @@ mod explorer_tests {
             ))
             .id();
         wait_for_children(&mut app, tmp.path(), tmp.path());
-        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert!(
+            !ExplorerTree::in_app(&app, tmp.path())
+                .expanded
+                .contains(&src)
+        );
         app.world_mut().get_mut::<FileView>(e).unwrap().path = file.clone();
         wait_for_children(&mut app, tmp.path(), &src);
-        assert!(ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert!(
+            ExplorerTree::in_app(&app, tmp.path())
+                .expanded
+                .contains(&src)
+        );
         assert_eq!(
             app.world()
                 .get::<ExplorerState>(e)
@@ -5983,7 +5998,11 @@ mod explorer_tests {
             app.update();
             std::thread::yield_now();
         }
-        assert!(!ExplorerTree::of(&app, tmp.path()).expanded.contains(&src));
+        assert!(
+            !ExplorerTree::in_app(&app, tmp.path())
+                .expanded
+                .contains(&src)
+        );
         assert!(
             app.world()
                 .get::<ExplorerState>(e)
@@ -6072,7 +6091,7 @@ mod explorer_tests {
             ))
             .id();
         wait_for_children(&mut app, tmp.path(), &src);
-        assert!(ExplorerTree::of(&app, tmp.path()).expanded.len() > 1);
+        assert!(ExplorerTree::in_app(&app, tmp.path()).expanded.len() > 1);
         app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
         app.world_mut().trigger(BinReceive {
             webview: e,
@@ -6080,7 +6099,7 @@ mod explorer_tests {
         });
         app.update();
         assert_eq!(
-            ExplorerTree::of(&app, tmp.path()).expanded,
+            ExplorerTree::in_app(&app, tmp.path()).expanded,
             HashSet::from([tmp.path().to_path_buf()]),
             "dropping the root makes the next reveal look like a tree change and re-scroll"
         );
@@ -6936,7 +6955,7 @@ mod parked_edit_tests {
 
         fn failure(&self) -> Option<LoadFailure> {
             let buf = self.app.world().get::<FileBuffer>(self.entity)?;
-            let (reason, _) = LoadFailure::of(&buf.language)?;
+            let (reason, _) = LoadFailure::parse(&buf.language)?;
             Some(reason)
         }
 
@@ -7204,7 +7223,7 @@ mod workspace_edit_tests {
             Self { app, views, sent }
         }
 
-        fn of(path: &Path, panes: usize) -> Self {
+        fn with_edit(path: &Path, panes: usize) -> Self {
             let (app, views) = Self::bare(path, panes);
             let (outgoing, sent) = std::sync::mpsc::channel();
             let events = app
@@ -7362,7 +7381,7 @@ mod workspace_edit_tests {
         let path = temp.path().join("main.rs");
         std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
 
-        let mut h = ApplyEdit::of(&path, 2);
+        let mut h = ApplyEdit::with_edit(&path, 2);
         h.app.update();
 
         for view in h.views.clone() {
@@ -7385,7 +7404,7 @@ mod workspace_edit_tests {
         let path = temp.path().join("main.rs");
         std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
 
-        let mut h = ApplyEdit::of(&path, 1);
+        let mut h = ApplyEdit::with_edit(&path, 1);
         h.app.update();
         let view = h.views[0];
         assert_eq!(h.text(view), "1 two 3\n");
@@ -7400,7 +7419,7 @@ mod workspace_edit_tests {
         let path = temp.path().join("main.rs");
         std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
 
-        let mut h = ApplyEdit::of(&path, 2);
+        let mut h = ApplyEdit::with_edit(&path, 2);
         let second = h.views[1];
         h.app
             .world_mut()
@@ -7429,7 +7448,7 @@ mod workspace_edit_tests {
         let path = temp.path().join("main.rs");
         std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
 
-        let mut h = ApplyEdit::of(&path, 1);
+        let mut h = ApplyEdit::with_edit(&path, 1);
         h.app.update();
 
         let reply = h.sent.try_recv().expect("the server must be answered");
@@ -7443,7 +7462,7 @@ mod workspace_edit_tests {
         let path = temp.path().join("closed.rs");
         std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
 
-        let mut h = ApplyEdit::of(&path, 0);
+        let mut h = ApplyEdit::with_edit(&path, 0);
         h.app.update();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 two 3\n");
@@ -7656,11 +7675,12 @@ mod editor_window_tests {
                     }
                     sync_fold_view(&mut edit);
                 }
-                let rows = EditorWindow::of(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
-                    .total_rows;
+                let rows =
+                    EditorWindow::render(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
+                        .total_rows;
                 for top in (0..rows + 40).step_by(11) {
                     let patch =
-                        EditorWindow::of(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
+                        EditorWindow::render(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
                     assert!(
                         EditorWindow::paired(&patch),
                         "cols {wrap_columns} collapsed {collapsed} top {top}: \
@@ -7690,7 +7710,7 @@ mod editor_window_tests {
             edit.folds
                 .set_regions(crate::fold::indent_regions(&edit.core.buffer.rope));
             sync_fold_view(&mut edit);
-            assert!(EditorWindow::paired(&EditorWindow::of(&mut edit, &vp)));
+            assert!(EditorWindow::paired(&EditorWindow::render(&mut edit, &vp)));
         }
     }
 }

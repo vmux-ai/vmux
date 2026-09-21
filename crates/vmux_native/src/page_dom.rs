@@ -89,7 +89,7 @@ impl PageDom {
 
         let data = match data {
             EventData::Mounted => Rc::new(PlatformEventData::new(Box::new(
-                converter::MountedBacking::of(backing),
+                converter::MountedBacking::from(backing),
             ))) as Rc<dyn std::any::Any>,
             data => data.into_any(),
         };

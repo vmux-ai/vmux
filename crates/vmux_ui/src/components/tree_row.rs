@@ -45,7 +45,7 @@ pub enum TreeRowAccent {
 }
 
 impl TreeRowAccent {
-    pub fn of(active: bool, focus: bool) -> Self {
+    pub fn resolve(active: bool, focus: bool) -> Self {
         match (active, focus) {
             (false, false) => Self::Plain,
             (true, false) => Self::Active,

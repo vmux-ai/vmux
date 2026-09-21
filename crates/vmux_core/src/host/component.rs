@@ -180,7 +180,7 @@ pub struct EffectiveStartupUrl(pub String);
 impl EffectiveStartupUrl {
     pub const START_PAGE: &'static str = "vmux://start/";
 
-    pub fn of(resolved: Option<&Self>) -> String {
+    pub fn resolve(resolved: Option<&Self>) -> String {
         match resolved {
             Some(url) if !url.0.is_empty() => url.0.clone(),
             _ => Self::START_PAGE.to_string(),

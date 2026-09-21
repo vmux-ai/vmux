@@ -54,21 +54,21 @@ impl FileKeys {
     }
 
     fn move_panel(&self, direction: MenuDirection) {
-        let Some(panel) = FilePanel::of(self.page) else {
+        let Some(panel) = FilePanel::current(self.page) else {
             return;
         };
         panel.move_by(self.page, direction);
     }
 
     fn choose(&self) {
-        let Some(panel) = FilePanel::of(self.page) else {
+        let Some(panel) = FilePanel::current(self.page) else {
             return;
         };
         panel.choose(self.page);
     }
 
     fn dismiss(&self) {
-        let Some(panel) = FilePanel::of(self.page) else {
+        let Some(panel) = FilePanel::current(self.page) else {
             return;
         };
         panel.dismiss(self.page);
@@ -82,7 +82,7 @@ enum FilePanel {
 }
 
 impl FilePanel {
-    fn of(page: FilePage) -> Option<Self> {
+    fn current(page: FilePage) -> Option<Self> {
         if (page.references_open)() {
             return Some(Self::References);
         }
@@ -175,7 +175,7 @@ pub struct FilePage {
 impl FilePage {
     fn key_context(&self) -> Vec<String> {
         let mut keys = vec!["files".to_string()];
-        if FilePanel::of(*self).is_some() {
+        if FilePanel::current(*self).is_some() {
             keys.push("files.panel".to_string());
         }
         keys

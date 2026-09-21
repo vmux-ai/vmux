@@ -8,7 +8,7 @@ pub enum PromptHistoryDirection {
 }
 
 impl PromptHistoryDirection {
-    pub fn of(direction: Option<MenuDirection>) -> Option<Self> {
+    pub fn from_menu(direction: Option<MenuDirection>) -> Option<Self> {
         match direction? {
             MenuDirection::Previous => Some(Self::Older),
             MenuDirection::Next => Some(Self::Newer),

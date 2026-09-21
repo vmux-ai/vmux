@@ -88,7 +88,7 @@ fn load_bookmarks_on_startup(
     }
     let path = bookmarks_path();
     if !path.exists() {
-        BookmarkDefaults::of(
+        BookmarkDefaults::new(
             &settings.browser.bookmarks,
             &settings.browser.bookmark_folders,
         )
@@ -122,7 +122,7 @@ fn seed_default_bookmarks_after_load(
     if pending.is_none() {
         return;
     }
-    BookmarkDefaults::of(
+    BookmarkDefaults::new(
         &settings.browser.bookmarks,
         &settings.browser.bookmark_folders,
     )
@@ -198,7 +198,7 @@ struct BookmarkDefaults<'a> {
 }
 
 impl<'a> BookmarkDefaults<'a> {
-    fn of(urls: &'a [String], folders: &'a [vmux_setting::BookmarkFolderSettings]) -> Self {
+    fn new(urls: &'a [String], folders: &'a [vmux_setting::BookmarkFolderSettings]) -> Self {
         Self { urls, folders }
     }
 
@@ -478,7 +478,7 @@ enum ToolBookmarkUrl {
 impl ToolBookmarkUrl {
     const ROOT: &'static str = "vmux://tools/";
 
-    fn of(url: &str) -> Self {
+    fn classify(url: &str) -> Self {
         let url = url
             .trim()
             .split(['?', '#'])
@@ -512,7 +512,7 @@ fn migrate_tool_page_bookmarks(
     let mut normalized_urls = Vec::new();
     let original_urls = std::mem::take(&mut offered.urls);
     for url in &original_urls {
-        let normalized = match ToolBookmarkUrl::of(url) {
+        let normalized = match ToolBookmarkUrl::classify(url) {
             ToolBookmarkUrl::Root => ToolBookmarkUrl::ROOT.to_string(),
             ToolBookmarkUrl::Child => {
                 changed = true;
@@ -534,7 +534,7 @@ fn migrate_tool_page_bookmarks(
     }
 
     for (entity, metadata) in &items {
-        match ToolBookmarkUrl::of(&metadata.url) {
+        match ToolBookmarkUrl::classify(&metadata.url) {
             ToolBookmarkUrl::Root => {
                 if metadata.url == ToolBookmarkUrl::ROOT {
                     continue;

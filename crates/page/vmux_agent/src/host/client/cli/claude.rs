@@ -91,7 +91,7 @@ impl CliAgentStrategy for ClaudeStrategy {
             "--allowedTools".to_string(),
             allowed_tools(crate::managed_mcp::load().into_keys()),
             "--append-system-prompt".to_string(),
-            vmux_core::knowledge::AgentPrompt::of(RUN_STEER_PROMPT).into_string(),
+            vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string(),
         ];
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
@@ -354,7 +354,7 @@ fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
             let mtime = std::fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .unwrap_or(SystemTime::UNIX_EPOCH);
-            let Some(head) = ClaudeHead::of(&path, stem) else {
+            let Some(head) = ClaudeHead::read(&path, stem) else {
                 continue;
             };
             out.push(ResumableSession {
@@ -377,7 +377,7 @@ struct ClaudeHead {
 }
 
 impl ClaudeHead {
-    fn of(path: &Path, stem: &str) -> Option<Self> {
+    fn read(path: &Path, stem: &str) -> Option<Self> {
         use std::io::{BufRead, BufReader};
         let mut cwd: Option<PathBuf> = None;
         let mut title: Option<String> = None;
@@ -398,7 +398,7 @@ impl ClaudeHead {
                     if Self::is_driven_by_sdk(&v) {
                         return None;
                     }
-                    title = ClaudePromptPreview::of(&v);
+                    title = ClaudePromptPreview::extract(&v);
                 }
                 if cwd.is_some() && title.is_some() {
                     break;
@@ -428,7 +428,7 @@ fn claude_latest_message(path: &Path) -> String {
         if v.get("type").and_then(|t| t.as_str()) != Some("user") {
             continue;
         }
-        let Some(text) = ClaudePromptPreview::of(&v) else {
+        let Some(text) = ClaudePromptPreview::extract(&v) else {
             continue;
         };
         return text;
@@ -439,7 +439,7 @@ fn claude_latest_message(path: &Path) -> String {
 struct ClaudePromptPreview;
 
 impl ClaudePromptPreview {
-    fn of(v: &Value) -> Option<String> {
+    fn extract(v: &Value) -> Option<String> {
         if v.get("isMeta").and_then(Value::as_bool) == Some(true) {
             return None;
         }

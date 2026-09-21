@@ -74,11 +74,11 @@ struct RepoLabels {
 }
 
 impl RepoLabels {
-    fn of(&mut self, cwd: &std::path::Path, fallback: &str) -> (String, String) {
+    fn resolve(&mut self, cwd: &std::path::Path, fallback: &str) -> (String, String) {
         if let Some(held) = self.by_dir.get(cwd) {
             return held.clone();
         }
-        let read = match vmux_git::worktree::RepoLabel::of(cwd) {
+        let read = match vmux_git::worktree::RepoLabel::read(cwd) {
             Some(label) => (label.project, label.branch),
             None => (fallback.to_string(), String::new()),
         };
@@ -111,7 +111,7 @@ fn resume_entries(
             sid: session.sid.clone(),
         }
         .format();
-        let (project, branch) = labels.of(&session.cwd, &dir);
+        let (project, branch) = labels.resolve(&session.cwd, &dir);
         let latest = strategies.latest_message(session.kind, &session.transcript);
         entries.push(ResumableSessionEntry {
             kind: session.kind.as_url_segment().to_string(),
@@ -254,7 +254,7 @@ fn on_prompt_history_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let wake = vmux_core::host::wake::Wake::of(proxy);
+    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let asked = trigger.event().payload.clone();
     let Some(kind) = AgentKind::from_url_segment(&asked.agent) else {
@@ -296,7 +296,7 @@ fn on_resume_list_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let wake = vmux_core::host::wake::Wake::of(proxy);
+    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let (kind, agent_name) = ask.agent_of(webview);
     let project = ask.project_of(webview);

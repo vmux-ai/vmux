@@ -18,7 +18,7 @@ pub struct CommandBarEntry {
 pub struct CommandBarPicks;
 
 impl CommandBarPicks {
-    pub fn of(picker: CommandBarPicker, locale: &Locale) -> Vec<CommandBarPickRow> {
+    pub fn for_picker(picker: CommandBarPicker, locale: &Locale) -> Vec<CommandBarPickRow> {
         match picker {
             CommandBarPicker::Space | CommandBarPicker::GotoLine => Vec::new(),
             CommandBarPicker::Indent => Self::indents(locale),

@@ -18,7 +18,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 #[component]
 pub fn Page() -> Element {
     let initial_route = try_consume_context::<vmux_core::PageMetadata>()
-        .map(|metadata| ToolsRoute::of(&metadata.url))
+        .map(|metadata| ToolsRoute::from(metadata.url.as_str()))
         .unwrap_or_default();
     let active_route = use_signal(|| initial_route);
     let route = active_route();
@@ -40,8 +40,8 @@ pub(crate) enum ToolsRoute {
     Extensions,
 }
 
-impl ToolsRoute {
-    fn of(url: &str) -> Self {
+impl From<&str> for ToolsRoute {
+    fn from(url: &str) -> Self {
         let path = url
             .strip_prefix("vmux://tools/")
             .unwrap_or_default()
@@ -60,7 +60,9 @@ impl ToolsRoute {
             _ => Self::Acp,
         }
     }
+}
 
+impl ToolsRoute {
     fn id(self) -> &'static str {
         match self {
             Self::Acp => "acp",
@@ -125,7 +127,7 @@ pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element 
             active: active_route().id().to_string(),
             tabs,
             onselect: move |url: String| {
-                active_route.set(ToolsRoute::of(&url));
+                active_route.set(ToolsRoute::from(url.as_str()));
                 let _ = send(&ToolsNavigateRequest { url });
             },
         }
@@ -477,9 +479,9 @@ mod tests {
 
     #[test]
     fn tool_routes_select_their_provider() {
-        assert_eq!(ToolsRoute::of("vmux://tools/"), ToolsRoute::Acp);
-        assert_eq!(ToolsRoute::of("vmux://tools/acp"), ToolsRoute::Acp);
-        assert_eq!(ToolsRoute::of("vmux://tools/lsp/"), ToolsRoute::Lsp);
+        assert_eq!(ToolsRoute::from("vmux://tools/"), ToolsRoute::Acp);
+        assert_eq!(ToolsRoute::from("vmux://tools/acp"), ToolsRoute::Acp);
+        assert_eq!(ToolsRoute::from("vmux://tools/lsp/"), ToolsRoute::Lsp);
         assert!(ToolsRoute::Homebrew.matches(ToolProvider::HomebrewFormula));
         assert!(ToolsRoute::Homebrew.matches(ToolProvider::HomebrewCask));
         assert!(!ToolsRoute::Homebrew.matches(ToolProvider::Npm));

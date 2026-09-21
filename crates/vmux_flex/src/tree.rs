@@ -11,8 +11,8 @@ pub struct LayoutContext {
     pub physical_size: Vec2,
 }
 
-impl LayoutContext {
-    pub fn of(window: &Window) -> Self {
+impl From<&Window> for LayoutContext {
+    fn from(window: &Window) -> Self {
         Self {
             scale_factor: window.resolution.scale_factor(),
             physical_size: Vec2::new(
@@ -21,7 +21,9 @@ impl LayoutContext {
             ),
         }
     }
+}
 
+impl LayoutContext {
     pub fn style_for(&self, node: &Node) -> taffy::Style {
         taffy::Style {
             display: match node.display {

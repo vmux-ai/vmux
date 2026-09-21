@@ -16,7 +16,7 @@ pub fn Avatar(
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
-    let generated = GeneratedAvatar::of(avatar_seed, &background);
+    let generated = GeneratedAvatar::generate(avatar_seed, &background);
     rsx! {
         div {
             class,
@@ -87,8 +87,8 @@ struct GeneratedAvatar {
 }
 
 impl GeneratedAvatar {
-    fn of(seed: &str, shape_color: &str) -> Self {
-        let mut random = AvatarRandom::of(seed);
+    fn generate(seed: &str, shape_color: &str) -> Self {
+        let mut random = AvatarRandom::from(seed);
         let background_color = GENERATED_AVATAR_COLORS[random.below(GENERATED_AVATAR_COLORS.len())];
         let translate_x = 3 + random.below(8);
         let translate_y = 3 + random.below(8);
@@ -161,8 +161,8 @@ impl GeneratedAvatar {
 
 struct AvatarRandom(u64);
 
-impl AvatarRandom {
-    fn of(seed: &str) -> Self {
+impl From<&str> for AvatarRandom {
+    fn from(seed: &str) -> Self {
         let mut hash = 0xcbf29ce484222325u64;
         for byte in seed.as_bytes() {
             hash ^= u64::from(*byte);
@@ -170,7 +170,9 @@ impl AvatarRandom {
         }
         Self(hash)
     }
+}
 
+impl AvatarRandom {
     fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
@@ -194,16 +196,16 @@ mod tests {
     #[test]
     fn generated_avatar_is_stable_for_a_profile() {
         assert_eq!(
-            GeneratedAvatar::of("Personal", "#3b82f6"),
-            GeneratedAvatar::of("Personal", "#3b82f6")
+            GeneratedAvatar::generate("Personal", "#3b82f6"),
+            GeneratedAvatar::generate("Personal", "#3b82f6")
         );
     }
 
     #[test]
     fn different_profiles_get_different_faces() {
         assert_ne!(
-            GeneratedAvatar::of("Personal", "#3b82f6"),
-            GeneratedAvatar::of("Work", "#3b82f6")
+            GeneratedAvatar::generate("Personal", "#3b82f6"),
+            GeneratedAvatar::generate("Work", "#3b82f6")
         );
     }
 

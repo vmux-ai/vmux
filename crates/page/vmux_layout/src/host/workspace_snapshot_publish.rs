@@ -26,7 +26,7 @@ fn publish_workspace_snapshot(
     mut snapshot: ResMut<CommandBarWorkspaceSnapshot>,
 ) {
     let active_tab = tab_gather.active_tab.get();
-    let project_root = ProjectRoot::of(active_tab, &projects);
+    let project_root = ProjectRoot::resolve(active_tab, &projects);
     let (_, pane, stack) = crate::stack::focused_stack(
         active_tab,
         &tab_gather.all_children,
@@ -67,7 +67,7 @@ fn publish_workspace_snapshot(
 struct ProjectRoot;
 
 impl ProjectRoot {
-    fn of(
+    fn resolve(
         active_tab: Option<Entity>,
         projects: &Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
     ) -> Option<String> {

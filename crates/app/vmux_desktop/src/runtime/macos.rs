@@ -252,8 +252,8 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
     })
 }
 
-impl NativeWindowFrame {
-    fn of(rect: objc2_foundation::NSRect) -> Self {
+impl From<objc2_foundation::NSRect> for NativeWindowFrame {
+    fn from(rect: objc2_foundation::NSRect) -> Self {
         Self {
             x: rect.origin.x,
             y: rect.origin.y,
@@ -261,7 +261,9 @@ impl NativeWindowFrame {
             height: rect.size.height,
         }
     }
+}
 
+impl NativeWindowFrame {
     fn rect(self) -> objc2_foundation::NSRect {
         use objc2_foundation::{NSPoint, NSRect, NSSize};
 
@@ -285,7 +287,7 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
         window.setStyleMask(style | NSWindowStyleMask::Resizable);
     }
     let cursor = NSEvent::mouseLocation();
-    let frame = NativeWindowFrame::of(window.frame());
+    let frame = NativeWindowFrame::from(window.frame());
     let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
     if !edges.any() {
         return None;
@@ -342,7 +344,7 @@ impl WindowTitlebarGesture {
             objc2_app_kit::NSEvent::doubleClickInterval(),
             TITLEBAR_DOUBLE_CLICK_SLOP_PX,
         );
-        let gesture = Self::of(count, Self::double_click_action().as_deref());
+        let gesture = Self::resolve(count, Self::double_click_action().as_deref());
         match gesture {
             Self::Drag => window.performWindowDragWithEvent(event),
             Self::Zoom => zoom.animate(window),
@@ -370,8 +372,8 @@ impl WindowZoom {
         };
         let target = self
             .toggled(
-                NativeWindowFrame::of(window.frame()),
-                NativeWindowFrame::of(screen.visibleFrame()),
+                NativeWindowFrame::from(window.frame()),
+                NativeWindowFrame::from(screen.visibleFrame()),
             )
             .rect();
         let duration = window.animationResizeTime(target);

@@ -10,13 +10,15 @@ pub(crate) struct ServiceWorkerCache {
     default_dir: PathBuf,
 }
 
-impl ServiceWorkerCache {
-    pub(crate) fn of(cef_profile: &Path) -> Self {
+impl From<&Path> for ServiceWorkerCache {
+    fn from(cef_profile: &Path) -> Self {
         Self {
             default_dir: cef_profile.join("Default"),
         }
     }
+}
 
+impl ServiceWorkerCache {
     pub(crate) fn reconcile(&self, prepared: &[PreparedRuntime]) -> Result<(), String> {
         if prepared.is_empty() {
             return Ok(());
@@ -78,7 +80,7 @@ mod tests {
         }
 
         fn cache(&self) -> ServiceWorkerCache {
-            ServiceWorkerCache::of(self.dir.path())
+            ServiceWorkerCache::from(self.dir.path())
         }
 
         fn script_cache(&self) -> PathBuf {

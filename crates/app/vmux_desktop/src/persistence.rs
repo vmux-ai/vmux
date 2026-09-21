@@ -514,12 +514,14 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct PageUrl<'a>(&'a str);
 
-impl<'a> PageUrl<'a> {
-    fn of(url: &'a str) -> Self {
+impl<'a> From<&'a str> for PageUrl<'a> {
+    fn from(url: &'a str) -> Self {
         let path = url.split(['?', '#']).next().unwrap_or(url);
         Self(path.trim_end_matches('/'))
     }
+}
 
+impl PageUrl<'_> {
     fn hosted_by(self, pages: &Query<&NativelyHosted>) -> Option<NativelyHosted> {
         for page in pages {
             if page.answers_for(self.0) {
@@ -657,7 +659,7 @@ pub(crate) fn rebuild_space_views(
             .unwrap_or(false);
 
         if !has_browser {
-            if let Some(page) = PageUrl::of(&meta.url).hosted_by(&native_pages) {
+            if let Some(page) = PageUrl::from(meta.url.as_str()).hosted_by(&native_pages) {
                 commands.spawn((
                     vmux_layout::cef::Browser::native_page(&meta.url, page.title),
                     ChildOf(entity),
@@ -1242,15 +1244,21 @@ mod tests {
 
     #[test]
     fn a_neighbouring_url_does_not_claim_a_hosted_page() {
-        assert_eq!(PageUrl::of("vmux://vault/"), PageUrl::of("vmux://vault"));
         assert_eq!(
-            PageUrl::of("vmux://vault/?provider=github"),
-            PageUrl::of("vmux://vault/")
+            PageUrl::from("vmux://vault/"),
+            PageUrl::from("vmux://vault")
         );
-        assert_ne!(PageUrl::of("vmux://vaults/"), PageUrl::of("vmux://vault/"));
+        assert_eq!(
+            PageUrl::from("vmux://vault/?provider=github"),
+            PageUrl::from("vmux://vault/")
+        );
         assert_ne!(
-            PageUrl::of("vmux://vault/deep"),
-            PageUrl::of("vmux://vault/")
+            PageUrl::from("vmux://vaults/"),
+            PageUrl::from("vmux://vault/")
+        );
+        assert_ne!(
+            PageUrl::from("vmux://vault/deep"),
+            PageUrl::from("vmux://vault/")
         );
     }
 

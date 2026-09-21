@@ -267,7 +267,7 @@ struct AgentModeMemory {
 struct AgentSelectionKey;
 
 impl AgentSelectionKey {
-    fn of(agent_id: &str) -> &str {
+    fn normalize(agent_id: &str) -> &str {
         if agent_id.starts_with("cli:") {
             return agent_id;
         }
@@ -276,7 +276,7 @@ impl AgentSelectionKey {
 
     fn acp_url(agent_id: &str) -> String {
         vmux_command::snapshot::AgentPromptTarget::Acp {
-            id: Self::of(agent_id).to_string(),
+            id: Self::normalize(agent_id).to_string(),
         }
         .url()
     }
@@ -320,7 +320,7 @@ fn load_agent_model_selections(mut models: ResMut<AgentModelSelections>) {
         return;
     };
     for (agent, entry) in saved {
-        let key = AgentSelectionKey::of(&agent).to_string();
+        let key = AgentSelectionKey::normalize(&agent).to_string();
         let mut memory = entry.memory();
         if !key.starts_with("cli:") && !memory.url.is_empty() {
             memory.url = AgentSelectionKey::acp_url(&agent);
@@ -340,7 +340,7 @@ fn load_agent_mode_selections(mut modes: ResMut<AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        let key = AgentSelectionKey::of(&agent).to_string();
+        let key = AgentSelectionKey::normalize(&agent).to_string();
         memory.url = AgentSelectionKey::acp_url(&agent);
         modes.by_agent.insert(key, memory);
     }
@@ -820,7 +820,7 @@ fn apply_last_used_acp_model(
     for (session, mut state) in &mut sessions {
         let Some(remembered) = last_used
             .by_agent
-            .get(AgentSelectionKey::of(&session.agent_id))
+            .get(AgentSelectionKey::normalize(&session.agent_id))
         else {
             continue;
         };
@@ -883,7 +883,7 @@ fn send_acp_mode_requests(
 
 impl AgentModelSelections {
     fn select(&mut self, agent_id: &str, model_id: &str) {
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         if !entry.models.is_empty() && !entry.models.iter().any(|model| model.id == model_id) {
             return;
@@ -896,7 +896,7 @@ impl AgentModelSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
+        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -912,7 +912,7 @@ impl AgentModelSelections {
         if models.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
@@ -942,7 +942,7 @@ impl AgentModelSelections {
 
 impl AgentModeSelections {
     fn select(&mut self, agent_id: &str, mode_id: &str) {
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         if !entry.modes.is_empty() && !entry.modes.iter().any(|mode| mode.id == mode_id) {
             return;
@@ -955,7 +955,7 @@ impl AgentModeSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
+        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -971,7 +971,7 @@ impl AgentModeSelections {
         if modes.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
@@ -1305,8 +1305,8 @@ mod tests {
             "custom",
             "custom-acp",
         ] {
-            let once = AgentSelectionKey::of(agent_id);
-            let twice = AgentSelectionKey::of(once);
+            let once = AgentSelectionKey::normalize(agent_id);
+            let twice = AgentSelectionKey::normalize(once);
             assert_eq!(once, twice, "{agent_id}");
         }
     }

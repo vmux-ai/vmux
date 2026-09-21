@@ -26,7 +26,11 @@ pub struct ComposerChips {
 }
 
 impl ComposerChips {
-    pub fn of(composer: &ComposerState, menu: ComposerMenu, mut picking: ProjectPicking) -> Self {
+    pub fn build(
+        composer: &ComposerState,
+        menu: ComposerMenu,
+        mut picking: ProjectPicking,
+    ) -> Self {
         if composer.loading {
             return Self {
                 agent: ComposerChip::loading(),
@@ -239,7 +243,7 @@ pub struct ComposerMenuSet {
 }
 
 impl ComposerMenuSet {
-    pub fn of(
+    pub fn build(
         composer: &ComposerState,
         mut signals: PaletteSignals,
         picking: ProjectPicking,

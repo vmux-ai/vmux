@@ -5,7 +5,7 @@ use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 pub struct Wake(Option<EventLoopProxy<WinitUserEvent>>);
 
 impl Wake {
-    pub fn of(proxy: Option<Res<EventLoopProxyWrapper>>) -> Self {
+    pub fn from_resource(proxy: Option<Res<EventLoopProxyWrapper>>) -> Self {
         Self(proxy.map(|proxy| (**proxy).clone()))
     }
 

@@ -120,7 +120,7 @@ pub(super) enum WindowTitlebarGesture {
 }
 
 impl WindowTitlebarGesture {
-    pub(super) fn of(click_count: isize, double_click_action: Option<&str>) -> Self {
+    pub(super) fn resolve(click_count: isize, double_click_action: Option<&str>) -> Self {
         if click_count < 2 {
             return Self::Drag;
         }
@@ -338,23 +338,23 @@ mod tests {
     #[test]
     fn a_second_click_on_the_titlebar_follows_the_system_double_click_action() {
         assert_eq!(
-            WindowTitlebarGesture::of(1, Some("Minimize")),
+            WindowTitlebarGesture::resolve(1, Some("Minimize")),
             WindowTitlebarGesture::Drag
         );
         assert_eq!(
-            WindowTitlebarGesture::of(2, Some("Minimize")),
+            WindowTitlebarGesture::resolve(2, Some("Minimize")),
             WindowTitlebarGesture::Miniaturize
         );
         assert_eq!(
-            WindowTitlebarGesture::of(2, Some("None")),
+            WindowTitlebarGesture::resolve(2, Some("None")),
             WindowTitlebarGesture::Ignore
         );
         assert_eq!(
-            WindowTitlebarGesture::of(2, Some("Maximize")),
+            WindowTitlebarGesture::resolve(2, Some("Maximize")),
             WindowTitlebarGesture::Zoom
         );
         assert_eq!(
-            WindowTitlebarGesture::of(2, None),
+            WindowTitlebarGesture::resolve(2, None),
             WindowTitlebarGesture::Zoom
         );
     }

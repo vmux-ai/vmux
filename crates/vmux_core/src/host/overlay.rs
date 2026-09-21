@@ -17,7 +17,7 @@ pub enum OverlayState {
 }
 
 impl OverlayState {
-    pub fn of(
+    pub fn resolve(
         display: Display,
         visibility: Visibility,
         has_keyboard_target: bool,
@@ -35,10 +35,10 @@ impl OverlayState {
         }
     }
 
-    pub fn of_any(overlay_q: &OverlayStateQuery) -> Self {
+    pub fn from_query(overlay_q: &OverlayStateQuery) -> Self {
         let mut state = Self::Closed;
         for (node, visibility, has_keyboard_target, shown_inline) in overlay_q.iter() {
-            state = state.max(Self::of(
+            state = state.max(Self::resolve(
                 node.display,
                 *visibility,
                 has_keyboard_target,
@@ -48,12 +48,12 @@ impl OverlayState {
         state
     }
 
-    pub fn of_each<'a>(
+    pub fn from_surfaces<'a>(
         surfaces: impl Iterator<Item = (&'a Node, &'a Visibility, bool, bool)>,
     ) -> Self {
         let mut state = Self::Closed;
         for (node, visibility, has_keyboard_target, shown_inline) in surfaces {
-            state = state.max(Self::of(
+            state = state.max(Self::resolve(
                 node.display,
                 *visibility,
                 has_keyboard_target,
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn missing_keyboard_target_is_closed() {
         assert_eq!(
-            OverlayState::of(Display::Flex, Visibility::Visible, false, false),
+            OverlayState::resolve(Display::Flex, Visibility::Visible, false, false),
             OverlayState::Closed
         );
     }
@@ -103,14 +103,14 @@ mod tests {
     #[test]
     fn display_none_is_closed_even_with_keyboard_target() {
         assert_eq!(
-            OverlayState::of(Display::None, Visibility::Visible, true, false),
+            OverlayState::resolve(Display::None, Visibility::Visible, true, false),
             OverlayState::Closed
         );
     }
 
     #[test]
     fn hidden_surface_with_keyboard_target_still_owns_input() {
-        let state = OverlayState::of(Display::Flex, Visibility::Hidden, true, false);
+        let state = OverlayState::resolve(Display::Flex, Visibility::Hidden, true, false);
 
         assert_eq!(state, OverlayState::Revealing);
         assert!(state.owns_input());
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn visible_surface_with_keyboard_target_is_shown() {
-        let state = OverlayState::of(Display::Flex, Visibility::Visible, true, false);
+        let state = OverlayState::resolve(Display::Flex, Visibility::Visible, true, false);
 
         assert_eq!(state, OverlayState::Shown);
         assert!(state.owns_input());
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn an_inline_surface_is_shown_however_the_overlay_node_looks() {
         assert_eq!(
-            OverlayState::of(Display::None, Visibility::Hidden, false, true),
+            OverlayState::resolve(Display::None, Visibility::Hidden, false, true),
             OverlayState::Shown
         );
     }

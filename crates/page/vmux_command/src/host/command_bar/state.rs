@@ -17,5 +17,5 @@ pub type CommandBarStateQuery<'w, 's> = Query<
 >;
 
 pub fn command_bar_state(modal_q: &CommandBarStateQuery) -> OverlayState {
-    OverlayState::of_each(modal_q.iter())
+    OverlayState::from_surfaces(modal_q.iter())
 }

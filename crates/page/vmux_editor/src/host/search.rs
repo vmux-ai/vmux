@@ -35,7 +35,7 @@ fn start_project_search(
     let Ok(view) = views.get(entity) else {
         return;
     };
-    let Some(search) = ProjectSearch::of(&view.path, &trigger.event().payload) else {
+    let Some(search) = ProjectSearch::compile(&view.path, &trigger.event().payload) else {
         commands.entity(entity).remove::<RunningSearch>();
         return;
     };
@@ -80,7 +80,7 @@ struct ProjectSearch {
 }
 
 impl ProjectSearch {
-    fn of(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
+    fn compile(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
         let pattern = SearchPattern::compile(request)?;
         Some(Self {
             root: project_root(start),
@@ -149,7 +149,7 @@ impl ProjectSearch {
                 line: index as u32 + 1,
                 col: Utf16Col::at(line, found.start()),
                 end_col: Utf16Col::at(line, found.end()),
-                preview: LinePreview::of(line),
+                preview: LinePreview::truncate(line),
             });
         }
         if matches.is_empty() {
@@ -223,14 +223,14 @@ struct FileText;
 impl FileText {
     fn read(path: &Path) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
-        Some(crate::encoding::DecodedText::of(&bytes)?.text)
+        Some(crate::encoding::DecodedText::decode(&bytes)?.text)
     }
 }
 
 struct LinePreview;
 
 impl LinePreview {
-    fn of(line: &str) -> String {
+    fn truncate(line: &str) -> String {
         line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect()
     }
 }
@@ -274,7 +274,9 @@ mod tests {
         fn search(&self, request: ExplorerSearchRequest) -> SearchOutcome {
             let anchor = self.dir.path().join("anchor.rs");
             std::fs::write(&anchor, "").expect("anchor");
-            ProjectSearch::of(&anchor, &request).expect("pattern").run()
+            ProjectSearch::compile(&anchor, &request)
+                .expect("pattern")
+                .run()
         }
 
         fn named(&self, request: ExplorerSearchRequest) -> Vec<String> {
@@ -398,7 +400,7 @@ mod tests {
         std::fs::write(&anchor, "").expect("anchor");
 
         assert!(
-            ProjectSearch::of(
+            ProjectSearch::compile(
                 &anchor,
                 &ExplorerSearchRequest {
                     query: "   ".to_string(),
@@ -418,7 +420,7 @@ mod tests {
         std::fs::write(&anchor, "").expect("anchor");
 
         assert!(
-            ProjectSearch::of(
+            ProjectSearch::compile(
                 &anchor,
                 &ExplorerSearchRequest {
                     query: "[unclosed".to_string(),
