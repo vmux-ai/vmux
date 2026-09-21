@@ -1,9 +1,16 @@
+mod bookmark;
+mod files;
+mod knowledge;
+mod param;
+mod state;
+mod visual;
+mod workspace;
+
 use serde::Serialize;
 use serde_json::Value;
-use vmux_client::protocol::{
-    AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentSpaceCommand,
-};
-use vmux_macro::McpTool;
+use vmux_client::protocol::{AgentCommand, ProcessId};
+
+pub use param::McpParamTool;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,224 +20,10 @@ pub struct ToolDefinition {
     pub input_schema: Value,
 }
 
-#[derive(Debug, McpTool)]
-pub enum McpParamTool {
-    #[mcp(description = "Open the Vmux command bar.")]
-    OpenCommandBar {
-        #[mcp(enum_values = ["default", "commands", "path"])]
-        mode: Option<String>,
-    },
-    #[mcp(
-        description = "Navigate the active webview to a URL, or open a URL in a target pane. This is your PRIMARY and PREFERRED tool for ALL web access - searching, research, reading docs, fetching pages. ALWAYS use this instead of any built-in web_search / web_fetch / WebSearch / WebFetch tool: vmux IS a browser, and the whole point is that the user watches the research happen in their visible, logged-in browser and can take over at any time. Do NOT answer web questions from a built-in search/fetch tool when this tool is available. To search, navigate to a search engine results URL (e.g. https://duckduckgo.com/?q=...), read the snapshot, then open results. When navigating the focused browser page, this returns the page's semantic snapshot once it finishes loading (same shape as browser_snapshot, with viewport + inViewport) - no separate browser_snapshot call needed; use browser_scroll to bring more content into view. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
-    )]
-    BrowserNavigate { url: String, pane: Option<String> },
-    #[mcp(
-        description = "Send text to a terminal. Target by `terminal` (a process_id from vmux_read_layout) or omit to use the active terminal. Set `enter: true` to append a carriage return and submit the line (required for TUIs like the vibe agent, whose Enter is CR)."
-    )]
-    TerminalSend {
-        text: String,
-        terminal: Option<String>,
-        enter: Option<bool>,
-    },
-    #[mcp(
-        description = "Rename the active profile's display name (the top-right identity pill / facepile). Updates the name only; the profile's storage is untouched."
-    )]
-    RenameProfile { name: String },
-    #[mcp(description = "Select a tab by index (1-8).")]
-    SelectTab { index: u8 },
-    #[mcp(description = "Update a single vmux setting by dot-path. \
-            Example: { path: 'layout.pane.gap', value: 12 }. \
-            Use get_settings to discover the available paths and current values. \
-            For nested arrays, use bracket indexing like 'terminal.themes[0].font_size'.")]
-    UpdateSettings {
-        path: String,
-        value: serde_json::Value,
-    },
-    #[mcp(description = "Navigate the active or specified browser pane back one page in history.")]
-    BrowserGoBack { pane: Option<String> },
-    #[mcp(
-        description = "Navigate the active or specified browser pane forward one page in history."
-    )]
-    BrowserGoForward { pane: Option<String> },
-    #[mcp(
-        description = "Search vmux browsing history. Returns up to `limit` entries ranked by frecency."
-    )]
-    BrowserHistorySearch { query: String, limit: Option<u32> },
-    #[mcp(
-        description = "Install a Chrome extension from the Chrome Web Store. `source` is a store URL (https://chromewebstore.google.com/detail/<slug>/<id>) or a 32-char extension id. The extension is side-loaded and activates after the next vmux relaunch; it runs only in windowed browse panes (macOS), not 3D/OSR panes."
-    )]
-    BrowserInstallExtension { source: String },
-    #[mcp(
-        description = "Create a new space and switch to it. If `name` is omitted, an auto-generated name is used."
-    )]
-    CreateSpace { name: Option<String> },
-    #[mcp(
-        description = "Rename a space by id (the id is stable; only the display name changes). Use list_spaces to discover ids."
-    )]
-    RenameSpace { space_id: String, name: String },
-    #[mcp(description = "Delete a space by id. Use list_spaces to discover ids.")]
-    DeleteSpace { space_id: String },
-    #[mcp(
-        description = "Notify the user that you (this agent) need their attention - typically that you have finished your turn. Shows a macOS notification when they are not looking at your page, and a dot on your avatar in the team facepile until they view it. Optional `title` and `body` customize the message; with neither, a default \"<agent> finished\" is shown."
-    )]
-    Notify {
-        title: Option<String>,
-        body: Option<String>,
-    },
-}
-
-impl McpParamTool {
-    pub fn to_agent_command(self) -> Result<AgentCommand, String> {
-        match self {
-            McpParamTool::OpenCommandBar { mode } => {
-                let id = match mode.as_deref().unwrap_or("default") {
-                    "default" => "browser_open_command_bar",
-                    "commands" => "browser_open_commands",
-                    "path" => "browser_open_path_bar",
-                    other => return Err(format!("unknown command bar mode: {other}")),
-                };
-                Ok(AgentCommand::AppCommand {
-                    id: id.to_string(),
-                    args_json: String::new(),
-                })
-            }
-            McpParamTool::BrowserNavigate { url, pane } => {
-                if url.trim().is_empty() {
-                    return Err("browser_navigate.url is empty".to_string());
-                }
-                Ok(AgentCommand::BrowserNavigate { url, pane })
-            }
-            McpParamTool::BrowserInstallExtension { source } => {
-                if source.trim().is_empty() {
-                    return Err("browser_install_extension.source is empty".to_string());
-                }
-                Ok(AgentCommand::BrowserInstallExtension { source })
-            }
-            McpParamTool::TerminalSend {
-                text,
-                terminal,
-                enter,
-            } => {
-                let text = if enter.unwrap_or(false) {
-                    format!("{text}\r")
-                } else {
-                    text
-                };
-                if text.is_empty() {
-                    return Err("terminal_send.text is empty".to_string());
-                }
-                Ok(AgentCommand::TerminalSend { text, terminal })
-            }
-            McpParamTool::RenameProfile { name } => {
-                if name.trim().is_empty() {
-                    return Err("rename_profile.name is empty".to_string());
-                }
-                Ok(AgentCommand::RenameProfile { name })
-            }
-            McpParamTool::SelectTab { index } => {
-                if !(1..=8).contains(&index) {
-                    return Err(format!(
-                        "select_tab.index must be between 1 and 8, got {index}"
-                    ));
-                }
-                Ok(AgentCommand::AppCommand {
-                    id: format!("tab_select_{index}"),
-                    args_json: String::new(),
-                })
-            }
-            McpParamTool::UpdateSettings { path, value } => {
-                if path.trim().is_empty() {
-                    return Err("update_settings.path is empty".to_string());
-                }
-                Ok(AgentCommand::UpdateSettings {
-                    path,
-                    value_json: value.to_string(),
-                })
-            }
-            McpParamTool::BrowserGoBack { pane } => Ok(AgentCommand::BrowserGoBack { pane }),
-            McpParamTool::BrowserGoForward { pane } => Ok(AgentCommand::BrowserGoForward { pane }),
-            McpParamTool::BrowserHistorySearch { query, limit } => {
-                if query.trim().is_empty() {
-                    return Err("browser_history_search.query is empty".into());
-                }
-                let limit = limit.unwrap_or(20).min(100);
-                Ok(AgentCommand::BrowserHistorySearch { query, limit })
-            }
-            McpParamTool::CreateSpace { name } => {
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
-                    name: name.filter(|name| !name.trim().is_empty()),
-                }))
-            }
-            McpParamTool::RenameSpace { space_id, name } => {
-                if space_id.trim().is_empty() {
-                    return Err("rename_space.space_id is empty".into());
-                }
-                if name.trim().is_empty() {
-                    return Err("rename_space.name is empty".into());
-                }
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
-                    space_id,
-                    name,
-                }))
-            }
-            McpParamTool::DeleteSpace { space_id } => {
-                if space_id.trim().is_empty() {
-                    return Err("delete_space.space_id is empty".into());
-                }
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
-                    space_id,
-                }))
-            }
-            McpParamTool::Notify { title, body } => Ok(AgentCommand::Notify { title, body }),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
     Query(vmux_client::protocol::AgentQuery),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ToolKind {
-    ReadLayout,
-    UpdateLayout,
-    GetSettings,
-    ListSpaces,
-    OpenPage,
-    OpenFile,
-    ReadFile,
-    Grep,
-    ResumeInAcp,
-    Run,
-    RequestUserChoice,
-    VaultStatus,
-    OpenVault,
-    SetConversationTitle,
-    SearchKnowledge,
-    ReadKnowledge,
-    WriteKnowledge,
-    SelectProject,
-    CreateWorktree,
-    ReadTerminal,
-    Screenshot,
-    SimulatorScreenshot,
-    SimulatorTap,
-    SimulatorSwipe,
-    SimulatorType,
-    SimulatorKey,
-    SimulatorButton,
-    BrowserSnapshot,
-    BrowserScroll,
-    RecordStart,
-    RecordStop,
-    BookmarkList,
-    BookmarkAdd,
-    BookmarkRemove,
-    BookmarkPin,
-    BookmarkUnpin,
-    BookmarkFolderCreate,
 }
 
 #[derive(Clone, Copy)]
@@ -241,7 +34,6 @@ enum ToolAvailability {
 }
 
 struct ToolSpec {
-    kind: ToolKind,
     name: &'static str,
     aliases: &'static [&'static str],
     definition: fn() -> ToolDefinition,
@@ -249,6 +41,27 @@ struct ToolSpec {
     availability: ToolAvailability,
     shell_note: bool,
 }
+
+struct ToolCall<'a> {
+    arguments: Value,
+    anchor: Option<ProcessId>,
+    host_shell: &'a str,
+}
+
+impl ToolCall<'_> {
+    fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+        serde_json::from_value(self.arguments.clone())
+            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+    }
+
+    fn require_anchor(&self, name: &str) -> Result<ProcessId, String> {
+        self.anchor.ok_or_else(|| {
+            format!("{name} requires an agent anchor (not available to this client)")
+        })
+    }
+}
+
+type ToolDispatch = for<'a> fn(ToolCall<'a>) -> Result<DispatchTarget, String>;
 
 impl ToolSpec {
     fn find(name: &str) -> Option<&'static Self> {
@@ -284,10 +97,9 @@ pub(crate) enum ProtocolTool {
     VaultStatus,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum ToolRoute {
-    Command,
-    Query,
+    Local(ToolDispatch),
     Protocol(ProtocolTool),
 }
 
@@ -298,7 +110,7 @@ pub(crate) fn canonical_tool_name(name: &str) -> &str {
 pub(crate) fn protocol_tool(name: &str) -> Option<ProtocolTool> {
     match ToolSpec::find(canonical_tool_name(name))?.route {
         ToolRoute::Protocol(tool) => Some(tool),
-        ToolRoute::Command | ToolRoute::Query => None,
+        ToolRoute::Local(_) => None,
     }
 }
 
@@ -311,1080 +123,302 @@ const ALWAYS: ToolAvailability = ToolAvailability::Always;
 
 const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
-        kind: ToolKind::ReadLayout,
         name: "read_layout",
         aliases: &[],
-        definition: read_layout_definition,
-        route: ToolRoute::Query,
+        definition: state::read_layout_definition,
+        route: ToolRoute::Local(state::read_layout),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::UpdateLayout,
         name: "update_layout",
         aliases: &[],
-        definition: update_layout_definition,
-        route: ToolRoute::Command,
+        definition: state::update_layout_definition,
+        route: ToolRoute::Local(state::update_layout),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::GetSettings,
         name: "get_settings",
         aliases: &[],
-        definition: get_settings_definition,
-        route: ToolRoute::Query,
+        definition: state::get_settings_definition,
+        route: ToolRoute::Local(state::get_settings),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::ListSpaces,
         name: "list_spaces",
         aliases: &[],
-        definition: list_spaces_definition,
-        route: ToolRoute::Query,
+        definition: state::list_spaces_definition,
+        route: ToolRoute::Local(state::list_spaces),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::OpenPage,
         name: "open_page",
         aliases: &[],
-        definition: open_page_definition,
-        route: ToolRoute::Command,
+        definition: workspace::open_page_definition,
+        route: ToolRoute::Local(workspace::open_page),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::OpenFile,
         name: "open_file",
         aliases: &[],
-        definition: open_file_definition,
-        route: ToolRoute::Command,
+        definition: workspace::open_file_definition,
+        route: ToolRoute::Local(workspace::open_file),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::ReadFile,
         name: "read_file",
         aliases: &[],
-        definition: read_file_definition,
+        definition: files::read_file_definition,
         route: ToolRoute::Protocol(ProtocolTool::ReadFile),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::Grep,
         name: "grep",
         aliases: &[],
-        definition: grep_definition,
+        definition: files::grep_definition,
         route: ToolRoute::Protocol(ProtocolTool::Grep),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::ResumeInAcp,
         name: "resume_in_acp",
         aliases: &[],
-        definition: resume_in_acp_definition,
-        route: ToolRoute::Command,
+        definition: workspace::resume_in_acp_definition,
+        route: ToolRoute::Local(workspace::resume_in_acp),
         availability: ToolAvailability::OutsideAcpSession,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::Run,
         name: "run",
         aliases: &[],
-        definition: run_definition,
-        route: ToolRoute::Command,
+        definition: workspace::run_definition,
+        route: ToolRoute::Local(workspace::run),
         availability: ToolAvailability::WithoutAcpTerminals,
         shell_note: true,
     },
     ToolSpec {
-        kind: ToolKind::RequestUserChoice,
         name: "request_user_choice",
         aliases: &[],
-        definition: request_user_choice_definition,
-        route: ToolRoute::Command,
+        definition: workspace::request_user_choice_definition,
+        route: ToolRoute::Local(workspace::request_user_choice),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::VaultStatus,
         name: "vault_status",
         aliases: &[],
-        definition: vault_status_definition,
+        definition: knowledge::vault_status_definition,
         route: ToolRoute::Protocol(ProtocolTool::VaultStatus),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::OpenVault,
         name: "open_vault",
         aliases: &[],
-        definition: open_vault_definition,
-        route: ToolRoute::Command,
+        definition: knowledge::open_vault_definition,
+        route: ToolRoute::Local(knowledge::open_vault),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SetConversationTitle,
         name: "set_conversation_title",
         aliases: &[],
-        definition: set_conversation_title_definition,
-        route: ToolRoute::Command,
+        definition: knowledge::set_conversation_title_definition,
+        route: ToolRoute::Local(knowledge::set_conversation_title),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SearchKnowledge,
         name: "search_knowledge",
         aliases: &[],
-        definition: search_knowledge_definition,
-        route: ToolRoute::Command,
+        definition: knowledge::search_knowledge_definition,
+        route: ToolRoute::Local(knowledge::search),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::ReadKnowledge,
         name: "read_knowledge",
         aliases: &[],
-        definition: read_knowledge_definition,
-        route: ToolRoute::Command,
+        definition: knowledge::read_knowledge_definition,
+        route: ToolRoute::Local(knowledge::read),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::WriteKnowledge,
         name: "write_knowledge",
         aliases: &[],
-        definition: write_knowledge_definition,
-        route: ToolRoute::Command,
+        definition: knowledge::write_knowledge_definition,
+        route: ToolRoute::Local(knowledge::write),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SelectProject,
         name: "select_project",
         aliases: &["select_workspace", "choose_workspace"],
-        definition: select_project_definition,
-        route: ToolRoute::Command,
+        definition: workspace::select_project_definition,
+        route: ToolRoute::Local(workspace::select_project),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::CreateWorktree,
         name: "create_worktree",
         aliases: &[],
-        definition: create_worktree_definition,
-        route: ToolRoute::Command,
+        definition: workspace::create_worktree_definition,
+        route: ToolRoute::Local(workspace::create_worktree),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::ReadTerminal,
         name: "read_terminal",
         aliases: &[],
-        definition: read_terminal_definition,
-        route: ToolRoute::Query,
+        definition: workspace::read_terminal_definition,
+        route: ToolRoute::Local(workspace::read_terminal),
         availability: ToolAvailability::WithoutAcpTerminals,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::Screenshot,
         name: "screenshot",
         aliases: &[],
-        definition: screenshot_definition,
-        route: ToolRoute::Query,
+        definition: visual::screenshot_definition,
+        route: ToolRoute::Local(visual::screenshot),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorScreenshot,
         name: "simulator_screenshot",
         aliases: &[],
-        definition: simulator_screenshot_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_screenshot_definition,
+        route: ToolRoute::Local(visual::simulator_screenshot),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorTap,
         name: "simulator_tap",
         aliases: &[],
-        definition: simulator_tap_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_tap_definition,
+        route: ToolRoute::Local(visual::simulator_tap),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorSwipe,
         name: "simulator_swipe",
         aliases: &[],
-        definition: simulator_swipe_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_swipe_definition,
+        route: ToolRoute::Local(visual::simulator_swipe),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorType,
         name: "simulator_type",
         aliases: &[],
-        definition: simulator_type_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_type_definition,
+        route: ToolRoute::Local(visual::simulator_type),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorKey,
         name: "simulator_key",
         aliases: &[],
-        definition: simulator_key_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_key_definition,
+        route: ToolRoute::Local(visual::simulator_key),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::SimulatorButton,
         name: "simulator_button",
         aliases: &[],
-        definition: simulator_button_definition,
-        route: ToolRoute::Query,
+        definition: visual::simulator_button_definition,
+        route: ToolRoute::Local(visual::simulator_button),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BrowserSnapshot,
         name: "browser_snapshot",
         aliases: &[],
-        definition: browser_snapshot_definition,
-        route: ToolRoute::Query,
+        definition: visual::browser_snapshot_definition,
+        route: ToolRoute::Local(visual::browser_snapshot),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BrowserScroll,
         name: "browser_scroll",
         aliases: &[],
-        definition: browser_scroll_definition,
-        route: ToolRoute::Query,
+        definition: visual::browser_scroll_definition,
+        route: ToolRoute::Local(visual::browser_scroll),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::RecordStart,
         name: "record_start",
         aliases: &[],
-        definition: record_start_definition,
-        route: ToolRoute::Query,
+        definition: visual::record_start_definition,
+        route: ToolRoute::Local(visual::record_start),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::RecordStop,
         name: "record_stop",
         aliases: &[],
-        definition: record_stop_definition,
-        route: ToolRoute::Query,
+        definition: visual::record_stop_definition,
+        route: ToolRoute::Local(visual::record_stop),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkList,
         name: "bookmark_list",
         aliases: &[],
-        definition: bookmark_list_definition,
-        route: ToolRoute::Query,
+        definition: bookmark::bookmark_list_definition,
+        route: ToolRoute::Local(bookmark::list),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkAdd,
         name: "bookmark_add",
         aliases: &[],
-        definition: bookmark_add_definition,
-        route: ToolRoute::Command,
+        definition: bookmark::bookmark_add_definition,
+        route: ToolRoute::Local(bookmark::add),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkRemove,
         name: "bookmark_remove",
         aliases: &[],
-        definition: bookmark_remove_definition,
-        route: ToolRoute::Command,
+        definition: bookmark::bookmark_remove_definition,
+        route: ToolRoute::Local(bookmark::remove),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkPin,
         name: "bookmark_pin",
         aliases: &[],
-        definition: bookmark_pin_definition,
-        route: ToolRoute::Command,
+        definition: bookmark::bookmark_pin_definition,
+        route: ToolRoute::Local(bookmark::pin),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkUnpin,
         name: "bookmark_unpin",
         aliases: &[],
-        definition: bookmark_unpin_definition,
-        route: ToolRoute::Command,
+        definition: bookmark::bookmark_unpin_definition,
+        route: ToolRoute::Local(bookmark::unpin),
         availability: ALWAYS,
         shell_note: false,
     },
     ToolSpec {
-        kind: ToolKind::BookmarkFolderCreate,
         name: "bookmark_folder_create",
         aliases: &[],
-        definition: bookmark_folder_create_definition,
-        route: ToolRoute::Command,
+        definition: bookmark::bookmark_folder_create_definition,
+        route: ToolRoute::Local(bookmark::create_folder),
         availability: ALWAYS,
         shell_note: false,
     },
 ];
-
-fn read_layout_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_layout".into(),
-        description: "Returns the full vmux layout (tabs, recursive pane tree, focused). \
-Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
-Useful for: answering questions about what's open; finding the focused tab/pane/stack; \
-reading a stack's url/kind so you can duplicate it elsewhere. \
-Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind=\"browser\"."
-            .into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
-}
-
-fn update_layout_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "update_layout".into(),
-        description: "Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). \
-Use this for compound or structural changes that the per-action tools can't express. \
-\
-Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
-\
-Recipes: \
-- Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present. \
-- Duplicate/mirror a stack: add a new pane (id: null) under the same parent, with a stack carrying the source stack's url. \
-- Swap two panes: reorder their entries in the parent split's children array. \
-- Move a stack to another pane: remove from source pane's stacks, add (same id) to target pane's stacks. \
-- Close a pane/stack: omit it from the submitted tree. \
-- Resize a split: change flex_weights on the parent split. \
-- Equalize a split: set all flex_weights to the same value. \
-- Group an agent's parallel terminals (keep the agent's own pane readable): make the tab root a row split with two children - the agent's own pane on one side, and on the other either a split holding the terminal panes (when there are a few, so all are visible) or a single pane whose stacks are all the terminals (tabs, when there are many). Move existing terminal stacks by id into the grouped pane(s) rather than recreating them, and set flex_weights so the agent keeps a fair share (e.g. [1, 1] or [2, 3]). \
-- Change focus: set the top-level focused triple. \
-- Toggle zoom: flip the pane's is_zoomed flag. \
-\
-Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied. \
-\
-Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one stack, a new tab needs name."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["tabs", "focused"],
-            "$defs": {
-                "Tab": {
-                    "type": "object",
-                    "required": ["name", "root"],
-                    "properties": {
-                        "id": {"type": "string", "description": "tab:<id>; omit to create"},
-                        "name": {"type": "string"},
-                        "is_active": {"type": "boolean"},
-                        "root": {"$ref": "#/$defs/LayoutNode"}
-                    }
-                },
-                "LayoutNode": {
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "required": ["kind", "direction", "children"],
-                            "properties": {
-                                "kind": {"const": "split"},
-                                "id": {"type": "string", "description": "split:<id>; omit to create"},
-                                "direction": {"enum": ["row", "column"]},
-                                "flex_weights": {"type": "array", "items": {"type": "number"}},
-                                "children": {"type": "array", "items": {"$ref": "#/$defs/LayoutNode"}}
-                            }
-                        },
-                        {
-                            "type": "object",
-                            "required": ["kind"],
-                            "properties": {
-                                "kind": {"const": "pane"},
-                                "id": {"type": "string", "description": "pane:<id>; omit to create"},
-                                "is_zoomed": {"type": "boolean"},
-                                "stacks": {"type": "array", "items": {"$ref": "#/$defs/Stack"}}
-                            }
-                        }
-                    ]
-                },
-                "Stack": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "stack:<id>; omit to create"},
-                        "title": {"type": "string"},
-                        "url": {"type": "string", "description": "Required when id is omitted"},
-                        "is_loading": {"type": "boolean"},
-                        "favicon_url": {"type": "string"}
-                    }
-                }
-            },
-            "properties": {
-                "tabs": {"type": "array", "items": {"$ref": "#/$defs/Tab"}},
-                "focused": {
-                    "type": "object",
-                    "properties": {
-                        "tab": {"type": "string"},
-                        "pane": {"type": "string"},
-                        "stack": {"type": "string"}
-                    }
-                }
-            }
-        }),
-    }
-}
-
-fn get_settings_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "get_settings".into(),
-        description: "Return the full vmux settings as a JSON snapshot.".into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
-}
-
-fn list_spaces_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "list_spaces".into(),
-        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.".into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-    }
-}
-
-fn open_page_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_page".into(),
-        description: "Open a page using vmux auto placement. Omit `direction` so vmux reuses \
-the existing matching bucket first (terminal pages with terminals, browser pages with browsers) \
-and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate \
-(vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override \
-for a forced adjacent open: right|left|top|bottom. focus defaults false."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["url"],
-            "additionalProperties": false,
-            "properties": {
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "url": {"type": "string"},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-fn open_file_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_file".into(),
-        description: "Open a local file (or directory) in the vmux editor using vmux auto \
-placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses \
-the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute \
-filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; \
-directories show a listing. direction is an override for a forced adjacent open: \
-right|left|top|bottom. focus defaults false. The path must be inside the selected project; call \
-select_project first to request access elsewhere."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-fn read_file_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_file".into(),
-        description: "Read a local file and show it in the vmux editor through auto placement, \
-preferring an existing file page/bucket. Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
-via run (that dumps into a terminal). path is an absolute filesystem path inside the selected \
-project; call select_project first to request access elsewhere. offset is the 1-based line to start \
-at; limit is the number of lines (default: the whole file)."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "offset": {"type": "integer"},
-                "limit": {"type": "integer"}
-            }
-        }),
-    }
-}
-
-fn grep_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "grep".into(),
-        description: "Search files with ripgrep and open each matching file in the vmux editor \
-through auto placement, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
-run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
-regex; path is a directory or file inside the selected project (default: the selected project). \
-Call select_project first to request access elsewhere."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["query"],
-            "additionalProperties": false,
-            "properties": {
-                "query": {"type": "string"},
-                "path": {"type": "string"}
-            }
-        }),
-    }
-}
-
-fn run_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "run".into(),
-        description:
-            "Run a shell command in a visible terminal pane the user can watch live and take over. \
-Blocks until the command finishes and returns its full output plus the exit code \
-(`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns \
-the output so far with a note to call read_terminal for the rest. \
-\
-PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
-beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
-into your project on every run; the shell stays where it was. The first `run` opens it; later ones run \
-in that same shell. Rule of thumb: don't open a new pane unless you actually need one. \
-Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects \
-them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. \
-When enabled, override only when you mean to: \
-- `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` \
-(force a new stacked terminal in the anchor's pane). \
-- `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
-pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it. \
-- `direction`: only for `split`; Omit `direction` in auto mode so vmux keeps terminal runs in the \
-terminal bucket and spirals new panes predictably. \
-- `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / \
-sequential steps that share one shell, in order). \
-\
-`focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command \
-is typed into an interactive shell, so the terminal stays usable afterwards. \
-\
-`shell`: hand the command to a named interpreter instead of writing it in the user's shell — \
-`bash`, `sh`, `python3`, `node`, `ruby`, anything on PATH. Name the program ALONE: vmux adds the \
-flag that makes it read a script (`-c`, `-e`, `eval`) and quotes the script for the user's shell, \
-so `command` is the script itself, newlines and all, and never carries `-c` or `-e` of its own. \
-Omit `shell` to write in the user's own shell."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["command"],
-            "additionalProperties": false,
-            "properties": {
-                "command": {"type": "string"},
-                "shell": {"type": "string"},
-                "terminal": {"type": "string"},
-                "beside": {"type": "string"},
-                "mode": {"enum": ["auto", "split", "stack"]},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-fn create_worktree_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "create_worktree".into(),
-        description: "Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "branch": {"type": "string"},
-                "task": {"type": "string"},
-                "create": {"type": "boolean"}
-            }
-        }),
-    }
-}
-
-fn select_project_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "select_project".into(),
-        description: "Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"}
-            }
-        }),
-    }
-}
-
-fn request_user_choice_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/projects path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["question", "options"],
-            "additionalProperties": false,
-            "properties": {
-                "question": {"type": "string"},
-                "options": {
-                    "type": "array",
-                    "minItems": 2,
-                    "maxItems": 9,
-                    "items": {"type": "string"}
-                }
-            }
-        }),
-    }
-}
-
-fn vault_status_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "vault_status".into(),
-        description: "Read the local Vault sync state without connecting, uploading, or discovering remote repositories. Use this first when the user asks to back up, upload, sync, or migrate vmux. If Vault is not connected and the user did not already choose a provider, call request_user_choice with GitHub and Cloud folder. If changes need upload, ask the user to confirm syncing before opening Vault. Never claim data was uploaded until a later status reports no local changes and no commits ahead."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-    }
-}
-
-fn open_vault_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "open_vault".into(),
-        description: "Open the user-facing Vault page for the final connection or sync confirmation. This tool never uploads by itself. First call vault_status. If the user did not already specify the provider or sync action, call request_user_choice and stop the turn; call open_vault only after the user selects GitHub, Cloud folder, or confirms Sync. The user completes the final repository/folder choice and clicks Create, Use, or Sync in Vault."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "provider": {"enum": ["overview", "github", "cloud_folder"]}
-            }
-        }),
-    }
-}
-
-fn set_conversation_title_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "set_conversation_title".into(),
-        description: "Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["title"],
-            "additionalProperties": false,
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 120
-                }
-            }
-        }),
-    }
-}
-
-fn write_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "write_knowledge".into(),
-        description: "Create or replace a Markdown note in the user's vmux Knowledge base, then open it beside the conversation. Use this when the user asks to save, copy, or organize information in Knowledge. Provide a relative path under skills/, memories/, projects/, meetings/, or handbook/; omit path to create projects/<title-slug>.md. Never write directly to ~/.vmux/knowledge with shell commands."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["title", "content"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "title": {"type": "string"},
-                "content": {"type": "string"}
-            }
-        }),
-    }
-}
-
-fn search_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "search_knowledge".into(),
-        description: "Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["query"],
-            "additionalProperties": false,
-            "properties": {
-                "query": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 100}
-            }
-        }),
-    }
-}
-
-fn read_knowledge_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_knowledge".into(),
-        description: "Read a Markdown note from the user's vmux Knowledge base by relative path, title, or alias. line is 1-based and defaults to 1; limit defaults to 200 lines. Use source references returned by search_knowledge. No permission is required."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "line": {"type": "integer", "minimum": 1},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 2000}
-            }
-        }),
-    }
-}
-
-fn resume_in_acp_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "resume_in_acp".into(),
-        description: "Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {}
-        }),
-    }
-}
-
-fn read_terminal_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "read_terminal".into(),
-        description:
-            "Return the current visible scrollback text of a terminal (the same text the user sees). \
-Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["terminal"],
-            "additionalProperties": false,
-            "properties": {
-                "terminal": {"type": "string"}
-            }
-        }),
-    }
-}
-
-fn screenshot_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "screenshot".into(),
-        description: "Capture the vmux window as a PNG and return it inline so you can SEE the current UI \
-(use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all \
-visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or \
-stack:<id> from read_layout) to crop to just that region. The full-resolution image is saved under \
-the active vmux profile's recording directory and a downscaled copy is returned inline. macOS only; the first call may prompt for \
-Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then \
-call again."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "pane": {
-                    "type": "string",
-                    "description": "Optional pane:<id> or stack:<id> to crop to; whole window if omitted."
-                }
-            }
-        }),
-    }
-}
-
-fn simulator_screenshot_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_screenshot".into(),
-        description: "Capture the attached iOS Simulator screen and return it inline. Use the returned pixel dimensions and image coordinates with simulator_tap and simulator_swipe."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {}
-        }),
-    }
-}
-
-fn simulator_tap_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_tap".into(),
-        description:
-            "Tap the attached iOS Simulator at x,y pixel coordinates from simulator_screenshot."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["x", "y"],
-            "additionalProperties": false,
-            "properties": {
-                "x": {"type": "integer", "minimum": 0},
-                "y": {"type": "integer", "minimum": 0}
-            }
-        }),
-    }
-}
-
-fn simulator_swipe_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_swipe".into(),
-        description: "Swipe the attached iOS Simulator between pixel coordinates from simulator_screenshot. duration_ms defaults to 300."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["start_x", "start_y", "end_x", "end_y"],
-            "additionalProperties": false,
-            "properties": {
-                "start_x": {"type": "integer", "minimum": 0},
-                "start_y": {"type": "integer", "minimum": 0},
-                "end_x": {"type": "integer", "minimum": 0},
-                "end_y": {"type": "integer", "minimum": 0},
-                "duration_ms": {"type": "integer", "minimum": 1, "maximum": 10000}
-            }
-        }),
-    }
-}
-
-fn simulator_type_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_type".into(),
-        description: "Type text into the focused control in the attached iOS Simulator.".into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["text"],
-            "additionalProperties": false,
-            "properties": {
-                "text": {"type": "string", "minLength": 1}
-            }
-        }),
-    }
-}
-
-fn simulator_key_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_key".into(),
-        description: "Press one HID keycode in the attached iOS Simulator. Common codes: Enter 40, Backspace 42, Tab 43, Space 44."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["keycode"],
-            "additionalProperties": false,
-            "properties": {
-                "keycode": {"type": "integer", "minimum": 0, "maximum": 255}
-            }
-        }),
-    }
-}
-
-fn simulator_button_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "simulator_button".into(),
-        description: "Press a hardware button on the attached iOS Simulator.".into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["button"],
-            "additionalProperties": false,
-            "properties": {
-                "button": {"enum": ["home", "lock", "siri"]}
-            }
-        }),
-    }
-}
-
-fn browser_snapshot_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "browser_snapshot".into(),
-        description:
-            "Read the current page's DOM as a compact semantic snapshot. Returns JSON with \
-the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, \
-`value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later \
-interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a \
-specific page; defaults to the focused page."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."
-                }
-            }
-        }),
-    }
-}
-
-fn browser_scroll_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "browser_scroll".into(),
-        description:
-            "Scroll the visible browser page so the user can watch, then return the post-scroll \
-snapshot (same shape as browser_snapshot, including viewport + inViewport flags). Pass exactly one \
-of `to` (\"top\" or \"bottom\") or `delta` (pixels; positive = down, e.g. one screen is about the \
-snapshot's viewport.height). Pass `target` = pane:<id> or stack:<id> to pick a page; defaults to \
-the focused page. Prefer scrolling to read long pages instead of assuming off-screen content."
-                .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom. Pass exactly one of `to` or `delta`."},
-                "delta": {
-                    "type": "integer",
-                    "minimum": i32::MIN,
-                    "maximum": i32::MAX,
-                    "description": "Scroll by pixels; positive = down. Pass exactly one of `to` or `delta`."
-                },
-                "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."}
-            }
-        }),
-    }
-}
-
-fn record_start_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "record_start".into(),
-        description: "Start recording the vmux window to an mp4 video (optionally also a GIF). \
-Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call \
-record_stop. Record in ONE live take: start, perform the few actions you want to show, then \
-stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the \
-live interaction in a single pass. Auto-stops after `max_secs` (default 600) as a safety cap. Only \
-one recording at a time. macOS only; the first call may prompt for Screen Recording permission - \
-grant it in System Settings > Privacy & Security > Screen Recording, then call again."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "gif": {"type": "boolean", "description": "Also emit a GIF next to the mp4 (default false)."},
-                "max_secs": {"type": "integer", "description": "Auto-stop cap in seconds (default 600)."},
-                "pane": {"type": "string", "description": "Optional pane:<id> or stack:<id> to crop to; whole window if omitted."}
-            }
-        }),
-    }
-}
-
-fn record_stop_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "record_stop".into(),
-        description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
-and size (plus the GIF path if one was requested). By default saves to the active vmux profile's recording directory; pass `dir` \
-(absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, \
-name=<feature> to drop a demo straight into the repo."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "dir": {"type": "string", "description": "Absolute output directory (default: active vmux profile recording directory)."},
-                "name": {"type": "string", "description": "Output basename without extension (default vmux-<timestamp>)."}
-            }
-        }),
-    }
-}
-
-fn bookmark_list_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_list".into(),
-        description: "List all pins (favicon quick-access) and bookmarks (saved pages, \
-optionally inside folders) for the current profile. Returns JSON: \
-{pins:[{uuid,url,title,favicon_url}], roots:[ {kind:\"entry\",...} | \
-{kind:\"folder\",uuid,name,collapsed,children:[...]} ]}."
-            .into(),
-        input_schema: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
-    }
-}
-
-fn bookmark_add_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_add".into(),
-        description: "Save a page as a bookmark. Optional folder (a folder uuid from \
-bookmark_list) nests it; omit for top level."
-            .into(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "required": ["url"],
-            "additionalProperties": false,
-            "properties": {
-                "url": {"type": "string"},
-                "title": {"type": "string"},
-                "favicon_url": {"type": "string"},
-                "folder": {"type": "string"}
-            }
-        }),
-    }
-}
-
-fn bookmark_remove_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_remove".into(),
-        description: "Remove a bookmark by its uuid (from bookmark_list).".into(),
-        input_schema: serde_json::json!({
-            "type":"object","required":["uuid"],"additionalProperties":false,
-            "properties":{"uuid":{"type":"string"}}
-        }),
-    }
-}
-
-fn bookmark_pin_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_pin".into(),
-        description: "Pin a page to the favicon grid. Provide a bookmark uuid to promote an \
-existing bookmark, OR a url (+optional title/favicon_url) to pin a page directly."
-            .into(),
-        input_schema: serde_json::json!({
-            "type":"object","additionalProperties":false,
-            "properties":{
-                "uuid":{"type":"string"},
-                "url":{"type":"string"},
-                "title":{"type":"string"},
-                "favicon_url":{"type":"string"}
-            }
-        }),
-    }
-}
-
-fn bookmark_unpin_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_unpin".into(),
-        description: "Unpin a pin by its uuid (from bookmark_list).".into(),
-        input_schema: serde_json::json!({
-            "type":"object","required":["uuid"],"additionalProperties":false,
-            "properties":{"uuid":{"type":"string"}}
-        }),
-    }
-}
-
-fn bookmark_folder_create_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "bookmark_folder_create".into(),
-        description: "Create a bookmark folder with the given name.".into(),
-        input_schema: serde_json::json!({
-            "type":"object","required":["name"],"additionalProperties":false,
-            "properties":{"name":{"type":"string"}}
-        }),
-    }
-}
 
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     tool_definitions_filtered(false, false, "")
@@ -1461,665 +495,19 @@ pub fn dispatch_with_anchor(
 pub fn dispatch_in_shell(
     name: &str,
     arguments: Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
+    anchor: Option<ProcessId>,
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
-    use vmux_client::protocol::AgentPaneDirection;
     let name = canonical_tool_name(name);
-    fn parse_direction(arguments: &Value) -> Result<Option<AgentPaneDirection>, String> {
-        match arguments.get("direction").and_then(Value::as_str) {
-            None => Ok(None),
-            Some("right") => Ok(Some(AgentPaneDirection::Right)),
-            Some("left") => Ok(Some(AgentPaneDirection::Left)),
-            Some("top") => Ok(Some(AgentPaneDirection::Top)),
-            Some("bottom") => Ok(Some(AgentPaneDirection::Bottom)),
-            Some(other) => Err(format!("unknown direction: {other}")),
-        }
-    }
-    fn required_u32(arguments: &Value, key: &str, tool: &str) -> Result<u32, String> {
-        let value = arguments
-            .get(key)
-            .and_then(Value::as_u64)
-            .ok_or_else(|| format!("{tool}.{key} must be a non-negative integer"))?;
-        u32::try_from(value).map_err(|_| format!("{tool}.{key} is out of range"))
-    }
-    let tool = ToolSpec::find(name).map(|spec| spec.kind);
-    if tool == Some(ToolKind::ResumeInAcp) {
-        let anchor = anchor
-            .ok_or("resume_in_acp requires an agent anchor (not available to this client)")?;
-        return Ok(DispatchTarget::Command(AgentCommand::ResumeInAcp {
-            anchor,
-        }));
-    }
-    if tool == Some(ToolKind::OpenPage) {
-        let anchor =
-            anchor.ok_or("open_page requires an agent anchor (not available to this client)")?;
-        let url = arguments
-            .get("url")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if url.trim().is_empty() {
-            return Err("open_page.url is empty".to_string());
-        }
-        let direction = parse_direction(&arguments)?;
-        let focus = arguments
-            .get("focus")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
-            anchor,
-            direction,
-            url,
-            focus,
-        }));
-    }
-    if tool == Some(ToolKind::OpenFile) {
-        let anchor =
-            anchor.ok_or("open_file requires an agent anchor (not available to this client)")?;
-        let path = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if path.is_empty() {
-            return Err("open_file.path is empty".to_string());
-        }
-        let url = if path.starts_with("file:") {
-            path
-        } else {
-            format!("file://{path}")
-        };
-        let direction = parse_direction(&arguments)?;
-        let focus = arguments
-            .get("focus")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
-            anchor,
-            direction,
-            url,
-            focus,
-        }));
-    }
-    if tool == Some(ToolKind::Run) {
-        let anchor = anchor.ok_or("run requires an agent anchor (not available to this client)")?;
-        let command = arguments
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if command.trim().is_empty() {
-            return Err("run.command is empty".to_string());
-        }
-        let command = match arguments.get("shell").and_then(Value::as_str) {
-            Some(interpreter) if !interpreter.trim().is_empty() => {
-                crate::host_quote::HostQuote::handing_to(host_shell, interpreter, &command)?
-            }
-            _ => command,
-        };
-        let placement_override = ["mode", "direction", "beside"]
-            .iter()
-            .any(|key| arguments.get(*key).is_some_and(|value| !value.is_null()));
-        let direction = parse_direction(&arguments)?.unwrap_or(AgentPaneDirection::Right);
-        let focus = arguments
-            .get("focus")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let terminal = match arguments.get("terminal").and_then(Value::as_str) {
-            Some(s) if !s.is_empty() => Some(
-                s.parse::<vmux_client::protocol::ProcessId>()
-                    .map_err(|_| format!("run.terminal is not a valid terminal id: {s}"))?,
-            ),
-            _ => None,
-        };
-        let beside = match arguments.get("beside").and_then(Value::as_str) {
-            Some(s) if !s.is_empty() && s != "self" => Some(
-                s.parse::<vmux_client::protocol::ProcessId>()
-                    .map_err(|_| format!("run.beside is not a valid page id: {s}"))?,
-            ),
-            _ => None,
-        };
-        let mode = match arguments
-            .get("mode")
-            .and_then(Value::as_str)
-            .unwrap_or("auto")
-        {
-            "auto" => vmux_client::protocol::PlacementMode::Auto,
-            "split" => vmux_client::protocol::PlacementMode::Split,
-            "stack" => vmux_client::protocol::PlacementMode::Stack,
-            other => return Err(format!("unknown mode: {other}")),
-        };
-        let command = if placement_override {
-            AgentCommand::RunWithPlacementOverride {
-                anchor,
-                command,
-                direction,
-                focus,
-                beside,
-                mode,
-                terminal,
-                done_marker: None,
-            }
-        } else {
-            AgentCommand::Run {
-                anchor,
-                command,
-                direction,
-                focus,
-                beside,
-                mode,
-                terminal,
-                done_marker: None,
-            }
-        };
-        return Ok(DispatchTarget::Command(command));
-    }
-    if tool == Some(ToolKind::CreateWorktree) {
-        let anchor = anchor
-            .ok_or("create_worktree requires an agent anchor (not available to this client)")?;
-        let branch = arguments
-            .get("branch")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|branch| !branch.is_empty());
-        if let Some(branch) = branch {
-            return Ok(DispatchTarget::Command(
-                AgentCommand::CreateWorktreeOnBranch {
-                    anchor,
-                    branch: branch.to_string(),
-                    project: None,
-                },
-            ));
-        }
-        let string_arg = |name: &str| {
-            arguments
-                .get(name)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        };
-        return Ok(DispatchTarget::Command(AgentCommand::PrepareWorktree {
-            anchor,
-            path: string_arg("path"),
-            task: string_arg("task"),
-            create: arguments
-                .get("create")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        }));
-    }
-    if tool == Some(ToolKind::RequestUserChoice) {
-        let anchor = anchor
-            .ok_or("request_user_choice requires an agent anchor (not available to this client)")?;
-        let question = arguments
-            .get("question")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|question| !question.is_empty())
-            .ok_or("request_user_choice.question is empty")?;
-        let options = arguments
-            .get("options")
-            .and_then(Value::as_array)
-            .ok_or("request_user_choice.options must be an array")?
-            .iter()
-            .map(|option| {
-                option
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|option| !option.is_empty())
-                    .map(str::to_string)
-                    .ok_or_else(|| {
-                        "request_user_choice options must be non-empty strings".to_string()
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if !(2..=9).contains(&options.len()) {
-            return Err("request_user_choice requires 2 to 9 options".to_string());
-        }
-        return Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
-            anchor,
-            question: question.to_string(),
-            options,
-        }));
-    }
-    if tool == Some(ToolKind::OpenVault) {
-        let anchor =
-            anchor.ok_or("open_vault requires an agent anchor (not available to this client)")?;
-        let provider = arguments
-            .get("provider")
-            .and_then(Value::as_str)
-            .unwrap_or("overview");
-        let url = match provider {
-            "overview" => "vmux://vault/".to_string(),
-            "github" => "vmux://vault/?provider=github".to_string(),
-            "cloud_folder" => "vmux://vault/?provider=cloud_folder".to_string(),
-            _ => {
-                return Err("open_vault.provider must be overview, github, or cloud_folder".into());
-            }
-        };
-        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
-            anchor,
-            direction: None,
-            url,
-            focus: true,
-        }));
-    }
-    if tool == Some(ToolKind::SetConversationTitle) {
-        let anchor = anchor.ok_or(
-            "set_conversation_title requires an agent anchor (not available to this client)",
-        )?;
-        let title = arguments
-            .get("title")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .ok_or("set_conversation_title.title is empty")?;
-        if title.chars().count() > 120 {
-            return Err("set_conversation_title.title exceeds 120 characters".to_string());
-        }
-        return Ok(DispatchTarget::Command(
-            AgentCommand::SetConversationTitle {
-                anchor,
-                title: title.to_string(),
-            },
-        ));
-    }
-    if tool == Some(ToolKind::SearchKnowledge) {
-        let anchor = anchor
-            .ok_or("search_knowledge requires an agent anchor (not available to this client)")?;
-        let query = arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|query| !query.is_empty())
-            .ok_or("search_knowledge.query is empty")?;
-        let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(20);
-        if !(1..=100).contains(&limit) {
-            return Err("search_knowledge.limit must be between 1 and 100".to_string());
-        }
-        return Ok(DispatchTarget::Command(AgentCommand::SearchKnowledge {
-            anchor,
-            query: query.to_string(),
-            limit: limit as u16,
-        }));
-    }
-    if tool == Some(ToolKind::ReadKnowledge) {
-        let anchor = anchor
-            .ok_or("read_knowledge requires an agent anchor (not available to this client)")?;
-        let path = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .ok_or("read_knowledge.path is empty")?;
-        let line = arguments.get("line").and_then(Value::as_u64).unwrap_or(1);
-        let limit = arguments
-            .get("limit")
-            .and_then(Value::as_u64)
-            .unwrap_or(200);
-        if line == 0 || line > u32::MAX as u64 {
-            return Err("read_knowledge.line must be at least 1".to_string());
-        }
-        if !(1..=2_000).contains(&limit) {
-            return Err("read_knowledge.limit must be between 1 and 2000".to_string());
-        }
-        return Ok(DispatchTarget::Command(AgentCommand::ReadKnowledge {
-            anchor,
-            path: path.to_string(),
-            line: line as u32,
-            limit: limit as u32,
-        }));
-    }
-    if tool == Some(ToolKind::WriteKnowledge) {
-        let anchor = anchor
-            .ok_or("write_knowledge requires an agent anchor (not available to this client)")?;
-        let path = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(str::to_string);
-        let title = arguments
-            .get("title")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .ok_or("write_knowledge.title is empty")?;
-        let content = arguments
-            .get("content")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|content| !content.is_empty())
-            .ok_or("write_knowledge.content is empty")?;
-        return Ok(DispatchTarget::Command(AgentCommand::WriteKnowledge {
-            anchor,
-            path,
-            title: title.to_string(),
-            content: content.to_string(),
-        }));
-    }
-    if tool == Some(ToolKind::SelectProject) {
-        let anchor = anchor
-            .ok_or("select_project requires an agent anchor (not available to this client)")?;
-        if let Some(path) = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-        {
-            return Ok(DispatchTarget::Command(
-                AgentCommand::ChooseWorkspaceAtPath {
-                    anchor,
-                    path: path.to_string(),
-                },
-            ));
-        }
-        return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
-            anchor,
-        }));
-    }
-    if tool == Some(ToolKind::ReadTerminal) {
-        let process_id = arguments
-            .get("terminal")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .parse::<vmux_client::protocol::ProcessId>()
-            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::ReadTerminal { process_id },
-        ));
-    }
-    if tool == Some(ToolKind::Screenshot) {
-        let pane = match arguments.get("pane") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => {
-                let s = s.trim();
-                (!s.is_empty()).then(|| s.to_string())
-            }
-            Some(_) => return Err("screenshot.pane must be a string".to_string()),
-        };
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::Screenshot { pane },
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorScreenshot) {
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorScreenshot,
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorTap) {
-        let x = required_u32(&arguments, "x", name)?;
-        let y = required_u32(&arguments, "y", name)?;
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorControl {
-                action: vmux_client::protocol::SimulatorAction::Tap { x, y },
-            },
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorSwipe) {
-        let start_x = required_u32(&arguments, "start_x", name)?;
-        let start_y = required_u32(&arguments, "start_y", name)?;
-        let end_x = required_u32(&arguments, "end_x", name)?;
-        let end_y = required_u32(&arguments, "end_y", name)?;
-        let duration_ms = arguments
-            .get("duration_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(300);
-        if !(1..=10_000).contains(&duration_ms) {
-            return Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string());
-        }
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorControl {
-                action: vmux_client::protocol::SimulatorAction::Swipe {
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                    duration_ms: duration_ms as u32,
-                },
-            },
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorType) {
-        let text = arguments
-            .get("text")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .ok_or("simulator_type.text is empty")?;
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorControl {
-                action: vmux_client::protocol::SimulatorAction::TypeText(text.to_string()),
-            },
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorKey) {
-        let keycode = required_u32(&arguments, "keycode", name)?;
-        let keycode = u8::try_from(keycode)
-            .map_err(|_| "simulator_key.keycode must be between 0 and 255".to_string())?;
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorControl {
-                action: vmux_client::protocol::SimulatorAction::Key(keycode),
-            },
-        ));
-    }
-    if tool == Some(ToolKind::SimulatorButton) {
-        let button = match arguments.get("button").and_then(Value::as_str) {
-            Some("home") => vmux_client::protocol::SimulatorButton::Home,
-            Some("lock") => vmux_client::protocol::SimulatorButton::Lock,
-            Some("siri") => vmux_client::protocol::SimulatorButton::Siri,
-            Some(other) => return Err(format!("unknown simulator button: {other}")),
-            None => return Err("simulator_button.button is required".to_string()),
-        };
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::SimulatorControl {
-                action: vmux_client::protocol::SimulatorAction::Button(button),
-            },
-        ));
-    }
-    if tool == Some(ToolKind::BrowserSnapshot) {
-        let pane = match arguments.get("target") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => {
-                let s = s.trim();
-                (!s.is_empty()).then(|| s.to_string())
-            }
-            Some(_) => return Err("browser_snapshot.target must be a string".to_string()),
-        };
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::BrowserSnapshot { pane, anchor },
-        ));
-    }
-    if tool == Some(ToolKind::BrowserScroll) {
-        let pane = match arguments.get("target") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => {
-                let s = s.trim();
-                (!s.is_empty()).then(|| s.to_string())
-            }
-            Some(_) => return Err("browser_scroll.target must be a string".to_string()),
-        };
-        let to = match arguments.get("to").and_then(Value::as_str) {
-            None => None,
-            Some(value @ ("top" | "bottom")) => Some(value.to_string()),
-            Some(other) => {
-                return Err(format!(
-                    "browser_scroll.to must be 'top' or 'bottom', got {other}"
-                ));
-            }
-        };
-        let delta = match arguments.get("delta") {
-            None | Some(Value::Null) => None,
-            Some(value) => {
-                let n = value
-                    .as_i64()
-                    .ok_or("browser_scroll.delta must be an integer")?;
-                let n = i32::try_from(n)
-                    .map_err(|_| "browser_scroll.delta is out of range".to_string())?;
-                Some(n)
-            }
-        };
-        if to.is_some() == delta.is_some() {
-            return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
-        }
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::BrowserScroll {
-                pane,
-                to,
-                delta,
-                anchor,
-            },
-        ));
-    }
-    if tool == Some(ToolKind::RecordStart) {
-        let gif = arguments
-            .get("gif")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let max_secs = arguments
-            .get("max_secs")
-            .and_then(Value::as_u64)
-            .unwrap_or(600) as u32;
-        let pane = match arguments.get("pane") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => {
-                let s = s.trim();
-                (!s.is_empty()).then(|| s.to_string())
-            }
-            Some(_) => return Err("record_start.pane must be a string".to_string()),
-        };
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::RecordStart {
-                gif,
-                max_secs,
-                pane,
-            },
-        ));
-    }
-    if tool == Some(ToolKind::RecordStop) {
-        let parse_opt = |key: &str| match arguments.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::String(s)) => {
-                let s = s.trim();
-                Ok((!s.is_empty()).then(|| s.to_string()))
-            }
-            Some(_) => Err(format!("record_stop.{key} must be a string")),
-        };
-        let dir = parse_opt("dir")?;
-        let out_name = parse_opt("name")?;
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::RecordStop {
-                dir,
-                name: out_name,
-            },
-        ));
-    }
-    if tool == Some(ToolKind::ReadLayout) {
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::ReadLayout { anchor },
-        ));
-    }
-    if tool == Some(ToolKind::UpdateLayout) {
-        let layout: vmux_client::protocol::layout::LayoutSnapshot =
-            serde_json::from_value(arguments)
-                .map_err(|e| format!("update_layout: invalid layout payload: {e}"))?;
-        return Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
-            layout,
-        }));
-    }
-    if tool == Some(ToolKind::GetSettings) {
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::GetSettings,
-        ));
-    }
-    if tool == Some(ToolKind::ListSpaces) {
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::ListSpaces,
-        ));
-    }
-    if tool == Some(ToolKind::BookmarkList) {
-        return Ok(DispatchTarget::Query(
-            vmux_client::protocol::AgentQuery::BookmarkList,
-        ));
-    }
-    {
-        let str_arg = |key: &str| {
-            arguments
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        };
-        match tool {
-            Some(ToolKind::BookmarkAdd) => {
-                let Some(url) = str_arg("url").filter(|url| !url.trim().is_empty()) else {
-                    return Err("bookmark_add.url is required".to_string());
-                };
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::Add {
-                        page: AgentBookmarkPage {
-                            url,
-                            title: str_arg("title"),
-                            favicon_url: str_arg("favicon_url"),
-                        },
-                        folder: str_arg("folder"),
-                    },
-                )));
-            }
-            Some(ToolKind::BookmarkRemove) => {
-                let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) else {
-                    return Err("bookmark_remove.uuid is required".to_string());
-                };
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::Remove { uuid },
-                )));
-            }
-            Some(ToolKind::BookmarkPin) => {
-                if let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) {
-                    return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                        AgentBookmarkCommand::Pin { uuid },
-                    )));
-                }
-                let Some(url) = str_arg("url").filter(|url| !url.trim().is_empty()) else {
-                    return Err("bookmark_pin requires uuid or url".to_string());
-                };
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::PinUrl {
-                        page: AgentBookmarkPage {
-                            url,
-                            title: str_arg("title"),
-                            favicon_url: str_arg("favicon_url"),
-                        },
-                    },
-                )));
-            }
-            Some(ToolKind::BookmarkUnpin) => {
-                let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) else {
-                    return Err("bookmark_unpin.uuid is required".to_string());
-                };
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::Unpin { uuid },
-                )));
-            }
-            Some(ToolKind::BookmarkFolderCreate) => {
-                let Some(name) = str_arg("name").filter(|name| !name.trim().is_empty()) else {
-                    return Err("bookmark_folder_create.name is required".to_string());
-                };
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::CreateFolder { name },
-                )));
-            }
-            _ => {}
-        }
-    }
     if let Some(spec) = ToolSpec::find(name) {
-        return Err(match spec.route {
-            ToolRoute::Protocol(_) => format!("tool {name} requires MCP protocol context"),
-            ToolRoute::Command | ToolRoute::Query => {
-                format!("tool {name} has no registered dispatcher")
-            }
-        });
+        return match spec.route {
+            ToolRoute::Local(dispatch) => dispatch(ToolCall {
+                arguments,
+                anchor,
+                host_shell,
+            }),
+            ToolRoute::Protocol(_) => Err(format!("tool {name} requires MCP protocol context")),
+        };
     }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
         return parsed
@@ -2143,1539 +531,4 @@ pub fn dispatch_in_shell(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_client::protocol::{AgentCommand, AgentQuery, SimulatorAction, SimulatorButton};
-
-    #[test]
-    fn the_run_tool_teaches_the_shell_it_will_actually_use() {
-        let plain = super::ShellNote::for_shell("/bin/zsh");
-        assert_eq!(plain, " The shell is zsh.");
-
-        let nu = super::ShellNote::for_shell("/opt/homebrew/bin/nu");
-        assert!(nu.contains("out+err>"), "{nu}");
-        assert!(nu.contains("bash -c"), "{nu}");
-
-        assert_eq!(super::ShellNote::for_shell(""), "");
-        assert_eq!(super::ShellNote::for_shell("   "), "");
-    }
-
-    #[test]
-    fn manual_registry_has_the_exact_definition_and_dispatch_set() {
-        let expected = [
-            "read_layout",
-            "update_layout",
-            "get_settings",
-            "list_spaces",
-            "open_page",
-            "open_file",
-            "read_file",
-            "grep",
-            "resume_in_acp",
-            "run",
-            "request_user_choice",
-            "vault_status",
-            "open_vault",
-            "set_conversation_title",
-            "search_knowledge",
-            "read_knowledge",
-            "write_knowledge",
-            "select_project",
-            "create_worktree",
-            "read_terminal",
-            "screenshot",
-            "simulator_screenshot",
-            "simulator_tap",
-            "simulator_swipe",
-            "simulator_type",
-            "simulator_key",
-            "simulator_button",
-            "browser_snapshot",
-            "browser_scroll",
-            "record_start",
-            "record_stop",
-            "bookmark_list",
-            "bookmark_add",
-            "bookmark_remove",
-            "bookmark_pin",
-            "bookmark_unpin",
-            "bookmark_folder_create",
-        ];
-        let registered = TOOL_SPECS.iter().map(|spec| spec.name).collect::<Vec<_>>();
-        assert_eq!(registered, expected);
-
-        let definitions = tool_definitions()
-            .into_iter()
-            .filter(|definition| expected.contains(&definition.name.as_str()))
-            .map(|definition| definition.name)
-            .collect::<Vec<_>>();
-        assert_eq!(definitions, expected);
-
-        let anchor = Some(vmux_client::protocol::ProcessId::new());
-        for spec in TOOL_SPECS {
-            match spec.route {
-                ToolRoute::Protocol(expected) => {
-                    assert_eq!(protocol_tool(spec.name), Some(expected));
-                }
-                ToolRoute::Command | ToolRoute::Query => {
-                    if let Err(error) =
-                        dispatch_with_anchor(spec.name, serde_json::json!({}), anchor)
-                    {
-                        assert!(
-                            !error.contains("no registered dispatcher"),
-                            "{}: {error}",
-                            spec.name
-                        );
-                        assert!(!error.contains("unknown tool"), "{}: {error}", spec.name);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn aliases_use_the_same_registry_entry() {
-        let select = ToolSpec::find("select_project").unwrap();
-        assert_eq!(
-            ToolSpec::find("select_workspace").unwrap().kind,
-            select.kind
-        );
-        assert_eq!(
-            ToolSpec::find("choose_workspace").unwrap().kind,
-            select.kind
-        );
-        assert_eq!(
-            protocol_tool("vmux_read_file"),
-            Some(ProtocolTool::ReadFile)
-        );
-    }
-
-    fn tool_names() -> Vec<String> {
-        tool_definitions()
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect()
-    }
-
-    fn dispatch_command(name: &str, args: serde_json::Value) -> Result<AgentCommand, String> {
-        match dispatch_from_tool_call(name, args)? {
-            DispatchTarget::Command(cmd) => Ok(cmd),
-            DispatchTarget::Query(_) => Err("expected Command, got Query".to_string()),
-        }
-    }
-
-    fn dispatch_query(name: &str, args: serde_json::Value) -> Result<AgentQuery, String> {
-        match dispatch_from_tool_call(name, args)? {
-            DispatchTarget::Query(q) => Ok(q),
-            DispatchTarget::Command(_) => Err("expected Query, got Command".to_string()),
-        }
-    }
-
-    #[test]
-    fn record_tools_are_listed() {
-        let names = tool_names();
-        assert!(names.contains(&"record_start".to_string()));
-        assert!(names.contains(&"record_stop".to_string()));
-    }
-
-    #[test]
-    fn simulator_tools_are_listed() {
-        let names = tool_names();
-        for name in [
-            "simulator_screenshot",
-            "simulator_tap",
-            "simulator_swipe",
-            "simulator_type",
-            "simulator_key",
-            "simulator_button",
-        ] {
-            assert!(names.contains(&name.to_string()), "missing {name}");
-        }
-    }
-
-    #[test]
-    fn simulator_controls_dispatch_to_queries() {
-        assert_eq!(
-            dispatch_query("simulator_screenshot", serde_json::json!({})).unwrap(),
-            AgentQuery::SimulatorScreenshot
-        );
-        assert_eq!(
-            dispatch_query("simulator_tap", serde_json::json!({"x": 120, "y": 240})).unwrap(),
-            AgentQuery::SimulatorControl {
-                action: SimulatorAction::Tap { x: 120, y: 240 }
-            }
-        );
-        assert_eq!(
-            dispatch_query(
-                "simulator_swipe",
-                serde_json::json!({"start_x": 100, "start_y": 700, "end_x": 100, "end_y": 200})
-            )
-            .unwrap(),
-            AgentQuery::SimulatorControl {
-                action: SimulatorAction::Swipe {
-                    start_x: 100,
-                    start_y: 700,
-                    end_x: 100,
-                    end_y: 200,
-                    duration_ms: 300,
-                }
-            }
-        );
-        assert_eq!(
-            dispatch_query("simulator_type", serde_json::json!({"text": "hello"})).unwrap(),
-            AgentQuery::SimulatorControl {
-                action: SimulatorAction::TypeText("hello".to_string())
-            }
-        );
-        assert_eq!(
-            dispatch_query("simulator_key", serde_json::json!({"keycode": 40})).unwrap(),
-            AgentQuery::SimulatorControl {
-                action: SimulatorAction::Key(40)
-            }
-        );
-        assert_eq!(
-            dispatch_query("simulator_button", serde_json::json!({"button": "home"})).unwrap(),
-            AgentQuery::SimulatorControl {
-                action: SimulatorAction::Button(SimulatorButton::Home)
-            }
-        );
-    }
-
-    #[test]
-    fn browser_snapshot_dispatches_to_query_with_pane() {
-        let q = dispatch_query(
-            "browser_snapshot",
-            serde_json::json!({ "target": "pane:42" }),
-        )
-        .unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::BrowserSnapshot {
-                pane: Some("pane:42".to_string()),
-                anchor: None,
-            }
-        );
-    }
-
-    #[test]
-    fn browser_snapshot_defaults_pane_to_none() {
-        let q = dispatch_query("browser_snapshot", serde_json::json!({})).unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::BrowserSnapshot {
-                pane: None,
-                anchor: None,
-            }
-        );
-    }
-
-    #[test]
-    fn browser_snapshot_is_listed() {
-        assert!(tool_names().contains(&"browser_snapshot".to_string()));
-    }
-
-    #[test]
-    fn browser_snapshot_rejects_non_string_target() {
-        let err =
-            dispatch_query("browser_snapshot", serde_json::json!({ "target": 123 })).unwrap_err();
-        assert!(err.contains("target"));
-    }
-
-    #[test]
-    fn browser_scroll_dispatches_with_delta() {
-        let q = dispatch_query("browser_scroll", serde_json::json!({ "delta": 600 })).unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::BrowserScroll {
-                pane: None,
-                to: None,
-                delta: Some(600),
-                anchor: None,
-            }
-        );
-    }
-
-    #[test]
-    fn browser_scroll_dispatches_to_bottom_with_pane() {
-        let q = dispatch_query(
-            "browser_scroll",
-            serde_json::json!({ "to": "bottom", "target": "pane:3" }),
-        )
-        .unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::BrowserScroll {
-                pane: Some("pane:3".to_string()),
-                to: Some("bottom".to_string()),
-                delta: None,
-                anchor: None,
-            }
-        );
-    }
-
-    #[test]
-    fn browser_scroll_requires_exactly_one_of_to_or_delta() {
-        assert!(dispatch_query("browser_scroll", serde_json::json!({})).is_err());
-        assert!(
-            dispatch_query(
-                "browser_scroll",
-                serde_json::json!({ "to": "top", "delta": 5 })
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn browser_scroll_rejects_non_integer_or_out_of_range_delta() {
-        let err =
-            dispatch_query("browser_scroll", serde_json::json!({ "delta": "600" })).unwrap_err();
-        assert!(err.contains("delta must be an integer"));
-        let err = dispatch_query(
-            "browser_scroll",
-            serde_json::json!({ "delta": 5_000_000_000i64 }),
-        )
-        .unwrap_err();
-        assert!(err.contains("out of range"));
-    }
-
-    #[test]
-    fn browser_scroll_is_listed() {
-        assert!(tool_names().contains(&"browser_scroll".to_string()));
-    }
-
-    #[test]
-    fn install_extension_is_listed() {
-        assert!(tool_names().contains(&"browser_install_extension".to_string()));
-    }
-
-    #[test]
-    fn install_extension_dispatches_with_source() {
-        let cmd = dispatch_command(
-            "browser_install_extension",
-            serde_json::json!({ "source": "cjpalhdlnbpafiamejdnhcphjbkeiagm" }),
-        )
-        .unwrap();
-        assert_eq!(
-            cmd,
-            AgentCommand::BrowserInstallExtension {
-                source: "cjpalhdlnbpafiamejdnhcphjbkeiagm".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn install_extension_rejects_empty_source() {
-        let err = dispatch_command(
-            "browser_install_extension",
-            serde_json::json!({ "source": "  " }),
-        )
-        .unwrap_err();
-        assert!(err.contains("source"));
-    }
-
-    #[test]
-    fn record_start_dispatch_defaults() {
-        let q = dispatch_query("record_start", serde_json::json!({})).unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::RecordStart {
-                gif: false,
-                max_secs: 600,
-                pane: None
-            }
-        );
-    }
-
-    #[test]
-    fn record_start_dispatch_args() {
-        let q = dispatch_query(
-            "record_start",
-            serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
-        )
-        .unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::RecordStart {
-                gif: true,
-                max_secs: 30,
-                pane: Some("pane:3".into())
-            }
-        );
-    }
-
-    #[test]
-    fn record_stop_dispatch_args() {
-        let q = dispatch_query(
-            "record_stop",
-            serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
-        )
-        .unwrap();
-        assert_eq!(
-            q,
-            AgentQuery::RecordStop {
-                dir: Some("/tmp/out".into()),
-                name: Some("feature-x".into())
-            }
-        );
-        let empty = dispatch_query("record_stop", serde_json::json!({})).unwrap();
-        assert_eq!(
-            empty,
-            AgentQuery::RecordStop {
-                dir: None,
-                name: None
-            }
-        );
-    }
-
-    #[test]
-    fn list_tools_includes_auto_generated_and_handwritten() {
-        let names = tool_names();
-
-        for hand in [
-            "open_command_bar",
-            "open_page",
-            "run",
-            "read_terminal",
-            "request_user_choice",
-            "vault_status",
-            "open_vault",
-            "set_conversation_title",
-            "write_knowledge",
-            "select_project",
-            "create_worktree",
-        ] {
-            assert!(
-                names.contains(&hand.to_string()),
-                "missing hand-written {hand}"
-            );
-        }
-        for removed_tool in [
-            "new_terminal_tab",
-            "run_shell",
-            "in_pane",
-            "select_workspace",
-        ] {
-            assert!(
-                !names.contains(&removed_tool.to_string()),
-                "superseded tool {removed_tool} should no longer appear in MCP tools"
-            );
-        }
-        for auto in ["terminal_clear", "browser_reload"] {
-            assert!(
-                names.contains(&auto.to_string()),
-                "missing auto-generated {auto}"
-            );
-        }
-        assert!(
-            names.iter().all(|n| !n.starts_with("vmux_")),
-            "MCP tool names must not be vmux_-prefixed (server is already named vmux): {names:?}"
-        );
-        for removed in ["stack_new", "close_tab", "split_v"] {
-            assert!(
-                !names.contains(&removed.to_string()),
-                "layout command {removed} should no longer appear in MCP tools"
-            );
-        }
-    }
-
-    #[test]
-    fn pane_open_tool_descriptions_prefer_auto_placement() {
-        let defs = tool_definitions();
-        let open_page = defs.iter().find(|tool| tool.name == "open_page").unwrap();
-        let open_file = defs.iter().find(|tool| tool.name == "open_file").unwrap();
-        let run = defs.iter().find(|tool| tool.name == "run").unwrap();
-
-        assert!(open_page.description.contains("Omit `direction`"));
-        assert!(open_file.description.contains("Omit `direction`"));
-        assert!(run.description.contains("Omit `direction`"));
-    }
-
-    #[test]
-    fn auto_generated_tool_dispatches_as_app_command() {
-        let command = dispatch_command("terminal_clear", serde_json::json!({})).unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::AppCommand {
-                id: "terminal_clear".to_string(),
-                args_json: String::new(),
-            }
-        );
-    }
-
-    #[test]
-    fn unknown_tool_returns_error() {
-        assert!(dispatch_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn list_tools_includes_notify() {
-        assert!(tool_names().contains(&"notify".to_string()));
-    }
-
-    #[test]
-    fn notify_dispatches_to_notify_command() {
-        let command = dispatch_command(
-            "notify",
-            serde_json::json!({"title": "done", "body": "built X"}),
-        )
-        .unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::Notify {
-                title: Some("done".to_string()),
-                body: Some("built X".to_string()),
-            }
-        );
-    }
-
-    #[test]
-    fn notify_allows_empty_args() {
-        let command = dispatch_command("notify", serde_json::json!({})).unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::Notify {
-                title: None,
-                body: None,
-            }
-        );
-    }
-
-    #[test]
-    fn list_tools_includes_browser_navigate() {
-        let names = tool_names();
-        assert!(names.contains(&"browser_navigate".to_string()));
-    }
-
-    #[test]
-    fn browser_navigate_dispatches_with_url() {
-        let command = dispatch_command(
-            "browser_navigate",
-            serde_json::json!({"url": "https://example.com"}),
-        )
-        .unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::BrowserNavigate {
-                url: "https://example.com".to_string(),
-                pane: None,
-            }
-        );
-    }
-
-    #[test]
-    fn browser_navigate_missing_url_returns_error() {
-        assert!(dispatch_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn vmux_prefixed_tool_name_dispatches() {
-        let command = dispatch_command(
-            "vmux_browser_navigate",
-            serde_json::json!({"url": "https://example.com"}),
-        )
-        .unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::BrowserNavigate {
-                url: "https://example.com".to_string(),
-                pane: None,
-            }
-        );
-    }
-
-    #[test]
-    fn list_tools_includes_terminal_send() {
-        let names = tool_names();
-        assert!(names.contains(&"terminal_send".to_string()));
-    }
-
-    #[test]
-    fn acp_terminals_toolset_hides_run_and_read_terminal_keeps_send() {
-        let names: Vec<String> = tool_definitions_filtered(true, true, "")
-            .into_iter()
-            .map(|def| def.name)
-            .collect();
-        assert!(!names.contains(&"run".to_string()));
-        assert!(!names.contains(&"read_terminal".to_string()));
-        assert!(names.contains(&"terminal_send".to_string()));
-        assert!(names.contains(&"open_page".to_string()));
-        assert!(!names.contains(&"resume_in_acp".to_string()));
-    }
-
-    #[test]
-    fn cli_toolset_lists_resume_in_acp() {
-        assert!(tool_names().contains(&"resume_in_acp".to_string()));
-    }
-
-    #[test]
-    fn resume_in_acp_dispatches_with_anchor() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target =
-            dispatch_with_anchor("resume_in_acp", serde_json::json!({}), Some(anchor)).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor: got }) if got == anchor
-        ));
-        assert!(dispatch_from_tool_call("resume_in_acp", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn conversation_title_dispatches_model_summary_to_agent_session() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "set_conversation_title",
-            serde_json::json!({"title": "  Refine model-generated summaries  "}),
-            Some(anchor),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::SetConversationTitle { anchor: got, title })
-                if got == anchor && title == "Refine model-generated summaries"
-        ));
-        assert!(
-            dispatch_from_tool_call(
-                "set_conversation_title",
-                serde_json::json!({"title": "summary"})
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn knowledge_write_dispatches_validated_note_to_host() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "write_knowledge",
-            serde_json::json!({
-                "path": "projects/yc.md",
-                "title": "YC Startup School",
-                "content": "Notes"
-            }),
-            Some(anchor),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::WriteKnowledge {
-                anchor: got,
-                path: Some(path),
-                title,
-                content,
-            }) if got == anchor
-                && path == "projects/yc.md"
-                && title == "YC Startup School"
-                && content == "Notes"
-        ));
-    }
-
-    #[test]
-    fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let search = dispatch_with_anchor(
-            "search_knowledge",
-            serde_json::json!({"query": "  Obsidian links  ", "limit": 12}),
-            Some(anchor),
-        )
-        .unwrap();
-        let read = dispatch_with_anchor(
-            "read_knowledge",
-            serde_json::json!({"path": "projects/obsidian-gap-analysis.md", "line": 8}),
-            Some(anchor),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            search,
-            DispatchTarget::Command(AgentCommand::SearchKnowledge {
-                anchor: got,
-                query,
-                limit: 12,
-            }) if got == anchor && query == "Obsidian links"
-        ));
-        assert!(matches!(
-            read,
-            DispatchTarget::Command(AgentCommand::ReadKnowledge {
-                anchor: got,
-                path,
-                line: 8,
-                limit: 200,
-            }) if got == anchor && path == "projects/obsidian-gap-analysis.md"
-        ));
-        assert!(
-            dispatch_from_tool_call("search_knowledge", serde_json::json!({"query": "links"}))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn project_tools_dispatch_with_anchor_and_branch() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let worktree_definition = create_worktree_definition();
-        let select_definition = select_project_definition();
-        let choice_definition = request_user_choice_definition();
-        assert!(
-            worktree_definition
-                .description
-                .contains("Never call for requests that only read")
-        );
-        assert!(select_definition.description.contains("before accessing"));
-        assert!(
-            select_definition
-                .description
-                .contains("Do not call for general questions")
-        );
-        assert!(
-            select_definition
-                .description
-                .contains("Do not search the user's home directory")
-        );
-        assert!(
-            select_definition
-                .description
-                .contains("native project picker")
-        );
-        assert!(
-            select_definition
-                .description
-                .contains("~/.vmux/projects/<remote-host>")
-        );
-        assert!(
-            select_definition
-                .description
-                .contains("~/.vmux/projects/local/<project>")
-        );
-        assert!(select_definition.description.contains("empty directory"));
-        assert!(
-            select_definition
-                .description
-                .contains("without a linked worktree")
-        );
-        assert!(
-            select_definition
-                .description
-                .contains("returns immediately")
-        );
-        assert!(choice_definition.description.contains("~/.vmux/projects"));
-        assert!(choice_definition.description.contains("Ctrl+N/Ctrl+P"));
-        let choose =
-            dispatch_with_anchor("select_project", serde_json::json!({}), Some(anchor)).unwrap();
-        let choose_path = dispatch_with_anchor(
-            "select_project",
-            serde_json::json!({"path": "/repo"}),
-            Some(anchor),
-        )
-        .unwrap();
-        let create = dispatch_with_anchor(
-            "create_worktree",
-            serde_json::json!({"branch": "feature/fun-terminal"}),
-            Some(anchor),
-        )
-        .unwrap();
-        let prepare = dispatch_with_anchor(
-            "create_worktree",
-            serde_json::json!({"path": "/repo-wt", "task": "fun terminal", "create": false}),
-            Some(anchor),
-        )
-        .unwrap();
-        let choice = dispatch_with_anchor(
-            "request_user_choice",
-            serde_json::json!({
-                "question": "Worktree?",
-                "options": ["Create new worktree", "/repo/.worktrees/feature"]
-            }),
-            Some(anchor),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            choose,
-            DispatchTarget::Command(AgentCommand::ChooseWorkspace { anchor: got }) if got == anchor
-        ));
-        assert!(matches!(
-            choose_path,
-            DispatchTarget::Command(AgentCommand::ChooseWorkspaceAtPath { anchor: got, path })
-                if got == anchor && path == "/repo"
-        ));
-        assert!(matches!(
-            create,
-            DispatchTarget::Command(AgentCommand::CreateWorktreeOnBranch { anchor: got, branch, .. })
-                if got == anchor && branch == "feature/fun-terminal"
-        ));
-        assert!(matches!(
-            prepare,
-            DispatchTarget::Command(AgentCommand::PrepareWorktree { anchor: got, path, task, create })
-                if got == anchor
-                    && path.as_deref() == Some("/repo-wt")
-                    && task.as_deref() == Some("fun terminal")
-                    && !create
-        ));
-        assert!(matches!(
-            choice,
-            DispatchTarget::Command(AgentCommand::RequestUserChoice { anchor: got, question, options })
-                if got == anchor && question == "Worktree?" && options.len() == 2
-        ));
-    }
-
-    #[test]
-    fn terminal_send_dispatches_with_text() {
-        let command = dispatch_command("terminal_send", serde_json::json!({"text": "ls"})).unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::TerminalSend {
-                text: "ls".to_string(),
-                terminal: None,
-            }
-        );
-    }
-
-    #[test]
-    fn terminal_send_enter_appends_carriage_return() {
-        let command = dispatch_command(
-            "terminal_send",
-            serde_json::json!({"text": "ls", "enter": true}),
-        )
-        .unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::TerminalSend {
-                text: "ls\r".to_string(),
-                terminal: None,
-            }
-        );
-    }
-
-    #[test]
-    fn terminal_send_enter_with_empty_text_submits_carriage_return() {
-        let command = dispatch_command(
-            "terminal_send",
-            serde_json::json!({"text": "", "enter": true}),
-        )
-        .unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::TerminalSend {
-                text: "\r".to_string(),
-                terminal: None,
-            }
-        );
-    }
-
-    #[test]
-    fn terminal_send_missing_text_returns_error() {
-        assert!(dispatch_from_tool_call("terminal_send", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn rename_profile_dispatches_with_name() {
-        let command =
-            dispatch_command("rename_profile", serde_json::json!({"name": "Junichi"})).unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::RenameProfile {
-                name: "Junichi".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn rename_profile_empty_name_returns_error() {
-        assert!(
-            dispatch_from_tool_call("rename_profile", serde_json::json!({"name": "  "})).is_err()
-        );
-    }
-
-    #[test]
-    fn list_tools_includes_select_tab() {
-        let names = tool_names();
-        assert!(names.contains(&"select_tab".to_string()));
-    }
-
-    #[test]
-    fn select_tab_dispatches_to_tab_select_id() {
-        let command = dispatch_command("select_tab", serde_json::json!({"index": 3})).unwrap();
-        assert_eq!(
-            command,
-            AgentCommand::AppCommand {
-                id: "tab_select_3".to_string(),
-                args_json: String::new(),
-            }
-        );
-    }
-
-    #[test]
-    fn select_tab_out_of_range_returns_error() {
-        assert!(dispatch_from_tool_call("select_tab", serde_json::json!({"index": 0})).is_err());
-        assert!(dispatch_from_tool_call("select_tab", serde_json::json!({"index": 9})).is_err());
-    }
-
-    #[test]
-    fn tool_list_includes_read_and_update_layout() {
-        let names = tool_names();
-        assert!(names.contains(&"read_layout".to_string()));
-        assert!(names.contains(&"update_layout".to_string()));
-    }
-
-    #[test]
-    fn list_tools_includes_screenshot() {
-        assert!(tool_names().contains(&"screenshot".to_string()));
-    }
-
-    #[test]
-    fn screenshot_dispatches_to_query_with_and_without_pane() {
-        let target = dispatch_from_tool_call("screenshot", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
-        ));
-
-        let target =
-            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" }))
-                .unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: Some(p) })
-                if p == "stack:7"
-        ));
-
-        let target =
-            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "  " })).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
-        ));
-
-        assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
-    }
-
-    #[test]
-    fn mcp_param_tool_entries_includes_all_param_tools() {
-        let names: Vec<&'static str> = McpParamTool::mcp_tool_entries()
-            .into_iter()
-            .map(|(name, _, _)| name)
-            .collect();
-        for expected in [
-            "open_command_bar",
-            "browser_navigate",
-            "terminal_send",
-            "select_tab",
-        ] {
-            assert!(names.contains(&expected), "missing param tool {expected}");
-        }
-    }
-
-    #[test]
-    fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
-        let entry = McpParamTool::mcp_tool_entries()
-            .into_iter()
-            .find(|(name, _, _)| *name == "browser_navigate")
-            .expect("browser_navigate present");
-        let schema = entry.2;
-        let required = schema.get("required").expect("required key");
-        assert_eq!(required, &serde_json::json!(["url"]));
-        let properties = schema.get("properties").expect("properties key");
-        assert!(properties.get("url").is_some());
-        assert!(properties.get("pane").is_some());
-    }
-
-    #[test]
-    fn mcp_param_tool_from_mcp_call_browser_navigate() {
-        let parsed = McpParamTool::from_mcp_call(
-            "browser_navigate",
-            serde_json::json!({"url": "https://example.com", "pane": "12345"}),
-        )
-        .expect("recognized")
-        .expect("parsed");
-        assert!(matches!(
-            parsed,
-            McpParamTool::BrowserNavigate { url, pane: Some(p) }
-                if url == "https://example.com" && p == "12345"
-        ));
-    }
-
-    #[test]
-    fn mcp_param_tool_from_mcp_call_browser_navigate_missing_url_errors() {
-        let result = McpParamTool::from_mcp_call("browser_navigate", serde_json::json!({}))
-            .expect("recognized");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn mcp_param_tool_from_mcp_call_unknown_returns_none() {
-        assert!(McpParamTool::from_mcp_call("nope", serde_json::json!({})).is_none());
-    }
-
-    #[test]
-    fn dispatch_from_tool_call_routes_command() {
-        let target = dispatch_from_tool_call("terminal_clear", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::AppCommand { id, .. }) if id == "terminal_clear"
-        ));
-    }
-
-    #[test]
-    fn dispatch_read_layout_routes_to_query() {
-        let target = dispatch_from_tool_call("read_layout", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(AgentQuery::ReadLayout { .. })
-        ));
-    }
-
-    #[test]
-    fn open_page_without_direction_is_auto() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_page",
-            serde_json::json!({"url": "https://x.com"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
-                assert_eq!(direction, None, "absent direction => auto placement");
-            }
-            other => panic!("expected OpenBeside, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn open_page_default_does_not_request_focus() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_page",
-            serde_json::json!({"url": "https://x.com"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::OpenBeside { focus, .. }) => {
-                assert!(!focus);
-            }
-            other => panic!("expected OpenBeside, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn open_file_default_does_not_request_focus() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_file",
-            serde_json::json!({"path": "/tmp/example.rs"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::OpenBeside { focus, .. }) => {
-                assert!(!focus);
-            }
-            other => panic!("expected OpenBeside, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn open_page_with_direction_is_explicit() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_page",
-            serde_json::json!({"url": "https://x.com", "direction": "left"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
-                assert_eq!(
-                    direction,
-                    Some(vmux_client::protocol::AgentPaneDirection::Left)
-                );
-            }
-            other => panic!("expected OpenBeside, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn open_page_dispatch_uses_anchor() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_page",
-            serde_json::json!({"direction": "right", "url": "vmux://terminal/"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::OpenBeside { anchor: a, url, .. }) => {
-                assert_eq!(a, anchor);
-                assert_eq!(url, "vmux://terminal/");
-            }
-            other => panic!("expected OpenBeside, got {other:?}"),
-        }
-        assert!(
-            dispatch_with_anchor("open_page", serde_json::json!({"url": ""}), Some(anchor))
-                .is_err()
-        );
-        assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
-        assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
-        assert!(tool_definitions().iter().any(|d| d.name == "run"));
-        assert!(tool_definitions().iter().any(|d| d.name == "read_file"));
-        assert!(tool_definitions().iter().any(|d| d.name == "grep"));
-    }
-
-    #[test]
-    fn open_vault_dispatch_focuses_confirmed_provider() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "open_vault",
-            serde_json::json!({"provider": "github"}),
-            Some(anchor),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::OpenBeside {
-                anchor: got,
-                direction: None,
-                url,
-                focus: true,
-            }) if got == anchor && url == "vmux://vault/?provider=github"
-        ));
-        assert!(
-            dispatch_with_anchor(
-                "open_vault",
-                serde_json::json!({"provider": "unknown"}),
-                Some(anchor),
-            )
-            .is_err()
-        );
-        assert!(dispatch_with_anchor("open_vault", serde_json::json!({}), None).is_err());
-    }
-
-    #[test]
-    fn run_dispatch_uses_anchor() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "echo hi"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::Run {
-                anchor: a, command, ..
-            }) => {
-                assert_eq!(a, anchor);
-                assert_eq!(command, "echo hi");
-            }
-            other => panic!("expected Run, got {other:?}"),
-        }
-        assert!(
-            dispatch_with_anchor("run", serde_json::json!({"command": " "}), Some(anchor)).is_err()
-        );
-        assert!(dispatch_with_anchor("run", serde_json::json!({"command": "x"}), None).is_err());
-    }
-
-    #[test]
-    fn run_dispatch_tracks_explicit_placement_override() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let bare = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "echo hi"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match bare {
-            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
-            other => panic!("expected Run, got {other:?}"),
-        }
-
-        let nulls = dispatch_with_anchor(
-            "run",
-            serde_json::json!({
-                "command": "echo hi",
-                "mode": null,
-                "direction": null,
-                "beside": null
-            }),
-            Some(anchor),
-        )
-        .unwrap();
-        match nulls {
-            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
-            other => panic!("expected Run for null placement values, got {other:?}"),
-        }
-
-        for arguments in [
-            serde_json::json!({"command": "echo hi", "direction": "bottom"}),
-            serde_json::json!({"command": "echo hi", "mode": "auto"}),
-            serde_json::json!({"command": "echo hi", "beside": "self"}),
-        ] {
-            let explicit = dispatch_with_anchor("run", arguments, Some(anchor)).unwrap();
-            match explicit {
-                DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { .. }) => {}
-                other => panic!("expected RunWithPlacementOverride, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn run_tool_documents_default_placement_policy() {
-        let run = tool_definitions()
-            .into_iter()
-            .find(|definition| definition.name == "run")
-            .expect("run definition");
-        assert!(
-            run.description
-                .contains("agent.allow_run_placement_override")
-        );
-        assert!(
-            run.description
-                .contains("omit `mode`, `direction`, and `beside`")
-        );
-    }
-
-    #[test]
-    fn run_with_terminal_targets_existing() {
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let term = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "ls", "terminal": term.to_string()}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::Run {
-                terminal: Some(t), ..
-            }) => {
-                assert_eq!(t, term);
-            }
-            other => panic!("expected Run with terminal, got {other:?}"),
-        }
-        assert!(
-            dispatch_with_anchor(
-                "run",
-                serde_json::json!({"command": "ls", "terminal": "nope"}),
-                Some(anchor)
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn run_beside_and_mode_dispatch() {
-        use vmux_client::protocol::PlacementMode;
-        let anchor = vmux_client::protocol::ProcessId::new();
-        let beside = vmux_client::protocol::ProcessId::new();
-
-        let target = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "ls", "beside": beside.to_string(), "mode": "stack"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
-                beside: Some(b),
-                mode,
-                ..
-            }) => {
-                assert_eq!(b, beside);
-                assert_eq!(mode, PlacementMode::Stack);
-            }
-            other => panic!("expected RunWithPlacementOverride with beside+stack, got {other:?}"),
-        }
-
-        let target = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "ls", "beside": "self"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
-                beside: None,
-                mode,
-                ..
-            }) => assert_eq!(mode, PlacementMode::Auto),
-            other => panic!("expected RunWithPlacementOverride with self+auto, got {other:?}"),
-        }
-
-        let target = dispatch_with_anchor(
-            "run",
-            serde_json::json!({"command": "ls", "mode": "split"}),
-            Some(anchor),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { mode, .. }) => {
-                assert_eq!(mode, PlacementMode::Split)
-            }
-            other => panic!("expected RunWithPlacementOverride with split, got {other:?}"),
-        }
-
-        assert!(
-            dispatch_with_anchor(
-                "run",
-                serde_json::json!({"command": "ls", "mode": "nope"}),
-                Some(anchor),
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn read_terminal_dispatch_routes_to_query() {
-        let pid = vmux_client::protocol::ProcessId::new();
-        let target = dispatch_from_tool_call(
-            "read_terminal",
-            serde_json::json!({"terminal": pid.to_string()}),
-        )
-        .unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(vmux_client::protocol::AgentQuery::ReadTerminal { .. })
-        ));
-        assert!(
-            dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
-                .is_err()
-        );
-        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
-    }
-
-    #[test]
-    fn dispatch_update_layout_parses_payload() {
-        let payload = serde_json::json!({
-            "tabs": [{
-                "id": "tab:1",
-                "name": "Work",
-                "is_active": true,
-                "root": { "kind": "pane", "id": "pane:2", "stacks": [{ "id": "stack:3" }] }
-            }],
-            "focused": { "tab": "tab:1", "pane": "pane:2", "stack": "stack:3" }
-        });
-        let target = dispatch_from_tool_call("update_layout", payload).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::UpdateLayout { .. })
-        ));
-    }
-
-    #[test]
-    fn dispatch_update_layout_rejects_malformed_payload() {
-        let payload = serde_json::json!({ "not_a_layout": true });
-        assert!(dispatch_from_tool_call("update_layout", payload).is_err());
-    }
-
-    #[test]
-    fn dispatch_from_tool_call_routes_param_command_with_pane() {
-        let target = dispatch_from_tool_call(
-            "browser_navigate",
-            serde_json::json!({"url": "https://example.com", "pane": "12345"}),
-        )
-        .unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::BrowserNavigate { url, pane: Some(p) })
-                if url == "https://example.com" && p == "12345"
-        ));
-    }
-
-    #[test]
-    fn dispatch_from_tool_call_unknown_returns_error() {
-        assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn list_tools_includes_update_settings_and_get_settings() {
-        let names = tool_names();
-        assert!(names.contains(&"update_settings".to_string()));
-        assert!(names.contains(&"get_settings".to_string()));
-    }
-
-    #[test]
-    fn update_settings_dispatches_with_path_and_value() {
-        let target = dispatch_from_tool_call(
-            "update_settings",
-            serde_json::json!({"path": "layout.pane.gap", "value": 12.0}),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::UpdateSettings { path, value_json }) => {
-                assert_eq!(path, "layout.pane.gap");
-                let parsed: serde_json::Value = serde_json::from_str(&value_json).unwrap();
-                assert_eq!(parsed, serde_json::json!(12.0));
-            }
-            other => panic!("expected UpdateSettings command, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn update_settings_empty_path_returns_error() {
-        let result = dispatch_from_tool_call(
-            "update_settings",
-            serde_json::json!({"path": "", "value": 1}),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_settings_dispatches_to_query() {
-        let target = dispatch_from_tool_call("get_settings", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(AgentQuery::GetSettings)
-        ));
-    }
-
-    #[test]
-    fn list_spaces_dispatches_to_query() {
-        let target = dispatch_from_tool_call("list_spaces", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(AgentQuery::ListSpaces)
-        ));
-    }
-
-    #[test]
-    fn bookmark_list_dispatches_to_query() {
-        let target = dispatch_from_tool_call("bookmark_list", serde_json::json!({})).unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Query(AgentQuery::BookmarkList)
-        ));
-    }
-
-    #[test]
-    fn bookmark_add_dispatches_to_command() {
-        let cmd = dispatch_command(
-            "bookmark_add",
-            serde_json::json!({"url": "https://a.test", "title": "A", "folder": "f1"}),
-        )
-        .unwrap();
-        match cmd {
-            AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add { page, folder }) => {
-                assert_eq!(page.url, "https://a.test");
-                assert_eq!(page.title.as_deref(), Some("A"));
-                assert_eq!(folder.as_deref(), Some("f1"));
-            }
-            other => panic!("expected BookmarkCommand, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn bookmark_folder_create_dispatches_to_command() {
-        let cmd =
-            dispatch_command("bookmark_folder_create", serde_json::json!({"name": "PRs"})).unwrap();
-        match cmd {
-            AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name }) => {
-                assert_eq!(name, "PRs");
-            }
-            other => panic!("expected BookmarkCommand, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rename_space_dispatches_to_space_command() {
-        let target = dispatch_from_tool_call(
-            "rename_space",
-            serde_json::json!({"space_id": "work", "name": "Client A"}),
-        )
-        .unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
-                space_id,
-                name,
-            })) => {
-                assert_eq!(space_id, "work");
-                assert_eq!(name, "Client A");
-            }
-            other => panic!("expected SpaceCommand, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn create_space_dispatches_to_space_command() {
-        let target =
-            dispatch_from_tool_call("create_space", serde_json::json!({"name": "Work"})).unwrap();
-        match target {
-            DispatchTarget::Command(AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
-                name,
-            })) => {
-                assert_eq!(name.as_deref(), Some("Work"));
-            }
-            other => panic!("expected SpaceCommand, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn delete_space_empty_id_returns_error() {
-        let result = dispatch_from_tool_call("delete_space", serde_json::json!({"space_id": ""}));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn open_command_tools_are_exposed() {
-        let names = tool_names();
-        for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
-            assert!(
-                names.contains(&expected.to_string()),
-                "missing OpenCommand tool: {expected}"
-            );
-        }
-        assert!(
-            !names.contains(&"in_pane".to_string()),
-            "in_pane is hidden, superseded by open_page"
-        );
-    }
-
-    #[test]
-    fn go_back_dispatches() {
-        let r = McpParamTool::BrowserGoBack { pane: None }.to_agent_command();
-        assert!(matches!(r, Ok(AgentCommand::BrowserGoBack { .. })));
-    }
-
-    #[test]
-    fn go_forward_dispatches() {
-        let r = McpParamTool::BrowserGoForward { pane: None }.to_agent_command();
-        assert!(matches!(r, Ok(AgentCommand::BrowserGoForward { .. })));
-    }
-
-    #[test]
-    fn history_search_rejects_empty_query() {
-        let r = McpParamTool::BrowserHistorySearch {
-            query: "  ".into(),
-            limit: None,
-        }
-        .to_agent_command();
-        assert!(r.is_err());
-    }
-
-    #[test]
-    fn history_search_clamps_limit() {
-        let r = McpParamTool::BrowserHistorySearch {
-            query: "x".into(),
-            limit: Some(500),
-        }
-        .to_agent_command();
-        match r {
-            Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 100),
-            _ => panic!(),
-        }
-    }
-
-    #[test]
-    fn history_search_default_limit() {
-        let r = McpParamTool::BrowserHistorySearch {
-            query: "x".into(),
-            limit: None,
-        }
-        .to_agent_command();
-        match r {
-            Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 20),
-            _ => panic!(),
-        }
-    }
-}
+mod tests;
