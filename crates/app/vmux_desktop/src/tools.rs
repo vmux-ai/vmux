@@ -14,6 +14,7 @@ use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
+use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
     ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
@@ -127,6 +128,7 @@ impl Plugin for ToolsPlugin {
             .init_resource::<ToolActionQueue>()
             .init_resource::<VaultActionQueue>()
             .init_resource::<VaultAutoSync>()
+            .init_resource::<VaultRecoveryState>()
             .add_plugins(crate::mcp_connection::McpConnectionPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 ToolsRefreshRequest,
@@ -245,6 +247,7 @@ struct VaultActionTask {
 struct VaultActionOutput {
     message: String,
     pending_upload: bool,
+    generated_recovery_key: Option<GeneratedRecoveryKey>,
 }
 
 struct VaultWatch {
@@ -264,6 +267,36 @@ struct VaultAutoSync {
 
 #[derive(Resource, Default)]
 struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
+
+#[derive(Resource)]
+struct VaultRecoveryState {
+    service: VaultRecovery,
+    pending_key: Option<GeneratedRecoveryKey>,
+}
+
+impl Default for VaultRecoveryState {
+    fn default() -> Self {
+        Self {
+            service: VaultRecovery::current(),
+            pending_key: None,
+        }
+    }
+}
+
+impl VaultRecoveryState {
+    fn begin(&mut self, action: VaultAction) -> (VaultRecovery, Option<GeneratedRecoveryKey>) {
+        let key = if action == VaultAction::CreateRecoveryKey {
+            self.pending_key.take()
+        } else {
+            None
+        };
+        (self.service.clone(), key)
+    }
+
+    fn retain(&mut self, key: GeneratedRecoveryKey) {
+        self.pending_key = Some(key);
+    }
+}
 
 #[derive(Clone, Debug)]
 struct InventoryItem {
@@ -491,6 +524,7 @@ fn start_tool_action(
 
 fn start_vault_action(
     mut queue: ResMut<VaultActionQueue>,
+    mut recovery: ResMut<VaultRecoveryState>,
     tasks: Query<(), With<VaultActionTask>>,
     tool_tasks: Query<(), With<ToolActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
@@ -503,6 +537,7 @@ fn start_vault_action(
     let Some((target, request)) = queue.0.pop_front() else {
         return;
     };
+    let (recovery, generated_recovery_key) = recovery.begin(request.action);
     let task_request = request.clone();
     let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let progress_wake = completion_wake.clone();
@@ -512,6 +547,8 @@ fn start_vault_action(
     let task = IoTaskPool::get().spawn(async move {
         let result = perform_vault_action(
             &task_request,
+            recovery,
+            generated_recovery_key,
             move |progress| {
                 if progress_sender.send(progress).is_ok()
                     && let Some(wake) = &progress_wake
@@ -648,6 +685,7 @@ fn drain_tool_actions(
 fn drain_vault_actions(
     mut tasks: Query<(Entity, &mut VaultActionTask)>,
     mut state: ResMut<ToolsState>,
+    mut recovery: ResMut<VaultRecoveryState>,
     browsers: NonSend<Browsers>,
     mut app_commands: MessageWriter<AppCommand>,
     mut commands: Commands,
@@ -674,10 +712,18 @@ fn drain_vault_actions(
         if task.canceled.load(Ordering::Relaxed) {
             continue;
         }
-        let (success, message, pending_upload) = match result {
-            Ok(output) => (true, output.message, output.pending_upload),
-            Err(message) => (false, message, false),
+        let (success, message, pending_upload, generated_recovery_key) = match result {
+            Ok(output) => (
+                true,
+                output.message,
+                output.pending_upload,
+                output.generated_recovery_key,
+            ),
+            Err(message) => (false, message, false, None),
         };
+        if let Some(key) = generated_recovery_key {
+            recovery.retain(key);
+        }
         let event = VaultActionResult {
             action: task.request.action,
             success,
@@ -1393,6 +1439,8 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
 
 async fn perform_vault_action<F, C>(
     request: &VaultActionRequest,
+    recovery: VaultRecovery,
+    generated_recovery_key: Option<GeneratedRecoveryKey>,
     progress: F,
     canceled: C,
 ) -> Result<VaultActionOutput, String>
@@ -1401,10 +1449,13 @@ where
     C: Fn() -> bool,
 {
     if request.action == VaultAction::CreateRecoveryKey {
-        let recovery = vmux_core::profile::vault::create_recovery_key()?;
+        let key = generated_recovery_key
+            .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
+        let result = recovery.create(key)?;
         return Ok(VaultActionOutput {
             message: String::new(),
-            pending_upload: recovery.pending_upload,
+            pending_upload: result.pending_upload,
+            generated_recovery_key: None,
         });
     }
     let message = match request.action {
@@ -1443,12 +1494,16 @@ where
             vmux_core::profile::vault::connect_folder(folder.path())
         }
         VaultAction::GenerateRecoveryKey => {
-            vmux_core::profile::vault::generate_recovery_key().map(|key| key.to_string())
+            let key = GeneratedRecoveryKey::generate()?;
+            let message = key.display().to_string();
+            return Ok(VaultActionOutput {
+                message,
+                pending_upload: false,
+                generated_recovery_key: Some(key),
+            });
         }
         VaultAction::CreateRecoveryKey => unreachable!(),
-        VaultAction::UnlockRecoveryKey => {
-            vmux_core::profile::vault::unlock_with_recovery_key(&request.recovery_key)
-        }
+        VaultAction::UnlockRecoveryKey => recovery.unlock(&request.recovery_key),
         VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
         VaultAction::CreateCloudFolder => {
             let folder = Path::new(&request.repository).join(&request.folder_name);
@@ -1481,6 +1536,7 @@ where
     Ok(VaultActionOutput {
         message,
         pending_upload: false,
+        generated_recovery_key: None,
     })
 }
 
@@ -1788,6 +1844,16 @@ mod tests {
         assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/extensions"));
         assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/homebrew"));
         assert!(!TOOLS_HOSTED_PAGE.answers_for("vmux://toolbox/"));
+    }
+
+    #[test]
+    fn recovery_key_is_retained_until_one_create_attempt() {
+        let mut recovery = VaultRecoveryState::default();
+        recovery.retain(GeneratedRecoveryKey::generate().unwrap());
+
+        assert!(recovery.begin(VaultAction::Sync).1.is_none());
+        assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_some());
+        assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_none());
     }
 
     #[test]

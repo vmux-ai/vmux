@@ -1,5 +1,9 @@
+#[cfg(target_os = "macos")]
+use crate::CefOsCryptKeyProvider;
 use crate::RunOnMainThread;
 use crate::common::WebviewSource;
+#[cfg(target_os = "macos")]
+use crate::common::os_crypt::OsCryptConfigurator;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::*;
 use cef::args::Args;
@@ -14,6 +18,8 @@ pub struct MessageLoopPlugin {
     pub root_cache_path: Option<String>,
     pub locale: String,
     pub accept_language_list: String,
+    #[cfg(target_os = "macos")]
+    pub os_crypt_key_provider: Option<CefOsCryptKeyProvider>,
 }
 
 #[derive(Resource, Default)]
@@ -34,6 +40,12 @@ impl Plugin for MessageLoopPlugin {
 
         #[cfg(target_os = "macos")]
         load_cef_library(app);
+
+        #[cfg(target_os = "macos")]
+        if let Some(provider) = self.os_crypt_key_provider {
+            OsCryptConfigurator::configure(provider)
+                .unwrap_or_else(|error| panic!("failed to configure browser storage: {error}"));
+        }
 
         let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
         let args = Args::new();
@@ -111,6 +123,26 @@ impl Plugin for MessageLoopPlugin {
         {
             app.insert_non_send(cef_pump_timer::install(rx, 1.0 / 60.0));
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn cef_framework_binary_path() -> std::path::PathBuf {
+    #[cfg(feature = "debug")]
+    {
+        return debug_chromium_embedded_framework_dir_path().join("Chromium Embedded Framework");
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Frameworks")
+            .join("Chromium Embedded Framework.framework")
+            .join("Chromium Embedded Framework")
     }
 }
 

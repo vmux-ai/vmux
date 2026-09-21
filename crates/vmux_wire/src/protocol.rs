@@ -343,11 +343,13 @@ pub enum AgentQuery {
     WorkingDirectory {
         anchor: ProcessId,
     },
+    VaultStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQueryResult {
     Layout(crate::protocol::layout::LayoutSnapshot),
+    VaultStatus(crate::vault::VaultStatusSnapshot),
     Text(String),
     Settings(String),
     Spaces(String),
@@ -1257,6 +1259,30 @@ mod tests {
         let back: AgentQueryResult =
             rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn agent_query_result_vault_status_rkyv_round_trip() {
+        let result = AgentQueryResult::VaultStatus(crate::vault::VaultStatusSnapshot {
+            root: "/Users/test/.vmux".into(),
+            connected: true,
+            encrypted: true,
+            unlocked: true,
+            recovery_key: true,
+            automatic_backup: true,
+            provider: Some(crate::vault::VaultProvider::Github),
+            remote: Some("https://github.com/vmux-ai/vault.git".into()),
+            branch: "main".into(),
+            local_changes: 2,
+            ahead: 1,
+            behind: 0,
+            sync_needed: true,
+        });
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
+        let recovered: AgentQueryResult =
+            rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(recovered, result);
     }
 
     #[test]

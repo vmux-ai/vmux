@@ -2,6 +2,7 @@ use crate::strategy::AgentStrategies;
 use crate::{AgentKind, mcp};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 use vmux_core::terminal::TerminalLaunch;
 
 struct AgentLaunchPreparation;
@@ -36,8 +37,7 @@ pub(crate) fn build_agent_launch(
         .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
     let _preparation = AgentLaunchPreparation::lock()?;
     for _ in 0..3 {
-        let mcp_revision =
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::stable_revision()?;
+        let mcp_revision = McpCredentialAccess::stable_revision()?;
         let mcp_cfg = mcp::resolve(cwd, anchor, kind)?;
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
@@ -60,7 +60,7 @@ pub(crate) fn build_agent_launch(
             env.extend(strategy.model_env(model));
         }
         env.push(("VMUX_ANCHOR".to_string(), anchor.to_string()));
-        if vmux_core::profile::mcp_credentials::McpOauthCredentials::revision() != mcp_revision {
+        if McpCredentialAccess::revision() != mcp_revision {
             continue;
         }
         return Ok(PreparedAgentLaunch {

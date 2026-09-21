@@ -1,7 +1,5 @@
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(any(target_os = "macos", test))]
-mod native;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
@@ -10,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use zeroize::Zeroizing;
 
-use super::validate_key;
+use super::snapshot::validate_key;
 
 const LOCKED: &str = "This Vault is locked on this device. Unlock it with a passkey.";
 
@@ -67,26 +65,6 @@ impl KeyStore for SilentSystemKeyStore {
     }
 }
 
-#[doc(hidden)]
-pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
-    DeviceKeys::broker_load(vault_id)
-}
-
-#[doc(hidden)]
-pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> {
-    DeviceKeys::broker_load_silent(vault_id)
-}
-
-#[doc(hidden)]
-pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
-    DeviceKeys::broker_store(vault_id, encoded_key)
-}
-
-#[doc(hidden)]
-pub fn authorize_key_broker_parent() -> Result<(), String> {
-    DeviceKeys::authorize_broker_parent()
-}
-
 fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
     Ok(SESSION_KEYS
         .get_or_init(Default::default)
@@ -128,7 +106,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::KEY_LEN;
+    use crate::vault::snapshot::KEY_LEN;
     use std::sync::Arc;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};

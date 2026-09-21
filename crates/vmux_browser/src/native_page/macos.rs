@@ -9,7 +9,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
-use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, ZoomLevel};
+use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, HostWindow, ZoomLevel};
 use bevy_cef_core::prelude::{
     BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
     asset_load_path_from_request_url, embedded_page_host_of,
@@ -249,7 +249,7 @@ fn place_native_pages(
     frames: Res<PaneFrames>,
     windows: Query<&Window>,
     pages: Query<(), With<HostsPage>>,
-    capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
+    capturing: Query<&HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
     settings: Res<AppSettings>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
@@ -263,7 +263,6 @@ fn place_native_pages(
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    let capturing = !capturing.is_empty();
     for (entity, page) in hosted.0.iter() {
         let window = windows.get(page.window).ok();
         let Some(bounds) = page.placement.bounds(*entity, window, &frames) else {
@@ -276,7 +275,8 @@ fn place_native_pages(
         let ring = frames.ring_of(*entity);
         page.surface.set_focus_ring(ring.width as f64, ring.rgb);
         page.surface.set_visible(true);
-        if let Some(order) = page.placement.pointer_order(capturing) {
+        let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
+        if let Some(order) = page.placement.pointer_order(window_is_capturing) {
             page.surface.order_among_siblings(order);
         }
     }

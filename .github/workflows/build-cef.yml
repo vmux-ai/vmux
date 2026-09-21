@@ -1,0 +1,54 @@
+name: Build CEF
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: cef-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build macOS ARM64 CEF
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Build pinned CEF
+        id: build
+        env:
+          CEF_BUILD_DIR: ${{ runner.temp }}/vmux-cef-build
+        run: ./scripts/build-cef.sh
+
+      - name: Attest artifact provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.build.outputs.artifact }}
+
+      - name: Publish CEF release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ steps.build.outputs.artifact }}
+          CHECKSUM: ${{ steps.build.outputs.checksum_file }}
+          METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          set -euo pipefail
+          tag="$(./scripts/cef-manifest.sh artifact_tag)"
+          cef_version="$(./scripts/cef-manifest.sh cef_version)"
+          patch_revision="$(./scripts/cef-manifest.sh patch_revision)"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "CEF $cef_version vmux patch $patch_revision" \
+              --notes "Pinned CEF build for vmux. Source and build metadata are attached." \
+              --prerelease
+          fi
+          gh release upload "$tag" "$ARTIFACT" "$CHECKSUM" "$METADATA"

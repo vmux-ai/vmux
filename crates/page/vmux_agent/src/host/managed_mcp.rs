@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
+use vmux_core::profile::mcp_credentials::McpCredentialAccess;
+#[cfg(not(test))]
+use vmux_core::profile::mcp_credentials::McpCredentialStorage;
 use vmux_core::profile::tools::{McpServerManifest, McpTransport};
 use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
 
@@ -27,7 +30,7 @@ pub(crate) struct PreparedManagedMcpServers {
 
 pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, String> {
     for _ in 0..3 {
-        let revision = vmux_core::profile::mcp_credentials::McpOauthCredentials::stable_revision()?;
+        let revision = McpCredentialAccess::stable_revision()?;
         let mut servers = Vec::new();
         for (name, server) in load() {
             if crate::acp_install::registry_id_alias(agent_id) == "codex-acp"
@@ -40,7 +43,7 @@ pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, S
             }
             servers.push(acp_server(name, server, agent_id));
         }
-        if vmux_core::profile::mcp_credentials::McpOauthCredentials::revision() != revision {
+        if McpCredentialAccess::revision() != revision {
             continue;
         }
         return Ok(PreparedManagedMcpServers { servers, revision });
@@ -266,21 +269,15 @@ impl McpAuthorization {
 
     #[cfg(not(test))]
     fn access_token(name: &str, server: &McpServerManifest) -> Result<Option<String>, String> {
-        let credentials =
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::read_transaction(|| {
-                Self::credentials(name, server)
-            })?;
+        let credentials = McpCredentialAccess::read(|| Self::credentials(name, server))?;
         let Some(credentials) = credentials else {
             return Ok(None);
         };
         if !credentials.expires_soon() {
             return Self::token(credentials).map(Some);
         }
-        vmux_core::profile::mcp_credentials::McpOauthCredentials::refresh_transaction(|| {
-            let current =
-                vmux_core::profile::mcp_credentials::McpOauthCredentials::read_transaction(|| {
-                    Self::credentials(name, server)
-                })?;
+        McpCredentialAccess::refresh(|| {
+            let current = McpCredentialAccess::read(|| Self::credentials(name, server))?;
             let Some(current) = current else {
                 return Ok(None);
             };
@@ -289,14 +286,14 @@ impl McpAuthorization {
             }
             let mut refreshed = current.clone();
             Self::refresh(&mut refreshed)?;
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::write_transaction(|| {
+            McpCredentialAccess::write(|| {
                 let Some(latest) = Self::credentials(name, server)? else {
                     return Ok(None);
                 };
                 if latest != current {
                     return Self::token(latest).map(Some);
                 }
-                refreshed.store(name)?;
+                McpCredentialStorage::store(name, &refreshed)?;
                 Self::token(refreshed).map(Some)
             })
         })
@@ -307,9 +304,7 @@ impl McpAuthorization {
         name: &str,
         server: &McpServerManifest,
     ) -> Result<Option<vmux_core::profile::mcp_credentials::McpOauthCredentials>, String> {
-        let Some(credentials) =
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::load(name)?
-        else {
+        let Some(credentials) = McpCredentialStorage::load(name)? else {
             return Ok(None);
         };
         let resource = server

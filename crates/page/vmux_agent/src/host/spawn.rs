@@ -322,7 +322,7 @@ fn drain_agent_launches(
                 continue;
             }
         };
-        let validation = vmux_core::profile::mcp_credentials::McpOauthCredentials::with_revision(
+        let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             prepared.mcp_revision,
             || {
                 clear_stack_children(request.stack, &children_q, &mut commands);
@@ -536,7 +536,7 @@ fn rebuilt_args_env_for_restart(
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
     for _ in 0..3 {
         let mcp_revision =
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::stable_revision()?;
+            vmux_core::profile::mcp_credentials::McpCredentialAccess::stable_revision()?;
         let mcp_cfg =
             crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id, strategy.kind())?;
         let args = strategy.build_args(&mcp_cfg, session_id);
@@ -553,7 +553,7 @@ fn rebuilt_args_env_for_restart(
             .cloned()
             .collect();
         env.extend(fresh);
-        if vmux_core::profile::mcp_credentials::McpOauthCredentials::revision() != mcp_revision {
+        if vmux_core::profile::mcp_credentials::McpCredentialAccess::revision() != mcp_revision {
             continue;
         }
         return Ok((args, env, mcp_revision));
@@ -642,7 +642,7 @@ fn drain_agent_restarts(
             }
         };
         let (cols, rows) = grid.map(|grid| (grid.cols, grid.rows)).unwrap_or((80, 24));
-        let validation = vmux_core::profile::mcp_credentials::McpOauthCredentials::with_revision(
+        let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             mcp_revision,
             || {
                 service
