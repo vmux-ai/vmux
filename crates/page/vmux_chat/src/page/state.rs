@@ -212,22 +212,20 @@ impl Chat {
     fn apply_snapshot(&self, snapshot: ChatSnapshot) {
         let transcript = self.transcript;
         let messages_changed = (transcript.recent_messages_start)() != snapshot.messages_start
-            || *transcript.recent_messages_json.peek() != snapshot.messages_json;
-        if messages_changed
-            && let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snapshot.messages_json)
-        {
-            self.request_transcript_previews(&parsed);
+            || transcript.recent_messages.peek().as_slice() != snapshot.messages.as_slice();
+        if messages_changed {
+            self.request_transcript_previews(&snapshot.messages);
             let mut items = transcript.items;
-            let mut recent_json = transcript.recent_messages_json;
+            let mut recent_messages = transcript.recent_messages;
             let mut recent_start = transcript.recent_messages_start;
             let start = merge_transcript_page(
                 &mut items.write(),
                 (transcript.loaded_start)(),
-                parsed,
+                snapshot.messages.clone(),
                 snapshot.messages_start,
             );
             set_if_changed(transcript.loaded_start, start);
-            recent_json.set(snapshot.messages_json.clone());
+            recent_messages.set(snapshot.messages.clone());
             recent_start.set(snapshot.messages_start);
             if start == 0 {
                 set_if_changed(transcript.history_loading, false);
@@ -267,11 +265,7 @@ impl Chat {
             choice_options.set(snapshot.choice_options.clone());
         }
         let next_approval = if snapshot.status == "awaiting" {
-            Some((
-                snapshot.approval_call_id.clone(),
-                snapshot.approval_name.clone(),
-                snapshot.approval_args_json.clone(),
-            ))
+            snapshot.approval.clone()
         } else {
             None
         };
@@ -289,15 +283,12 @@ impl Chat {
         if page.end != (transcript.loaded_start)() {
             return;
         }
-        let Ok(older) = serde_json::from_str::<Vec<ChatItem>>(&page.items_json) else {
-            return;
-        };
-        self.request_transcript_previews(&older);
+        self.request_transcript_previews(&page.items);
         let metrics = scroll::metrics(transcript.scroll_container);
         let mut items = transcript.items;
         let mut loaded_start = transcript.loaded_start;
         let mut messages_total = transcript.messages_total;
-        drop(items.write().splice(0..0, older));
+        drop(items.write().splice(0..0, page.items));
         loaded_start.set(page.start);
         messages_total.set(page.total);
         if let Some((height, top)) = metrics {
@@ -996,7 +987,7 @@ pub struct Transcript {
     pub loaded_start: Signal<u32>,
     pub messages_total: Signal<u32>,
     pub history_loading: Signal<bool>,
-    pub recent_messages_json: Signal<String>,
+    pub recent_messages: Signal<Vec<ChatItem>>,
     pub recent_messages_start: Signal<u32>,
     pub at_bottom: Signal<bool>,
     pub last_top: Signal<i32>,
@@ -1009,7 +1000,7 @@ pub fn use_transcript() -> Transcript {
         loaded_start: use_signal(|| 0),
         messages_total: use_signal(|| 0),
         history_loading: use_signal(|| false),
-        recent_messages_json: use_signal(String::new),
+        recent_messages: use_signal(Vec::new),
         recent_messages_start: use_signal(|| u32::MAX),
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
@@ -1021,7 +1012,7 @@ pub fn use_transcript() -> Transcript {
 pub struct RunState {
     pub status: Signal<String>,
     pub error: Signal<String>,
-    pub approval: Signal<Option<(String, String, String)>>,
+    pub approval: Signal<Option<crate::event::PendingApproval>>,
     pub approval_sel: Signal<usize>,
     pub choice_question: Signal<String>,
     pub choice_options: Signal<Vec<String>>,

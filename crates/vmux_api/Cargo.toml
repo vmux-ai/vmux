@@ -12,6 +12,7 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 unicode-segmentation = "1"
 vmux_macro = { path = "../vmux_macro" }
 url = { workspace = true }
@@ -19,9 +20,6 @@ uuid = { workspace = true }
 
 bevy_ecs = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

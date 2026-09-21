@@ -8,7 +8,7 @@ use vmux_api::room::{
 };
 use vmux_service::chat::group_turns_tail;
 
-use crate::event::ChatSnapshot;
+use crate::event::{ChatSnapshot, PendingApproval};
 
 pub struct ChatRoomPlugin;
 
@@ -175,17 +175,15 @@ impl Snapshot {
         let running = matches!(session.status, RemoteStatus::Streaming);
         let items = log.chat_items(&live.0, running);
         let total = items.len() as u32;
-        let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
         let speaker = agents.named(&session.name);
-        let (approval_call_id, approval_name, approval_args_json) =
-            match conversation.approval.as_ref() {
-                Some(pending) => (
-                    pending.call_id.clone(),
-                    pending.name.clone(),
-                    pending.args_json.clone(),
-                ),
-                None => (String::new(), String::new(), String::new()),
-            };
+        let approval = conversation
+            .approval
+            .as_ref()
+            .map(|pending| PendingApproval {
+                call_id: pending.call_id.clone(),
+                name: pending.name.clone(),
+                args: vmux_api::json::JsonValue::parse_or_string(&pending.args_json),
+            });
         let error = match &conversation.status {
             RemoteStatus::Errored(message) => message.clone(),
             _ => String::new(),
@@ -195,14 +193,12 @@ impl Snapshot {
             None => (String::new(), ""),
         };
         snapshot.0 = ChatSnapshot {
-            messages_json,
+            messages: items,
             messages_start: 0,
             messages_total: total,
             status: conversation.status.page_status().to_string(),
             error,
-            approval_call_id,
-            approval_name,
-            approval_args_json,
+            approval,
             agent_name: session.name.clone(),
             conversation_title: session.name.clone(),
             agent_icon,
@@ -273,7 +269,7 @@ mod tests {
         }
 
         fn items(&self) -> Vec<ChatItem> {
-            serde_json::from_str(&self.snapshot().messages_json).expect("a decodable transcript")
+            self.snapshot().messages.clone()
         }
 
         fn insert(&mut self, resource: impl Resource) {
@@ -447,7 +443,7 @@ mod tests {
         started.insert(Conversation::default());
         assert!(started.snapshot().agent_name.is_empty());
         assert_eq!(started.snapshot().messages_total, 0);
-        assert!(started.snapshot().messages_json.is_empty());
+        assert!(started.snapshot().messages.is_empty());
     }
 
     #[test]

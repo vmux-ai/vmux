@@ -82,9 +82,14 @@ pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "settings", name = "list", target = "settings")]
+#[vmux_api::host_event(
+    namespace = "settings",
+    name = "list",
+    version = 2,
+    target = "settings"
+)]
 pub struct SettingsListEvent {
-    pub json: String,
+    pub value: vmux_api::json::JsonValue,
 }
 
 #[derive(
@@ -99,10 +104,15 @@ pub struct SettingsListEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "settings", name = "request", target = "settings")]
+#[vmux_api::ui_event(
+    namespace = "settings",
+    name = "request",
+    version = 2,
+    target = "settings"
+)]
 pub struct SettingsRequest {
     pub path: String,
-    pub value: String,
+    pub value: vmux_api::json::JsonValue,
 }
 
 #[derive(
@@ -110,16 +120,20 @@ pub struct SettingsRequest {
     Debug,
     Default,
     PartialEq,
-    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "settings", name = "schema", target = "settings")]
+#[vmux_api::host_event(
+    namespace = "settings",
+    name = "schema",
+    version = 2,
+    target = "settings"
+)]
 pub struct SettingsSchemaEvent {
-    pub json: String,
+    pub schema: crate::schema::SettingsSchema,
 }
 
 #[cfg(test)]
@@ -129,7 +143,7 @@ mod tests {
     #[test]
     fn settings_list_event_rkyv_roundtrip() {
         let original = SettingsListEvent {
-            json: r#"{"auto_update":true}"#.to_string(),
+            value: serde_json::json!({"auto_update": true}).into(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let decoded =
@@ -141,7 +155,7 @@ mod tests {
     fn settings_request_rkyv_roundtrip() {
         let original = SettingsRequest {
             path: "layout.pane.gap".to_string(),
-            value: "12.0".to_string(),
+            value: serde_json::json!(12.0).into(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let decoded = rkyv::from_bytes::<SettingsRequest, rkyv::rancor::Error>(&bytes).expect("de");
@@ -151,7 +165,7 @@ mod tests {
     #[test]
     fn settings_schema_event_rkyv_roundtrip() {
         let original = SettingsSchemaEvent {
-            json: r#"{"sections":[]}"#.to_string(),
+            schema: crate::schema::SettingsSchema::default(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let decoded =

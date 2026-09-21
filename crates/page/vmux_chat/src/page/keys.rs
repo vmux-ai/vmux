@@ -327,13 +327,13 @@ impl ChatList {
     fn choose(self, chat: Chat, index: usize) {
         match self {
             Self::Approval => {
-                let Some((call_id, _, _)) = chat.run.approval.peek().clone() else {
+                let Some(approval) = chat.run.approval.peek().clone() else {
                     return;
                 };
                 let Some(decision) = ApprovalDecision::for_index(index) else {
                     return;
                 };
-                chat.answer_approval(call_id, decision);
+                chat.answer_approval(approval.call_id, decision);
             }
             Self::Choice => {
                 if index < chat.run.choice_options.peek().len() {

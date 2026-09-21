@@ -9,15 +9,15 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     if chat.installing() {
         return rsx! {};
     }
-    let Some((call_id, name, args_json)) = (chat.run.approval)() else {
+    let Some(approval) = (chat.run.approval)() else {
         return rsx! {};
     };
     rsx! {
         ApprovalPanel {
-            tool: name,
-            args_json,
+            tool: approval.name,
+            args: approval.args,
             selected: Some((chat.run.approval_sel)()),
-            on_answer: move |decision| chat.answer_approval(call_id.clone(), decision),
+            on_answer: move |decision| chat.answer_approval(approval.call_id.clone(), decision),
         }
     }
 }
@@ -25,11 +25,11 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
 #[component]
 pub fn ApprovalPanel(
     tool: String,
-    args_json: String,
+    args: vmux_api::json::JsonValue,
     #[props(default)] selected: Option<usize>,
     on_answer: EventHandler<ApprovalDecision>,
 ) -> Element {
-    let details = ApprovalDetail::rows(&args_json);
+    let details = ApprovalDetail::rows(&args);
     rsx! {
         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
             div { class: "mx-auto flex max-w-3xl flex-col gap-3",
