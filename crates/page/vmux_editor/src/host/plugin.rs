@@ -2876,17 +2876,6 @@ fn emit_wiki_completions(
     true
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
-    let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-    let tmp = match dir {
-        Some(d) => d.join(format!(".{fname}.vmux-tmp")),
-        None => PathBuf::from(format!(".{fname}.vmux-tmp")),
-    };
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-}
-
 fn sync_fold_view(edit: &mut EditState) {
     let total = edit.core.buffer.len_lines() as u32;
     edit.core.fold_view = edit.folds.view(total);
@@ -3068,7 +3057,7 @@ fn run_commands(
                     continue;
                 }
             };
-            match write_atomic(&path, &bytes) {
+            match vmux_path::AtomicFile::write(&path, &bytes) {
                 Ok(()) => {
                     self_writes
                         .0
@@ -3617,7 +3606,7 @@ fn edit_closed_file(
     self_writes
         .0
         .insert(canon(document.path.as_path()), std::time::Instant::now());
-    write_atomic(document.path.as_path(), updated.as_bytes())
+    vmux_path::AtomicFile::write(document.path.as_path(), updated.as_bytes())
         .map_err(|e| format!("{}: {e}", document.path.as_path().display()))
 }
 

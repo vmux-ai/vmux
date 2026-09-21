@@ -6,18 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::lsp::package_path::{PackageName, PackagePath};
 
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    use std::io::Write;
-    temporary.write_all(bytes)?;
-    temporary.flush()?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    Ok(())
-}
-
 pub fn default_root() -> PathBuf {
     vmux_core::profile::lsp_dir()
 }
@@ -62,7 +50,7 @@ pub fn write_receipt(root: &Path, name: &PackageName, receipt: &Receipt) -> io::
 
 pub fn write_receipt_in(package_dir: &Path, receipt: &Receipt) -> io::Result<()> {
     let json = serde_json::to_vec_pretty(receipt)?;
-    write_atomic(&package_dir.join("vmux-receipt.json"), &json)
+    vmux_path::AtomicFile::write(package_dir.join("vmux-receipt.json"), &json)
 }
 
 pub fn activate_package(root: &Path, name: &PackageName, staged: &Path) -> io::Result<()> {

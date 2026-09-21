@@ -10184,6 +10184,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_mcp",
+ "vmux_path",
  "vmux_remote",
  "vmux_service",
  "vmux_session",
@@ -10719,6 +10720,7 @@ dependencies = [
  "toml",
  "url",
  "vmux_api",
+ "vmux_path",
  "zeroize",
 ]
 
@@ -10814,6 +10816,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_path",
  "vmux_ui",
 ]
 
