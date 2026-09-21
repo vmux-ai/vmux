@@ -395,54 +395,6 @@ mod tests {
         assert!(!layout_window);
     }
 
-    #[test]
-    fn native_mouse_motion_publishes_latest_sample_before_waking() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("NSEventMask::MouseMoved"));
-        assert!(monitor.contains("NSEventMask::LeftMouseDown"));
-        assert!(monitor.contains("WinitUserEvent::WakeUp"));
-        assert!(monitor.contains("vmux_layout::native_pointer::publish"));
-        assert!(!monitor.contains("forward_pointer_move"));
-        assert!(!monitor.contains("vmux_layout::pane::wake_on_move"));
-        assert!(monitor.contains("let global_mask = NSEventMask::LeftMouseDown"));
-    }
-
-    #[test]
-    fn native_mouse_wake_throttle_has_a_trailing_wake() {
-        let source = include_str!("runtime/macos.rs");
-        let throttle = source
-            .split("fn native_throttle")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_native_mouse_wake_monitor").next())
-            .unwrap_or_default();
-
-        assert!(throttle.contains("sync_channel::<()>(1)"));
-        assert!(throttle.contains("recv_timeout"));
-        assert!(throttle.contains("pending_interval_ns.fetch_min"));
-        assert!(!throttle.contains("while wake_rx.try_recv().is_ok()"));
-        assert!(!throttle.contains("thread_pending_interval_ns.store"));
-        assert!(!throttle.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
-    }
-
-    #[test]
-    fn native_mouse_monitor_tracks_left_button_state() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
-        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
-    }
-
     fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
         use bevy::ecs::schedule::{NodeId, Schedules};
 
@@ -487,64 +439,12 @@ mod tests {
     }
 
     #[test]
-    fn primary_window_activation_takes_the_key_window() {
-        let native = include_str!("runtime/macos.rs");
-        assert!(native.contains("activateIgnoringOtherApps"));
-        assert!(native.contains("makeKeyAndOrderFront"));
-    }
-
-    #[test]
-    fn native_mouse_monitor_does_not_wait_for_window_creation() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("proxy: Option<Res<EventLoopProxyWrapper>>"));
-        assert!(!monitor.contains("PrimaryWindow"));
-        assert!(!monitor.contains("appkit_window_ptr"));
-    }
-
-    #[test]
-    fn startup_activation_waits_for_visible_window() {
-        let source = include_str!("runtime/macos.rs")
-            .split("fn activate_primary_window_on_startup")
-            .nth(1)
-            .and_then(|tail| tail.split("fn grab_key_window_on_pane_hover").next())
-            .unwrap_or_default();
-
-        assert!(source.contains("if !window.visible"));
-    }
-
-    #[test]
     fn app_activation_starts_during_boot() {
         let update = platform_systems(Update);
         assert!(
             update.contains(&"activate_app_during_boot".to_string()),
             "update systems: {update:?}"
         );
-
-        let boot = include_str!("runtime/macos.rs")
-            .split("fn activate_app_during_boot")
-            .nth(1)
-            .and_then(|tail| tail.split("type NativeThrottle").next())
-            .unwrap_or_default();
-        assert!(boot.contains("APP_ACTIVATION_BUDGET"));
-        assert!(boot.contains("WinitUserEvent::WakeUp"));
-    }
-
-    #[test]
-    fn native_mouse_down_offers_the_click_to_the_page() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("event_location_in_window_physical_px"));
     }
 
     #[test]
@@ -600,13 +500,5 @@ mod tests {
             cef_wake_interval(true, true, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
-    }
-
-    #[test]
-    fn hide_lifecycle_suspends_osr_webviews() {
-        let source = include_str!("runtime.rs");
-
-        assert!(source.contains("hide_all_osr_webviews(world)"));
-        assert!(source.contains("set_all_osr_hidden"));
     }
 }

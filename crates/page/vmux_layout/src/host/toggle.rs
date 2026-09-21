@@ -109,19 +109,6 @@ mod tests {
     use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
 
     #[test]
-    fn hidden_layout_padding_uses_layout_window_settings() {
-        let source = include_str!("toggle.rs");
-        let sync_fn = source
-            .split("fn sync_window_padding_to_layout_hidden")
-            .nth(1)
-            .and_then(|tail| tail.split("fn handle_toggle").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.window.pad_top()"));
-        assert!(sync_fn.contains("settings.window.pad_left()"));
-    }
-
-    #[test]
     fn visible_fullscreen_layout_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

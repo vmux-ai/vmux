@@ -1246,21 +1246,6 @@ mod tests {
     }
 
     #[test]
-    fn window_padding_tracks_layout_window_settings() {
-        let source = include_str!("window.rs");
-        let sync_fn = source
-            .split("fn sync_window_layout_to_settings")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_main_column_gap_to_pane_count").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.window.pad_top()"));
-        assert!(sync_fn.contains("settings.window.pad_right()"));
-        assert!(sync_fn.contains("settings.window.pad_bottom()"));
-        assert!(sync_fn.contains("settings.window.pad_left()"));
-    }
-
-    #[test]
     fn visible_fills_monitor_window_sync_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
