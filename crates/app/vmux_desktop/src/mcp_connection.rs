@@ -13,8 +13,8 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerAction, McpServerActionRequest, McpServerActionResult, McpServerEntry,
-    McpServerStatus, McpServers, McpServersRequest,
+    McpServerAction, McpServerActionResult, McpServerEntry, McpServerRequest, McpServerStatus,
+    McpServers, McpServersRequest,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::profile::mcp_credentials::{
@@ -27,10 +27,7 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<McpActionQueue>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                McpServersRequest,
-                McpServerActionRequest,
-            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(McpServersRequest, McpServerRequest)>::default())
             .add_observer(McpConnections::request)
             .add_observer(McpConnections::act)
             .add_systems(
@@ -59,7 +56,7 @@ impl McpConnections {
         Self::spawn_snapshot(target, proxy.as_deref(), &mut commands);
     }
 
-    fn act(trigger: On<BinReceive<McpServerActionRequest>>, mut queue: ResMut<McpActionQueue>) {
+    fn act(trigger: On<BinReceive<McpServerRequest>>, mut queue: ResMut<McpActionQueue>) {
         queue
             .0
             .push_back((trigger.event().webview, trigger.event().payload.clone()));
@@ -181,12 +178,12 @@ impl McpConnections {
 }
 
 #[derive(Resource, Default)]
-struct McpActionQueue(VecDeque<(Entity, McpServerActionRequest)>);
+struct McpActionQueue(VecDeque<(Entity, McpServerRequest)>);
 
 #[derive(Component)]
 struct McpActionTask {
     target: Entity,
-    request: McpServerActionRequest,
+    request: McpServerRequest,
     task: Task<Result<(), String>>,
     progress: Mutex<mpsc::Receiver<String>>,
 }

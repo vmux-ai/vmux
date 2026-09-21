@@ -112,10 +112,10 @@ pub enum McpServerAction {
 )]
 #[vmux_api::ui_event(
     namespace = "mcp",
-    name = "server_action_request",
+    name = "server_request",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
-pub struct McpServerActionRequest {
+pub struct McpServerRequest {
     pub id: String,
     pub action: McpServerAction,
 }
