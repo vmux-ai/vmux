@@ -424,6 +424,7 @@ mod tests {
             outbox: Rc::new(TestOutbox),
             assets: Rc::new(TestAssets),
             waker: Rc::new(TestWake),
+            layer: None,
         }
     }
 
