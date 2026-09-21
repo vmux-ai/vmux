@@ -80,6 +80,9 @@ features = ["derive"]
 [dependencies.serde_json]
 version = "1"
 
+[dependencies.vmux_api]
+path = "../../crates/vmux_api"
+
 [dependencies.zeroize]
 version = "1"
 

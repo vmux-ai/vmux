@@ -11,13 +11,10 @@
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "data_request", target = "start")]
 pub struct StartDataRequest;
 
-pub use vmux_wire::command_bar::StartSelectWorkspace;
-
-pub const START_COMMAND_BAR_OPEN_EVENT: &str = "start-command-bar-open";
-
-pub const START_FOCUS_INPUT_EVENT: &str = "start-focus-input";
+pub use vmux_api::command_bar::StartSelectWorkspace;
 
 #[derive(
     Clone,
@@ -32,4 +29,5 @@ pub const START_FOCUS_INPUT_EVENT: &str = "start-focus-input";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "start-focus-input", target = "start")]
 pub struct StartFocusInput;

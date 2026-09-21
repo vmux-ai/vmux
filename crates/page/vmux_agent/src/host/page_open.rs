@@ -311,12 +311,12 @@ fn prepare_agent_tab_worktrees(
             continue;
         }
         if metadata.is_none()
-            && AgentCwd::of_tab(tab.startup_dir.as_deref())
+            && AgentCwd::from_tab(tab.startup_dir.as_deref())
                 .stored()
                 .ok()
                 .flatten()
                 .is_none()
-            && AgentCwd::of_tab(Some(&workspace.project_dir))
+            && AgentCwd::from_tab(Some(&workspace.project_dir))
                 .stored()
                 .ok()
                 .flatten()
@@ -514,7 +514,7 @@ fn handle_agent_page_open(
             &settings,
             workspace.active_space.as_deref(),
         );
-        let default_cwd = match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+        let default_cwd = match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
             Ok(None) => match space_startup_dir {
                 Some(dir) => dir.path,

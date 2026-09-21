@@ -2,28 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::FileLine;
 
-pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
-pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
-pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
-pub const FILE_HOVER_EVENT: &str = "file_hover";
-pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
-pub const FILE_RENAME_BEGIN_EVENT: &str = "file_rename_begin";
-pub const FILE_CODE_ACTIONS_EVENT: &str = "file_code_actions";
-pub const FILE_EDIT_FAILED_EVENT: &str = "file_edit_failed";
-pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
-pub const FILE_REFERENCES_EVENT: &str = "file_references";
-pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
-pub const FILE_COMPLETION_EVENT: &str = "file_completion";
-pub const FILE_GOTO_REQUEST_EVENT: &str = "file_goto_request";
-pub const FILE_COMPLETION_COMMIT_EVENT: &str = "file_completion_commit";
-pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
-pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
-pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
-pub const LSP_UNINSTALL_REQUEST: &str = "lsp_uninstall_request";
-pub const LSP_UPDATE_REQUEST: &str = "lsp_update_request";
-pub const LSP_INSTALL_PROGRESS_EVENT: &str = "lsp_install_progress";
-pub const LSP_PKG_STATUS_EVENT: &str = "lsp_pkg_status";
-
 #[derive(
     Debug,
     Clone,
@@ -74,6 +52,7 @@ pub struct FileDiagnostic {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "diagnostics", target = "files")]
 pub struct FileDiagnosticsEvent {
     pub path: String,
     pub diagnostics: Vec<FileDiagnostic>,
@@ -108,6 +87,7 @@ pub enum LspServerState {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "lsp_status", target = "files")]
 pub struct FileLspStatusEvent {
     pub path: String,
     pub server: String,
@@ -172,6 +152,7 @@ pub struct LspPackage {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "lsp", name = "catalog_request", target = "lsp")]
 pub struct LspCatalogRequest {
     pub query: String,
     pub language: String,
@@ -204,6 +185,7 @@ impl LspCatalogRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "lsp", name = "catalog", target = "lsp")]
 pub struct LspCatalogEvent {
     pub packages: Vec<LspPackage>,
 }
@@ -218,6 +200,11 @@ pub struct LspCatalogEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+)]
+#[vmux_api::ui_event(
+    namespace = "lsp",
+    name = "install_request",
+    targets = ["files", "lsp"]
 )]
 pub struct LspInstallRequest {
     pub name: String,
@@ -234,6 +221,7 @@ pub struct LspInstallRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "lsp", name = "uninstall_request", target = "lsp")]
 pub struct LspUninstallRequest {
     pub name: String,
 }
@@ -249,6 +237,7 @@ pub struct LspUninstallRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "lsp", name = "update_request", target = "lsp")]
 pub struct LspUpdateRequest {
     pub name: String,
 }
@@ -285,6 +274,11 @@ pub enum InstallPhase {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(
+    namespace = "lsp",
+    name = "install_progress",
+    targets = ["files", "lsp"]
+)]
 pub struct LspInstallProgress {
     pub name: String,
     pub phase: InstallPhase,
@@ -302,6 +296,11 @@ pub struct LspInstallProgress {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+)]
+#[vmux_api::host_event(
+    namespace = "lsp",
+    name = "pkg_status",
+    targets = ["files", "lsp"]
 )]
 pub struct LspPkgStatusEvent {
     pub name: String,
@@ -321,6 +320,7 @@ pub struct LspPkgStatusEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "hover_request", target = "files")]
 pub struct FileHoverRequest {
     pub line: u32,
     pub col: u32,
@@ -352,6 +352,7 @@ pub struct HoverBlock {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "hover", target = "files")]
 pub struct FileHoverEvent {
     pub line: u32,
     pub col: u32,
@@ -370,6 +371,7 @@ pub struct FileHoverEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "definition_request", target = "files")]
 pub struct FileDefinitionRequest {
     pub line: u32,
     pub col: u32,
@@ -386,6 +388,7 @@ pub struct FileDefinitionRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "rename_request", target = "files")]
 pub struct FileRenameRequest {
     pub line: u32,
     pub col: u32,
@@ -403,6 +406,7 @@ pub struct FileRenameRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "code_actions", target = "files")]
 pub struct FileCodeActionsEvent {
     pub titles: Vec<String>,
 }
@@ -419,6 +423,7 @@ pub struct FileCodeActionsEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "code_action_pick", target = "files")]
 pub struct FileCodeActionPick {
     pub index: u32,
 }
@@ -462,6 +467,7 @@ pub enum EditorAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "editor_action", target = "files")]
 pub struct FileEditorAction {
     pub action: EditorAction,
     pub line: u32,
@@ -479,6 +485,7 @@ pub struct FileEditorAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "edit_failed", target = "files")]
 pub struct FileEditFailedEvent {
     pub reason: String,
 }
@@ -494,6 +501,7 @@ pub struct FileEditFailedEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "rename_begin", target = "files")]
 pub struct FileRenameBeginEvent {
     pub line: u32,
     pub col: u32,
@@ -512,6 +520,7 @@ pub struct FileRenameBeginEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "references_request", target = "files")]
 pub struct FileReferencesRequest {
     pub line: u32,
     pub col: u32,
@@ -547,6 +556,7 @@ pub struct RefItem {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "references", target = "files")]
 pub struct FileReferencesEvent {
     pub items: Vec<RefItem>,
 }
@@ -563,6 +573,7 @@ pub struct FileReferencesEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "completion_request", target = "files")]
 pub struct FileCompletionRequest {
     pub line: u32,
     pub col: u32,
@@ -597,6 +608,7 @@ pub struct CompletionItem {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "completion", target = "files")]
 pub struct FileCompletionEvent {
     pub items: Vec<CompletionItem>,
     pub replace_from_col: u32,
@@ -614,6 +626,7 @@ pub struct FileCompletionEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "goto_request", target = "files")]
 pub struct FileGotoRequest {
     pub path: String,
     pub line: u32,
@@ -631,6 +644,7 @@ pub struct FileGotoRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "completion_commit", target = "files")]
 pub struct FileCompletionCommit {
     pub line: u32,
     pub replace_from_col: u32,

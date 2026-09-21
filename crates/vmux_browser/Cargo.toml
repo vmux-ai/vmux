@@ -52,7 +52,7 @@ vmux_start = { path = "../page/vmux_start" }
 vmux_team = { path = "../page/vmux_team" }
 vmux_terminal = { path = "../page/vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
-vmux_wire = { path = "../vmux_wire" }
+vmux_api = { path = "../vmux_api" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = [

@@ -1,9 +1,11 @@
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+use crate::lsp::package_path::{PackagePath, Sha256Digest};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
     pub target: String,
-    pub file: String,
-    #[serde(default)]
-    pub bin: Option<String>,
+    pub file: PackagePath,
+    pub bin: Option<PackagePath>,
+    pub sha256: Option<Sha256Digest>,
 }
 
 pub fn host_target() -> &'static str {
@@ -35,8 +37,9 @@ mod tests {
     fn asset(target: &str) -> Asset {
         Asset {
             target: target.into(),
-            file: format!("file-{target}.gz"),
-            bin: Some("bin".into()),
+            file: PackagePath::parse(&format!("file-{target}.gz")).unwrap(),
+            bin: Some(PackagePath::parse("bin").unwrap()),
+            sha256: None,
         }
     }
 

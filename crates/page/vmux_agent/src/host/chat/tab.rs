@@ -65,7 +65,7 @@ fn activity_icon(
     let provider = session
         .map(|session| session.provider.as_str())
         .unwrap_or_default();
-    let accent = Accent::of_agent(
+    let accent = Accent::for_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
             .unwrap_or_default(),
@@ -77,7 +77,7 @@ fn activity_icon(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::chat::{ChatBlock, ChatTurn};
+    use vmux_api::chat::{ChatBlock, ChatTurn};
 
     struct Conversation {
         view: Entity,
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn a_streaming_agent_is_read_from_the_last_block_of_the_running_turn() {
         let thinking = ActivityIcon::current(
-            &[vmux_wire::chat::ChatItem::Turn(ChatTurn {
+            &[vmux_api::chat::ChatItem::Turn(ChatTurn {
                 running: true,
                 blocks: vec![ChatBlock::Thinking(String::new())],
                 ..Default::default()
@@ -200,7 +200,7 @@ mod tests {
             "streaming",
         );
         let writing = ActivityIcon::current(
-            &[vmux_wire::chat::ChatItem::Turn(ChatTurn {
+            &[vmux_api::chat::ChatItem::Turn(ChatTurn {
                 running: true,
                 blocks: vec![
                     ChatBlock::Thinking(String::new()),

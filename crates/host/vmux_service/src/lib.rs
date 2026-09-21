@@ -1,5 +1,5 @@
 pub mod chat;
-pub use vmux_wire::service as event;
+pub use vmux_api::service as event;
 
 #[cfg(ui)]
 pub mod page;

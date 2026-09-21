@@ -26,10 +26,10 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use vmux_api::room::{RemoteAgent, RemoteSession};
 use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
-use vmux_wire::room::{RemoteAgent, RemoteSession};
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));

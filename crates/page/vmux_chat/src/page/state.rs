@@ -2,17 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use super::scroll;
 use crate::event::{
-    ApprovalDecision, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
-    CHAT_HISTORY_PAGE_EVENT, CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_PROJECT_BRANCHES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBranch,
+    ApprovalDecision, CHAT_HISTORY_PAGE_SIZE, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachmentPreviews, ChatAttachments, ChatBranch,
     ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
     ChatPickFiles, ChatProjectBranches, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ComposerContext, MODE_STATE_EVENT, MODEL_STATE_EVENT, ModeState, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectMode,
-    SelectModel, SlashCommandEntry, SlashCommands as SlashCommandsEvent, latest_tool_location,
+    ComposerContext, ModeState, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry,
+    SlashCommands as SlashCommandsEvent, latest_tool_location,
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
@@ -20,6 +18,9 @@ use crate::format::composer::{
 };
 use crate::tab::Accent;
 use dioxus::prelude::*;
+use vmux_api::prompt_media::{
+    inline_media_query, merge_chat_attachments, replace_inline_media_query,
+};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
@@ -32,9 +33,6 @@ use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_wire::prompt_media::{
-    inline_media_query, merge_chat_attachments, replace_inline_media_query,
-};
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Chat {
@@ -81,7 +79,7 @@ pub fn use_chat() -> Chat {
         slash: use_slash_commands(),
         resume: use_resume(),
         menu: use_composer_menu(),
-        activity_counts: use_memo(move || vmux_wire::chat::activity_counts(&items.read())),
+        activity_counts: use_memo(move || vmux_api::chat::activity_counts(&items.read())),
         latest_tool: use_memo(move || latest_tool_location(&items.read())),
     };
     chat.listen();
@@ -92,46 +90,42 @@ pub fn use_chat() -> Chat {
 impl Chat {
     fn listen(&self) {
         let chat = *self;
-        let _snapshot = use_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snapshot| {
+        let _snapshot = use_listener::<ChatSnapshot, _>(move |snapshot| {
             chat.apply_snapshot(snapshot);
         });
-        let _history = use_listener::<ChatHistoryPage, _>(CHAT_HISTORY_PAGE_EVENT, move |page| {
+        let _history = use_listener::<ChatHistoryPage, _>(move |page| {
             chat.apply_history_page(page);
         });
-        let _attachments =
-            use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
-                let mut attachments = chat.composer.attachments;
-                let current = attachments.peek().clone();
-                attachments.set(merge_chat_attachments(&current, &selected.attachments));
-                focus_prompt_end(PROMPT_INPUT_ID);
-            });
-        let _previews =
-            use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
-                let mut known = chat.composer.attachment_previews;
-                let mut previews = known.peek().clone();
-                for attachment in &loaded.attachments {
-                    previews.insert(attachment.path.clone(), attachment.clone());
-                }
-                known.set(previews);
-            });
-        let _media =
-            use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
-                if response.request_id != (chat.media.request_id)() {
-                    return;
-                }
-                let mut entries = chat.media.entries;
-                let mut loading = chat.media.loading;
-                let mut menu_sel = chat.slash.menu_sel;
-                entries.set(response.entries.clone());
-                loading.set(false);
-                menu_sel.set(0);
-            });
-        let _commands =
-            use_listener::<SlashCommandsEvent, _>(SLASH_COMMANDS_EVENT, move |incoming| {
-                let mut commands = chat.slash.commands;
-                commands.set(incoming.commands.clone());
-            });
-        let _models = use_listener::<ModelState, _>(MODEL_STATE_EVENT, move |state| {
+        let _attachments = use_listener::<ChatAttachments, _>(move |selected| {
+            let mut attachments = chat.composer.attachments;
+            let current = attachments.peek().clone();
+            attachments.set(merge_chat_attachments(&current, &selected.attachments));
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        let _previews = use_listener::<ChatAttachmentPreviews, _>(move |loaded| {
+            let mut known = chat.composer.attachment_previews;
+            let mut previews = known.peek().clone();
+            for attachment in &loaded.attachments {
+                previews.insert(attachment.path.clone(), attachment.clone());
+            }
+            known.set(previews);
+        });
+        let _media = use_listener::<ChatMediaEntries, _>(move |response| {
+            if response.request_id != (chat.media.request_id)() {
+                return;
+            }
+            let mut entries = chat.media.entries;
+            let mut loading = chat.media.loading;
+            let mut menu_sel = chat.slash.menu_sel;
+            entries.set(response.entries.clone());
+            loading.set(false);
+            menu_sel.set(0);
+        });
+        let _commands = use_listener::<SlashCommandsEvent, _>(move |incoming| {
+            let mut commands = chat.slash.commands;
+            commands.set(incoming.commands.clone());
+        });
+        let _models = use_listener::<ModelState, _>(move |state| {
             let mut models = chat.models.models;
             let mut current_model_id = chat.models.current_model_id;
             let mut default_model_id = chat.models.default_model_id;
@@ -153,32 +147,30 @@ impl Chat {
             menu_sel.set(0);
             loaded.set(true);
         });
-        let _modes = use_listener::<ModeState, _>(MODE_STATE_EVENT, move |state| {
+        let _modes = use_listener::<ModeState, _>(move |state| {
             let mut modes = chat.permissions.modes;
             let mut current_mode_id = chat.permissions.current_mode_id;
             modes.set(state.modes.clone());
             current_mode_id.set(state.current_mode_id.clone());
         });
-        let _context = use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
+        let _context = use_listener::<ComposerContext, _>(move |context| {
             let mut composer_context = chat.slash.composer_context;
             let mut loaded = chat.projects.loaded;
             composer_context.set(context.clone());
             loaded.set(true);
         });
-        let _branches =
-            use_listener::<ChatProjectBranches, _>(CHAT_PROJECT_BRANCHES_EVENT, move |incoming| {
-                chat.projects
-                    .remember(incoming.project.clone(), incoming.branches.clone());
-            });
-        let _sessions =
-            use_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |incoming| {
-                let mut sessions = chat.resume.sessions;
-                let mut menu_sel = chat.slash.menu_sel;
-                let mut loading = chat.resume.loading;
-                sessions.set(incoming.sessions.clone());
-                menu_sel.set(0);
-                loading.set(false);
-            });
+        let _branches = use_listener::<ChatProjectBranches, _>(move |incoming| {
+            chat.projects
+                .remember(incoming.project.clone(), incoming.branches.clone());
+        });
+        let _sessions = use_listener::<ResumableSessions, _>(move |incoming| {
+            let mut sessions = chat.resume.sessions;
+            let mut menu_sel = chat.slash.menu_sel;
+            let mut loading = chat.resume.loading;
+            sessions.set(incoming.sessions.clone());
+            menu_sel.set(0);
+            loading.set(false);
+        });
     }
 
     fn watch(&self) {
@@ -497,7 +489,7 @@ impl Chat {
         filter_models(&self.models.models.read(), query)
     }
 
-    pub fn filtered_mcp_servers(&self) -> Vec<vmux_wire::mcp::McpServerEntry> {
+    pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
         let draft = self.draft();
         let Some(query) = McpQuery::read(&draft) else {
             return Vec::new();
@@ -1216,7 +1208,7 @@ pub fn use_effort_picker() -> EffortPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PermissionPicker {
-    pub modes: Signal<Vec<vmux_wire::protocol::AcpModeOption>>,
+    pub modes: Signal<Vec<vmux_api::protocol::AcpModeOption>>,
     pub current_mode_id: Signal<String>,
 }
 

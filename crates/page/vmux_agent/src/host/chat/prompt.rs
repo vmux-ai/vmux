@@ -25,12 +25,8 @@ impl Plugin for ChatPromptPlugin {
             ChatResume,
             ChatClearQueue,
             ChatCancelQueuedPrompt,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
-            .add_plugins(
-                BinEventEmitterPlugin::<(ChatApproval, ChatChoiceSelected)>::for_hosts(
-                    super::CHAT_EVENT_HOSTS,
-                ),
-            )
+        )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
             .add_observer(on_chat_submit)
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_escape)
@@ -131,7 +127,7 @@ fn cancel_session(
     };
     service.0.send(ClientMessage::Shared(SharedMessage::agent(
         sid,
-        vmux_wire::protocol::AgentAction::Cancel,
+        vmux_api::protocol::AgentAction::Cancel,
     )));
 }
 

@@ -7,8 +7,8 @@ use bevy_ecs::component::Mutable;
 use bevy_ecs::message::{Message, Messages};
 use bevy_ecs::resource::Resource;
 use bevy_window::AppLifecycle;
+use vmux_api::page::PageEmit;
 use vmux_ui::hooks::transport::BytesListener;
-use vmux_wire::page::PageEmit;
 
 thread_local! {
     static REPORTED: RefCell<Vec<AppLifecycle>> = const { RefCell::new(Vec::new()) };
@@ -19,7 +19,7 @@ thread_local! {
 pub struct World {
     app: App,
     lifecycle: AppLifecycle,
-    listeners: HashMap<&'static str, BytesListener>,
+    listeners: HashMap<String, BytesListener>,
     finished: bool,
 }
 
@@ -75,8 +75,8 @@ impl World {
         }
     }
 
-    pub fn listen(&mut self, id: &'static str, on_bytes: BytesListener) {
-        self.listeners.insert(id, on_bytes);
+    pub fn listen(&mut self, id: impl Into<String>, on_bytes: BytesListener) {
+        self.listeners.insert(id.into(), on_bytes);
     }
 
     pub fn report(lifecycle: AppLifecycle) {
@@ -109,7 +109,7 @@ impl World {
             .drain()
             .collect::<Vec<_>>();
         for emit in emitted {
-            let Some(listener) = self.listeners.get_mut(emit.id) else {
+            let Some(listener) = self.listeners.get_mut(&emit.id) else {
                 tracing::debug!(id = emit.id, "page emit had no listener");
                 continue;
             };

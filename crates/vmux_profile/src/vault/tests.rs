@@ -35,7 +35,7 @@ fn agent_status_reports_provider_and_pending_sync() {
     assert!(status.automatic_backup);
     assert_eq!(
         status.provider,
-        Some(vmux_wire::vault::VaultProvider::Github)
+        Some(vmux_api::vault::VaultProvider::Github)
     );
     assert_eq!(
         status.remote.as_deref(),
@@ -51,15 +51,15 @@ fn agent_status_matches_github_hosts_exactly() {
     for (remote, provider) in [
         (
             "git@github.com:vmux-ai/vault.git",
-            vmux_wire::vault::VaultProvider::Github,
+            vmux_api::vault::VaultProvider::Github,
         ),
         (
             "https://notgithub.com/vmux-ai/vault.git",
-            vmux_wire::vault::VaultProvider::Git,
+            vmux_api::vault::VaultProvider::Git,
         ),
         (
             "/Volumes/github.com/vault.git",
-            vmux_wire::vault::VaultProvider::CloudFolder,
+            vmux_api::vault::VaultProvider::CloudFolder,
         ),
     ] {
         let status = VaultStatus {
@@ -82,7 +82,7 @@ fn agent_status_removes_remote_url_credentials() {
 
     assert_eq!(
         status.provider,
-        Some(vmux_wire::vault::VaultProvider::Github)
+        Some(vmux_api::vault::VaultProvider::Github)
     );
     assert_eq!(
         status.remote.as_deref(),

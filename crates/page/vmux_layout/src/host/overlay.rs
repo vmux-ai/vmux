@@ -8,10 +8,8 @@ pub struct LayoutOverlayPlugin;
 
 impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(LayoutOverlayEvent,)>::for_hosts(
-            &["layout"],
-        ))
-        .add_observer(on_layout_overlay_emit);
+        app.add_plugins(BinEventEmitterPlugin::<(LayoutOverlayEvent,)>::default())
+            .add_observer(on_layout_overlay_emit);
     }
 }
 

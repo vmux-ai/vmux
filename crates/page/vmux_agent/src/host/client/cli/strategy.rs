@@ -11,7 +11,7 @@ use crate::strategy::AgentStrategy;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CliModelCatalog {
     pub selected: String,
-    pub models: Vec<vmux_wire::room::ModelOptionEntry>,
+    pub models: Vec<vmux_api::room::ModelOptionEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -177,7 +177,8 @@ impl Detected {
         let head = &bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)];
         let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
         detector.feed(head, head.len() == bytes.len());
-        FileEncoding::of_charset(detector.guess(None, Utf8Detection::Deny))
+        FileEncoding::try_from(detector.guess(None, Utf8Detection::Deny).name())
+            .unwrap_or(FileEncoding::Windows1252)
     }
 }
 
@@ -295,7 +296,6 @@ impl Reencode {
 
 pub trait Charset: Sized {
     fn charset(self) -> &'static Encoding;
-    fn of_charset(charset: &'static Encoding) -> Self;
 }
 
 impl Charset for FileEncoding {
@@ -309,19 +309,6 @@ impl Charset for FileEncoding {
             Self::Big5 => encoding_rs::BIG5,
             Self::EucKr => encoding_rs::EUC_KR,
             Self::Windows1252 | Self::Iso8859_1 => encoding_rs::WINDOWS_1252,
-        }
-    }
-
-    fn of_charset(charset: &'static Encoding) -> Self {
-        match charset.name() {
-            "UTF-8" => Self::Utf8,
-            "Shift_JIS" => Self::ShiftJis,
-            "EUC-JP" => Self::EucJp,
-            "ISO-2022-JP" => Self::Iso2022Jp,
-            "GBK" | "gb18030" => Self::Gbk,
-            "Big5" => Self::Big5,
-            "EUC-KR" => Self::EucKr,
-            _ => Self::Windows1252,
         }
     }
 }

@@ -92,7 +92,7 @@ impl GitStatusFeed {
             mut message,
         } = self;
 
-        let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+        let _status = use_listener::<GitStatusEvent, _>(move |s| {
             if s.path != path() {
                 return;
             }
@@ -104,11 +104,11 @@ impl GitStatusFeed {
             staged_count.set(s.staged_count);
             has_diff.set(status_has_diff(s.file_status));
         });
-        let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
+        let _result = use_listener::<GitResultEvent, _>(move |r| {
             message.set(if r.ok { String::new() } else { r.message });
             nonce.set(nonce() + 1);
         });
-        let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
+        let _error = use_listener::<GitErrorEvent, _>(move |e| {
             message.set(e.message);
         });
 
@@ -136,7 +136,7 @@ pub fn GitFooter(
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
     let mut pending_commit_msg = use_signal(String::new);
-    let _commit_result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
+    let _commit_result = use_listener::<GitResultEvent, _>(move |result| {
         if result.action != "commit" {
             return;
         }
@@ -256,7 +256,7 @@ pub fn DiffView(
     let mut requested_path = use_signal(String::new);
     let mut request_generation = use_signal(|| 0u64);
 
-    let _vp = use_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
+    let _vp = use_listener::<GitDiffViewportEvent, _>(move |p| {
         if p.generation != request_generation() {
             return;
         }

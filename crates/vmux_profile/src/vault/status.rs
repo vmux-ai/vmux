@@ -28,8 +28,8 @@ pub struct VaultStatus {
 }
 
 impl VaultStatus {
-    pub fn snapshot(&self) -> vmux_wire::vault::VaultStatusSnapshot {
-        use vmux_wire::vault::VaultStatusSnapshot;
+    pub fn snapshot(&self) -> vmux_api::vault::VaultStatusSnapshot {
+        use vmux_api::vault::VaultStatusSnapshot;
 
         let remote = self.sanitized_remote();
         let connected = self.initialized && remote.is_some();
@@ -74,8 +74,8 @@ impl VaultStatus {
         Some(remote.to_string())
     }
 
-    fn provider(remote: &str) -> vmux_wire::vault::VaultProvider {
-        use vmux_wire::vault::VaultProvider;
+    fn provider(remote: &str) -> vmux_api::vault::VaultProvider {
+        use vmux_api::vault::VaultProvider;
 
         if Path::new(remote).is_absolute() {
             return VaultProvider::CloudFolder;

@@ -107,6 +107,12 @@ impl ScopedPath {
     }
 }
 
+impl AsRef<Path> for ScopedPath {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScopedPathError {
     ParentTraversal,

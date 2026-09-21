@@ -3,9 +3,9 @@ use std::collections::{HashSet, VecDeque};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
-use vmux_wire::agent::AgentKind;
-use vmux_wire::protocol::AgentAttachment;
-use vmux_wire::room::Message;
+use vmux_api::agent::AgentKind;
+use vmux_api::protocol::AgentAttachment;
+use vmux_api::room::Message;
 
 use crate::variant::AgentVariant;
 
@@ -218,13 +218,13 @@ mod tests {
         let before = vec![
             Message::user("question"),
             Message::Assistant {
-                blocks: vec![vmux_wire::room::AssistantBlock::Text("part".into())],
+                blocks: vec![vmux_api::room::AssistantBlock::Text("part".into())],
             },
         ];
         let after = vec![
             Message::user("question"),
             Message::Assistant {
-                blocks: vec![vmux_wire::room::AssistantBlock::Text(
+                blocks: vec![vmux_api::room::AssistantBlock::Text(
                     "partial answer".into(),
                 )],
             },

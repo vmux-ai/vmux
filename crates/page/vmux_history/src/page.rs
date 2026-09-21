@@ -1,9 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HistoryChangedEvent,
-    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
-    HistoryQueryRequest, HistoryQueryResponse,
+    HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
+    HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::alert_dialog::{
@@ -39,20 +38,17 @@ pub fn Page() -> Element {
     let mut request_id: Signal<u64> = use_signal(|| 0);
     let mut last_reset_id: Signal<u64> = use_signal(|| 0);
 
-    let _listener = use_listener::<HistoryQueryResponse, _>(
-        HISTORY_QUERY_RESPONSE_EVENT,
-        move |resp: HistoryQueryResponse| {
-            if resp.request_id < *last_reset_id.read() {
-                return;
-            }
-            if resp.request_id == *last_reset_id.read() {
-                entries.set(resp.entries);
-            } else {
-                entries.write().extend(resp.entries);
-            }
-            has_more.set(resp.has_more);
-        },
-    );
+    let _listener = use_listener::<HistoryQueryResponse, _>(move |resp: HistoryQueryResponse| {
+        if resp.request_id < *last_reset_id.read() {
+            return;
+        }
+        if resp.request_id == *last_reset_id.read() {
+            entries.set(resp.entries);
+        } else {
+            entries.write().extend(resp.entries);
+        }
+        has_more.set(resp.has_more);
+    });
 
     use_effect(move || {
         request_id.set(1);
@@ -60,17 +56,15 @@ pub fn Page() -> Element {
         emit_query("", 0, 1);
     });
 
-    let _changed_listener = use_listener::<HistoryChangedEvent, _>(
-        HISTORY_CHANGED_EVENT,
-        move |_: HistoryChangedEvent| {
+    let _changed_listener =
+        use_listener::<HistoryChangedEvent, _>(move |_: HistoryChangedEvent| {
             let new_id = *request_id.peek() + 1;
             request_id.set(new_id);
             offset.set(0);
             last_reset_id.set(new_id);
             let q = query.peek().clone();
             emit_query(&q, 0, new_id);
-        },
-    );
+        });
 
     let load_more = move |e: Event<VisibleData>| {
         if !e.is_intersecting().unwrap_or(false) {

@@ -4,9 +4,8 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tools::{
-    TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
-    ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus, ToolsNavigateRequest,
-    ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolActionRequest, ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider,
+    ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
@@ -143,18 +142,17 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     let mut pending = use_signal(BTreeSet::<String>::new);
     let mut notice = use_signal(|| None::<ToolActionResult>);
 
-    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(move |event| {
         snapshot.set(event);
         loaded.set(true);
     });
-    let _action_listener =
-        use_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
-            pending
-                .write()
-                .remove(&action_key(result.provider, result.action, &result.id));
-            notice.set(Some(result));
-            request_snapshot(false);
-        });
+    let _action_listener = use_listener::<ToolActionResult, _>(move |result| {
+        pending
+            .write()
+            .remove(&action_key(result.provider, result.action, &result.id));
+        notice.set(Some(result));
+        request_snapshot(false);
+    });
 
     use_effect(move || {
         locale();

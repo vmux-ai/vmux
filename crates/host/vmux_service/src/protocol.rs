@@ -1,1 +1,1 @@
-pub use vmux_wire::protocol::*;
+pub use vmux_api::protocol::*;

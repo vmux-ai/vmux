@@ -5,15 +5,15 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest,
 };
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_session::AcpSession;
 use vmux_session::AgentSession;
-use vmux_wire::chat::{PROMPT_HISTORY_EVENT, PromptHistory, PromptHistoryRequest};
 
 pub(super) struct ChatResumePlugin;
 
@@ -24,7 +24,7 @@ impl Plugin for ChatResumePlugin {
             ResumeSession,
             RuntimeSwitchRequest,
             PromptHistoryRequest,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
+        )>::default())
             .init_resource::<ResumableScan>()
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
@@ -279,11 +279,7 @@ fn drain_prompt_history_tasks(
             continue;
         };
         commands.entity(entity).despawn();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            task.webview,
-            PROMPT_HISTORY_EVENT,
-            &history,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(task.webview, &history));
     }
 }
 
@@ -356,11 +352,7 @@ fn drain_resume_list_tasks(
             scan.sessions = scanned;
             scan.read_at = Some(std::time::Instant::now());
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            task.webview,
-            RESUMABLE_SESSIONS_EVENT,
-            &answer.sessions,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(task.webview, &answer.sessions));
     }
 }
 

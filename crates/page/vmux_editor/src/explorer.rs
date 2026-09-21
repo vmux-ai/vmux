@@ -947,10 +947,10 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let mut query = search.query;
     let ime = use_ime_guard();
 
-    let _results = use_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |event| {
+    let _results = use_listener::<ExplorerSearchEvent, _>(move |event| {
         search.arrived(event);
     });
-    let _showing = use_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |event| {
+    let _showing = use_listener::<ExplorerFocusEvent, _>(move |event| {
         search.showing(&event.path);
     });
 
@@ -1307,7 +1307,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         }
     });
 
-    let _tree = use_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
+    let _tree = use_listener::<ExplorerTreeEvent, _>(move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
@@ -1318,7 +1318,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
         }
     });
-    let _focus = use_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
+    let _focus = use_listener::<ExplorerFocusEvent, _>(move |e| {
         if current_path() != e.path {
             current_path.set(e.path.clone());
         }
@@ -1327,13 +1327,13 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.path, focus_generation, e.reveal);
         }
     });
-    let _open = use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
+    let _open = use_listener::<OpenEditorsEvent, _>(move |e| {
         open_editors.set(e.items);
     });
-    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+    let _outline = use_listener::<OutlineEvent, _>(move |e| {
         outline.set(e.items);
     });
-    let _fs_result = use_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
+    let _fs_result = use_listener::<ExplorerFsResult, _>(move |e| {
         if e.ok && !e.open_path.is_empty() {
             open_file(e.open_path);
         }

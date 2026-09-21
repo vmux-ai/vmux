@@ -14,10 +14,10 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::{SideSheetCommandEvent, SideSheetResizeEvent};
+use vmux_layout::event::{SideSheetRequest, SideSheetResizeEvent};
 use vmux_layout::{
     Header, LayoutCef,
-    event::{HeaderCommandEvent, RELOAD_EVENT, ReloadEvent},
+    event::{HeaderRequest, ReloadEvent},
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{
         SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
@@ -33,8 +33,8 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_header_command_emit)
-            .add_observer(on_side_sheet_command_emit)
+        app.add_observer(on_header_request)
+            .add_observer(on_side_sheet_request)
             .add_observer(on_side_sheet_resize)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
@@ -200,8 +200,8 @@ impl ActiveStack<'_, '_> {
     }
 }
 
-fn on_header_command_emit(
-    trigger: On<BinReceive<HeaderCommandEvent>>,
+fn on_header_request(
+    trigger: On<BinReceive<HeaderRequest>>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
@@ -237,11 +237,7 @@ fn on_reload_notify_header(
         return;
     };
     if browsers.can_emit_to(&cef_e) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            cef_e,
-            RELOAD_EVENT,
-            &ReloadEvent,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(cef_e, &ReloadEvent));
     }
 }
 
@@ -260,11 +256,7 @@ fn on_hard_reload_notify_header(
         return;
     };
     if browsers.can_emit_to(&cef_e) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            cef_e,
-            RELOAD_EVENT,
-            &ReloadEvent,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(cef_e, &ReloadEvent));
     }
 }
 
@@ -292,8 +284,8 @@ fn on_side_sheet_resize(
     }
 }
 
-fn on_side_sheet_command_emit(
-    trigger: On<BinReceive<SideSheetCommandEvent>>,
+fn on_side_sheet_request(
+    trigger: On<BinReceive<SideSheetRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -479,14 +471,12 @@ mod tests {
         }
 
         fn pressed(&mut self, button: &str) {
-            self.app
-                .world_mut()
-                .trigger(BinReceive::<HeaderCommandEvent> {
-                    webview: Entity::PLACEHOLDER,
-                    payload: HeaderCommandEvent {
-                        header_command: button.to_string(),
-                    },
-                });
+            self.app.world_mut().trigger(BinReceive::<HeaderRequest> {
+                webview: Entity::PLACEHOLDER,
+                payload: HeaderRequest {
+                    header_command: button.to_string(),
+                },
+            });
             self.app.update();
             self.app.update();
         }
@@ -535,7 +525,7 @@ mod tests {
             .add_message::<AppCommand>()
             .add_message::<vmux_command::CommandIssued>()
             .init_resource::<PaneHoverIntent>()
-            .add_observer(on_side_sheet_command_emit);
+            .add_observer(on_side_sheet_request);
 
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
@@ -551,17 +541,16 @@ mod tests {
             .resource::<Messages<CloseStackRequest>>()
             .get_cursor();
 
-        app.world_mut()
-            .trigger(BinReceive::<SideSheetCommandEvent> {
-                webview: Entity::PLACEHOLDER,
-                payload: SideSheetCommandEvent {
-                    command: "close_stack".to_string(),
-                    pane_id: pane.to_bits().to_string(),
-                    stack_id: middle.to_bits(),
-                    line: 0,
-                    path: String::new(),
-                },
-            });
+        app.world_mut().trigger(BinReceive::<SideSheetRequest> {
+            webview: Entity::PLACEHOLDER,
+            payload: SideSheetRequest {
+                command: "close_stack".to_string(),
+                pane_id: pane.to_bits().to_string(),
+                stack_id: middle.to_bits(),
+                line: 0,
+                path: String::new(),
+            },
+        });
         app.world_mut().flush();
 
         let requests = app.world().resource::<Messages<CloseStackRequest>>();
@@ -665,7 +654,7 @@ mod tests {
                 .add_message::<AppCommand>()
                 .add_message::<vmux_command::CommandIssued>()
                 .init_resource::<PaneHoverIntent>()
-                .add_observer(on_side_sheet_command_emit);
+                .add_observer(on_side_sheet_request);
 
             let space = app
                 .world_mut()
@@ -696,9 +685,9 @@ mod tests {
         fn expand(&mut self, section: &str) {
             self.app
                 .world_mut()
-                .trigger(BinReceive::<SideSheetCommandEvent> {
+                .trigger(BinReceive::<SideSheetRequest> {
                     webview: Entity::PLACEHOLDER,
-                    payload: SideSheetCommandEvent {
+                    payload: SideSheetRequest {
                         command: "expand_section".to_string(),
                         pane_id: self.pane_in_first_tab.to_bits().to_string(),
                         stack_id: 0,

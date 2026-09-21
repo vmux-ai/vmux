@@ -98,6 +98,43 @@ pub struct FileSearchMatch {
     pub preview: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentSpaceCommand {
+    Create { name: Option<String> },
+    Rename { space_id: String, name: String },
+    Delete { space_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AgentBookmarkPage {
+    pub url: String,
+    pub title: Option<String>,
+    pub favicon_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentBookmarkCommand {
+    Add {
+        page: AgentBookmarkPage,
+        folder: Option<String>,
+    },
+    Remove {
+        uuid: String,
+    },
+    Pin {
+        uuid: String,
+    },
+    PinUrl {
+        page: AgentBookmarkPage,
+    },
+    Unpin {
+        uuid: String,
+    },
+    CreateFolder {
+        name: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
@@ -153,11 +190,7 @@ pub enum AgentCommand {
     OpenInNewStack {
         url: String,
     },
-    SpaceCommand {
-        command: String,
-        space_id: Option<String>,
-        name: Option<String>,
-    },
+    SpaceCommand(AgentSpaceCommand),
     OpenBeside {
         anchor: ProcessId,
         direction: Option<AgentPaneDirection>,
@@ -213,14 +246,7 @@ pub enum AgentCommand {
         branch: String,
         project: Option<String>,
     },
-    BookmarkCommand {
-        command: String,
-        uuid: Option<String>,
-        name: Option<String>,
-        url: Option<String>,
-        title: Option<String>,
-        favicon_url: Option<String>,
-    },
+    BookmarkCommand(AgentBookmarkCommand),
     RequestUserChoice {
         anchor: ProcessId,
         question: String,
@@ -352,11 +378,38 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         AgentCommand::OpenInNewStack { url, .. } if url.trim().is_empty() => {
             Err("open_in_new_stack.url is empty")
         }
-        AgentCommand::SpaceCommand { command, .. } if command.trim().is_empty() => {
-            Err("space_command.command is empty")
+        AgentCommand::SpaceCommand(AgentSpaceCommand::Create { name: Some(name) })
+            if name.trim().is_empty() =>
+        {
+            Err("space_command.name is empty")
         }
-        AgentCommand::BookmarkCommand { command, .. } if command.trim().is_empty() => {
-            Err("bookmark_command.command is empty")
+        AgentCommand::SpaceCommand(AgentSpaceCommand::Rename { space_id, name })
+            if space_id.trim().is_empty() || name.trim().is_empty() =>
+        {
+            Err("space_command rename fields are empty")
+        }
+        AgentCommand::SpaceCommand(AgentSpaceCommand::Delete { space_id })
+            if space_id.trim().is_empty() =>
+        {
+            Err("space_command.space_id is empty")
+        }
+        AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add { page, .. })
+        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::PinUrl { page })
+            if page.url.trim().is_empty() =>
+        {
+            Err("bookmark_command.url is empty")
+        }
+        AgentCommand::BookmarkCommand(AgentBookmarkCommand::Remove { uuid })
+        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Pin { uuid })
+        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin { uuid })
+            if uuid.trim().is_empty() =>
+        {
+            Err("bookmark_command.uuid is empty")
+        }
+        AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name })
+            if name.trim().is_empty() =>
+        {
+            Err("bookmark_command.name is empty")
         }
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
             Err("open_beside_me.url is empty")

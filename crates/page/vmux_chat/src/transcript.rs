@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use vmux_api::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
+use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
-use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use crate::activity::{
     ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,

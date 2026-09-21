@@ -8,7 +8,6 @@ use bevy_cef::prelude::{
 };
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::knowledge::{
-    KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
     KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent, KnowledgeTreeToggle,
 };
@@ -295,11 +294,8 @@ impl KnowledgeTreeEmitter<'_, '_> {
         }
         let mut tree = state.tree.clone();
         expansion.stamp(&mut tree);
-        self.commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            KNOWLEDGE_TREE_EVENT,
-            &tree,
-        ));
+        self.commands
+            .trigger(BinHostEmitEvent::from_event(entity, &tree));
         self.pending.remove(&entity);
         self.last_revision.insert(entity, state.revision);
     }
@@ -334,9 +330,8 @@ fn on_knowledge_search(
             preview: item.preview,
         })
         .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         webview,
-        KNOWLEDGE_SEARCH_EVENT,
         &KnowledgeSearchEvent { query, matches },
     ));
 }
@@ -376,9 +371,5 @@ fn on_knowledge_create(
             is_directory: request.is_directory,
         },
     };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        KNOWLEDGE_CREATE_RESULT_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
 }

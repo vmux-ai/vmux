@@ -1,7 +1,7 @@
-use vmux_wire::protocol::{
+use vmux_api::protocol::{
     AgentAction, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_wire::room::{ClientOpId, RemoteSession};
+use vmux_api::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
 use crate::acp::AcpInput;
@@ -88,7 +88,7 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
     sessions.extend(state.acp.lock().await.remote_sessions());
     for session in &mut sessions {
         if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
-            session.title = vmux_wire::room::Message::conversation_title(&messages, &session.name);
+            session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);
         }
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
@@ -122,7 +122,7 @@ async fn prompt(
     sid: &str,
     text: String,
     context: Option<String>,
-    attachments: Vec<vmux_wire::protocol::AgentAttachment>,
+    attachments: Vec<vmux_api::protocol::AgentAttachment>,
     preferred_mode: Option<String>,
 ) -> SharedResponse {
     if text.trim().is_empty() || text.len() > MAX_PROMPT_BYTES {

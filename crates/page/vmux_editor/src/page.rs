@@ -22,7 +22,7 @@ use vmux_core::event::CommandBarPicker;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 use vmux_core::media::MediaKind;
-use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
+use vmux_git::event::GitChangedEvent;
 use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::caret::EventSelection;
@@ -197,7 +197,7 @@ pub fn Page() -> Element {
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
 
-    let _chrome = use_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
+    let _chrome = use_listener::<ExplorerChromeEvent, _>(move |c| {
         if should_apply_explorer_chrome(
             explorer_client_id(),
             explorer_request_id(),
@@ -212,11 +212,11 @@ pub fn Page() -> Element {
         explorer.sync();
     });
 
-    let _tidy = use_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
+    let _tidy = use_listener::<FileTidyPromptEvent, _>(move |e| {
         tidy_prompt.set(Some(e.count));
     });
 
-    let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+    let _meta = use_listener::<FileMetaEvent, _>(move |m| {
         let arrival = FileMeta::arriving(&m.abs_path, &git_path.peek());
         doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
@@ -260,16 +260,16 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
-    let _shape = use_listener::<FileShapeEvent, _>(FILE_SHAPE_EVENT, move |s| {
+    let _shape = use_listener::<FileShapeEvent, _>(move |s| {
         indent.set(s.indent);
         line_ending.set(s.line_ending);
     });
 
-    let _encoding = use_listener::<FileEncodingEvent, _>(FILE_ENCODING_EVENT, move |e| {
+    let _encoding = use_listener::<FileEncodingEvent, _>(move |e| {
         encoding.set(e.encoding);
     });
 
-    let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
+    let _vp = use_listener::<FileViewportPatch, _>(move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
@@ -286,11 +286,11 @@ pub fn Page() -> Element {
         lsp_hover.set(None);
     });
 
-    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+    let _outline = use_listener::<OutlineEvent, _>(move |e| {
         outline.set(e.items);
     });
 
-    let _cur = use_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
+    let _cur = use_listener::<FileCursorEvent, _>(move |c| {
         let moved = cursor.peek().ne(&c.primary);
         if *ed_mode.peek() != c.mode {
             ed_mode.set(c.mode);
@@ -363,7 +363,7 @@ pub fn Page() -> Element {
         }
     });
 
-    let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
+    let _scroll_by = use_listener::<FileScrollByEvent, _>(move |event| {
         let Some(line_height) =
             ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
         else {
@@ -372,12 +372,11 @@ pub fn Page() -> Element {
         viewport.scroll_by(event.lines, line_height);
     });
 
-    let _open_editors =
-        use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |event| {
-            open_editors.set(event.items);
-        });
+    let _open_editors = use_listener::<OpenEditorsEvent, _>(move |event| {
+        open_editors.set(event.items);
+    });
 
-    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |_| {
+    let _dirty = use_listener::<FileDirtyEvent, _>(move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
@@ -386,7 +385,7 @@ pub fn Page() -> Element {
         .schedule();
     });
 
-    let _git_changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
+    let _git_changed = use_listener::<GitChangedEvent, _>(move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
@@ -395,7 +394,7 @@ pub fn Page() -> Element {
         .schedule();
     });
 
-    let _view_mode = use_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
+    let _view_mode = use_listener::<FileViewModeEvent, _>(move |event| {
         if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
             note_editing.set(false);
         }
@@ -420,7 +419,7 @@ pub fn Page() -> Element {
         }
     });
 
-    let _keymap = use_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
+    let _keymap = use_listener::<FileKeymapEvent, _>(move |event| {
         keymap.set(event.keymap);
         if event.keymap == vmux_core::KeymapKind::Vim
             && file_view_mode() == FileViewMode::Note
@@ -439,7 +438,7 @@ pub fn Page() -> Element {
         }
     });
 
-    let _note = use_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
+    let _note = use_listener::<FileNoteEvent, _>(move |event| {
         let FileNoteEvent {
             title,
             properties,
@@ -486,32 +485,32 @@ pub fn Page() -> Element {
         }
     });
 
-    let _hov = use_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
+    let _hov = use_listener::<FileHoverEvent, _>(move |h| {
         lsp_hover.set(Some(h));
     });
 
-    let _refs = use_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
+    let _refs = use_listener::<FileReferencesEvent, _>(move |e| {
         refs.set(e.items);
         refs_sel.set(0);
         refs_open.set(true);
         FocusClaim::new("refs-panel").request();
     });
 
-    let _comp = use_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
+    let _comp = use_listener::<FileCompletionEvent, _>(move |e| {
         comp_open.set(!e.items.is_empty());
         comps.set(e.items);
         comp_sel.set(0);
         comp_anchor.set((e.line, e.replace_from_col));
     });
 
-    let _diag = use_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
+    let _diag = use_listener::<FileDiagnosticsEvent, _>(move |d| {
         if d.path != git_path() {
             return;
         }
         diagnostics.set(d.diagnostics);
     });
 
-    let _lsp_status = use_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
+    let _lsp_status = use_listener::<FileLspStatusEvent, _>(move |s| {
         if s.path != git_path() {
             return;
         }
@@ -535,72 +534,68 @@ pub fn Page() -> Element {
         lsp_status.set(Some(s));
     });
 
-    let _lsp_install_progress =
-        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |progress| {
-            let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
-            if !active {
-                return;
-            }
-            let delay = match progress.phase {
-                InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
-                InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
-                _ => None,
-            };
-            lsp_install_notice.set(Some(progress));
-            if let Some(delay) = delay {
-                schedule_lsp_notice_clear(
-                    lsp_install_notice,
-                    lsp_install_request,
-                    lsp_notice_generation,
-                    delay,
-                );
-            }
-        });
-
-    let _lsp_package_status =
-        use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
-            if status.status != LspPkgStatus::Installed
-                || lsp_install_request().is_none_or(|(_, package)| package != status.name)
-            {
-                return;
-            }
-            lsp_install_notice.set(Some(LspInstallProgress {
-                name: status.name,
-                phase: InstallPhase::Done,
-                pct: Some(100),
-                message: translate("lsp-status-installed"),
-            }));
+    let _lsp_install_progress = use_listener::<LspInstallProgress, _>(move |progress| {
+        let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
+        if !active {
+            return;
+        }
+        let delay = match progress.phase {
+            InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
+            InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
+            _ => None,
+        };
+        lsp_install_notice.set(Some(progress));
+        if let Some(delay) = delay {
             schedule_lsp_notice_clear(
                 lsp_install_notice,
                 lsp_install_request,
                 lsp_notice_generation,
-                LSP_NOTICE_DONE_MS,
+                delay,
             );
-        });
+        }
+    });
 
-    let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+    let _lsp_package_status = use_listener::<LspPkgStatusEvent, _>(move |status| {
+        if status.status != LspPkgStatus::Installed
+            || lsp_install_request().is_none_or(|(_, package)| package != status.name)
+        {
+            return;
+        }
+        lsp_install_notice.set(Some(LspInstallProgress {
+            name: status.name,
+            phase: InstallPhase::Done,
+            pct: Some(100),
+            message: translate("lsp-status-installed"),
+        }));
+        schedule_lsp_notice_clear(
+            lsp_install_notice,
+            lsp_install_request,
+            lsp_notice_generation,
+            LSP_NOTICE_DONE_MS,
+        );
+    });
+
+    let _err = use_listener::<FileErrorEvent, _>(move |e| {
         error_undecodable.set(e.undecodable);
         error.set(e.message);
     });
 
-    let _code_actions =
-        use_listener::<FileCodeActionsEvent, _>(FILE_CODE_ACTIONS_EVENT, move |e| {
-            code_action_sel.set(0);
-            code_actions.set(e.titles);
-        });
+    let _code_actions = use_listener::<FileCodeActionsEvent, _>(move |e| {
+        code_action_sel.set(0);
+        code_actions.set(e.titles);
+    });
 
-    let _rename_begin =
-        use_listener::<FileRenameBeginEvent, _>(FILE_RENAME_BEGIN_EVENT, move |e| {
-            rename_failed.set(String::new());
-            rename_box.set(Some(RenameBox {
-                line: e.line,
-                col: e.col,
-                original: e.current.clone(),
-                draft: e.current,
-            }));
-        });
+    let _rename_begin = use_listener::<FileRenameBeginEvent, _>(move |e| {
+        rename_failed.set(String::new());
+        rename_box.set(Some(RenameBox {
+            line: e.line,
+            col: e.col,
+            original: e.current.clone(),
+            draft: e.current,
+        }));
+    });
 
-    let _rename_failed = use_listener::<FileEditFailedEvent, _>(FILE_EDIT_FAILED_EVENT, move |e| {
+    let _rename_failed = use_listener::<FileEditFailedEvent, _>(move |e| {
         rename_failed.set(e.reason);
         let id = rename_failed_generation().wrapping_add(1);
         rename_failed_generation.set(id);
@@ -612,7 +607,7 @@ pub fn Page() -> Element {
         });
     });
 
-    let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+    let _dir = use_listener::<FileDirEvent, _>(move |d| {
         error.set(String::new());
         clear_preview(preview, thumbs);
         media.set(None);
@@ -655,7 +650,7 @@ pub fn Page() -> Element {
         );
     });
 
-    let _media = use_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
+    let _media = use_listener::<FileMediaEvent, _>(move |e| {
         error.set(String::new());
         clear_preview(preview, thumbs);
         let kind = e.kind;
@@ -666,7 +661,7 @@ pub fn Page() -> Element {
         lsp_status.set(None);
     });
 
-    let _prev = use_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
+    let _prev = use_listener::<FilePreviewEvent, _>(move |ev| {
         if ev.thumb {
             if let PreviewKind::Image { bytes, .. } = ev.kind {
                 let url = image_data_url(&bytes, &ev.path);
@@ -698,7 +693,7 @@ pub fn Page() -> Element {
         preview.set(next);
     });
 
-    let _theme = use_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
+    let _theme = use_listener::<FileThemeEvent, _>(move |t| {
         let mut s = String::new();
         if !t.font_family.is_empty() {
             s.push_str(&format!(
@@ -1128,7 +1123,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Tidy });
+                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-tidy")}
@@ -1136,7 +1131,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Always });
+                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-always")}
@@ -1144,7 +1139,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
+                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
                                         tidy_prompt.set(None);
                                     },
                                     "\u{2715}"

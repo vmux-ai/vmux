@@ -17,7 +17,7 @@ pub struct BevyState {
 struct PageReadyAnnouncement(Rc<Cell<bool>>);
 
 impl PageReadyAnnouncement {
-    fn of_page() -> Self {
+    fn new() -> Self {
         use_root_context(|| Self(Rc::new(Cell::new(false))))
     }
 
@@ -31,9 +31,9 @@ impl PageReadyAnnouncement {
     }
 }
 
-pub fn use_listener<T, F>(name: &'static str, on_event: F) -> BevyState
+pub fn use_listener<T, F>(on_event: F) -> BevyState
 where
-    T: rkyv::Archive + 'static,
+    T: vmux_api::HostEvent + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
@@ -45,7 +45,7 @@ where
     let mut error = use_signal(|| None::<String>);
     let mut is_listening = use_signal(|| false);
     let retry_tick = use_signal(|| 0u32);
-    let announcement = PageReadyAnnouncement::of_page();
+    let announcement = PageReadyAnnouncement::new();
 
     use_effect(move || {
         let current_retry = retry_tick();
@@ -62,7 +62,7 @@ where
             return;
         };
         let scope = current_scope_id();
-        match try_cef_bin_listen::<T, _>(name, move |msg| {
+        match try_cef_bin_listen::<T, _>(move |msg| {
             let listener = listener.clone();
             rt.in_scope(scope, || {
                 listener.call(msg);

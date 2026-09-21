@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use vmux_core::event::{
-    PAGE_CONTEXT_EVENT, PageContextEvent, PageContextRequest, TAB_WORKSPACE_EVENT,
-    TabWorkspaceEvent, TabWorkspaceRequest,
+    PageContextEvent, PageContextRequest, TabWorkspaceEvent, TabWorkspaceRequest,
 };
 
 use crate::settings::EffectiveStartupDir;
@@ -161,9 +160,8 @@ fn on_page_context_request(
         .get(trigger.event().webview)
         .map(|page| page.url.clone())
         .unwrap_or_default();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         trigger.event().webview,
-        PAGE_CONTEXT_EVENT,
         &PageContextEvent {
             working_directory: path,
             page_url,
@@ -220,22 +218,14 @@ fn on_tab_workspace_request(
         error,
     };
     let Some(tab_entity) = tab_entity else {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            TAB_WORKSPACE_EVENT,
-            &event,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(webview, &event));
         return;
     };
     for page in &pages {
         let mut current = page;
         loop {
             if current == tab_entity {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    page,
-                    TAB_WORKSPACE_EVENT,
-                    &event,
-                ));
+                commands.trigger(BinHostEmitEvent::from_event(page, &event));
                 break;
             }
             let Ok(parent) = child_of.get(current) else {

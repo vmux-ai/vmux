@@ -347,7 +347,7 @@ pub(super) fn handle_agent_self_commands(
                                     .ok()
                                     .map(|session| session.cwd.to_string_lossy().into_owned())
                             });
-                        let cwd = match AgentCwd::of_tab(tab_cwd.as_deref())
+                        let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
                             .or_agent_launch(agent_cwd.as_deref())
                         {
                             Ok(cwd) => cwd,
@@ -796,7 +796,7 @@ pub(super) fn handle_agent_self_commands(
                         continue;
                     };
                     let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
-                        AgentCwd::of_tab(tab.startup_dir.as_deref())
+                        AgentCwd::from_tab(tab.startup_dir.as_deref())
                             .stored()
                             .ok()
                             .flatten()
@@ -811,7 +811,7 @@ pub(super) fn handle_agent_self_commands(
                             .get(tab_entity)
                             .ok()
                             .and_then(|workspace| {
-                                AgentCwd::of_tab(Some(&workspace.project_dir))
+                                AgentCwd::from_tab(Some(&workspace.project_dir))
                                     .stored()
                                     .ok()
                                     .flatten()
@@ -961,7 +961,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .ok()
                                     .and_then(|t| t.startup_dir.clone());
-                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+                                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
                                     Ok(Some(path)) => AgentCommandResult::Text(
                                         path.to_string_lossy().into_owned(),
                                     ),
@@ -982,7 +982,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .map(|t| t.name.clone())
                                     .unwrap_or_default();
-                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+                                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
                                     Err(message) => AgentCommandResult::Error(message),
                                     Ok(stored) => 'create_worktree: {
                                         let configured_dir =
@@ -992,7 +992,7 @@ pub(super) fn handle_agent_self_commands(
                                         let workspace_dir =
                                             tab_worktree.workspaces.get(tab_e).ok().and_then(
                                                 |workspace| {
-                                                    AgentCwd::of_tab(Some(&workspace.project_dir))
+                                                    AgentCwd::from_tab(Some(&workspace.project_dir))
                                                         .stored()
                                                         .ok()
                                                         .flatten()
@@ -1111,7 +1111,7 @@ pub(super) fn handle_agent_self_commands(
                             project
                                 .as_ref()
                                 .and_then(|picked| {
-                                    AgentCwd::of_tab(Some(picked)).stored().ok().flatten()
+                                    AgentCwd::from_tab(Some(picked)).stored().ok().flatten()
                                 })
                                 .or_else(|| {
                                     tab_worktree
@@ -1123,7 +1123,7 @@ pub(super) fn handle_agent_self_commands(
                                 .or_else(|| {
                                     tab_worktree.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
-                                            AgentCwd::of_tab(Some(&workspace.project_dir))
+                                            AgentCwd::from_tab(Some(&workspace.project_dir))
                                                 .stored()
                                                 .ok()
                                                 .flatten()

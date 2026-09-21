@@ -173,7 +173,7 @@ impl VibeModels {
             } else {
                 model.display_name
             };
-            models.push(vmux_wire::room::ModelOptionEntry {
+            models.push(vmux_api::room::ModelOptionEntry {
                 id,
                 name,
                 description: model.provider,
@@ -184,7 +184,7 @@ impl VibeModels {
         {
             models.insert(
                 0,
-                vmux_wire::room::ModelOptionEntry {
+                vmux_api::room::ModelOptionEntry {
                     id: config.active_model.clone(),
                     name: config.active_model.clone(),
                     description: String::new(),

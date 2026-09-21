@@ -200,7 +200,7 @@ mod wasm {
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
     use dioxus::prelude::*;
-    use vmux_wire::icon::{BuiltinIcon, PageIcon};
+    use vmux_api::icon::{BuiltinIcon, PageIcon};
 
     #[component]
     pub fn LineIconView(icon: LineIcon, class: String) -> Element {

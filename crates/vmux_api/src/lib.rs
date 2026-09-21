@@ -1,5 +1,8 @@
+extern crate self as vmux_api;
+
 pub mod agent;
 pub mod avatar;
+pub mod bin_event;
 pub mod chat;
 pub mod command_bar;
 pub mod error;
@@ -21,9 +24,12 @@ pub mod terminal;
 pub mod vault;
 
 pub use agent::AgentKind;
+pub use bin_event::{BinEvent, BinEventTarget, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
 pub use terminal::{
-    CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
-    FLAG_UNDERLINE, LinkRange, TermColor, TermCursor, TermLine, TermSelectionRange, TermSpan,
+    AnsiPalette, CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
+    FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
+    TermSpan,
 };
+pub use vmux_macro::{bidirectional_event, host_event, ui_event};

@@ -165,6 +165,22 @@ contents that composes lifecycle, interaction, presentation, and persistence plu
 system stays private beside the plugin that schedules it, so ordering and run conditions
 cannot be bypassed by another module.
 
+Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
+does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
+deterministic internal state change is a `Mutation`. Something that occurred is named in
+the past tense or uses `Event`. Current state is a `Snapshot`; an operation outcome is a
+`Result`. `Command` is reserved for application, agent, and service command protocols or
+actual Bevy world commands. `Message` is reserved for protocol envelopes and conversation
+content.
+
+Binary events name their source. `#[ui_event]` marks an event emitted by Dioxus and consumed
+by the Bevy host; `#[host_event]` marks the reverse direction. The attribute owns the wire name,
+namespace, protocol version, and allowed page hosts so transport metadata cannot drift from the
+payload type. Namespaces hold shared prefixes such as `git`; an event named `status_request` in
+that namespace has the wire id `git.status_request@1`. Every event declares its allowed page host
+or explicitly uses `target = any`; both UI-to-host decoding and host-to-UI delivery reject a
+mismatched host before touching the payload.
+
 ---
 
 ## The layout tree
@@ -647,7 +663,7 @@ crates/
 ├── vmux_session
 ├── vmux_tools              tool manifests, imports, and dotfile state
 ├── vmux_ui
-└── vmux_wire
+└── vmux_api
 ```
 
 Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,

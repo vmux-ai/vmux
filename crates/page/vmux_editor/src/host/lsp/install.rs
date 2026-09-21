@@ -3,12 +3,16 @@ use std::path::Path;
 
 use vmux_core::event::InstallPhase;
 
+use crate::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use crate::lsp::target::Asset;
 use crate::lsp::{archive, catalog::Package, download, purl, store, target};
 
-fn resolve_bin_template(tmpl: &str, asset_bin: &str) -> String {
-    tmpl.replace("{{source.asset.bin}}", asset_bin)
-        .replace("{{source.asset.file}}", asset_bin)
+fn resolve_bin_template(tmpl: &str, asset_bin: &PackagePath) -> Result<PackagePath, String> {
+    PackagePath::parse(
+        &tmpl
+            .replace("{{source.asset.bin}}", asset_bin.as_str())
+            .replace("{{source.asset.file}}", asset_bin.as_str()),
+    )
 }
 
 pub fn asset_url(pkg: &Package, asset: &Asset) -> Result<String, String> {
@@ -20,7 +24,10 @@ pub fn asset_url(pkg: &Package, asset: &Asset) -> Result<String, String> {
     let ver = p.version.ok_or("github purl missing version")?;
     Ok(format!(
         "https://github.com/{}/{}/releases/download/{}/{}",
-        ns, p.name, ver, asset.file
+        ns,
+        p.name,
+        ver,
+        asset.file.as_str()
     ))
 }
 
@@ -28,32 +35,43 @@ pub fn install_from_url(
     pkg: &Package,
     asset: &Asset,
     url: &str,
+    digest: &Sha256Digest,
     store_root: &Path,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
-    let asset_bin = asset.bin.clone().unwrap_or_else(|| pkg.name.clone());
+    let asset_bin = asset
+        .bin
+        .clone()
+        .unwrap_or_else(|| PackagePath::parse(pkg.name.as_str()).expect("validated package name"));
 
-    let staging = store::staging_dir(store_root).join(&pkg.name);
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let dl = staging.join(&asset.file);
+    let staging_root = store::staging_dir(store_root);
+    std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
+    let staging = tempfile::Builder::new()
+        .prefix(pkg.name.as_str())
+        .tempdir_in(&staging_root)
+        .map_err(|e| e.to_string())?;
+    let dl = staging.path().join(asset.file.as_path());
 
     emit(InstallPhase::Downloading, Some(0), url);
-    download::download_to(url, &dl, |d, total| {
+    download::download_to(url, &dl, download::PACKAGE_MAX_BYTES, digest, |d, total| {
         let pct = total.and_then(|t| (t > 0).then(|| ((d * 100) / t) as u8));
         emit(InstallPhase::Downloading, pct, "downloading");
     })?;
 
-    let pkgdir = store::packages_dir(store_root).join(&pkg.name);
-    let _ = std::fs::remove_dir_all(&pkgdir);
+    let pkgdir = staging.path().join("package");
     std::fs::create_dir_all(&pkgdir).map_err(|e| e.to_string())?;
     emit(InstallPhase::Extracting, None, "extracting");
-    archive::extract(&dl, archive::kind_for(&asset.file), &pkgdir, &asset_bin)?;
+    archive::extract(
+        &dl,
+        archive::kind_for(asset.file.as_str()),
+        &pkgdir,
+        asset_bin.as_str(),
+    )?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let p = pkgdir.join(&asset_bin);
+        let p = pkgdir.join(asset_bin.as_path());
         if let Ok(meta) = std::fs::metadata(&p) {
             let mut perm = meta.permissions();
             perm.set_mode(0o755);
@@ -62,26 +80,34 @@ pub fn install_from_url(
     }
 
     emit(InstallPhase::Linking, None, "linking");
-    let mut links: BTreeMap<String, String> = BTreeMap::new();
+    let mut links: BTreeMap<PackageName, PackagePath> = BTreeMap::new();
     if pkg.bin.is_empty() {
         links.insert(pkg.name.clone(), asset_bin.clone());
     } else {
         for (link_name, tmpl) in &pkg.bin {
-            links.insert(link_name.clone(), resolve_bin_template(tmpl, &asset_bin));
+            links.insert(link_name.clone(), resolve_bin_template(tmpl, &asset_bin)?);
         }
     }
-    for (link_name, file) in &links {
-        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
+    for file in links.values() {
+        if !pkgdir.join(file.as_path()).is_file() {
+            return Err(format!("package binary is missing: {file}"));
+        }
     }
 
     let receipt = store::Receipt {
-        name: pkg.name.clone(),
+        name: pkg.name.as_str().to_string(),
         version: purl::parse(&pkg.source_id).and_then(|p| p.version),
         source_id: pkg.source_id.clone(),
-        bin: links,
+        bin: links
+            .iter()
+            .map(|(name, path)| (name.as_str().to_string(), path.as_str().to_string()))
+            .collect(),
     };
-    store::write_receipt(store_root, &receipt).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_dir_all(&staging);
+    store::write_receipt_in(&pkgdir, &receipt).map_err(|e| e.to_string())?;
+    store::activate_package(store_root, &pkg.name, &pkgdir).map_err(|e| e.to_string())?;
+    for (link_name, file) in &links {
+        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
+    }
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(receipt)
 }
@@ -96,8 +122,22 @@ pub fn install_github(
     let asset = target::pick_asset(&pkg.assets, target_id)
         .ok_or_else(|| format!("no prebuilt asset for {target_id}"))?
         .clone();
-    let url = asset_url(pkg, &asset)?;
-    install_from_url(pkg, &asset, &url, store_root, emit)
+    let p = purl::parse(&pkg.source_id).ok_or("bad purl")?;
+    let owner = p.namespace.as_deref().ok_or("github purl missing owner")?;
+    let version = p.version.as_deref().ok_or("github purl missing version")?;
+    let remote = download::github_release_asset(
+        owner,
+        &p.name,
+        Some(version),
+        asset.file.as_str(),
+        download::PACKAGE_MAX_BYTES,
+    )?;
+    if let Some(expected) = asset.sha256.as_ref()
+        && expected != &remote.sha256
+    {
+        return Err("catalog and GitHub asset digests disagree".to_string());
+    }
+    install_from_url(pkg, &asset, &remote.url, &remote.sha256, store_root, emit)
 }
 
 pub fn toolchain_for(kind: &str) -> Option<&'static str> {
@@ -171,8 +211,11 @@ pub fn pip_spec(p: &purl::Purl) -> String {
     }
 }
 
-pub fn source_links(kind: &str, pkg: &Package) -> BTreeMap<String, String> {
-    let keys: Vec<String> = if pkg.bin.is_empty() {
+pub fn source_links(
+    kind: &str,
+    pkg: &Package,
+) -> Result<BTreeMap<PackageName, PackagePath>, String> {
+    let keys: Vec<PackageName> = if pkg.bin.is_empty() {
         vec![pkg.name.clone()]
     } else {
         pkg.bin.keys().cloned().collect()
@@ -183,9 +226,14 @@ pub fn source_links(kind: &str, pkg: &Package) -> BTreeMap<String, String> {
         "cargo" | "golang" => "bin/",
         _ => "",
     };
-    keys.into_iter()
-        .map(|k| (k.clone(), format!("{prefix}{k}")))
-        .collect()
+    let mut links = BTreeMap::new();
+    for key in keys {
+        links.insert(
+            key.clone(),
+            PackagePath::parse(&format!("{prefix}{}", key.as_str()))?,
+        );
+    }
+    Ok(links)
 }
 
 fn run(program: &str, args: &[String], envs: &[(&str, String)]) -> Result<(), String> {
@@ -204,33 +252,39 @@ fn run(program: &str, args: &[String], envs: &[(&str, String)]) -> Result<(), St
 fn finalize_links(
     pkg: &Package,
     store_root: &Path,
+    staged_package: &Path,
     kind: &str,
     p: &purl::Purl,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
     emit(InstallPhase::Linking, None, "linking");
-    let pkgdir = store::packages_dir(store_root).join(&pkg.name);
-    let links = source_links(kind, pkg);
-    for (link_name, file) in &links {
+    let links = source_links(kind, pkg)?;
+    for file in links.values() {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let bin = pkgdir.join(file);
+            let bin = staged_package.join(file.as_path());
             if let Ok(meta) = std::fs::metadata(&bin) {
                 let mut perm = meta.permissions();
                 perm.set_mode(0o755);
                 let _ = std::fs::set_permissions(&bin, perm);
             }
         }
-        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
     }
     let receipt = store::Receipt {
-        name: pkg.name.clone(),
+        name: pkg.name.as_str().to_string(),
         version: p.version.clone(),
         source_id: pkg.source_id.clone(),
-        bin: links,
+        bin: links
+            .iter()
+            .map(|(name, path)| (name.as_str().to_string(), path.as_str().to_string()))
+            .collect(),
     };
-    store::write_receipt(store_root, &receipt).map_err(|e| e.to_string())?;
+    store::write_receipt_in(staged_package, &receipt).map_err(|e| e.to_string())?;
+    store::activate_package(store_root, &pkg.name, staged_package).map_err(|e| e.to_string())?;
+    for (link_name, file) in &links {
+        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
+    }
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(receipt)
 }
@@ -245,8 +299,13 @@ fn install_toolchain(
     if !crate::lsp::registry::executable_on_path(tool) {
         return Err(format!("requires {tool}"));
     }
-    let pkgdir = store::packages_dir(store_root).join(&pkg.name);
-    let _ = std::fs::remove_dir_all(&pkgdir);
+    let staging_root = store::staging_dir(store_root);
+    std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
+    let staging = tempfile::Builder::new()
+        .prefix(pkg.name.as_str())
+        .tempdir_in(&staging_root)
+        .map_err(|e| e.to_string())?;
+    let pkgdir = staging.path().join("package");
     std::fs::create_dir_all(&pkgdir).map_err(|e| e.to_string())?;
     emit(InstallPhase::Downloading, None, tool);
     match p.kind.as_str() {
@@ -286,7 +345,7 @@ fn install_toolchain(
         }
         other => return Err(format!("source '{other}' not supported")),
     }
-    finalize_links(pkg, store_root, &p.kind, p, &mut emit)
+    finalize_links(pkg, store_root, &pkgdir, &p.kind, p, &mut emit)
 }
 
 pub fn install(
@@ -309,13 +368,15 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-    fn serve_gz_once(payload: &'static [u8]) -> (String, String) {
+    fn serve_gz_once(payload: &'static [u8]) -> (String, PackagePath, Sha256Digest) {
         let mut gz = Vec::new();
         {
             let mut enc = flate2::write::GzEncoder::new(&mut gz, flate2::Compression::default());
             enc.write_all(payload).unwrap();
             enc.finish().unwrap();
         }
+        use sha2::Digest;
+        let digest = Sha256Digest::parse(&format!("{:x}", sha2::Sha256::digest(&gz))).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
@@ -327,13 +388,17 @@ mod tests {
                 let _ = s.write_all(&gz);
             }
         });
-        (format!("http://{addr}/server.gz"), "server.gz".to_string())
+        (
+            format!("http://{addr}/server.gz"),
+            PackagePath::parse("server.gz").unwrap(),
+            digest,
+        )
     }
 
     #[test]
     fn asset_url_builds_github_release_url() {
         let pkg = Package {
-            name: "rust-analyzer".into(),
+            name: PackageName::parse("rust-analyzer").unwrap(),
             description: String::new(),
             languages: vec![],
             categories: vec![],
@@ -343,8 +408,9 @@ mod tests {
         };
         let asset = Asset {
             target: "darwin_arm64".into(),
-            file: "ra.gz".into(),
-            bin: Some("ra".into()),
+            file: PackagePath::parse("ra.gz").unwrap(),
+            bin: Some(PackagePath::parse("ra").unwrap()),
+            sha256: None,
         };
         assert_eq!(
             asset_url(&pkg, &asset).unwrap(),
@@ -354,13 +420,16 @@ mod tests {
 
     #[test]
     fn install_from_url_extracts_links_and_writes_receipt() {
-        let (url, file) = serve_gz_once(b"#!/bin/sh\necho hi\n");
+        let (url, file, digest) = serve_gz_once(b"#!/bin/sh\necho hi\n");
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         let mut bin = BTreeMap::new();
-        bin.insert("myserver".to_string(), "{{source.asset.bin}}".to_string());
+        bin.insert(
+            PackageName::parse("myserver").unwrap(),
+            "{{source.asset.bin}}".to_string(),
+        );
         let pkg = Package {
-            name: "myserver".into(),
+            name: PackageName::parse("myserver").unwrap(),
             description: String::new(),
             languages: vec![],
             categories: vec![],
@@ -371,16 +440,19 @@ mod tests {
         let asset = Asset {
             target: "darwin_arm64".into(),
             file,
-            bin: Some("myserver-bin".into()),
+            bin: Some(PackagePath::parse("myserver-bin").unwrap()),
+            sha256: Some(digest.clone()),
         };
         let mut phases = Vec::new();
-        let receipt =
-            install_from_url(&pkg, &asset, &url, root, |ph, _, _| phases.push(ph)).unwrap();
+        let receipt = install_from_url(&pkg, &asset, &url, &digest, root, |ph, _, _| {
+            phases.push(ph)
+        })
+        .unwrap();
 
         assert_eq!(receipt.name, "myserver");
         assert_eq!(receipt.version.as_deref(), Some("1.2.3"));
-        assert!(store::is_installed(root, "myserver"));
-        let binp = store::bin_path(root, "myserver").unwrap();
+        assert!(store::is_installed(root, &pkg.name));
+        let binp = store::bin_path(root, &pkg.name).unwrap();
         assert_eq!(std::fs::read(&binp).unwrap(), b"#!/bin/sh\necho hi\n");
         assert!(phases.contains(&InstallPhase::Done));
     }
@@ -388,7 +460,12 @@ mod tests {
     #[test]
     fn asset_file_template_links_extracted_binary() {
         assert_eq!(
-            resolve_bin_template("{{source.asset.file}}", "marksman"),
+            resolve_bin_template(
+                "{{source.asset.file}}",
+                &PackagePath::parse("marksman").unwrap()
+            )
+            .unwrap()
+            .as_str(),
             "marksman"
         );
     }
@@ -431,9 +508,9 @@ mod tests {
     #[test]
     fn source_links_prefixes() {
         let mut bin = BTreeMap::new();
-        bin.insert("ts".to_string(), "{{x}}".to_string());
+        bin.insert(PackageName::parse("ts").unwrap(), "{{x}}".to_string());
         let pkg = Package {
-            name: "ts".into(),
+            name: PackageName::parse("ts").unwrap(),
             description: String::new(),
             languages: vec![],
             categories: vec![],
@@ -441,12 +518,18 @@ mod tests {
             assets: vec![],
             bin,
         };
-        assert_eq!(
-            source_links("npm", &pkg).get("ts").unwrap(),
-            "node_modules/.bin/ts"
-        );
-        assert_eq!(source_links("pypi", &pkg).get("ts").unwrap(), "venv/bin/ts");
-        assert_eq!(source_links("cargo", &pkg).get("ts").unwrap(), "bin/ts");
-        assert_eq!(source_links("golang", &pkg).get("ts").unwrap(), "bin/ts");
+        let first = |kind| {
+            source_links(kind, &pkg)
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .as_str()
+                .to_string()
+        };
+        assert_eq!(first("npm"), "node_modules/.bin/ts");
+        assert_eq!(first("pypi"), "venv/bin/ts");
+        assert_eq!(first("cargo"), "bin/ts");
+        assert_eq!(first("golang"), "bin/ts");
     }
 }

@@ -2,8 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 use super::event::{
-    AGENT_SETUP_PREREQ_EVENT, AGENT_SETUP_RESULT_EVENT, AgentInstallRunRequest,
-    AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
+    AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
 };
 use vmux_core::agent::AgentKind;
 
@@ -14,7 +13,7 @@ impl Plugin for AgentSetupPlugin {
         app.add_plugins(BinEventEmitterPlugin::<(
             AgentInstallRunRequest,
             AgentSetupPrereqRequest,
-        )>::for_hosts(&["agent", "agents"]))
+        )>::default())
             .add_observer(on_agent_install_run)
             .add_observer(on_agent_setup_prereq_request)
             .add_systems(Update, auto_redirect_agent_setup_when_installed)
@@ -56,9 +55,8 @@ fn on_agent_setup_prereq_request(
     let brew_present = crate::exec::find_executable("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
     if browsers.can_emit_to(&webview) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             webview,
-            AGENT_SETUP_PREREQ_EVENT,
             &AgentSetupPrereqStatus { needs_homebrew },
         ));
     }
@@ -94,9 +92,8 @@ fn detect_agent_install_outcome(
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
                     if let Some(ok) = install_outcome(pane.armed, installed) {
                         if browsers.can_emit_to(&pane.setup_webview) {
-                            commands.trigger(BinHostEmitEvent::from_rkyv(
+                            commands.trigger(BinHostEmitEvent::from_event(
                                 pane.setup_webview,
-                                AGENT_SETUP_RESULT_EVENT,
                                 &AgentSetupResult {
                                     agent: pane.agent.as_url_segment().to_string(),
                                     ok,

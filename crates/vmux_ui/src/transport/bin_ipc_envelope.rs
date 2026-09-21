@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn bin_ipc_envelope_preserves_id_and_payload_in_single_buffer() {
-        let id = "vmux_command::event::CommandBarActionEvent";
+        let id = "vmux_command::event::CommandBarRequest";
         let payload = [1, 2, 3, 4];
 
         let envelope = BinIpcEnvelope::new(id, &payload);
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn decode_recovers_what_new_framed_and_rejects_anything_else() {
-        let id = "vmux_command::event::CommandBarActionEvent";
+        let id = "vmux_command::event::CommandBarRequest";
         let envelope = BinIpcEnvelope::new(id, &[1, 2, 3, 4]);
 
         let (decoded_id, payload) = BinIpcEnvelope::decode(envelope.as_bytes()).expect("envelope");

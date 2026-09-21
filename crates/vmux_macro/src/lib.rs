@@ -1,3 +1,4 @@
+mod bin_event;
 mod expand;
 mod named_fields;
 mod string_id;
@@ -6,6 +7,33 @@ mod variant_names;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
+
+#[proc_macro_attribute]
+pub fn host_event(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::expand(args.into(), input, bin_event::Direction::Host) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn ui_event(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::expand(args.into(), input, bin_event::Direction::Ui) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn bidirectional_event(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::expand(args.into(), input, bin_event::Direction::Both) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
 
 #[proc_macro_attribute]
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {

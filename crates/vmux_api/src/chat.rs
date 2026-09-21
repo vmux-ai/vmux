@@ -239,8 +239,6 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-spelunking",
 ];
 
-pub const CHAT_KEY_EVENT: &str = "chat-key";
-
 #[derive(
     Clone,
     Copy,
@@ -253,6 +251,7 @@ pub const CHAT_KEY_EVENT: &str = "chat-key";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "chat", name = "key", targets = ["sessions", "agent", "start"])]
 pub enum ChatKey {
     ListNext,
     ListPrevious,
@@ -339,9 +338,6 @@ mod activity_counts_tests {
     }
 }
 
-pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";
-pub const PROMPT_HISTORY_EVENT: &str = "prompt_history";
-
 #[derive(
     Clone,
     Debug,
@@ -354,6 +350,7 @@ pub const PROMPT_HISTORY_EVENT: &str = "prompt_history";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "prompt", name = "history_request", targets = ["sessions", "agent", "start"])]
 pub struct PromptHistoryRequest {
     pub agent: String,
     pub cwd: String,
@@ -371,11 +368,11 @@ pub struct PromptHistoryRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "prompt", name = "history", targets = ["sessions", "agent", "start"])]
 pub struct PromptHistory {
     pub prompts: Vec<String>,
 }
 
-pub const SLASH_COMMANDS_EVENT: &str = "slash_commands";
 #[derive(
     Clone,
     Debug,
@@ -414,6 +411,7 @@ pub struct ResumableSessionEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "resumable_sessions", targets = ["sessions", "agent", "start"])]
 pub struct ResumableSessions {
     pub sessions: Vec<ResumableSessionEntry>,
     pub offset: u32,
@@ -457,6 +455,7 @@ pub struct SlashCommandEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "slash_commands", targets = ["sessions", "agent", "start"])]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
 }
@@ -470,6 +469,7 @@ pub struct SlashCommands {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "resume", name = "list_request", targets = ["sessions", "agent", "start"])]
 pub struct ResumeListRequest {
     pub offset: u32,
 }
@@ -483,11 +483,13 @@ pub struct ResumeListRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "resume", name = "session", targets = ["sessions", "agent", "start"])]
 pub struct ResumeSession {
     pub kind: String,
     pub sid: String,
     pub cwd: String,
 }
+
 impl SlashCommands {
     pub fn for_start() -> Self {
         let commands = vec![

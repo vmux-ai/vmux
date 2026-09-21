@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const PAGE_CONTEXT_EVENT: &str = "page_context";
-pub const TAB_WORKSPACE_EVENT: &str = "tab_workspace";
-pub const AGENT_PROMPT_DRAFT_EVENT: &str = "agent_prompt_draft";
-pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
-
 #[derive(
     Debug,
     Clone,
@@ -17,6 +12,7 @@ pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "page", name = "context_request", target = "git")]
 pub struct PageContextRequest {}
 
 #[derive(
@@ -31,6 +27,7 @@ pub struct PageContextRequest {}
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "page", name = "context", target = "git")]
 pub struct PageContextEvent {
     pub working_directory: String,
     pub page_url: String,
@@ -48,6 +45,7 @@ pub struct PageContextEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "tab", name = "workspace_request", target = "git")]
 pub struct TabWorkspaceRequest {
     pub path: String,
     pub branch: String,
@@ -67,6 +65,7 @@ pub struct TabWorkspaceRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "tab", name = "workspace", target = "git")]
 pub struct TabWorkspaceEvent {
     pub path: String,
     pub branch: String,

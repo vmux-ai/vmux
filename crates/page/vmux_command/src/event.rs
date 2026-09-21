@@ -1,39 +1,89 @@
-pub use vmux_wire::command_bar::*;
+pub use vmux_api::command_bar::*;
 
 use vmux_core::PageMetadata;
 
 #[derive(
     Clone,
     Debug,
+    PartialEq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct BookmarksCommandEvent {
-    pub command: String,
-    #[serde(default)]
-    pub uuid: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub metadata: Option<PageMetadata>,
-    #[serde(default)]
-    pub folder: Option<String>,
-    #[serde(default)]
-    pub target_uuid: Option<String>,
+#[vmux_api::ui_event(namespace = "bookmark", name = "request", target = "layout")]
+pub enum BookmarkRequest {
+    ToggleActive,
+    MenuRoot,
+    MenuPin {
+        uuid: String,
+    },
+    MenuBookmark {
+        uuid: String,
+    },
+    MenuFolder {
+        uuid: String,
+        active_page: Option<PageMetadata>,
+    },
+    Open {
+        url: String,
+    },
+    Add {
+        metadata: PageMetadata,
+        folder: Option<String>,
+    },
+    PinUrl {
+        metadata: PageMetadata,
+    },
+    Remove {
+        uuid: String,
+    },
+    Rename {
+        uuid: String,
+        name: String,
+    },
+    Move {
+        uuid: String,
+        folder: Option<String>,
+    },
+    MovePin {
+        uuid: String,
+        folder: Option<String>,
+    },
+    ReorderPin {
+        uuid: String,
+        target_uuid: String,
+    },
+    Pin {
+        uuid: String,
+    },
+    Unpin {
+        uuid: String,
+    },
+    ToggleFolder {
+        uuid: String,
+    },
+    CreateFolder {
+        name: String,
+        parent: Option<String>,
+    },
+    MoveFolder {
+        uuid: String,
+        parent: Option<String>,
+    },
+    RenameFolder {
+        uuid: String,
+        name: String,
+    },
+    RemoveFolder {
+        uuid: String,
+    },
 }
 
 #[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
-
-pub const LAYOUT_COMMAND_BAR_OPEN_EVENT: &str = "layout-command-bar-open";
-
-pub const LAYOUT_COMMAND_BAR_CLOSE_EVENT: &str = "layout-command-bar-close";
 
 #[derive(
     Clone,
@@ -48,6 +98,7 @@ pub const LAYOUT_COMMAND_BAR_CLOSE_EVENT: &str = "layout-command-bar-close";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "command_bar", name = "panel_close", target = "layout")]
 pub struct CommandBarPanelCloseEvent;
 
 #[derive(
@@ -106,7 +157,8 @@ pub fn clamp_panel_placement(
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct CommandBarPanelActiveEvent {
+#[vmux_api::ui_event(namespace = "command_bar", name = "panel_request", target = "layout")]
+pub struct CommandBarPanelRequest {
     pub active: bool,
 }
 

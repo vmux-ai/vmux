@@ -33,13 +33,9 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::with_id(
-                "vmux-agent-toast",
-            ))
-            .add_plugins(BinEventEmitterPlugin::<(
-                vmux_core::event::FileTidyActionEvent,
-            )>::default())
-            .add_observer(crate::host::on_tidy_action)
+            .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
+            .add_observer(crate::host::on_tidy_request)
             .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)
             .add_systems(
@@ -114,7 +110,7 @@ fn spawn_page_session_on_add(
         });
         service.0.send(ClientMessage::Shared(SharedMessage::agent(
             session.sid.clone(),
-            vmux_wire::protocol::AgentAction::Attach,
+            vmux_api::protocol::AgentAction::Attach,
         )));
     }
 }

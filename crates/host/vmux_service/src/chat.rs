@@ -1,6 +1,6 @@
 use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
-use vmux_wire::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
-use vmux_wire::prompt_media::ChatSubmitAttachment;
+use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
+use vmux_api::prompt_media::ChatSubmitAttachment;
 
 #[cfg(test)]
 pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Vec<ChatItem> {

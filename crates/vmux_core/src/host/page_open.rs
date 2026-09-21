@@ -34,7 +34,7 @@ pub struct PageOpenRequest {
 pub struct PendingPrompt(pub String);
 
 #[derive(Component, Clone, Debug, Default)]
-pub struct PendingPromptAttachments(pub Vec<vmux_wire::protocol::AgentAttachment>);
+pub struct PendingPromptAttachments(pub Vec<vmux_api::protocol::AgentAttachment>);
 
 #[derive(Component, Clone, Debug)]
 pub struct PageOpenTask {

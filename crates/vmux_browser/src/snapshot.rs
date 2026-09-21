@@ -64,13 +64,11 @@ pub(crate) fn start_snapshots(
     mut writer: MessageWriter<BrowserSnapshotResponse>,
 ) {
     for request in reader.read() {
-        let webview = request
-            .webview
-            .filter(|webview| browsers.contains(*webview))
-            .or_else(|| {
-                let target = request.pane.as_deref().and_then(|target| {
-                    vmux_layout::target::parse_browser_target(target, &panes, &stacks)
-                })?;
+        let explicit_target = request.webview.is_some() || request.pane.is_some();
+        let webview = if let Some(webview) = request.webview {
+            browsers.contains(webview).then_some(webview)
+        } else if let Some(target) = request.pane.as_deref() {
+            vmux_layout::target::parse_browser_target(target, &panes, &stacks).and_then(|target| {
                 vmux_layout::target::webview_for_target(
                     target,
                     &pane_children,
@@ -79,30 +77,53 @@ pub(crate) fn start_snapshots(
                     &terminals,
                 )
             })
-            .or_else(|| {
-                active
-                    .local()
-                    .pane
-                    .filter(|p| panes.contains(*p))
-                    .and_then(|pane| {
-                        active_webview_for_tab(
-                            active_stack_in_pane(pane, &pane_children, &stack_ts),
-                            &browsers,
-                            &terminals,
-                        )
-                    })
-            })
-            .or_else(|| most_recent_browser(&browsers, &terminals, &stack_ts));
+        } else {
+            default_browser(
+                &active,
+                &panes,
+                &terminals,
+                &browsers,
+                &pane_children,
+                &stack_ts,
+            )
+        };
         let sent = webview
             .map(|webview| cef_browsers.request_snapshot(&webview, &hex(&request.request_id)))
             .unwrap_or(false);
         if !sent {
+            let message = if explicit_target {
+                "browser target not found"
+            } else {
+                "no browser page to snapshot"
+            };
             writer.write(BrowserSnapshotResponse {
                 request_id: request.request_id,
-                result: Err("no browser page to snapshot".to_string()),
+                result: Err(message.to_string()),
             });
         }
     }
+}
+
+pub(crate) fn default_browser(
+    active: &ActivePanes,
+    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+) -> Option<Entity> {
+    active
+        .local()
+        .pane
+        .filter(|pane| panes.contains(*pane))
+        .and_then(|pane| {
+            active_webview_for_tab(
+                active_stack_in_pane(pane, pane_children, stack_ts),
+                browsers,
+                terminals,
+            )
+        })
+        .or_else(|| most_recent_browser(browsers, terminals, stack_ts))
 }
 
 pub(crate) fn most_recent_browser(

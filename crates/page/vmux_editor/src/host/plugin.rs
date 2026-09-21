@@ -388,9 +388,8 @@ impl FileViewport {
         if !browsers.can_emit_to(&entity) {
             return;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_SCROLL_BY_EVENT,
             &FileScrollByEvent {
                 lines: top as i32 - was as i32,
             },
@@ -1016,7 +1015,7 @@ struct FilePageTarget {
 
 impl FilePageTarget {
     fn resolve(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
-        if url.trim_end_matches('/') == vmux_wire::space::PROJECTS_PAGE_URL.trim_end_matches('/') {
+        if url.trim_end_matches('/') == vmux_api::space::PROJECTS_PAGE_URL.trim_end_matches('/') {
             return Some(Self {
                 path: Some(
                     project_dir
@@ -1288,9 +1287,8 @@ fn send_initial_meta(
             continue;
         }
         if let Some((reason, message)) = LoadFailure::parse(&buf.language) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                FILE_ERROR_EVENT,
                 &FileErrorEvent {
                     message: message.to_string(),
                     undecodable: reason == LoadFailure::Undecodable,
@@ -1320,9 +1318,8 @@ fn send_initial_text_meta(
             continue;
         }
         let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_META_EVENT,
             &FileMetaEvent {
                 path: display_path(&fv.path),
                 abs_path: fv.path.to_string_lossy().into_owned(),
@@ -1379,9 +1376,8 @@ fn send_file_theme(
                 (th.font_family.clone(), th.font_size, th.line_height)
             })
             .unwrap_or_else(|| (String::new(), 0.0, 0.0));
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_THEME_EVENT,
             &FileThemeEvent {
                 font_family,
                 font_size,
@@ -1404,11 +1400,7 @@ fn send_file_view_mode(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            FILE_VIEW_MODE_EVENT,
-            &event,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
         commands.entity(entity).insert(FileViewModeSent);
     }
     if mode.is_changed() {
@@ -1416,11 +1408,7 @@ fn send_file_view_mode(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                FILE_VIEW_MODE_EVENT,
-                &event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
         }
     }
 }
@@ -1439,11 +1427,7 @@ fn send_file_keymap(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            FILE_KEYMAP_EVENT,
-            &event,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
         commands.entity(entity).insert(FileKeymapSent);
     }
     if settings
@@ -1454,11 +1438,7 @@ fn send_file_keymap(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                FILE_KEYMAP_EVENT,
-                &event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
         }
     }
 }
@@ -1523,9 +1503,8 @@ fn send_note(
             })
             .unwrap_or_default();
         let active = active_note_block(&note.blocks, edit.core.cursor_pos().line);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_NOTE_EVENT,
             &FileNoteEvent {
                 title: note.title,
                 properties: note.properties,
@@ -1565,9 +1544,8 @@ fn send_initial_dir(
             continue;
         }
         let (parent_path, parent_entries) = parent_listing(&fv.path);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_DIR_EVENT,
             &FileDirEvent {
                 path: display_path(&fv.path),
                 abs_path: fv.path.to_string_lossy().into_owned(),
@@ -1627,9 +1605,8 @@ fn emit_window(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_VIEWPORT_EVENT,
         &EditorWindow::render(edit, vp),
     ));
 }
@@ -1782,9 +1759,8 @@ fn emit_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_CURSOR_EVENT,
         &FileCursorEvent {
             search_total,
             search_index,
@@ -2055,9 +2031,8 @@ fn on_file_shape_set(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_SHAPE_EVENT,
         &FileShapeEvent {
             indent: shape.indent,
             line_ending: shape.line_ending,
@@ -2117,9 +2092,8 @@ fn on_file_encoding_set(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_ENCODING_EVENT,
         &FileEncodingEvent {
             encoding: edit.core.buffer.encoding,
         },
@@ -2299,9 +2273,8 @@ fn send_initial_media(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_MEDIA_EVENT,
             &FileMediaEvent {
                 kind: media.kind,
                 mime: media.mime.clone(),
@@ -2395,9 +2368,8 @@ fn on_file_preview_request(
         return;
     }
     let kind = preview::build_preview_sync(&path);
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_PREVIEW_EVENT,
         &FilePreviewEvent {
             path: req.path,
             thumb: false,
@@ -2418,9 +2390,8 @@ fn drain_thumb_tasks(
             if let Ok(bytes) = result
                 && browsers.can_emit_to(&webview)
             {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     webview,
-                    FILE_PREVIEW_EVENT,
                     &FilePreviewEvent {
                         path,
                         thumb: true,
@@ -2576,9 +2547,8 @@ fn on_knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                        commands.trigger(BinHostEmitEvent::from_event(
                             entity,
-                            FILE_ERROR_EVENT,
                             &FileErrorEvent {
                                 message: error,
                                 undecodable: false,
@@ -2757,9 +2727,8 @@ fn reload_changed_files(
             });
             if ready {
                 let (parent_path, parent_entries) = parent_listing(&fv.path);
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    FILE_DIR_EVENT,
                     &FileDirEvent {
                         path: display_path(&fv.path),
                         abs_path: fv.path.to_string_lossy().into_owned(),
@@ -2782,9 +2751,8 @@ fn reload_changed_files(
                     .map(|d| d.as_millis())
                     .unwrap_or(0);
                 let url = format!("{}&v={nonce}", raw_media_url(&fv.path));
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    FILE_MEDIA_EVENT,
                     &FileMediaEvent {
                         kind,
                         mime,
@@ -2800,9 +2768,8 @@ fn reload_changed_files(
             && edit.core.dirty
         {
             if ready {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    FILE_EXTERNAL_CHANGE_EVENT,
                     &FileExternalChange {
                         path: display_path(&fv.path),
                     },
@@ -2898,9 +2865,8 @@ fn emit_wiki_completions(
             kind: "knowledge".to_string(),
         })
         .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         entity,
-        FILE_COMPLETION_EVENT,
         &FileCompletionEvent {
             items,
             replace_from_col,
@@ -3040,9 +3006,8 @@ fn run_commands(
                 if current.is_empty() || !browsers.can_emit_to(&entity) {
                     continue;
                 }
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    vmux_core::event::FILE_RENAME_BEGIN_EVENT,
                     &vmux_core::event::FileRenameBeginEvent {
                         line,
                         col: ccol as u32,
@@ -3052,17 +3017,15 @@ fn run_commands(
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    vmux_core::event::FILE_KEY_EVENT,
                     &vmux_core::event::FileKey::FindClose,
                 ));
                 cursor_stale = true;
             }
             EditCommand::OpenFind { forward } => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    vmux_core::event::FILE_KEY_EVENT,
                     &vmux_core::event::FileKey::Find { forward: *forward },
                 ));
                 continue;
@@ -3094,9 +3057,8 @@ fn run_commands(
                 Err(unmappable) => {
                     tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                        commands.trigger(BinHostEmitEvent::from_event(
                             entity,
-                            FILE_ERROR_EVENT,
                             &FileErrorEvent {
                                 message: format!("save failed: {unmappable}"),
                                 undecodable: false,
@@ -3124,9 +3086,8 @@ fn run_commands(
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                        commands.trigger(BinHostEmitEvent::from_event(
                             entity,
-                            FILE_ERROR_EVENT,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
                                 undecodable: false,
@@ -3212,9 +3173,8 @@ fn run_commands(
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_DIRTY_EVENT,
             &FileDirtyEvent {
                 dirty: edit.core.dirty,
             },
@@ -3454,9 +3414,8 @@ fn on_file_property_edit(
     {
         Ok(updated) => updated,
         Err(message) => {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                FILE_ERROR_EVENT,
                 &FileErrorEvent {
                     message,
                     undecodable: false,
@@ -3503,7 +3462,7 @@ fn apply_lsp_workspace_edit(
     mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
-        let refusal = match WorkspaceEditPlan::try_from(&awaiting.0.edit) {
+        let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
             Ok(plan) => apply_planned_documents(
                 plan,
                 &mut views,
@@ -3529,7 +3488,7 @@ fn apply_lsp_workspace_edit(
     for rename in renames.read() {
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
-            Ok(edit) => match WorkspaceEditPlan::try_from(edit) {
+            Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
                 Ok(plan) => apply_planned_documents(
                     plan,
                     &mut views,
@@ -3546,9 +3505,8 @@ fn apply_lsp_workspace_edit(
             continue;
         };
         if browsers.can_emit_to(&rename.entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 rename.entity,
-                vmux_core::event::FILE_EDIT_FAILED_EVENT,
                 &vmux_core::event::FileEditFailedEvent { reason },
             ));
         }
@@ -3573,14 +3531,15 @@ fn apply_planned_documents(
     commands: &mut Commands,
 ) -> Option<String> {
     for document in plan.documents {
-        let wanted = canon(&document.path);
-        if let (Some(expected), Some(actual)) =
-            (document.version, manager.document_version(&document.path))
-            && expected != actual
+        let wanted = canon(document.path.as_path());
+        if let (Some(expected), Some(actual)) = (
+            document.version,
+            manager.document_version(document.path.as_path()),
+        ) && expected != actual
         {
             return Some(format!(
                 "{} changed since the edit was computed",
-                document.path.display()
+                document.path.as_path().display()
             ));
         }
 
@@ -3605,7 +3564,7 @@ fn apply_planned_documents(
         if texts.any(|text| text != first) {
             return Some(format!(
                 "{} is open more than once with different contents",
-                document.path.display()
+                document.path.as_path().display()
             ));
         }
 
@@ -3616,7 +3575,7 @@ fn apply_planned_documents(
             };
             let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
                 Ok(updated) => updated,
-                Err(e) => return Some(format!("{}: {e}", document.path.display())),
+                Err(e) => return Some(format!("{}: {e}", document.path.as_path().display())),
             };
             run_commands(
                 entity,
@@ -3640,20 +3599,26 @@ fn edit_closed_file(
     document: &crate::lsp::workspace_edit::PlannedDocument,
     self_writes: &mut SelfWrites,
 ) -> Result<(), String> {
-    let Ok(text) = std::fs::read_to_string(&document.path) else {
-        return Err(format!("{} could not be read", document.path.display()));
+    let Ok(text) = std::fs::read_to_string(document.path.as_path()) else {
+        return Err(format!(
+            "{} could not be read",
+            document.path.as_path().display()
+        ));
     };
-    let buffer =
-        crate::edit::buffer::TextBuffer::from_text(document.path.clone(), String::new(), &text);
+    let buffer = crate::edit::buffer::TextBuffer::from_text(
+        document.path.as_path().to_path_buf(),
+        String::new(),
+        &text,
+    );
     let updated = match buffer.with_lsp_edits(&document.edits) {
         Ok(updated) => updated,
-        Err(e) => return Err(format!("{}: {e}", document.path.display())),
+        Err(e) => return Err(format!("{}: {e}", document.path.as_path().display())),
     };
     self_writes
         .0
-        .insert(canon(&document.path), std::time::Instant::now());
-    write_atomic(&document.path, updated.as_bytes())
-        .map_err(|e| format!("{}: {e}", document.path.display()))
+        .insert(canon(document.path.as_path()), std::time::Instant::now());
+    write_atomic(document.path.as_path(), updated.as_bytes())
+        .map_err(|e| format!("{}: {e}", document.path.as_path().display()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3879,9 +3844,8 @@ fn on_file_editor_action(
         EditorAction::Rename => {
             let current = word_at_col(&lt, ccol);
             if !current.is_empty() && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     entity,
-                    vmux_core::event::FILE_RENAME_BEGIN_EVENT,
                     &vmux_core::event::FileRenameBeginEvent {
                         line,
                         col: ccol as u32,
@@ -3930,13 +3894,14 @@ fn on_file_code_action_pick(
         return;
     };
     let path = edit.core.buffer.path.clone();
-    let Some(workspace_edit) =
+    let Some((root, workspace_edit)) =
         manager.run_code_action(entity, trigger.event().payload.index as usize, &path)
     else {
         return;
     };
     edits.write(crate::lsp::manager::LspRequestedEdit {
         entity,
+        root,
         result: Ok(workspace_edit),
     });
 }
@@ -4323,9 +4288,8 @@ fn emit_explorer_focus(
     commands: &mut Commands,
 ) {
     if browsers.can_emit_to(&entity) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            EXPLORER_FOCUS_EVENT,
             &ExplorerFocusEvent {
                 path: current.to_string_lossy().into_owned(),
                 reveal,
@@ -4498,9 +4462,8 @@ fn emit_explorer_tree(
         } else {
             String::new()
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            EXPLORER_TREE_EVENT,
             &ExplorerTreeEvent {
                 root_name: explorer_root_name(&st.root),
                 root_path: st.root.to_string_lossy().into_owned(),
@@ -4798,9 +4761,8 @@ fn emit_explorer_fs_result(
     commands: &mut Commands,
 ) {
     if browsers.can_emit_to(&webview) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             webview,
-            EXPLORER_FS_RESULT_EVENT,
             &ExplorerFsResult {
                 ok,
                 message,
@@ -4932,9 +4894,8 @@ fn emit_explorer_chrome(
             .map(|state| state.visible)
             .unwrap_or(chrome.default_visible);
         let revision = revisions.get(scope).copied().unwrap_or_default();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            EXPLORER_CHROME_EVENT,
             &ExplorerChromeEvent {
                 visible,
                 width: chrome.width,
@@ -5111,9 +5072,8 @@ fn emit_open_editors(
                 is_dir: path.is_dir(),
             });
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            EXPLORER_OPEN_EDITORS_EVENT,
             &OpenEditorsEvent { items },
         ));
         commands.entity(entity).remove::<OpenEditorsDirty>();
@@ -5190,9 +5150,8 @@ fn emit_outline_markdown(
             continue;
         }
         let items = crate::explorer_model::markdown_outline(&edit.core.buffer.text());
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            EXPLORER_OUTLINE_EVENT,
             &OutlineEvent { items },
         ));
         commands.entity(entity).remove::<OutlineDirty>();
@@ -5206,9 +5165,8 @@ fn clear_outline_on_file_change(
 ) {
     for entity in &q {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                EXPLORER_OUTLINE_EVENT,
                 &OutlineEvent { items: Vec::new() },
             ));
         }
@@ -5301,11 +5259,7 @@ fn emit_global_search(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            EXPLORER_SEARCH_EVENT,
-            &search.0,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &search.0));
         commands.entity(entity).remove::<GlobalSearchDirty>();
     }
 }
@@ -5662,6 +5616,7 @@ mod edit_flow_tests {
 mod explorer_tests {
     use super::*;
     use std::fs;
+    use vmux_api::BinEvent;
 
     fn git_repo() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
@@ -6055,11 +6010,11 @@ mod explorer_tests {
         }
 
         fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
-            if emit.id != EXPLORER_FOCUS_EVENT {
+            if emit.id() != ExplorerFocusEvent::id() {
                 return;
             }
             let decoded =
-                rkyv::from_bytes::<ExplorerFocusEvent, rkyv::rancor::Error>(&emit.payload);
+                rkyv::from_bytes::<ExplorerFocusEvent, rkyv::rancor::Error>(emit.payload());
             let Ok(event) = decoded else {
                 return;
             };
@@ -7247,6 +7202,7 @@ mod workspace_edit_tests {
             app.world_mut()
                 .write_message(crate::lsp::manager::LspRequestedEdit {
                     entity: views[0],
+                    root: path.parent().unwrap_or(path).to_path_buf(),
                     result: Ok(Self::renaming(path)),
                 });
             let (_outgoing, sent) = std::sync::mpsc::channel();
@@ -7266,6 +7222,7 @@ mod workspace_edit_tests {
                         crate::lsp::wire::RequestId::Number(1000),
                         outgoing,
                     ),
+                    root: path.parent().unwrap_or(path).to_path_buf(),
                     params: lsp_types::ApplyWorkspaceEditParams {
                         label: None,
                         edit: Self::renaming(path),
@@ -7786,6 +7743,7 @@ mod open_editor_tests {
 #[cfg(test)]
 mod announced_scroll_tests {
     use super::*;
+    use vmux_api::BinEvent;
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<String>);
@@ -7818,7 +7776,7 @@ mod announced_scroll_tests {
                 .add_systems(Update, apply_goto)
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        emitted.0.push(trigger.event().id.clone());
+                        emitted.0.push(trigger.event().id().to_string());
                     },
                 );
             app.world_mut()
@@ -7894,7 +7852,8 @@ mod announced_scroll_tests {
                 .world()
                 .resource::<Emitted>()
                 .0
-                .contains(&FILE_SCROLL_BY_EVENT.to_string()),
+                .iter()
+                .any(|id| id == FileScrollByEvent::id()),
             "the window was repainted at row {top}, so a page still parked at row 0 \
              would render the band off screen unless the move is announced: {:?}",
             session.app.world().resource::<Emitted>().0

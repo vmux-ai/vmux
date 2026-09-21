@@ -15,14 +15,14 @@ use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tools::{
-    TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
-    ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolActionRequest, ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest,
+    ToolProvider, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_core::vault::{
-    VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
-    VaultActionResult, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultSnapshot,
+    VaultAction, VaultActionRequest, VaultActionResult, VaultAuthProgress, VaultRefreshRequest,
+    VaultRepository, VaultSnapshot,
 };
+use vmux_editor::lsp::package_path::PackageName;
 use vmux_layout::LayoutCef;
 use vmux_tools::{self as manifest_store, ToolsManifest};
 
@@ -668,11 +668,7 @@ fn drain_tool_actions(
             message,
         };
         if browsers.can_emit_to(&task.target) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                task.target,
-                TOOL_ACTION_RESULT_EVENT,
-                &event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(task.target, &event));
         }
         if success {
             state.dirty = true;
@@ -698,11 +694,7 @@ fn drain_vault_actions(
                         url: Some(progress.url.clone()),
                     },
                 )));
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    task.target,
-                    VAULT_AUTH_PROGRESS_EVENT,
-                    &progress,
-                ));
+                commands.trigger(BinHostEmitEvent::from_event(task.target, &progress));
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
@@ -738,11 +730,7 @@ fn drain_vault_actions(
             }
         }
         if browsers.can_emit_to(&task.target) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                task.target,
-                VAULT_ACTION_RESULT_EVENT,
-                &event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(task.target, &event));
         }
         state.dirty = true;
         state.full_scan |= !state.loaded;
@@ -769,11 +757,7 @@ fn emit_tools_snapshot(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            TOOLS_SNAPSHOT_EVENT,
-            &state.snapshot,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &state.snapshot));
         layout_revisions.insert(entity, state.revision);
     }
     let revision = state.revision;
@@ -783,11 +767,7 @@ fn emit_tools_snapshot(
             return false;
         }
         if *sent_revision != revision && browsers.can_emit_to(entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                *entity,
-                TOOLS_SNAPSHOT_EVENT,
-                &snapshot,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(*entity, &snapshot));
             *sent_revision = revision;
         }
         true
@@ -1169,7 +1149,9 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     let mut inventory = receipts
         .into_values()
         .map(|receipt| {
-            let package = catalog_by_name.get(&receipt.name).copied();
+            let package = PackageName::parse(&receipt.name)
+                .ok()
+                .and_then(|name| catalog_by_name.get(&name).copied());
             let latest = package
                 .and_then(|package| vmux_editor::lsp::purl::parse(&package.source_id))
                 .and_then(|purl| purl.version);
@@ -1199,19 +1181,19 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
         .map(|item| item.id.clone())
         .collect::<BTreeSet<_>>();
     for package in catalog {
-        if installed.contains(&package.name) {
+        if installed.contains(package.name.as_str()) {
             continue;
         }
         let on_path = package.bin.keys().any(|command| {
             matches!(
-                vmux_editor::lsp::store::resolved_command(&root, command),
+                vmux_editor::lsp::store::resolved_command(&root, command.as_str()),
                 vmux_editor::lsp::store::Resolution::OnPath
             )
         });
         if on_path {
             inventory.push(InventoryItem {
-                id: package.name.clone(),
-                name: package.name,
+                id: package.name.as_str().to_string(),
+                name: package.name.as_str().to_string(),
                 icon: None,
                 version: None,
                 detail: "Available on PATH".to_string(),
@@ -1747,7 +1729,7 @@ fn install_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
             let packages = vmux_editor::lsp::catalog::ensure_catalog(&root, false)?;
             let package = packages
                 .iter()
-                .find(|package| package.name == id)
+                .find(|package| package.name.as_str() == id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
             vmux_editor::lsp::install::install(
                 package,
@@ -1777,7 +1759,8 @@ fn uninstall_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
         }
         ToolProvider::Acp => vmux_agent::acp_install::uninstall(id)?,
         ToolProvider::Lsp => {
-            vmux_editor::lsp::store::remove(&vmux_editor::lsp::store::default_root(), id)
+            let name = vmux_editor::lsp::package_path::PackageName::parse(id)?;
+            vmux_editor::lsp::store::remove(&vmux_editor::lsp::store::default_root(), &name)
                 .map_err(|error| error.to_string())?;
         }
         ToolProvider::Dotfiles => {

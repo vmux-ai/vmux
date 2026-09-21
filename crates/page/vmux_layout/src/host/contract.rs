@@ -4,7 +4,7 @@ use crate::active_panes::{ActivatePane, ActivePanes};
 use crate::apply::{
     LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse,
 };
-use crate::bookmark::{BookmarkOp, ShowBookmarkMenuRequest};
+use crate::bookmark::{BookmarkMutation, ShowBookmarkMenuRequest};
 use crate::pane::{OpenBesideRequest, SpawnCounter};
 use crate::settings::{EffectiveStartupDir, EffectiveStartupUrl};
 use crate::space::ActiveSpaceId;
@@ -28,7 +28,7 @@ impl Plugin for LayoutContractPlugin {
             .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_message::<ActivatePane>()
-            .add_message::<BookmarkOp>()
+            .add_message::<BookmarkMutation>()
             .add_message::<BrowserGoBackRequest>()
             .add_message::<BrowserGoForwardRequest>()
             .add_message::<BrowserNavigateRequest>()

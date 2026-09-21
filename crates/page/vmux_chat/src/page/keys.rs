@@ -1,6 +1,6 @@
 use super::composer::options::ChatMenuSet;
 use super::state::Chat;
-use crate::event::{ApprovalDecision, CHAT_KEY_EVENT, ChatItem, ChatKey};
+use crate::event::{ApprovalDecision, ChatItem, ChatKey};
 use crate::format::composer::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
@@ -125,7 +125,7 @@ impl ChatKeys {
 
     fn listen(&self) {
         let keys = *self;
-        let _resolved = use_listener::<ChatKey, _>(CHAT_KEY_EVENT, move |key| keys.apply(key));
+        let _resolved = use_listener::<ChatKey, _>(move |key| keys.apply(key));
     }
 
     fn apply(&self, key: ChatKey) {

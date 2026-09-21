@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const EXTENSIONS_LIST_EVENT: &str = "extensions_list";
-pub const EXT_INSTALL_PROGRESS_EVENT: &str = "ext_install_progress";
-pub const EXT_STATUS_EVENT: &str = "ext_status";
-pub const EXTENSION_POPUP_EVENT: &str = "extension_popup";
-pub const EXTENSION_POPUP_SIZE_EVENT: &str = "extension_popup_size";
 pub const EXTENSIONS_PAGE_URL: &str = "vmux://extensions/";
 
 #[derive(
@@ -84,6 +79,7 @@ pub struct ExtRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "extensions", name = "list", targets = ["extensions", "layout", "tools"])]
 pub struct ExtensionsEvent {
     pub extensions: Vec<ExtRow>,
     pub pending: bool,
@@ -100,6 +96,7 @@ pub struct ExtensionsEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "ext", name = "install_progress", targets = ["extensions", "layout", "tools"])]
 pub struct ExtInstallProgress {
     pub key: String,
     pub phase: ExtInstallPhase,
@@ -118,6 +115,7 @@ pub struct ExtInstallProgress {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "ext", name = "status", targets = ["extensions", "layout", "tools"])]
 pub struct ExtStatusEvent {
     pub id: String,
     pub status: ExtStatus,
@@ -135,6 +133,7 @@ pub struct ExtStatusEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "toggle_request", targets = ["extensions", "tools"])]
 pub struct ExtToggleRequest {
     pub id: String,
     pub enabled: bool,
@@ -152,6 +151,7 @@ pub struct ExtToggleRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "uninstall_request", targets = ["extensions", "tools"])]
 pub struct ExtUninstallRequest {
     pub id: String,
 }
@@ -167,6 +167,7 @@ pub struct ExtUninstallRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "action_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtActionRequest {
     pub id: String,
     pub anchor: ExtensionPopupAnchor,
@@ -202,6 +203,7 @@ pub struct ExtensionPopupAnchor {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "extension", name = "popup", target = "layout")]
 pub struct ExtensionPopupEvent {
     pub id: String,
     pub name: String,
@@ -221,6 +223,7 @@ pub struct ExtensionPopupEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "extension", name = "popup_bounds_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtensionPopupBoundsRequest {
     pub left: f32,
     pub top: f32,
@@ -239,6 +242,7 @@ pub struct ExtensionPopupBoundsRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "extension", name = "popup_size", target = "layout")]
 pub struct ExtensionPopupSizeEvent {
     pub id: String,
     pub width: f32,
@@ -258,6 +262,7 @@ pub struct ExtensionPopupSizeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "extension", name = "popup_close_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtensionPopupCloseRequest;
 
 #[derive(
@@ -271,6 +276,7 @@ pub struct ExtensionPopupCloseRequest;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "pin_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtPinRequest {
     pub id: String,
     pub pinned: bool,
@@ -287,6 +293,7 @@ pub struct ExtPinRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "open_manager_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtOpenManagerRequest;
 
 #[derive(
@@ -300,6 +307,7 @@ pub struct ExtOpenManagerRequest;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "list_request", targets = ["extensions", "layout", "tools"])]
 pub struct ExtListRequest;
 
 #[derive(
@@ -313,6 +321,7 @@ pub struct ExtListRequest;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "ext", name = "browse_store_request", targets = ["extensions", "tools"])]
 pub struct ExtBrowseStoreRequest {
     pub query: String,
 }

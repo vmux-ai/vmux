@@ -1,6 +1,6 @@
 [package]
-name = "vmux_wire"
-description = "Lightweight wire types shared by vmux processes"
+name = "vmux_api"
+description = "Shared API types for vmux process and UI boundaries"
 version.workspace = true
 edition.workspace = true
 publish = false

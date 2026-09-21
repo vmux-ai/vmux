@@ -132,7 +132,7 @@ pub enum ChatKeyCommand {
     Cancel,
 }
 
-impl From<ChatKeyCommand> for vmux_wire::chat::ChatKey {
+impl From<ChatKeyCommand> for vmux_api::chat::ChatKey {
     fn from(command: ChatKeyCommand) -> Self {
         match command {
             ChatKeyCommand::ListNext => Self::ListNext,
@@ -385,8 +385,8 @@ pub enum BrowserBarCommand {
 }
 
 impl BrowserBarCommand {
-    pub const fn picker(self) -> Option<vmux_wire::command_bar::CommandBarPicker> {
-        use vmux_wire::command_bar::CommandBarPicker;
+    pub const fn picker(self) -> Option<vmux_api::command_bar::CommandBarPicker> {
+        use vmux_api::command_bar::CommandBarPicker;
         match self {
             Self::OpenGotoLine => Some(CommandBarPicker::GotoLine),
             Self::OpenIndentation => Some(CommandBarPicker::Indent),
@@ -403,8 +403,8 @@ impl BrowserBarCommand {
         }
     }
 
-    pub const fn opening(picker: vmux_wire::command_bar::CommandBarPicker) -> Option<Self> {
-        use vmux_wire::command_bar::CommandBarPicker;
+    pub const fn opening(picker: vmux_api::command_bar::CommandBarPicker) -> Option<Self> {
+        use vmux_api::command_bar::CommandBarPicker;
         match picker {
             CommandBarPicker::GotoLine => Some(Self::OpenGotoLine),
             CommandBarPicker::Indent => Some(Self::OpenIndentation),
@@ -470,13 +470,13 @@ pub enum SpaceCommand {
 }
 
 impl SpaceCommand {
-    pub fn key(self) -> Option<vmux_wire::space::SpaceKey> {
+    pub fn key(self) -> Option<vmux_api::space::SpaceKey> {
         match self {
             Self::Open => None,
-            Self::Next => Some(vmux_wire::space::SpaceKey::Next),
-            Self::Previous => Some(vmux_wire::space::SpaceKey::Previous),
-            Self::Attach => Some(vmux_wire::space::SpaceKey::Attach),
-            Self::Delete => Some(vmux_wire::space::SpaceKey::Delete),
+            Self::Next => Some(vmux_api::space::SpaceKey::Next),
+            Self::Previous => Some(vmux_api::space::SpaceKey::Previous),
+            Self::Attach => Some(vmux_api::space::SpaceKey::Attach),
+            Self::Delete => Some(vmux_api::space::SpaceKey::Delete),
         }
     }
 }

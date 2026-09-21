@@ -1,4 +1,4 @@
-use crate::event::{BookmarkContextMenuEvent, BookmarkTextInputEvent, BookmarksCommandEvent};
+use crate::event::{BookmarkContextMenuEvent, BookmarkRequest, BookmarkTextInputEvent};
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
 use bevy::ecs::relationship::Relationship;
@@ -14,13 +14,13 @@ pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<BookmarkOp>()
+        app.add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
-                BookmarksCommandEvent,
+                BookmarkRequest,
                 BookmarkTextInputEvent,
                 BookmarkContextMenuEvent,
-            )>::for_hosts(&["layout"]))
+            )>::default())
             .add_observer(on_bookmarks_command_emit)
             .add_observer(on_bookmark_text_input_emit)
             .add_observer(on_bookmark_context_menu_emit)
@@ -28,7 +28,7 @@ impl Plugin for BookmarkPlugin {
                 Update,
                 (
                     handle_bookmark_app_commands.in_set(ReadAppCommands),
-                    apply_bookmark_ops,
+                    apply_bookmark_mutations,
                     sync_bookmark_metadata,
                 )
                     .chain(),
@@ -37,7 +37,7 @@ impl Plugin for BookmarkPlugin {
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
-pub enum BookmarkOp {
+pub enum BookmarkMutation {
     ToggleForUrl {
         metadata: PageMetadata,
     },
@@ -177,8 +177,8 @@ fn can_parent_folder(folder: Entity, parent: Entity, child_of_q: &Query<&ChildOf
     true
 }
 
-fn apply_bookmark_ops(
-    mut reader: MessageReader<BookmarkOp>,
+fn apply_bookmark_mutations(
+    mut reader: MessageReader<BookmarkMutation>,
     ids: Query<(Entity, &Uuid)>,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
@@ -192,7 +192,7 @@ fn apply_bookmark_ops(
 ) {
     for op in reader.read() {
         match op {
-            BookmarkOp::ToggleForUrl { metadata } => {
+            BookmarkMutation::ToggleForUrl { metadata } => {
                 let existing = bookmarks
                     .iter()
                     .find(|(_, meta)| meta.url == metadata.url)
@@ -215,7 +215,7 @@ fn apply_bookmark_ops(
                     commands.spawn((Bookmark, new_uuid(), metadata.clone(), order));
                 }
             }
-            BookmarkOp::Add { metadata, folder } => {
+            BookmarkMutation::Add { metadata, folder } => {
                 let folder_entity = folder.as_ref().and_then(|folder_uuid| {
                     let entity = find_by_uuid(folder_uuid, &ids)?;
                     folder_q.get(entity).ok().map(|_| entity)
@@ -248,7 +248,7 @@ fn apply_bookmark_ops(
                     e.insert(ChildOf(folder_entity));
                 }
             }
-            BookmarkOp::Remove { uuid } => {
+            BookmarkMutation::Remove { uuid } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && (bookmarks.get(entity).is_ok() || pinned.get(entity).is_ok())
                 {
@@ -262,7 +262,7 @@ fn apply_bookmark_ops(
                     }
                 }
             }
-            BookmarkOp::Rename { uuid, name } => {
+            BookmarkMutation::Rename { uuid, name } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && let Ok((_, metadata)) = bookmarks.get(entity)
                 {
@@ -271,7 +271,7 @@ fn apply_bookmark_ops(
                     commands.entity(entity).insert(metadata);
                 }
             }
-            BookmarkOp::Move { uuid, folder } => {
+            BookmarkMutation::Move { uuid, folder } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && bookmarks.get(entity).is_ok()
                 {
@@ -285,7 +285,7 @@ fn apply_bookmark_ops(
                     }
                 }
             }
-            BookmarkOp::MovePin { uuid, folder } => {
+            BookmarkMutation::MovePin { uuid, folder } => {
                 let folder_entity = folder.as_ref().and_then(|folder_uuid| {
                     let entity = find_by_uuid(folder_uuid, &ids)?;
                     folder_q.get(entity).ok().map(|_| entity)
@@ -305,7 +305,7 @@ fn apply_bookmark_ops(
                     }
                 }
             }
-            BookmarkOp::ReorderPin { uuid, target_uuid } => {
+            BookmarkMutation::ReorderPin { uuid, target_uuid } => {
                 let mut pins = pin_orders
                     .iter()
                     .map(|(entity, uuid, order)| (entity, uuid.0.clone(), order.0))
@@ -328,11 +328,11 @@ fn apply_bookmark_ops(
                     commands.entity(entity).insert(BookmarkOrder(order));
                 }
             }
-            BookmarkOp::AddFolder { name } => {
+            BookmarkMutation::AddFolder { name } => {
                 let order = next_top_order(orders.iter().map(|o| o.0));
                 commands.spawn((Folder, new_uuid(), Name::new(name.clone()), order));
             }
-            BookmarkOp::AddFolderIn { name, parent } => {
+            BookmarkMutation::AddFolderIn { name, parent } => {
                 let Some(parent_entity) = find_by_uuid(parent, &ids) else {
                     continue;
                 };
@@ -348,7 +348,7 @@ fn apply_bookmark_ops(
                     ChildOf(parent_entity),
                 ));
             }
-            BookmarkOp::MoveFolder { uuid, parent } => {
+            BookmarkMutation::MoveFolder { uuid, parent } => {
                 let Some(folder_entity) = find_by_uuid(uuid, &ids) else {
                     continue;
                 };
@@ -370,7 +370,7 @@ fn apply_bookmark_ops(
                     commands.entity(folder_entity).remove::<ChildOf>();
                 }
             }
-            BookmarkOp::RemoveFolder { uuid } => {
+            BookmarkMutation::RemoveFolder { uuid } => {
                 if let Some(folder_entity) = find_by_uuid(uuid, &ids)
                     && folder_q.get(folder_entity).is_ok()
                 {
@@ -387,7 +387,7 @@ fn apply_bookmark_ops(
                     commands.entity(folder_entity).remove::<ChildOf>().despawn();
                 }
             }
-            BookmarkOp::RenameFolder { uuid, name } => {
+            BookmarkMutation::RenameFolder { uuid, name } => {
                 if let Some(folder_entity) = find_by_uuid(uuid, &ids)
                     && folder_q.get(folder_entity).is_ok()
                 {
@@ -396,7 +396,7 @@ fn apply_bookmark_ops(
                         .insert(Name::new(name.clone()));
                 }
             }
-            BookmarkOp::ToggleFolder { uuid } => {
+            BookmarkMutation::ToggleFolder { uuid } => {
                 if let Some(folder_entity) = find_by_uuid(uuid, &ids)
                     && folder_q.get(folder_entity).is_ok()
                 {
@@ -407,14 +407,14 @@ fn apply_bookmark_ops(
                     }
                 }
             }
-            BookmarkOp::Pin { uuid } => {
+            BookmarkMutation::Pin { uuid } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && bookmarks.get(entity).is_ok()
                 {
                     commands.entity(entity).insert(Pin);
                 }
             }
-            BookmarkOp::PinUrl { metadata } => {
+            BookmarkMutation::PinUrl { metadata } => {
                 if let Some((entity, _)) = pinned.iter().find(|(_, meta)| meta.url == metadata.url)
                 {
                     commands.entity(entity).insert(metadata.clone());
@@ -429,7 +429,7 @@ fn apply_bookmark_ops(
                 let order = next_top_order(orders.iter().map(|o| o.0));
                 commands.spawn((Pin, new_uuid(), metadata.clone(), order));
             }
-            BookmarkOp::Unpin { uuid } => {
+            BookmarkMutation::Unpin { uuid } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && pinned.get(entity).is_ok()
                 {
@@ -512,143 +512,122 @@ fn sync_bookmark_metadata(
 }
 
 fn on_bookmarks_command_emit(
-    trigger: On<BinReceive<BookmarksCommandEvent>>,
-    mut ops: MessageWriter<BookmarkOp>,
+    trigger: On<BinReceive<BookmarkRequest>>,
+    mut ops: MessageWriter<BookmarkMutation>,
     mut app_cmds: MessageWriter<AppCommand>,
     mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
 ) {
     let e = &trigger.event().payload;
-    match e.command.as_str() {
-        "toggle_active" => {
+    match e {
+        BookmarkRequest::ToggleActive => {
             app_cmds.write(AppCommand::Bookmark(BookmarkCommand::ToggleActive));
         }
-        "menu_root" | "menu_new_folder" => {
+        BookmarkRequest::MenuRoot => {
             menu_req.write(ShowBookmarkMenuRequest {
                 webview: trigger.event().webview,
                 target: BookmarkMenuTarget::Root,
             });
         }
-        "menu_pin" => {
-            if let Some(uuid) = e.uuid.clone() {
-                menu_req.write(ShowBookmarkMenuRequest {
-                    webview: trigger.event().webview,
-                    target: BookmarkMenuTarget::Pin { uuid },
+        BookmarkRequest::MenuPin { uuid } => {
+            menu_req.write(ShowBookmarkMenuRequest {
+                webview: trigger.event().webview,
+                target: BookmarkMenuTarget::Pin { uuid: uuid.clone() },
+            });
+        }
+        BookmarkRequest::MenuBookmark { uuid } => {
+            menu_req.write(ShowBookmarkMenuRequest {
+                webview: trigger.event().webview,
+                target: BookmarkMenuTarget::Bookmark { uuid: uuid.clone() },
+            });
+        }
+        BookmarkRequest::MenuFolder { uuid, active_page } => {
+            menu_req.write(ShowBookmarkMenuRequest {
+                webview: trigger.event().webview,
+                target: BookmarkMenuTarget::Folder {
+                    uuid: uuid.clone(),
+                    active_page: active_page.clone(),
+                },
+            });
+        }
+        BookmarkRequest::Open { url } => {
+            app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack {
+                    url: Some(url.clone()),
+                },
+            )));
+        }
+        BookmarkRequest::Add { metadata, folder } => {
+            ops.write(BookmarkMutation::Add {
+                metadata: metadata.clone(),
+                folder: folder.clone(),
+            });
+        }
+        BookmarkRequest::PinUrl { metadata } => {
+            ops.write(BookmarkMutation::PinUrl {
+                metadata: metadata.clone(),
+            });
+        }
+        BookmarkRequest::Remove { uuid } => {
+            ops.write(BookmarkMutation::Remove { uuid: uuid.clone() });
+        }
+        BookmarkRequest::Rename { uuid, name } => {
+            ops.write(BookmarkMutation::Rename {
+                uuid: uuid.clone(),
+                name: name.clone(),
+            });
+        }
+        BookmarkRequest::Move { uuid, folder } => {
+            ops.write(BookmarkMutation::Move {
+                uuid: uuid.clone(),
+                folder: folder.clone(),
+            });
+        }
+        BookmarkRequest::MovePin { uuid, folder } => {
+            ops.write(BookmarkMutation::MovePin {
+                uuid: uuid.clone(),
+                folder: folder.clone(),
+            });
+        }
+        BookmarkRequest::ReorderPin { uuid, target_uuid } => {
+            ops.write(BookmarkMutation::ReorderPin {
+                uuid: uuid.clone(),
+                target_uuid: target_uuid.clone(),
+            });
+        }
+        BookmarkRequest::Pin { uuid } => {
+            ops.write(BookmarkMutation::Pin { uuid: uuid.clone() });
+        }
+        BookmarkRequest::Unpin { uuid } => {
+            ops.write(BookmarkMutation::Unpin { uuid: uuid.clone() });
+        }
+        BookmarkRequest::ToggleFolder { uuid } => {
+            ops.write(BookmarkMutation::ToggleFolder { uuid: uuid.clone() });
+        }
+        BookmarkRequest::CreateFolder { name, parent } => {
+            if let Some(parent) = parent.clone() {
+                ops.write(BookmarkMutation::AddFolderIn {
+                    name: name.clone(),
+                    parent,
                 });
+            } else {
+                ops.write(BookmarkMutation::AddFolder { name: name.clone() });
             }
         }
-        "menu_bookmark" => {
-            if let Some(uuid) = e.uuid.clone() {
-                menu_req.write(ShowBookmarkMenuRequest {
-                    webview: trigger.event().webview,
-                    target: BookmarkMenuTarget::Bookmark { uuid },
-                });
-            }
+        BookmarkRequest::MoveFolder { uuid, parent } => {
+            ops.write(BookmarkMutation::MoveFolder {
+                uuid: uuid.clone(),
+                parent: parent.clone(),
+            });
         }
-        "menu_folder" => {
-            if let Some(uuid) = e.uuid.clone() {
-                menu_req.write(ShowBookmarkMenuRequest {
-                    webview: trigger.event().webview,
-                    target: BookmarkMenuTarget::Folder {
-                        uuid,
-                        active_page: e.metadata.clone(),
-                    },
-                });
-            }
+        BookmarkRequest::RenameFolder { uuid, name } => {
+            ops.write(BookmarkMutation::RenameFolder {
+                uuid: uuid.clone(),
+                name: name.clone(),
+            });
         }
-        "open" => {
-            if let Some(url) = e.url.clone() {
-                app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InNewStack { url: Some(url) },
-                )));
-            }
+        BookmarkRequest::RemoveFolder { uuid } => {
+            ops.write(BookmarkMutation::RemoveFolder { uuid: uuid.clone() });
         }
-        "add" => {
-            if let Some(metadata) = e.metadata.clone() {
-                ops.write(BookmarkOp::Add {
-                    metadata,
-                    folder: e.folder.clone(),
-                });
-            }
-        }
-        "pin_url" => {
-            if let Some(metadata) = e.metadata.clone() {
-                ops.write(BookmarkOp::PinUrl { metadata });
-            }
-        }
-        "remove" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::Remove { uuid });
-            }
-        }
-        "rename" => {
-            if let (Some(uuid), Some(name)) = (e.uuid.clone(), e.name.clone()) {
-                ops.write(BookmarkOp::Rename { uuid, name });
-            }
-        }
-        "move" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::Move {
-                    uuid,
-                    folder: e.folder.clone(),
-                });
-            }
-        }
-        "move_pin" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::MovePin {
-                    uuid,
-                    folder: e.folder.clone(),
-                });
-            }
-        }
-        "reorder_pin" => {
-            if let (Some(uuid), Some(target_uuid)) = (e.uuid.clone(), e.target_uuid.clone()) {
-                ops.write(BookmarkOp::ReorderPin { uuid, target_uuid });
-            }
-        }
-        "pin" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::Pin { uuid });
-            }
-        }
-        "unpin" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::Unpin { uuid });
-            }
-        }
-        "toggle_folder" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::ToggleFolder { uuid });
-            }
-        }
-        "new_folder" => {
-            if let Some(name) = e.name.clone() {
-                if let Some(parent) = e.folder.clone() {
-                    ops.write(BookmarkOp::AddFolderIn { name, parent });
-                } else {
-                    ops.write(BookmarkOp::AddFolder { name });
-                }
-            }
-        }
-        "move_folder" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::MoveFolder {
-                    uuid,
-                    parent: e.folder.clone(),
-                });
-            }
-        }
-        "rename_folder" => {
-            if let (Some(uuid), Some(name)) = (e.uuid.clone(), e.name.clone()) {
-                ops.write(BookmarkOp::RenameFolder { uuid, name });
-            }
-        }
-        "remove_folder" => {
-            if let Some(uuid) = e.uuid.clone() {
-                ops.write(BookmarkOp::RemoveFolder { uuid });
-            }
-        }
-        _ => {}
     }
 }
 
@@ -661,14 +640,14 @@ fn handle_bookmark_app_commands(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_meta: Query<&PageMetadata, With<Stack>>,
-    mut ops: MessageWriter<BookmarkOp>,
+    mut ops: MessageWriter<BookmarkMutation>,
 ) {
     for cmd in reader.read() {
         let pin = match cmd {
             AppCommand::Bookmark(BookmarkCommand::ToggleActive) => false,
             AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
             AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
-                ops.write(BookmarkOp::AddFolder {
+                ops.write(BookmarkMutation::AddFolder {
                     name: "New Folder".to_string(),
                 });
                 continue;
@@ -691,11 +670,11 @@ fn handle_bookmark_app_commands(
             continue;
         }
         if pin {
-            ops.write(BookmarkOp::PinUrl {
+            ops.write(BookmarkMutation::PinUrl {
                 metadata: meta.clone(),
             });
         } else {
-            ops.write(BookmarkOp::ToggleForUrl {
+            ops.write(BookmarkMutation::ToggleForUrl {
                 metadata: meta.clone(),
             });
         }
@@ -710,14 +689,17 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<BookmarkOp>()
-            .add_systems(Update, (apply_bookmark_ops, sync_bookmark_metadata).chain());
+            .add_message::<BookmarkMutation>()
+            .add_systems(
+                Update,
+                (apply_bookmark_mutations, sync_bookmark_metadata).chain(),
+            );
         app
     }
 
-    fn send(app: &mut App, op: BookmarkOp) {
+    fn send(app: &mut App, op: BookmarkMutation) {
         app.world_mut()
-            .resource_mut::<Messages<BookmarkOp>>()
+            .resource_mut::<Messages<BookmarkMutation>>()
             .write(op);
         app.update();
     }
@@ -741,24 +723,17 @@ mod tests {
     fn open_event_requests_new_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<BookmarkOp>()
+            .add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<AppCommand>()
             .add_observer(on_bookmarks_command_emit);
         let webview = app.world_mut().spawn_empty().id();
-        app.world_mut()
-            .trigger(BinReceive::<BookmarksCommandEvent> {
-                webview,
-                payload: BookmarksCommandEvent {
-                    command: "open".into(),
-                    uuid: None,
-                    name: None,
-                    url: Some("https://a.test".into()),
-                    metadata: None,
-                    folder: None,
-                    target_uuid: None,
-                },
-            });
+        app.world_mut().trigger(BinReceive::<BookmarkRequest> {
+            webview,
+            payload: BookmarkRequest::Open {
+                url: "https://a.test".into(),
+            },
+        });
         let commands: Vec<_> = app
             .world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -839,7 +814,7 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
@@ -857,7 +832,7 @@ mod tests {
         ] {
             send(
                 &mut app,
-                BookmarkOp::Add {
+                BookmarkMutation::Add {
                     metadata: PageMetadata {
                         title: url.into(),
                         url: url.into(),
@@ -894,7 +869,7 @@ mod tests {
 
         send(
             &mut app,
-            BookmarkOp::ReorderPin {
+            BookmarkMutation::ReorderPin {
                 uuid: "a".into(),
                 target_uuid: "c".into(),
             },
@@ -915,12 +890,12 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
         );
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         assert_eq!(count::<With<moonshine_save::prelude::Save>>(&mut app), 0);
     }
 
@@ -935,7 +910,7 @@ mod tests {
         };
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: expected.clone(),
                 folder: None,
             },
@@ -1089,7 +1064,7 @@ mod tests {
     #[test]
     fn toggle_for_url_is_idempotent_add_then_remove() {
         let mut app = test_app();
-        let op = || BookmarkOp::ToggleForUrl {
+        let op = || BookmarkMutation::ToggleForUrl {
             metadata: metadata("A"),
         };
         send(&mut app, op());
@@ -1103,7 +1078,7 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
@@ -1115,7 +1090,7 @@ mod tests {
             .unwrap()
             .0
             .clone();
-        send(&mut app, BookmarkOp::Remove { uuid });
+        send(&mut app, BookmarkMutation::Remove { uuid });
         assert_eq!(count::<With<Bookmark>>(&mut app), 0);
     }
 
@@ -1124,7 +1099,7 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::PinUrl {
+            BookmarkMutation::PinUrl {
                 metadata: metadata("A"),
             },
         );
@@ -1137,11 +1112,11 @@ mod tests {
             .clone();
         send(
             &mut app,
-            BookmarkOp::ToggleForUrl {
+            BookmarkMutation::ToggleForUrl {
                 metadata: metadata("A"),
             },
         );
-        send(&mut app, BookmarkOp::Remove { uuid });
+        send(&mut app, BookmarkMutation::Remove { uuid });
         assert_eq!(count::<With<Bookmark>>(&mut app), 0);
         assert_eq!(count::<With<Pin>>(&mut app), 1);
     }
@@ -1176,11 +1151,11 @@ mod tests {
     #[test]
     fn add_into_folder_sets_childof() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(fid),
             },
@@ -1193,14 +1168,14 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::AddFolder {
+            BookmarkMutation::AddFolder {
                 name: "Work".into(),
             },
         );
         let (parent, parent_uuid) = folder_named(&mut app, "Work");
         send(
             &mut app,
-            BookmarkOp::AddFolderIn {
+            BookmarkMutation::AddFolderIn {
                 name: "PRs".into(),
                 parent: parent_uuid,
             },
@@ -1214,14 +1189,14 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::AddFolder {
+            BookmarkMutation::AddFolder {
                 name: "Work".into(),
             },
         );
         let (parent, parent_uuid) = folder_named(&mut app, "Work");
         send(
             &mut app,
-            BookmarkOp::AddFolderIn {
+            BookmarkMutation::AddFolderIn {
                 name: "PRs".into(),
                 parent: parent_uuid.clone(),
             },
@@ -1229,7 +1204,7 @@ mod tests {
         let (_, child_uuid) = folder_named(&mut app, "PRs");
         send(
             &mut app,
-            BookmarkOp::MoveFolder {
+            BookmarkMutation::MoveFolder {
                 uuid: parent_uuid,
                 parent: Some(child_uuid),
             },
@@ -1242,14 +1217,14 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::AddFolder {
+            BookmarkMutation::AddFolder {
                 name: "Work".into(),
             },
         );
         let (parent, parent_uuid) = folder_named(&mut app, "Work");
         send(
             &mut app,
-            BookmarkOp::AddFolderIn {
+            BookmarkMutation::AddFolderIn {
                 name: "PRs".into(),
                 parent: parent_uuid,
             },
@@ -1257,12 +1232,15 @@ mod tests {
         let (_, child_uuid) = folder_named(&mut app, "PRs");
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(child_uuid.clone()),
             },
         );
-        send(&mut app, BookmarkOp::RemoveFolder { uuid: child_uuid });
+        send(
+            &mut app,
+            BookmarkMutation::RemoveFolder { uuid: child_uuid },
+        );
         let bookmark = app
             .world_mut()
             .query_filtered::<Entity, With<Bookmark>>()
@@ -1276,16 +1254,16 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
         );
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A updated"),
                 folder: Some(fid),
             },
@@ -1305,18 +1283,18 @@ mod tests {
     #[test]
     fn add_existing_bookmark_without_folder_preserves_parent() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(fid),
             },
         );
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A updated"),
                 folder: None,
             },
@@ -1329,7 +1307,7 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
@@ -1337,7 +1315,7 @@ mod tests {
         let uuid = bookmark_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Rename {
+            BookmarkMutation::Rename {
                 uuid,
                 name: "Renamed".into(),
             },
@@ -1355,11 +1333,11 @@ mod tests {
     #[test]
     fn move_reparents_bookmark_and_returns_it_to_root() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: None,
             },
@@ -1367,29 +1345,29 @@ mod tests {
         let uuid = bookmark_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Move {
+            BookmarkMutation::Move {
                 uuid: uuid.clone(),
                 folder: Some(fid),
             },
         );
         assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
-        send(&mut app, BookmarkOp::Move { uuid, folder: None });
+        send(&mut app, BookmarkMutation::Move { uuid, folder: None });
         assert_eq!(count::<(With<Bookmark>, Without<ChildOf>)>(&mut app), 1);
     }
 
     #[test]
     fn remove_folder_reparents_children_to_top_level() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(fid.clone()),
             },
         );
-        send(&mut app, BookmarkOp::RemoveFolder { uuid: fid });
+        send(&mut app, BookmarkMutation::RemoveFolder { uuid: fid });
         assert_eq!(count::<With<Folder>>(&mut app), 0);
         assert_eq!(count::<(With<Bookmark>, Without<ChildOf>)>(&mut app), 1);
     }
@@ -1397,22 +1375,25 @@ mod tests {
     #[test]
     fn toggle_folder_adds_then_removes_collapsed() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let fid = folder_uuid(&mut app);
-        send(&mut app, BookmarkOp::ToggleFolder { uuid: fid.clone() });
+        send(
+            &mut app,
+            BookmarkMutation::ToggleFolder { uuid: fid.clone() },
+        );
         assert_eq!(count::<With<Collapsed>>(&mut app), 1);
-        send(&mut app, BookmarkOp::ToggleFolder { uuid: fid });
+        send(&mut app, BookmarkMutation::ToggleFolder { uuid: fid });
         assert_eq!(count::<With<Collapsed>>(&mut app), 0);
     }
 
     #[test]
     fn pin_keeps_bookmark_in_its_folder() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let folder = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(folder),
             },
@@ -1424,13 +1405,13 @@ mod tests {
             .unwrap()
             .0
             .clone();
-        send(&mut app, BookmarkOp::Pin { uuid: uuid.clone() });
+        send(&mut app, BookmarkMutation::Pin { uuid: uuid.clone() });
         assert_eq!(count::<With<Pin>>(&mut app), 1);
         assert_eq!(
             count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
             1
         );
-        send(&mut app, BookmarkOp::Unpin { uuid });
+        send(&mut app, BookmarkMutation::Unpin { uuid });
         assert_eq!(
             count::<(With<Bookmark>, Without<Pin>, With<ChildOf>)>(&mut app),
             1
@@ -1440,18 +1421,18 @@ mod tests {
     #[test]
     fn pin_url_promotes_existing_bookmark_without_duplication() {
         let mut app = test_app();
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let folder = folder_uuid(&mut app);
         send(
             &mut app,
-            BookmarkOp::Add {
+            BookmarkMutation::Add {
                 metadata: metadata("A"),
                 folder: Some(folder),
             },
         );
         send(
             &mut app,
-            BookmarkOp::PinUrl {
+            BookmarkMutation::PinUrl {
                 metadata: metadata("A"),
             },
         );
@@ -1468,13 +1449,13 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::PinUrl {
+            BookmarkMutation::PinUrl {
                 metadata: metadata("A"),
             },
         );
         send(
             &mut app,
-            BookmarkOp::ToggleForUrl {
+            BookmarkMutation::ToggleForUrl {
                 metadata: metadata("A"),
             },
         );
@@ -1483,7 +1464,7 @@ mod tests {
         assert_eq!(count::<With<Pin>>(&mut app), 1);
         send(
             &mut app,
-            BookmarkOp::ToggleForUrl {
+            BookmarkMutation::ToggleForUrl {
                 metadata: metadata("A"),
             },
         );
@@ -1497,11 +1478,11 @@ mod tests {
         let mut app = test_app();
         send(
             &mut app,
-            BookmarkOp::PinUrl {
+            BookmarkMutation::PinUrl {
                 metadata: metadata("A"),
             },
         );
-        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        send(&mut app, BookmarkMutation::AddFolder { name: "PRs".into() });
         let folder = folder_uuid(&mut app);
         let uuid = app
             .world_mut()
@@ -1512,7 +1493,7 @@ mod tests {
             .clone();
         send(
             &mut app,
-            BookmarkOp::MovePin {
+            BookmarkMutation::MovePin {
                 uuid,
                 folder: Some(folder),
             },

@@ -107,7 +107,7 @@ impl Plugin for TerminalInputPlugin {
                 TermMouseEvent,
                 TermScrollEvent,
                 TermLinkOpenRequest,
-            )>::for_hosts(&["terminal"]))
+            )>::default())
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
@@ -1041,11 +1041,7 @@ fn broadcast_service_unavailable(
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                SERVICE_UNAVAILABLE_EVENT,
-                &evt,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
         }
     }
 }
@@ -1397,11 +1393,7 @@ fn poll_service_messages(
                             mouse,
                             evicted_total,
                         };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
+                        commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
                         break;
                     }
                 }
@@ -1422,11 +1414,7 @@ fn poll_service_messages(
                             continue;
                         }
                         let evt = TermTitleEvent { title };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_TITLE_EVENT,
-                            &evt,
-                        ));
+                        commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
                         break;
                     }
                 }
@@ -1471,11 +1459,7 @@ fn poll_service_messages(
                             mouse: false,
                             evicted_total: 0,
                         };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
+                        commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
                         break;
                     }
                 }
@@ -1495,9 +1479,8 @@ fn poll_service_messages(
                             .remove::<CloseRequiresConfirmation>()
                             .remove::<AgentLoading>();
                         let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                            commands.trigger(BinHostEmitEvent::from_rkyv(
+                            commands.trigger(BinHostEmitEvent::from_event(
                                 entity,
-                                TERM_LOADING_EVENT,
                                 &crate::event::TermLoadingEvent {
                                     loading: false,
                                     label: session.kind.display_name().to_string(),
@@ -2739,9 +2722,8 @@ fn on_term_key(
             .flatten();
         if capture.apply(event, pasted) {
             let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                AGENT_PROMPT_DRAFT_EVENT,
                 &AgentPromptDraftEvent { draft, skipped },
             ));
         }
@@ -2837,9 +2819,8 @@ fn arm_agent_loading(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                AGENT_PROMPT_DRAFT_EVENT,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
@@ -2850,9 +2831,8 @@ fn arm_agent_loading(
             continue;
         }
         let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: true,
                 label,
@@ -2879,9 +2859,8 @@ fn announce_slow_shell_boot(
         }
         loading.announced = true;
         let (label, segment) = terminal_loading_labels(None);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: true,
                 label,
@@ -2916,9 +2895,8 @@ fn arm_agent_loading_on_restart(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 entity,
-                AGENT_PROMPT_DRAFT_EVENT,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
@@ -2929,9 +2907,8 @@ fn arm_agent_loading_on_restart(
             continue;
         }
         let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: true,
                 label,
@@ -2982,9 +2959,8 @@ fn clear_agent_loading(
             continue;
         }
         let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: false,
                 label,
@@ -3194,10 +3170,10 @@ fn sync_terminal_theme(
     *last_theme_hash = hash;
 
     let base_event = crate::event::TermThemeEvent {
-        foreground: colors.foreground,
-        background: colors.background,
-        cursor: colors.cursor,
-        ansi: colors.ansi,
+        foreground: colors.foreground.into(),
+        background: colors.background.into(),
+        cursor: colors.cursor.into(),
+        ansi: colors.ansi.into(),
         font_family: theme.font_family.clone(),
         font_size: theme.font_size,
         line_height: theme.line_height,
@@ -3213,11 +3189,7 @@ fn sync_terminal_theme(
 
     for entity in targets {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                TERM_THEME_EVENT,
-                &base_event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &base_event));
         }
     }
 }
@@ -3407,7 +3379,7 @@ pub fn apply_osc_title(
         {
             commands
                 .entity(entity)
-                .insert(PageIdentity::of_title(ev.title.clone()));
+                .insert(PageIdentity::from(ev.title.clone()));
         }
     }
 }
@@ -5278,7 +5250,7 @@ mod tests {
         let pid = ProcessId::new();
         let e = app
             .world_mut()
-            .spawn((Terminal, pid, vmux_core::PageIdentity::of_title("working")))
+            .spawn((Terminal, pid, vmux_core::PageIdentity::from("working")))
             .id();
 
         app.world_mut()

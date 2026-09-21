@@ -1,10 +1,10 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use vmux_api::command_bar::CommandBarTab;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
-use vmux_wire::command_bar::CommandBarTab;
 
 use crate::cef::Browser;
 use crate::pane::{Pane, PaneSplit};

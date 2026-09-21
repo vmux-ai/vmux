@@ -8,10 +8,7 @@ use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::stack::Stack;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
-use crate::event::{
-    ProjectCommandEvent, SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow,
-    SpacesListEvent,
-};
+use crate::event::{ProjectRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow, SpacesListEvent};
 use crate::spaces::{ActiveSpace, Spaces};
 
 pub struct SpacePlugin;
@@ -24,8 +21,8 @@ impl Plugin for SpacePlugin {
             .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<SaveSpaceRequest>()
-            .add_message::<SpaceCommandRequest>()
-            .add_systems(Update, relay_space_command_requests)
+            .add_message::<SpaceRequest>()
+            .add_systems(Update, relay_space_requests)
             .add_systems(
                 Update,
                 (sync_active_space_record, update_effective_startup_url).chain(),
@@ -61,13 +58,13 @@ impl Plugin for SpacePlugin {
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
                 BinEventEmitterPlugin::<(
-                    SpaceCommandEvent,
-                    ProjectCommandEvent,
+                    SpaceRequest,
+                    ProjectRequest,
                     vmux_core::event::ProjectTreeToggle,
-                )>::for_hosts(&["spaces", "layout"]),
+                )>::default(),
             ))
-            .add_observer(on_space_command)
-            .add_observer(on_project_command)
+            .add_observer(on_space_request)
+            .add_observer(on_project_request)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
@@ -80,13 +77,6 @@ impl Plugin for SpacePlugin {
 #[derive(Message, Clone)]
 pub struct SaveSpaceRequest {
     pub path: PathBuf,
-}
-
-#[derive(Message, Clone)]
-pub struct SpaceCommandRequest {
-    pub command: String,
-    pub space_id: Option<String>,
-    pub name: Option<String>,
 }
 
 fn update_effective_startup_url(
@@ -318,18 +308,14 @@ fn broadcast_spaces_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            SPACES_LIST_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         commands.entity(entity).insert(SpacesListSent);
         last_body.insert(entity, payload);
     }
 }
 
-fn on_project_command(
-    trigger: On<BinReceive<ProjectCommandEvent>>,
+fn on_project_request(
+    trigger: On<BinReceive<ProjectRequest>>,
     active: Option<Res<ActiveSpace>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
@@ -357,18 +343,11 @@ fn on_project_command(
     }
 }
 
-fn relay_space_command_requests(
-    mut reader: MessageReader<SpaceCommandRequest>,
-    mut commands: Commands,
-) {
+fn relay_space_requests(mut reader: MessageReader<SpaceRequest>, mut commands: Commands) {
     for request in reader.read() {
         commands.trigger(BinReceive {
             webview: Entity::PLACEHOLDER,
-            payload: SpaceCommandEvent {
-                command: request.command.clone(),
-                space_id: request.space_id.clone(),
-                name: request.name.clone(),
-            },
+            payload: request.clone(),
         });
     }
 }
@@ -520,8 +499,8 @@ fn sync_space_name_to_id(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn on_space_command(
-    trigger: On<BinReceive<SpaceCommandEvent>>,
+fn on_space_request(
+    trigger: On<BinReceive<SpaceRequest>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
@@ -538,28 +517,26 @@ fn on_space_command(
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    if evt.command == "rename" {
-        let Some(id) = evt.space_id.as_deref() else {
+    if let SpaceRequest::Rename { space_id, name } = evt {
+        let name = name.trim();
+        if name.is_empty() {
             return;
-        };
-        let Some(name) = evt.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
-            return;
-        };
-        if !spaces.iter().any(|(_, sid, _, _, _)| sid.0 == id) {
+        }
+        if !spaces.iter().any(|(_, sid, _, _, _)| sid.0 == *space_id) {
             return;
         }
         let existing: std::collections::HashSet<String> = spaces
             .iter()
-            .filter(|(_, sid, _, _, _)| sid.0 != id)
+            .filter(|(_, sid, _, _, _)| sid.0 != *space_id)
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
         let new_id = crate::model::unique_space_id_among(&existing, name);
-        let renamed_active = active_id.0.as_deref() == Some(id)
+        let renamed_active = active_id.0.as_deref() == Some(space_id)
             || spaces
                 .iter()
-                .any(|(_, sid, is_active, _, _)| sid.0 == id && is_active);
+                .any(|(_, sid, is_active, _, _)| sid.0 == *space_id && is_active);
         for (entity, sid, _, _, _) in spaces.iter() {
-            if sid.0 != id {
+            if sid.0 != *space_id {
                 continue;
             }
             commands.entity(entity).insert((
@@ -567,9 +544,9 @@ fn on_space_command(
                 vmux_layout::space::SpaceId(new_id.clone()),
             ));
         }
-        if new_id != id {
+        if new_id != *space_id {
             for (tab, sid, _, _) in tabs.iter() {
-                if sid.0 != id {
+                if sid.0 != *space_id {
                     continue;
                 }
                 commands
@@ -593,7 +570,7 @@ fn on_space_command(
         return;
     };
 
-    if evt.command == "open_page" {
+    if matches!(evt, SpaceRequest::OpenPage) {
         if let Some((existing, _)) = stack_q.iter().find(|(stack, meta)| {
             meta.url == SPACES_PAGE_URL
                 && vmux_layout::window::host_window_of(*stack, &child_of_q, &host_windows)
@@ -626,10 +603,8 @@ fn on_space_command(
         return;
     }
 
-    if evt.command == "delete" {
-        let Some(id) = evt.space_id.as_deref() else {
-            return;
-        };
+    if let SpaceRequest::Delete { space_id } = evt {
+        let id = space_id.as_str();
         let logical_ids: std::collections::HashSet<&str> = spaces
             .iter()
             .map(|(_, id, _, _, _)| id.0.as_str())
@@ -688,11 +663,9 @@ fn on_space_command(
         return;
     }
 
-    match evt.command.as_str() {
-        "attach" => {
-            let Some(id) = evt.space_id.as_deref() else {
-                return;
-            };
+    match evt {
+        SpaceRequest::Attach { space_id } => {
+            let id = space_id.as_str();
             let local = spaces
                 .iter()
                 .find(|(_, sid, _, _, parent)| sid.0 == id && parent.parent() == main);
@@ -720,16 +693,16 @@ fn on_space_command(
                 bump_space_tab(&tabs, entity, &mut commands);
             }
         }
-        "new" => {
+        SpaceRequest::Create { name } => {
             let count = spaces
                 .iter()
                 .filter(|(_, _, _, _, parent)| parent.parent() == main)
                 .count();
-            let name = evt
-                .name
-                .clone()
-                .filter(|n| !n.trim().is_empty())
-                .unwrap_or_else(|| format!("Space {}", count + 1));
+            let name = if name.trim().is_empty() {
+                format!("Space {}", count + 1)
+            } else {
+                name.trim().to_string()
+            };
             let existing: std::collections::HashSet<String> = spaces
                 .iter()
                 .map(|(_, sid, _, _, _)| sid.0.clone())
@@ -772,7 +745,7 @@ fn on_space_command(
                 focus: true,
             });
         }
-        _ => {}
+        SpaceRequest::OpenPage | SpaceRequest::Delete { .. } | SpaceRequest::Rename { .. } => {}
     }
 }
 
@@ -1000,7 +973,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_request);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
@@ -1041,10 +1014,8 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: SpaceCommandEvent {
-                command: "attach".to_string(),
-                space_id: Some("shared".to_string()),
-                name: None,
+            payload: SpaceRequest::Attach {
+                space_id: "shared".to_string(),
             },
         });
         app.update();
@@ -1082,7 +1053,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_request);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
@@ -1119,10 +1090,8 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: SpaceCommandEvent {
-                command: "delete".to_string(),
-                space_id: Some("shared".to_string()),
-                name: None,
+            payload: SpaceRequest::Delete {
+                space_id: "shared".to_string(),
             },
         });
         app.update();
@@ -1265,7 +1234,7 @@ mod tests {
         );
     }
 
-    fn project_command_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
+    fn project_request_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
         let mut settings = test_settings();
         settings.spaces.insert(
             "work".into(),
@@ -1286,15 +1255,15 @@ mod tests {
                     profile: bootstrap_profile_name(),
                 },
             })
-            .add_observer(on_project_command);
+            .add_observer(on_project_request);
         app
     }
 
-    fn run_project_command(app: &mut App, command: &str, path: &str) {
+    fn run_project_request(app: &mut App, command: &str, path: &str) {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: ProjectCommandEvent {
+            payload: ProjectRequest {
                 command: command.into(),
                 path: Some(path.into()),
             },
@@ -1316,7 +1285,7 @@ mod tests {
 
     #[test]
     fn activating_a_project_moves_only_the_space_default() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/alpha",
             vec![
                 vmux_setting::SpaceProject::at("/repo/alpha"),
@@ -1343,7 +1312,7 @@ mod tests {
             })
             .collect();
 
-        run_project_command(&mut app, "activate", "/repo/beta");
+        run_project_request(&mut app, "activate", "/repo/beta");
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
         let after: Vec<Option<String>> = tabs
@@ -1362,7 +1331,7 @@ mod tests {
 
     #[test]
     fn forgetting_the_active_project_falls_back_to_one_that_remains() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/beta",
             vec![
                 vmux_setting::SpaceProject::at("/repo/alpha"),
@@ -1370,7 +1339,7 @@ mod tests {
             ],
         );
 
-        run_project_command(&mut app, "forget", "/repo/beta");
+        run_project_request(&mut app, "forget", "/repo/beta");
 
         assert_eq!(
             space_state(&app),
@@ -1380,12 +1349,12 @@ mod tests {
 
     #[test]
     fn activating_a_project_the_space_does_not_hold_is_ignored() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/alpha",
             vec![vmux_setting::SpaceProject::at("/repo/alpha")],
         );
 
-        run_project_command(&mut app, "activate", "/repo/elsewhere");
+        run_project_request(&mut app, "activate", "/repo/elsewhere");
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/alpha"));
     }
@@ -1556,7 +1525,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_request);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
         let main = app.world_mut().spawn(vmux_layout::window::Main).id();
         let space = app
@@ -1581,10 +1550,9 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview: Entity::PLACEHOLDER,
-            payload: SpaceCommandEvent {
-                command: "rename".to_string(),
-                space_id: Some("rename-src-test".to_string()),
-                name: Some("Vmux Ai/Vmux".to_string()),
+            payload: SpaceRequest::Rename {
+                space_id: "rename-src-test".to_string(),
+                name: "Vmux Ai/Vmux".to_string(),
             },
         });
         app.update();

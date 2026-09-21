@@ -78,7 +78,7 @@ mod tests {
     }
 
     impl Spaces {
-        fn of_one() -> Self {
+        fn one() -> Self {
             let mut app = App::new();
             app.init_resource::<CommandBarSpacesSnapshot>()
                 .add_systems(Update, update_spaces_snapshot);
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn writes_active_name_and_url() {
-        let mut spaces = Spaces::of_one();
+        let mut spaces = Spaces::one();
         spaces.republished();
         let snap = spaces.snapshot();
 
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn an_unchanged_space_list_is_not_republished() {
-        let mut spaces = Spaces::of_one();
+        let mut spaces = Spaces::one();
         assert!(spaces.republished(), "the first list has to reach the bar");
 
         assert!(
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn a_renamed_space_is_republished() {
-        let mut spaces = Spaces::of_one();
+        let mut spaces = Spaces::one();
         spaces.republished();
         spaces.rename("Renamed");
 

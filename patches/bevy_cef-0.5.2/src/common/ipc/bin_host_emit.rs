@@ -3,35 +3,63 @@ use bevy_cef_core::prelude::*;
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
+use vmux_api::{BinEventTarget, HostEvent};
 
 #[derive(Reflect, Debug, Clone, EntityEvent)]
 #[reflect(opaque)]
 pub struct BinHostEmitEvent {
     #[event_target]
-    pub webview: Entity,
-    pub id: String,
-    pub payload: Vec<u8>,
+    webview: Entity,
+    id: &'static str,
+    target: BinEventTarget,
+    payload: Vec<u8>,
 }
 
 impl BinHostEmitEvent {
-    pub fn from_bytes(webview: Entity, id: impl Into<String>, payload: Vec<u8>) -> Self {
+    fn from_bytes<T>(webview: Entity, payload: Vec<u8>) -> Self
+    where
+        T: HostEvent,
+    {
         Self {
             webview,
-            id: id.into(),
+            id: T::id(),
+            target: T::TARGET,
             payload,
         }
     }
 
-    pub fn from_rkyv<T>(webview: Entity, id: impl Into<String>, value: &T) -> Self
+    pub fn from_event<T>(webview: Entity, value: &T) -> Self
     where
-        T: for<'a> rkyv::Serialize<
+        T: HostEvent
+            + for<'a> rkyv::Serialize<
                 HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>,
             >,
     {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(value)
-            .map(|b| b.into_vec())
-            .unwrap_or_default();
-        Self::from_bytes(webview, id, bytes)
+        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(value)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to serialize binary host event {}: {error:?}",
+                    T::id()
+                )
+            })
+            .into_vec();
+        Self::from_bytes::<T>(webview, payload)
+    }
+
+    pub const fn webview(&self) -> Entity {
+        self.webview
+    }
+
+    pub const fn id(&self) -> &'static str {
+        self.id
+    }
+
+    pub const fn target(&self) -> BinEventTarget {
+        self.target
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
     }
 }
 
@@ -45,7 +73,17 @@ impl Plugin for BinHostEmitPlugin {
 }
 
 fn bin_host_emit(trigger: On<BinHostEmitEvent>, browsers: NonSend<Browsers>) {
-    browsers.emit_event_bytes(&trigger.webview, trigger.id.clone(), &trigger.payload);
+    let Some(host) = browsers.page_host(&trigger.webview()) else {
+        return;
+    };
+    if !trigger.target().accepts(&host) {
+        warn!(
+            "blocked binary host event {} for unexpected page host {host}",
+            trigger.id()
+        );
+        return;
+    }
+    browsers.emit_event_bytes(&trigger.webview(), trigger.id(), trigger.payload());
 }
 
 #[cfg(test)]
@@ -54,17 +92,19 @@ mod tests {
     use bevy::prelude::Entity;
 
     #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+    #[vmux_api::host_event(name = "test", target = "test-host")]
     struct TestPayload {
         value: u32,
     }
 
     #[test]
-    fn bin_host_emit_event_from_rkyv_round_trips() {
+    fn bin_host_emit_event_from_event_round_trips() {
         let original = TestPayload { value: 42 };
-        let event = BinHostEmitEvent::from_rkyv(Entity::PLACEHOLDER, "test-id", &original);
-        assert_eq!(event.id, "test-id");
+        let event = BinHostEmitEvent::from_event(Entity::PLACEHOLDER, &original);
+        assert_eq!(event.id(), "test@1");
+        assert_eq!(event.target(), BinEventTarget::Host("test-host"));
         let recovered =
-            rkyv::from_bytes::<TestPayload, rkyv::rancor::Error>(&event.payload).expect("decode");
+            rkyv::from_bytes::<TestPayload, rkyv::rancor::Error>(event.payload()).expect("decode");
         assert_eq!(original, recovered);
     }
 }

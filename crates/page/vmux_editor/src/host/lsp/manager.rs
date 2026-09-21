@@ -98,9 +98,9 @@ pub enum ReqKind {
     Hover { line: u32, col: u32 },
     Definition,
     References,
-    Rename,
+    Rename { root: PathBuf },
     CodeAction,
-    Formatting { path: PathBuf },
+    Formatting { path: PathBuf, root: PathBuf },
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
@@ -131,6 +131,7 @@ pub struct LspFolds {
 #[derive(Message)]
 pub struct LspRequestedEdit {
     pub entity: Entity,
+    pub root: PathBuf,
     pub result: Result<lsp_types::WorkspaceEdit, String>,
 }
 pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
@@ -525,7 +526,8 @@ impl LspManager {
         entity: Entity,
         index: usize,
         path: &Path,
-    ) -> Option<lsp_types::WorkspaceEdit> {
+    ) -> Option<(PathBuf, lsp_types::WorkspaceEdit)> {
+        let root = self.open_docs.get(path)?.key.0.clone();
         let chosen = self.offered_actions.get(&entity)?.get(index)?;
         match chosen.clone() {
             lsp_types::CodeActionOrCommand::Command(command) => {
@@ -536,7 +538,7 @@ impl LspManager {
                 if let Some(command) = &action.command {
                     self.execute_command(path, command);
                 }
-                action.edit
+                action.edit.map(|edit| (root, edit))
             }
         }
     }
@@ -621,6 +623,7 @@ impl LspManager {
         let Some(client) = self.servers.get(&doc.key) else {
             return;
         };
+        let root = doc.key.0.clone();
         if !client.provides(method) {
             return;
         }
@@ -638,6 +641,7 @@ impl LspManager {
             entity,
             kind: ReqKind::Formatting {
                 path: path.to_path_buf(),
+                root,
             },
             rx,
         });
@@ -661,6 +665,9 @@ impl LspManager {
         utf16_col: u32,
         new_name: &str,
     ) {
+        let Some(root) = self.open_docs.get(path).map(|doc| doc.key.0.clone()) else {
+            return;
+        };
         self.send_doc_request(
             entity,
             path,
@@ -668,7 +675,7 @@ impl LspManager {
             line,
             utf16_col,
             serde_json::json!({ "newName": new_name }),
-            ReqKind::Rename,
+            ReqKind::Rename { root },
         );
     }
 
@@ -993,7 +1000,6 @@ fn drain_lsp_requests(
     mut commands: Commands,
 ) {
     use vmux_core::event::{
-        EXPLORER_OUTLINE_EVENT, FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT,
         FileCompletionEvent, FileHoverEvent, FileReferencesEvent, OutlineEvent, RefItem,
     };
     let drained = std::mem::take(&mut manager.inflight);
@@ -1012,9 +1018,8 @@ fn drain_lsp_requests(
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                    commands.trigger(BinHostEmitEvent::from_event(
                         f.entity,
-                        FILE_HOVER_EVENT,
                         &FileHoverEvent { line, col, blocks },
                     ));
                 }
@@ -1029,7 +1034,7 @@ fn drain_lsp_requests(
                     });
                 }
             }
-            ReqKind::Rename => {
+            ReqKind::Rename { root } => {
                 let result = if value.is_null() {
                     Err("the language server would not rename this".to_string())
                 } else {
@@ -1038,6 +1043,7 @@ fn drain_lsp_requests(
                 };
                 edit_w.write(LspRequestedEdit {
                     entity: f.entity,
+                    root,
                     result,
                 });
             }
@@ -1056,22 +1062,20 @@ fn drain_lsp_requests(
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                    commands.trigger(BinHostEmitEvent::from_event(
                         f.entity,
-                        vmux_core::event::FILE_EDIT_FAILED_EVENT,
                         &vmux_core::event::FileEditFailedEvent {
                             reason: "no code actions here".to_string(),
                         },
                     ));
                     continue;
                 }
-                commands.trigger(BinHostEmitEvent::from_rkyv(
+                commands.trigger(BinHostEmitEvent::from_event(
                     f.entity,
-                    vmux_core::event::FILE_CODE_ACTIONS_EVENT,
                     &vmux_core::event::FileCodeActionsEvent { titles },
                 ));
             }
-            ReqKind::Formatting { path } => {
+            ReqKind::Formatting { path, root } => {
                 let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(value) {
                     Ok(edits) if edits.is_empty() => continue,
                     Ok(edits) => one_document_edit(&path, edits)
@@ -1080,6 +1084,7 @@ fn drain_lsp_requests(
                 };
                 edit_w.write(LspRequestedEdit {
                     entity: f.entity,
+                    root,
                     result,
                 });
             }
@@ -1099,9 +1104,8 @@ fn drain_lsp_requests(
                     })
                     .collect();
                 if !items.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                    commands.trigger(BinHostEmitEvent::from_event(
                         f.entity,
-                        FILE_REFERENCES_EVENT,
                         &FileReferencesEvent { items },
                     ));
                 }
@@ -1112,9 +1116,8 @@ fn drain_lsp_requests(
             } => {
                 let items = parse_completion(&value);
                 if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                    commands.trigger(BinHostEmitEvent::from_event(
                         f.entity,
-                        FILE_COMPLETION_EVENT,
                         &FileCompletionEvent {
                             items,
                             replace_from_col,
@@ -1133,9 +1136,8 @@ fn drain_lsp_requests(
             ReqKind::DocumentSymbol => {
                 let items = crate::explorer_model::flatten_symbols(&value);
                 if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                    commands.trigger(BinHostEmitEvent::from_event(
                         f.entity,
-                        EXPLORER_OUTLINE_EVENT,
                         &OutlineEvent { items },
                     ));
                 }
@@ -1231,7 +1233,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
 }
 
 use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-use vmux_core::event::{FILE_DIAGNOSTICS_EVENT, FileDiagnosticsEvent};
+use vmux_core::event::FileDiagnosticsEvent;
 
 use crate::lsp::LintOutbox;
 
@@ -1272,9 +1274,8 @@ fn emit_diagnostics_system(
             None if merged.is_empty() => continue,
             _ => {}
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_DIAGNOSTICS_EVENT,
             &FileDiagnosticsEvent {
                 path: fv.path.to_string_lossy().into_owned(),
                 diagnostics: merged.clone(),
@@ -1391,7 +1392,7 @@ fn lsp_status_system(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FILE_LSP_STATUS_EVENT, FileLspStatusEvent, LspServerState};
+    use vmux_core::event::{FileLspStatusEvent, LspServerState};
     let overrides = server_overrides(&settings);
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -1411,9 +1412,8 @@ fn lsp_status_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            FILE_LSP_STATUS_EVENT,
             &FileLspStatusEvent {
                 path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),

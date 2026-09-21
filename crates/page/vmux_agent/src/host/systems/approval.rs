@@ -146,7 +146,7 @@ pub(crate) fn handle_approval_reply(
     if let Some(service) = service.as_ref() {
         service.0.send(ClientMessage::Shared(SharedMessage::agent(
             sid,
-            vmux_wire::protocol::AgentAction::Approve {
+            vmux_api::protocol::AgentAction::Approve {
                 call_id: reply.call_id.clone(),
                 decision: reply.decision,
             },

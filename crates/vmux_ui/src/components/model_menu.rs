@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_wire::room::ModelOptionEntry;
+use vmux_api::room::ModelOptionEntry;
 
 use crate::components::prompt_box::{
     PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,

@@ -24,7 +24,7 @@ pub fn EditorBreadcrumbs(
         siblings: use_signal(Vec::<FileDirEntry>::new),
         pending: use_signal(|| false),
     };
-    let _listing = use_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |event| {
+    let _listing = use_listener::<FilePreviewEvent, _>(move |event| {
         menus.receive(event);
     });
 

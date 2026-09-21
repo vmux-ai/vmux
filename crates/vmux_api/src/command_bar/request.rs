@@ -11,7 +11,8 @@ use super::CommandBarPick;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub enum CommandBarActionEvent {
+#[vmux_api::ui_event(namespace = "command_bar", name = "request", targets = ["command-bar", "start", "layout"])]
+pub enum CommandBarRequest {
     Prompt {
         text: String,
         target_url: Option<String>,
@@ -109,11 +110,10 @@ impl ExCommandName {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "select_workspace", target = "start")]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
 }
-
-pub const START_PROJECT_BRANCHES_EVENT: &str = "start_project_branches";
 
 #[derive(
     Clone,
@@ -125,6 +125,7 @@ pub const START_PROJECT_BRANCHES_EVENT: &str = "start_project_branches";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "branches_request", target = "start")]
 pub struct StartBranchesRequest {
     pub project: String,
 }
@@ -139,6 +140,7 @@ pub struct StartBranchesRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "start", name = "project_branches", target = "start")]
 pub struct StartProjectBranches {
     pub project: String,
     pub branches: Vec<crate::space::ProjectBranch>,
@@ -154,6 +156,7 @@ pub struct StartProjectBranches {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "go_to_branch", target = "start")]
 pub struct StartGoToBranch {
     pub project: String,
     pub branch: String,
@@ -207,6 +210,7 @@ pub struct AgentModes {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "select_model", target = "start")]
 pub struct StartSelectModel {
     pub agent_key: String,
     pub model_id: String,
@@ -222,12 +226,13 @@ pub struct StartSelectModel {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "start", name = "select_mode", target = "start")]
 pub struct StartSelectMode {
     pub agent_key: String,
     pub mode_id: String,
 }
 
-impl CommandBarActionEvent {
+impl CommandBarRequest {
     pub fn open(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
         Self::Open {
             value: value.to_string(),

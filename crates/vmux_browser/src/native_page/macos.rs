@@ -324,10 +324,18 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, hosted: Option<NonSend<Hos
     let Some(hosted) = hosted else {
         return;
     };
-    let Some(page) = hosted.get(host_emit.webview) else {
+    let Some(page) = hosted.get(host_emit.webview()) else {
         return;
     };
-    page.surface.deliver(&host_emit.id, &host_emit.payload);
+    let host = embedded_page_host_of(page.page.url).unwrap_or_default();
+    if !host_emit.target().accepts(&host) {
+        warn!(
+            "blocked binary host event {} for unexpected native page host {host}",
+            host_emit.id()
+        );
+        return;
+    }
+    page.surface.deliver(host_emit.id(), host_emit.payload());
 }
 
 fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<AppSettings>) {

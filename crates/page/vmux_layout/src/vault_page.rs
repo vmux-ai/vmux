@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolsSnapshot};
+use vmux_core::tools::ToolsSnapshot;
 use vmux_core::vault::{
-    VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
-    VaultActionResult, VaultAuthProgress, VaultRefreshRequest, VaultSnapshot,
+    VaultAction, VaultActionRequest, VaultActionResult, VaultAuthProgress, VaultRefreshRequest,
+    VaultSnapshot,
 };
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
@@ -79,7 +79,7 @@ pub fn Page() -> Element {
     let mut cloud_root = use_signal(String::new);
     let private = use_signal(|| true);
 
-    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(move |event| {
         if pending() == Some(VaultAction::ConnectGithub)
             && (event.vault.repositories_loaded || !event.vault.error.is_empty())
         {
@@ -108,69 +108,67 @@ pub fn Page() -> Element {
         snapshot.set(event);
         loaded.set(true);
     });
-    let _action_listener =
-        use_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |mut result| {
-            if result.action == VaultAction::ConnectGithub {
-                github_device_code.set(String::new());
-                github_device_code_copied.set(false);
-            }
-            if result.action == VaultAction::Sync && result.success {
-                recovery_upload_pending.set(false);
-            }
-            if !result.success {
-                match result.action {
-                    VaultAction::Sync => {
-                        result.message = translate("vault-backup-failed");
-                    }
-                    VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
-                        result.message = translate("vault-recovery-key-create-failed");
-                    }
-                    VaultAction::UnlockRecoveryKey => {
-                        result.message = translate("vault-recovery-key-invalid");
-                    }
-                    _ => {}
-                }
-            }
-            if result.action == VaultAction::GenerateRecoveryKey && result.success {
-                generated_recovery_key.set(result.message);
-                recovery_key_confirmation.set(String::new());
-                recovery_key_copied.set(false);
-                pending.set(None);
-                notice.set(None);
-            } else if result.action == VaultAction::CreateRecoveryKey && result.success {
-                generated_recovery_key.set(String::new());
-                recovery_key_confirmation.set(String::new());
-                recovery_key_copied.set(false);
-                recovery_upload_pending.set(result.pending_upload);
-                pending.set(None);
-                notice.set(None);
-            } else if result.action == VaultAction::UnlockRecoveryKey && result.success {
-                recovery_key_input.set(String::new());
-                pending.set(None);
-                notice.set(Some(result));
-            } else if result.action == VaultAction::ConnectCloud && result.success {
-                cloud_root.set(result.message);
-                pending.set(None);
-                notice.set(None);
-            } else if result.action == VaultAction::ConnectGithub && result.success {
-                let mut current = snapshot();
-                current.vault.github_owner = result.message.clone();
-                current.vault.github_owners = vec![result.message.clone()];
-                current.vault.repositories.clear();
-                current.vault.repositories_loaded = false;
-                current.vault.error.clear();
-                snapshot.set(current);
-                notice.set(None);
-            } else {
-                pending.set(None);
-                notice.set(Some(result));
-            }
-        });
-    let _auth_progress_listener =
-        use_listener::<VaultAuthProgress, _>(VAULT_AUTH_PROGRESS_EVENT, move |progress| {
+    let _action_listener = use_listener::<VaultActionResult, _>(move |mut result| {
+        if result.action == VaultAction::ConnectGithub {
+            github_device_code.set(String::new());
             github_device_code_copied.set(false);
-            github_device_code.set(progress.code);
-        });
+        }
+        if result.action == VaultAction::Sync && result.success {
+            recovery_upload_pending.set(false);
+        }
+        if !result.success {
+            match result.action {
+                VaultAction::Sync => {
+                    result.message = translate("vault-backup-failed");
+                }
+                VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
+                    result.message = translate("vault-recovery-key-create-failed");
+                }
+                VaultAction::UnlockRecoveryKey => {
+                    result.message = translate("vault-recovery-key-invalid");
+                }
+                _ => {}
+            }
+        }
+        if result.action == VaultAction::GenerateRecoveryKey && result.success {
+            generated_recovery_key.set(result.message);
+            recovery_key_confirmation.set(String::new());
+            recovery_key_copied.set(false);
+            pending.set(None);
+            notice.set(None);
+        } else if result.action == VaultAction::CreateRecoveryKey && result.success {
+            generated_recovery_key.set(String::new());
+            recovery_key_confirmation.set(String::new());
+            recovery_key_copied.set(false);
+            recovery_upload_pending.set(result.pending_upload);
+            pending.set(None);
+            notice.set(None);
+        } else if result.action == VaultAction::UnlockRecoveryKey && result.success {
+            recovery_key_input.set(String::new());
+            pending.set(None);
+            notice.set(Some(result));
+        } else if result.action == VaultAction::ConnectCloud && result.success {
+            cloud_root.set(result.message);
+            pending.set(None);
+            notice.set(None);
+        } else if result.action == VaultAction::ConnectGithub && result.success {
+            let mut current = snapshot();
+            current.vault.github_owner = result.message.clone();
+            current.vault.github_owners = vec![result.message.clone()];
+            current.vault.repositories.clear();
+            current.vault.repositories_loaded = false;
+            current.vault.error.clear();
+            snapshot.set(current);
+            notice.set(None);
+        } else {
+            pending.set(None);
+            notice.set(Some(result));
+        }
+    });
+    let _auth_progress_listener = use_listener::<VaultAuthProgress, _>(move |progress| {
+        github_device_code_copied.set(false);
+        github_device_code.set(progress.code);
+    });
 
     use_effect(move || {
         locale();

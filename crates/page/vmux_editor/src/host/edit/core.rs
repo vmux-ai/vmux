@@ -370,7 +370,7 @@ impl EditCore {
             .slice(line_start..line_start + col)
             .chars()
             .collect();
-        DisplayCells::of_str(&s)
+        DisplayCells::width_of(&s)
     }
 
     pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {

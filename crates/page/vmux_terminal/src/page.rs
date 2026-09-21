@@ -128,11 +128,9 @@ pub fn Page() -> Element {
     });
 
     let _err_listener =
-        use_listener::<ServiceUnavailableEvent, _>(SERVICE_UNAVAILABLE_EVENT, move |evt| {
-            service_error.set(evt.message)
-        });
+        use_listener::<ServiceUnavailableEvent, _>(move |evt| service_error.set(evt.message));
 
-    let _listener = use_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
+    let _listener = use_listener::<TermViewportPatch, _>(move |patch| {
         let first = patch.first_row;
         if *first_row.peek() != first {
             first_row.set(first);
@@ -267,15 +265,15 @@ pub fn Page() -> Element {
         });
     });
 
-    let _theme_listener = use_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
+    let _theme_listener = use_listener::<TermThemeEvent, _>(move |data| {
         theme.set(Some(data));
     });
 
-    let _title_listener = use_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
+    let _title_listener = use_listener::<TermTitleEvent, _>(move |evt| {
         raw_title.set(evt.title);
     });
 
-    let _loading_listener = use_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
+    let _loading_listener = use_listener::<TermLoadingEvent, _>(move |evt| {
         loading.set(if evt.loading {
             Some((evt.label, evt.segment))
         } else {
@@ -284,10 +282,9 @@ pub fn Page() -> Element {
         });
     });
 
-    let _prompt_draft_listener =
-        use_listener::<AgentPromptDraftEvent, _>(AGENT_PROMPT_DRAFT_EVENT, move |evt| {
-            prompt_draft.set((evt.draft, evt.skipped));
-        });
+    let _prompt_draft_listener = use_listener::<AgentPromptDraftEvent, _>(move |evt| {
+        prompt_draft.set((evt.draft, evt.skipped));
+    });
 
     let locate_container = move || {
         spawn(async move {
@@ -311,12 +308,13 @@ pub fn Page() -> Element {
         let t = theme();
         match t {
             Some(t) => {
-                let [fr, fg, fb] = t.foreground;
-                let [cr, cg, cb] = t.cursor;
+                let [fr, fg, fb] = t.foreground.components();
+                let [cr, cg, cb] = t.cursor.components();
                 let mut s = format!(
                     "--term-fg:rgb({fr},{fg},{fb});--term-bg:var(--background);--term-cursor:rgb({cr},{cg},{cb});"
                 );
-                for (i, [r, g, b]) in t.ansi.iter().enumerate() {
+                for (i, color) in t.ansi.iter().enumerate() {
+                    let [r, g, b] = color.components();
                     s.push_str(&format!("--ansi-{i}:rgb({r},{g},{b});"));
                 }
                 if !t.font_family.is_empty() {

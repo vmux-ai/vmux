@@ -52,7 +52,7 @@ impl From<Chat> for ChatMenuSet {
         let permission = PermissionMenuData {
             modes: (chat.permissions.modes)(),
             current_mode_id: (chat.permissions.current_mode_id)(),
-            on_select: EventHandler::new(move |mode: vmux_wire::protocol::AcpModeOption| {
+            on_select: EventHandler::new(move |mode: vmux_api::protocol::AcpModeOption| {
                 chat.select_mode(mode.id)
             }),
         };
@@ -140,7 +140,7 @@ impl ChatMenuSet {
         true
     }
 
-    fn roots(&self) -> Vec<&vmux_wire::space::ProjectRow> {
+    fn roots(&self) -> Vec<&vmux_api::space::ProjectRow> {
         let mut roots = Vec::new();
         for project in &self.project.projects {
             if project.depth == 0 {

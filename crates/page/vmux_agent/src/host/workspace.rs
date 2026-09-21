@@ -708,7 +708,7 @@ mod tests {
             chat_agent_continuation_message("sid-1", "continue original request"),
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: vmux_wire::protocol::AgentAction::Input { text, context, .. },
+                action: vmux_api::protocol::AgentAction::Input { text, context, .. },
             })
                 if sid == "sid-1"
                     && text.is_empty()

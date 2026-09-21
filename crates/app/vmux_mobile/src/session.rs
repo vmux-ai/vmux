@@ -4,8 +4,8 @@ use crate::take_resumed;
 use crate::transition;
 use dioxus::prelude::*;
 use std::time::Duration;
+use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
 use vmux_chat::room::{Conversation, LiveTurn, Log, Reported};
-use vmux_wire::room::{NewChatRequest, RemoteEvent, RemoteSession};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum AuthState {

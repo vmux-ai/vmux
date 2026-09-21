@@ -1,8 +1,4 @@
 pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-pub const SETTINGS_LIST_EVENT: &str = "settings_list";
-pub const SETTINGS_SCHEMA_EVENT: &str = "settings_schema";
-pub const UPDATE_CHECK_STATUS_EVENT: &str = "update_check_status";
-
 #[derive(
     Clone,
     Copy,
@@ -16,6 +12,7 @@ pub const UPDATE_CHECK_STATUS_EVENT: &str = "update_check_status";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(name = "check_for_updates", target = "settings")]
 pub struct CheckForUpdatesEvent;
 
 #[derive(
@@ -60,6 +57,7 @@ pub enum UpdateCheckStatus {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "update", name = "check_status", target = "settings")]
 pub struct UpdateCheckStatusEvent {
     pub status: UpdateCheckStatus,
 }
@@ -84,6 +82,7 @@ pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "settings", name = "list", target = "settings")]
 pub struct SettingsListEvent {
     pub json: String,
 }
@@ -100,7 +99,8 @@ pub struct SettingsListEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SettingsCommandEvent {
+#[vmux_api::ui_event(namespace = "settings", name = "request", target = "settings")]
+pub struct SettingsRequest {
     pub path: String,
     pub value: String,
 }
@@ -117,6 +117,7 @@ pub struct SettingsCommandEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "settings", name = "schema", target = "settings")]
 pub struct SettingsSchemaEvent {
     pub json: String,
 }
@@ -137,14 +138,13 @@ mod tests {
     }
 
     #[test]
-    fn settings_command_event_rkyv_roundtrip() {
-        let original = SettingsCommandEvent {
+    fn settings_request_rkyv_roundtrip() {
+        let original = SettingsRequest {
             path: "layout.pane.gap".to_string(),
             value: "12.0".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let decoded =
-            rkyv::from_bytes::<SettingsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        let decoded = rkyv::from_bytes::<SettingsRequest, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(decoded, original);
     }
 

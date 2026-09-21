@@ -3,6 +3,61 @@ use serde::{Deserialize, Serialize};
 #[derive(
     Debug,
     Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RgbColor([u8; 3]);
+
+impl RgbColor {
+    pub const fn components(self) -> [u8; 3] {
+        self.0
+    }
+}
+
+impl From<[u8; 3]> for RgbColor {
+    fn from(value: [u8; 3]) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AnsiPalette([RgbColor; 16]);
+
+impl AnsiPalette {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &RgbColor> {
+        self.0.iter()
+    }
+}
+
+impl From<[[u8; 3]; 16]> for AnsiPalette {
+    fn from(value: [[u8; 3]; 16]) -> Self {
+        Self(value.map(RgbColor::from))
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
     Serialize,
     Deserialize,
     Default,

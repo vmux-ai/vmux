@@ -4,9 +4,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 
 use vmux_chat::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
+    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
+    ChatPickFiles,
 };
 
 pub(super) struct ChatMediaPlugin;
@@ -19,7 +19,7 @@ impl Plugin for ChatMediaPlugin {
             ChatMediaListRequest,
             ChatAttachPaths,
             ChatAttachmentPreviewRequest,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
+        )>::default())
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
             .add_observer(on_chat_media_list_request)
@@ -39,8 +39,14 @@ impl Plugin for ChatMediaPlugin {
 #[derive(Component)]
 struct ChatAttachmentTask {
     webview: Entity,
-    event: &'static str,
-    task: Task<ChatAttachments>,
+    delivery: ChatAttachmentDelivery,
+    task: Task<Vec<ChatAttachment>>,
+}
+
+#[derive(Clone, Copy)]
+enum ChatAttachmentDelivery {
+    Selected,
+    Previews,
 }
 
 #[derive(Component)]
@@ -147,9 +153,8 @@ fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
 
 fn spawn_chat_attachment_task(
     webview: Entity,
-    event: &'static str,
+    delivery: ChatAttachmentDelivery,
     paths: Vec<std::path::PathBuf>,
-    previews: bool,
     wake: vmux_core::host::wake::Wake,
     commands: &mut Commands,
 ) {
@@ -158,20 +163,17 @@ fn spawn_chat_attachment_task(
     }
     let task = IoTaskPool::get().spawn(async move {
         let _wake = wake;
-        ChatAttachments {
-            attachments: paths
-                .into_iter()
-                .filter_map(if previews {
-                    chat_attachment_preview
-                } else {
-                    chat_attachment
-                })
-                .collect(),
-        }
+        paths
+            .into_iter()
+            .filter_map(match delivery {
+                ChatAttachmentDelivery::Previews => chat_attachment_preview,
+                ChatAttachmentDelivery::Selected => chat_attachment,
+            })
+            .collect()
     });
     commands.spawn(ChatAttachmentTask {
         webview,
-        event,
+        delivery,
         task,
     });
 }
@@ -184,9 +186,8 @@ fn spawn_selected_attachment_tasks(
 ) {
     spawn_chat_attachment_task(
         webview,
-        CHAT_ATTACHMENTS_EVENT,
+        ChatAttachmentDelivery::Selected,
         paths.clone(),
-        false,
         wake,
         commands,
     );
@@ -406,9 +407,8 @@ fn on_chat_attachment_preview_request(
         .collect();
     spawn_chat_attachment_task(
         trigger.event().webview,
-        CHAT_ATTACHMENT_PREVIEWS_EVENT,
+        ChatAttachmentDelivery::Previews,
         paths,
-        true,
         vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
@@ -479,24 +479,32 @@ fn drain_chat_attachment_tasks(
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        let preview_paths = (pending.event == CHAT_ATTACHMENTS_EVENT).then(|| {
-            attachments
-                .attachments
-                .iter()
-                .map(|attachment| std::path::PathBuf::from(&attachment.path))
-                .collect::<Vec<_>>()
-        });
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            pending.event,
-            &attachments,
-        ));
+        let preview_paths =
+            matches!(pending.delivery, ChatAttachmentDelivery::Selected).then(|| {
+                attachments
+                    .iter()
+                    .map(|attachment| std::path::PathBuf::from(&attachment.path))
+                    .collect::<Vec<_>>()
+            });
+        match pending.delivery {
+            ChatAttachmentDelivery::Selected => {
+                commands.trigger(BinHostEmitEvent::from_event(
+                    pending.webview,
+                    &ChatAttachments { attachments },
+                ));
+            }
+            ChatAttachmentDelivery::Previews => {
+                commands.trigger(BinHostEmitEvent::from_event(
+                    pending.webview,
+                    &ChatAttachmentPreviews { attachments },
+                ));
+            }
+        }
         if let Some(paths) = preview_paths {
             spawn_chat_attachment_task(
                 pending.webview,
-                CHAT_ATTACHMENT_PREVIEWS_EVENT,
+                ChatAttachmentDelivery::Previews,
                 paths,
-                true,
                 vmux_core::host::wake::Wake::beside(proxy.as_deref()),
                 &mut commands,
             );
@@ -514,11 +522,7 @@ fn drain_chat_media_list_tasks(
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            CHAT_MEDIA_ENTRIES_EVENT,
-            &entries,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(pending.webview, &entries));
         if entries
             .entries
             .iter()
@@ -546,11 +550,7 @@ fn drain_chat_media_preview_tasks(
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            CHAT_MEDIA_ENTRIES_EVENT,
-            &entries,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(pending.webview, &entries));
         commands.entity(entity).despawn();
     }
 }

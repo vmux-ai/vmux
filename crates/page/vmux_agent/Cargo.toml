@@ -15,7 +15,7 @@ serde_json = { workspace = true }
 rkyv = { workspace = true }
 similar = "2"
 vmux_chat = { path = "../vmux_chat" }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 vmux_clipboard = { path = "../../vmux_clipboard" }
@@ -35,6 +35,7 @@ futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"] }
 tokio = { workspace = true, features = ["rt"] }
 toml = { workspace = true }
+tempfile = "3"
 uuid = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
@@ -60,7 +61,6 @@ vmux_ui = { path = "../../vmux_ui", default-features = false }
 [dev-dependencies]
 mockito = "1"
 serial_test = "3"
-tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]

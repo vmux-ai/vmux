@@ -1,6 +1,5 @@
 use crate::event::{
-    CommandBarOpenEvent, CommandBarPanelActiveEvent, CommandBarPanelCloseEvent,
-    LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT, PanelPlacement,
+    CommandBarOpenEvent, CommandBarPanelCloseEvent, CommandBarPanelRequest, PanelPlacement,
     clamp_panel_placement,
 };
 use crate::page::CommandPalette;
@@ -10,7 +9,7 @@ use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::launcher::palette::PaletteSurface;
 
 fn set_command_bar_panel_active(active: bool) {
-    let _ = send(&CommandBarPanelActiveEvent { active });
+    let _ = send(&CommandBarPanelRequest { active });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,15 +139,11 @@ pub fn CommandBarPanel() -> Element {
         set_command_bar_panel_active(showing);
     };
 
-    let _open_listener =
-        use_listener::<CommandBarOpenEvent, _>(LAYOUT_COMMAND_BAR_OPEN_EVENT, move |data| {
-            state.set(data);
-            set_open(true);
-        });
-    let _close_listener =
-        use_listener::<CommandBarPanelCloseEvent, _>(LAYOUT_COMMAND_BAR_CLOSE_EVENT, move |_| {
-            set_open(false)
-        });
+    let _open_listener = use_listener::<CommandBarOpenEvent, _>(move |data| {
+        state.set(data);
+        set_open(true);
+    });
+    let _close_listener = use_listener::<CommandBarPanelCloseEvent, _>(move |_| set_open(false));
     use_drop(move || set_command_bar_panel_active(false));
 
     if !open() {

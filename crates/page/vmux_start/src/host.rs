@@ -13,10 +13,7 @@ use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
-use crate::event::{
-    START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
-    StartSelectWorkspace,
-};
+use crate::event::{StartDataRequest, StartFocusInput, StartSelectWorkspace};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
@@ -45,9 +42,9 @@ impl Plugin for StartPlugin {
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
-            vmux_wire::command_bar::StartBranchesRequest,
-            vmux_wire::command_bar::StartGoToBranch,
-        )>::for_hosts(&["start"]))
+            vmux_api::command_bar::StartBranchesRequest,
+            vmux_api::command_bar::StartGoToBranch,
+        )>::default())
             .add_observer(on_start_data_request)
             .add_observer(on_start_select_workspace)
             .add_observer(on_start_branches_request)
@@ -264,7 +261,7 @@ fn drain_start_workspace_pickers(
 struct StartBranchRead {
     webview: Entity,
     project: String,
-    task: bevy::tasks::Task<Vec<vmux_wire::space::ProjectBranch>>,
+    task: bevy::tasks::Task<Vec<vmux_api::space::ProjectBranch>>,
 }
 
 impl StartBranchRead {
@@ -282,7 +279,7 @@ impl StartBranchRead {
                 for holder in holders {
                     let checkout = holder.checkout_path();
                     let label = holder.checkout_label();
-                    branches.push(vmux_wire::space::ProjectBranch {
+                    branches.push(vmux_api::space::ProjectBranch {
                         branch: holder.branch,
                         checkout,
                         label,
@@ -302,7 +299,7 @@ impl StartBranchRead {
 }
 
 fn on_start_branches_request(
-    trigger: On<BinReceive<vmux_wire::command_bar::StartBranchesRequest>>,
+    trigger: On<BinReceive<vmux_api::command_bar::StartBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -329,10 +326,9 @@ fn drain_start_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             read.webview,
-            vmux_wire::command_bar::START_PROJECT_BRANCHES_EVENT,
-            &vmux_wire::command_bar::StartProjectBranches {
+            &vmux_api::command_bar::StartProjectBranches {
                 project: read.project.clone(),
                 branches,
             },
@@ -341,7 +337,7 @@ fn drain_start_branch_reads(
 }
 
 fn on_start_go_to_branch(
-    trigger: On<BinReceive<vmux_wire::command_bar::StartGoToBranch>>,
+    trigger: On<BinReceive<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,
     mut tabs: Query<&mut Tab>,
@@ -519,17 +515,9 @@ fn sync_live_start_pages(
         {
             commands.spawn(read);
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            e,
-            START_COMMAND_BAR_OPEN_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(e, &payload));
         if focus_requested {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                e,
-                START_FOCUS_INPUT_EVENT,
-                &StartFocusInput,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(e, &StartFocusInput));
         }
         commands.entity(e).try_insert(StartWorkSynced);
     }
@@ -596,17 +584,9 @@ fn on_start_data_request(
             .map(|locale| locale.0.clone())
             .unwrap_or_else(Locale::preferred),
     );
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        START_COMMAND_BAR_OPEN_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
     if keyboard_targets.contains(webview) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            START_FOCUS_INPUT_EVENT,
-            &StartFocusInput,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(webview, &StartFocusInput));
     }
 }
 
@@ -619,9 +599,9 @@ fn build_start_payload(
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
-    projects: Vec<vmux_wire::space::ProjectRow>,
-    agent_models: Vec<vmux_wire::command_bar::AgentModels>,
-    agent_modes: Vec<vmux_wire::command_bar::AgentModes>,
+    projects: Vec<vmux_api::space::ProjectRow>,
+    agent_models: Vec<vmux_api::command_bar::AgentModels>,
+    agent_modes: Vec<vmux_api::command_bar::AgentModes>,
     locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
@@ -697,13 +677,14 @@ fn begin_requested_inline_transition(
 mod tests {
     use super::*;
     use bevy_cef::prelude::BinReceive;
+    use vmux_api::BinEvent;
     use vmux_core::page::PageManifest;
 
     #[derive(Resource, Default)]
     struct EmittedIds(Vec<String>);
 
     fn capture_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedIds>) {
-        emitted.0.push(trigger.id.clone());
+        emitted.0.push(trigger.id().to_string());
     }
 
     fn start_ready_app() -> App {
@@ -786,9 +767,6 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(
-            emitted,
-            &[START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]
-        );
+        assert_eq!(emitted, &[CommandBarOpenEvent::id(), StartFocusInput::id()]);
     }
 }

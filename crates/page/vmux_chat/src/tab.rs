@@ -5,7 +5,7 @@ pub struct Accent {
 }
 
 impl Accent {
-    pub fn of_agent(profile_color: &str, agent: &str) -> Self {
+    pub fn for_agent(profile_color: &str, agent: &str) -> Self {
         Self::resolve(
             profile_color,
             vmux_ui::agent_accent::agent_accent(agent).rain_rgb,

@@ -8,8 +8,8 @@ use vmux_layout::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{
-    AgentCommand as ServiceAgentCommand, AgentRequestId, AgentShellMode, ClientMessage,
-    SharedAgentCommand,
+    AgentBookmarkCommand, AgentBookmarkPage, AgentCommand as ServiceAgentCommand, AgentRequestId,
+    AgentShellMode, AgentSpaceCommand, ClientMessage, SharedAgentCommand,
 };
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
@@ -133,15 +133,51 @@ pub(crate) fn preserve_current_focus_in_layout_snapshot(
 }
 
 pub(crate) fn agent_may_dispatch_app_command(command: &AppCommand) -> bool {
-    !matches!(
-        command,
+    use vmux_command::{
+        BrowserCommand, BrowserNavigationCommand, BrowserViewCommand, TerminalCommand,
+    };
+
+    match command {
+        AppCommand::Terminal(command) => match command {
+            TerminalCommand::Close | TerminalCommand::Clear | TerminalCommand::CopyMode => true,
+            TerminalCommand::Next | TerminalCommand::Previous => false,
+        },
+        AppCommand::Browser(BrowserCommand::Navigation(command)) => match command {
+            BrowserNavigationCommand::PrevPage
+            | BrowserNavigationCommand::NextPage
+            | BrowserNavigationCommand::Reload
+            | BrowserNavigationCommand::HardReload
+            | BrowserNavigationCommand::Stop => true,
+        },
+        AppCommand::Browser(BrowserCommand::View(command)) => match command {
+            BrowserViewCommand::ZoomIn
+            | BrowserViewCommand::ZoomOut
+            | BrowserViewCommand::ZoomReset
+            | BrowserViewCommand::DevTools
+            | BrowserViewCommand::ViewSource
+            | BrowserViewCommand::Print => true,
+        },
         AppCommand::Layout(_)
-            | AppCommand::Browser(vmux_command::BrowserCommand::Open(_))
-            | AppCommand::Browser(vmux_command::BrowserCommand::Bar(_))
-            | AppCommand::Service(vmux_command::ServiceCommand::Open)
-            | AppCommand::Terminal(vmux_command::TerminalCommand::Next)
-            | AppCommand::Terminal(vmux_command::TerminalCommand::Previous)
-    )
+        | AppCommand::Browser(BrowserCommand::Open(_))
+        | AppCommand::Browser(BrowserCommand::Bar(_))
+        | AppCommand::Service(_)
+        | AppCommand::Bookmark(_)
+        | AppCommand::CommandBar(_)
+        | AppCommand::Chat(_)
+        | AppCommand::File(_) => false,
+    }
+}
+
+fn command_arguments(input: &str) -> Result<serde_json::Value, String> {
+    if input.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|error| format!("invalid JSON arguments: {error}"))?;
+    if !value.is_object() {
+        return Err("command arguments must be a JSON object".to_string());
+    }
+    Ok(value)
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -154,8 +190,8 @@ pub struct AgentLookups<'w> {
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::apply::LayoutApplyRequest>,
-    space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
-    bookmark_op: MessageWriter<'w, vmux_layout::bookmark::BookmarkOp>,
+    space_request: MessageWriter<'w, vmux_space::SpaceRequest>,
+    bookmark_mutation: MessageWriter<'w, vmux_layout::bookmark::BookmarkMutation>,
     focus_pane: MessageWriter<'w, FocusPaneRequest>,
     rename_profile: MessageWriter<'w, RenameProfileRequest>,
     issued: MessageWriter<'w, vmux_command::CommandIssued>,
@@ -181,8 +217,19 @@ pub(super) fn handle_agent_tool_calls(
     service: Option<Res<ServiceClient>>,
 ) {
     for req in reader.read() {
-        let args: serde_json::Value =
-            serde_json::from_str(&req.args_json).unwrap_or_else(|_| serde_json::json!({}));
+        let args = match command_arguments(&req.args_json) {
+            Ok(args) => args,
+            Err(message) => {
+                if let Some(service) = service.as_ref() {
+                    service.0.send(ClientMessage::AgentToolResult {
+                        request_id: req.request_id,
+                        content: message,
+                        is_error: true,
+                    });
+                }
+                continue;
+            }
+        };
         match vmux_mcp::tools::dispatch_from_tool_call(&req.name, args) {
             Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
                 command_writer.write(AgentCommandRequest {
@@ -215,11 +262,11 @@ pub(super) fn handle_agent_tool_calls(
 
 pub(crate) fn remote_agents(
     snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
-) -> Vec<vmux_wire::room::RemoteAgent> {
+) -> Vec<vmux_api::room::RemoteAgent> {
     snapshot
         .acp
         .iter()
-        .map(|agent| vmux_wire::room::RemoteAgent {
+        .map(|agent| vmux_api::room::RemoteAgent {
             id: agent.id.clone(),
             name: agent.name.clone(),
             url: agent.url.clone(),
@@ -229,7 +276,7 @@ pub(crate) fn remote_agents(
             snapshot
                 .providers
                 .iter()
-                .map(|agent| vmux_wire::room::RemoteAgent {
+                .map(|agent| vmux_api::room::RemoteAgent {
                     id: agent.id.clone(),
                     name: format!("{} (CLI)", agent.name),
                     url: agent.url.clone(),
@@ -293,10 +340,17 @@ pub(super) fn handle_agent_commands(
             ServiceAgentCommand::FileSearch { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
-                let args: serde_json::Value = if args_json.is_empty() {
-                    serde_json::json!({})
-                } else {
-                    serde_json::from_str(args_json).unwrap_or(serde_json::json!({}))
+                let args = match command_arguments(args_json) {
+                    Ok(args) => args,
+                    Err(message) => {
+                        if let Some(service) = service.as_ref() {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(message),
+                            });
+                        }
+                        continue;
+                    }
                 };
                 match AppCommand::from_mcp_call(id, args) {
                     Some(Ok(command)) => {
@@ -544,59 +598,61 @@ pub(super) fn handle_agent_commands(
                     .write(vmux_layout::OpenInNewStackRequest { url: url.clone() });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::SpaceCommand {
-                command,
-                space_id,
-                name,
-            } => {
-                writers
-                    .space_command
-                    .write(vmux_space::SpaceCommandRequest {
-                        command: command.clone(),
-                        space_id: space_id.clone(),
-                        name: name.clone(),
-                    });
+            ServiceAgentCommand::SpaceCommand(command) => {
+                let command = match command {
+                    AgentSpaceCommand::Create { name } => {
+                        vmux_core::event::space::SpaceRequest::Create {
+                            name: name.clone().unwrap_or_default(),
+                        }
+                    }
+                    AgentSpaceCommand::Rename { space_id, name } => {
+                        vmux_core::event::space::SpaceRequest::Rename {
+                            space_id: space_id.clone(),
+                            name: name.clone(),
+                        }
+                    }
+                    AgentSpaceCommand::Delete { space_id } => {
+                        vmux_core::event::space::SpaceRequest::Delete {
+                            space_id: space_id.clone(),
+                        }
+                    }
+                };
+                writers.space_request.write(command);
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::BookmarkCommand {
-                command,
-                uuid,
-                name,
-                url,
-                title,
-                favicon_url,
-            } => {
-                use vmux_layout::bookmark::BookmarkOp;
-                let metadata = |url| vmux_core::PageMetadata {
-                    title: title.clone().unwrap_or_default(),
-                    url,
-                    icon: vmux_core::PageIcon::favicon(favicon_url.clone().unwrap_or_default()),
+            ServiceAgentCommand::BookmarkCommand(command) => {
+                use vmux_layout::bookmark::BookmarkMutation;
+                let metadata = |page: &AgentBookmarkPage| vmux_core::PageMetadata {
+                    title: page.title.clone().unwrap_or_default(),
+                    url: page.url.clone(),
+                    icon: vmux_core::PageIcon::favicon(
+                        page.favicon_url.clone().unwrap_or_default(),
+                    ),
                     bg_color: None,
                 };
-                let op = match command.as_str() {
-                    "add" => url.clone().map(|url| BookmarkOp::Add {
-                        metadata: metadata(url),
-                        folder: uuid.clone(),
-                    }),
-                    "remove" => uuid.clone().map(|uuid| BookmarkOp::Remove { uuid }),
-                    "pin" => match (uuid.clone(), url.clone()) {
-                        (Some(uuid), _) => Some(BookmarkOp::Pin { uuid }),
-                        (None, Some(url)) => Some(BookmarkOp::PinUrl {
-                            metadata: metadata(url),
-                        }),
-                        _ => None,
+                let op = match command {
+                    AgentBookmarkCommand::Add { page, folder } => BookmarkMutation::Add {
+                        metadata: metadata(page),
+                        folder: folder.clone(),
                     },
-                    "unpin" => uuid.clone().map(|uuid| BookmarkOp::Unpin { uuid }),
-                    "folder_create" => name.clone().map(|name| BookmarkOp::AddFolder { name }),
-                    _ => None,
-                };
-                match op {
-                    Some(op) => {
-                        writers.bookmark_op.write(op);
-                        AgentCommandResult::Ok
+                    AgentBookmarkCommand::Remove { uuid } => {
+                        BookmarkMutation::Remove { uuid: uuid.clone() }
                     }
-                    None => AgentCommandResult::Error("invalid bookmark command".to_string()),
-                }
+                    AgentBookmarkCommand::Pin { uuid } => {
+                        BookmarkMutation::Pin { uuid: uuid.clone() }
+                    }
+                    AgentBookmarkCommand::PinUrl { page } => BookmarkMutation::PinUrl {
+                        metadata: metadata(page),
+                    },
+                    AgentBookmarkCommand::Unpin { uuid } => {
+                        BookmarkMutation::Unpin { uuid: uuid.clone() }
+                    }
+                    AgentBookmarkCommand::CreateFolder { name } => {
+                        BookmarkMutation::AddFolder { name: name.clone() }
+                    }
+                };
+                writers.bookmark_mutation.write(op);
+                AgentCommandResult::Ok
             }
             ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat {
                 prompt,
@@ -701,7 +757,7 @@ mod tests {
             AgentSessionPlugin,
         ))
         .add_message::<vmux_setting::SettingsWriteRequest>()
-        .add_message::<vmux_space::SpaceCommandRequest>()
+        .add_message::<vmux_space::SpaceRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings());
@@ -766,7 +822,7 @@ mod tests {
             AgentSessionPlugin,
         ))
         .add_message::<vmux_setting::SettingsWriteRequest>()
-        .add_message::<vmux_space::SpaceCommandRequest>()
+        .add_message::<vmux_space::SpaceRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
         .insert_resource(FocusedStack::default())
@@ -886,5 +942,17 @@ mod tests {
         assert!(agent_may_dispatch_app_command(&AppCommand::Terminal(
             vmux_command::TerminalCommand::Clear,
         )));
+    }
+
+    #[test]
+    fn command_arguments_reject_malformed_and_non_object_json() {
+        assert!(command_arguments("{").is_err());
+        assert!(command_arguments("null").is_err());
+        assert!(command_arguments("[]").is_err());
+        assert_eq!(command_arguments("").unwrap(), serde_json::json!({}));
+        assert_eq!(
+            command_arguments(r#"{"url":"https://example.com"}"#).unwrap(),
+            serde_json::json!({ "url": "https://example.com" })
+        );
     }
 }

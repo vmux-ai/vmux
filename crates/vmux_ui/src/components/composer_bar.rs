@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
-use vmux_wire::protocol::AcpModeOption;
-use vmux_wire::room::ModelOptionEntry;
-use vmux_wire::space::{ProjectBranch, ProjectRow};
+use vmux_api::protocol::AcpModeOption;
+use vmux_api::room::ModelOptionEntry;
+use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::components::agent_menu::{AgentMenu, ComposerAgentOption};
 use crate::components::effort_menu::EffortMenu;

@@ -6,7 +6,7 @@ use crate::file_icon::FilePath;
 use crate::i18n::{TranslationValue, translate, translate_with};
 use crate::icon::PageIconView;
 use dioxus::prelude::*;
-use vmux_wire::command_bar::looks_like_url;
+use vmux_api::command_bar::looks_like_url;
 
 use crate::launcher::results::CommandBarResultItem as ResultItem;
 use crate::launcher::results::{prompt_target_matches_query, prompt_target_url};

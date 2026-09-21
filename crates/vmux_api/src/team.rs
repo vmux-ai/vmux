@@ -1,5 +1,4 @@
 pub const TEAM_PAGE_URL: &str = "vmux://team/";
-pub const TEAM_EVENT: &str = "team";
 
 #[derive(
     Clone,
@@ -13,6 +12,7 @@ pub const TEAM_EVENT: &str = "team";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "team", targets = ["team", "layout", "spaces"])]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -80,7 +80,8 @@ pub struct TeamMemberRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TeamCommandEvent {
+#[vmux_api::ui_event(namespace = "team", name = "request", targets = ["team", "layout", "spaces"])]
+pub struct TeamRequest {
     pub command: String,
     #[serde(default)]
     pub member_id: Option<String>,
@@ -141,8 +142,8 @@ mod tests {
     }
 
     #[test]
-    fn team_command_event_rkyv_roundtrip() {
-        let original = TeamCommandEvent {
+    fn team_request_rkyv_roundtrip() {
+        let original = TeamRequest {
             command: "activate".to_string(),
             member_id: Some("42".to_string()),
             profile_id: None,
@@ -150,7 +151,7 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
-            rkyv::from_bytes::<TeamCommandEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
+            rkyv::from_bytes::<TeamRequest, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

@@ -1,16 +1,15 @@
 use crate::event::{
-    HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
-    HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry,
+    HistoryEntry, HistorySuggestionsRequest, HistorySuggestionsResponse, PathCompleteRequest,
+    PathCompleteResponse, PathEntry,
 };
 use crate::page::signals::PaletteSignals;
 use dioxus::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use vmux_api::chat::ResumableSessionEntry;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::launcher::palette::{CompletionQuery, PaletteDraft, PaletteSurface};
 use vmux_ui::platform::sleep_ms;
-use vmux_wire::chat::ResumableSessionEntry;
 
 pub const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
 
@@ -135,12 +134,11 @@ impl PaletteFeeds {
         let mut partial = self.completions_partial;
         let mut total = self.completions_total;
         let mut request_id = self.completion_id;
-        let _response =
-            use_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
-                completions.set(data.completions);
-                partial.set(data.truncated);
-                total.set(data.total as usize);
-            });
+        let _response = use_listener::<PathCompleteResponse, _>(move |data| {
+            completions.set(data.completions);
+            partial.set(data.truncated);
+            total.set(data.total as usize);
+        });
 
         let query = signals.query;
         use_effect(move || {
@@ -171,15 +169,12 @@ impl PaletteFeeds {
     ) {
         let mut suggestions = self.suggestions;
         let mut request_id = self.suggestion_id;
-        let _response = use_listener::<HistorySuggestionsResponse, _>(
-            HISTORY_SUGGESTIONS_RESPONSE_EVENT,
-            move |response| {
-                if response.request_id != *request_id.read() {
-                    return;
-                }
-                suggestions.set(response.entries);
-            },
-        );
+        let _response = use_listener::<HistorySuggestionsResponse, _>(move |response| {
+            if response.request_id != *request_id.read() {
+                return;
+            }
+            suggestions.set(response.entries);
+        });
 
         let query = signals.query;
         let is_start = surface.is_start();

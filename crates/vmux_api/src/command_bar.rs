@@ -1,19 +1,16 @@
-pub use crate::history::{
-    HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
-    HistorySuggestionsResponse,
-};
+pub use crate::history::{HistoryEntry, HistorySuggestionsRequest, HistorySuggestionsResponse};
 
-mod action;
 mod input;
 mod open;
 mod picker;
 mod query;
+mod request;
 
-pub use action::*;
 pub use input::*;
 pub use open::*;
 pub use picker::*;
 pub use query::*;
+pub use request::*;
 
 #[cfg(test)]
 mod tests {
