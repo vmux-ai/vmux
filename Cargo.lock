@@ -10945,6 +10945,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "serde_json",
  "sysinfo",
  "tempfile",
  "tracing",

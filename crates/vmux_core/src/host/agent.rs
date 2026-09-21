@@ -71,7 +71,7 @@ pub struct StackSessionHandoff {
     pub source_agent: String,
     pub source_kind: AgentKind,
     pub source_sid: String,
-    pub messages_json: String,
+    pub messages: Vec<vmux_api::room::Message>,
     pub context: String,
     pub truncated: bool,
 }
