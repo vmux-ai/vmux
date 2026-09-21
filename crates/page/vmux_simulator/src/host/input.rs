@@ -12,6 +12,7 @@ use crate::event::{
 use crate::url::PAGE_HOST;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -54,10 +55,148 @@ struct SimulatorKeyRequest {
     key: SimulatorKey,
 }
 
+#[derive(Component)]
+pub(super) struct SimulatorKeyboard {
+    sender: mpsc::Sender<SimulatorKey>,
+}
+
+impl SimulatorKeyboard {
+    pub fn start(axe: &Axe, device: &SimulatorDevice) -> io::Result<Self> {
+        let runner = SimulatorKeyboardRunner {
+            axe: axe.path().to_path_buf(),
+            udid: device.udid.clone(),
+        };
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("vmux-simulator-keyboard".into())
+            .spawn(move || runner.run(receiver))?;
+        Ok(Self { sender })
+    }
+
+    fn dispatch(&self, key: SimulatorKey) {
+        if self.sender.send(key).is_err() {
+            error!("simulator keyboard worker stopped");
+        }
+    }
+}
+
+struct SimulatorKeyboardRunner {
+    axe: PathBuf,
+    udid: String,
+}
+
+impl SimulatorKeyboardRunner {
+    const MAX_BATCH_KEYS: usize = 256;
+
+    fn run(&self, receiver: mpsc::Receiver<SimulatorKey>) {
+        while let Ok(first) = receiver.recv() {
+            let batch = SimulatorKeyboardBatch::from_receiver(first, &receiver);
+            if let Err(error) = self.execute(batch) {
+                error!("simulator keyboard failed: {error}");
+            }
+        }
+    }
+
+    fn execute(&self, batch: SimulatorKeyboardBatch) -> Result<(), String> {
+        let mut command = Command::new(&self.axe);
+        command
+            .arg("batch")
+            .args(["--udid", &self.udid])
+            .env("AXE_HID_STABILIZATION_MS", "200")
+            .stdin(Stdio::null());
+        for step in batch.steps() {
+            command.arg("--step").arg(step);
+        }
+        let output = command
+            .output()
+            .map_err(|error| format!("could not start AXe: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            return Err(format!("AXe exited with {}", output.status));
+        }
+        Err(stderr)
+    }
+}
+
+struct SimulatorKeyboardBatch {
+    keys: Vec<SimulatorKey>,
+}
+
+impl SimulatorKeyboardBatch {
+    fn from_receiver(first: SimulatorKey, receiver: &mpsc::Receiver<SimulatorKey>) -> Self {
+        let mut keys = vec![first];
+        while keys.len() < SimulatorKeyboardRunner::MAX_BATCH_KEYS {
+            let Ok(key) = receiver.try_recv() else {
+                break;
+            };
+            keys.push(key);
+        }
+        Self { keys }
+    }
+
+    fn steps(self) -> Vec<String> {
+        let mut steps = Vec::new();
+        let mut text = String::new();
+        for key in self.keys {
+            match key {
+                SimulatorKey::Text(value) => text.push_str(&value),
+                other => {
+                    Self::push_text(&mut steps, &mut text);
+                    steps.push(Self::step(other));
+                }
+            }
+        }
+        Self::push_text(&mut steps, &mut text);
+        steps
+    }
+
+    fn push_text(steps: &mut Vec<String>, text: &mut String) {
+        if text.is_empty() {
+            return;
+        }
+        steps.push(format!("type {}", Self::quote(text)));
+        text.clear();
+    }
+
+    fn step(key: SimulatorKey) -> String {
+        match key {
+            SimulatorKey::Text(text) => format!("type {}", Self::quote(&text)),
+            SimulatorKey::Code(code) => format!("key {code}"),
+            SimulatorKey::Modified { code, modifiers } => {
+                let modifiers = modifiers
+                    .hid_codes()
+                    .iter()
+                    .map(u8::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("key-combo --modifiers {modifiers} --key {code}")
+            }
+            SimulatorKey::Button(button) => format!("button {}", button.as_arg()),
+        }
+    }
+
+    fn quote(text: &str) -> String {
+        let mut quoted = String::with_capacity(text.len() + 2);
+        quoted.push('"');
+        for character in text.chars() {
+            if matches!(character, '\\' | '"') {
+                quoted.push('\\');
+            }
+            quoted.push(character);
+        }
+        quoted.push('"');
+        quoted
+    }
+}
+
 #[derive(Component, Default)]
 pub(super) struct DeviceTouchSession {
     start: Option<(f32, f32)>,
     last: Option<(f32, f32)>,
+    focus: Option<(f32, f32)>,
     dragging: bool,
 }
 
@@ -96,10 +235,15 @@ impl ClipboardJob {
                 self.key_combo(6)?;
                 self.sync(&self.udid, "host")
             }
+            crate::event::SimulatorClipboardAction::Cut => {
+                self.key_combo(27)?;
+                self.sync(&self.udid, "host")
+            }
             crate::event::SimulatorClipboardAction::Paste => {
                 self.sync("host", &self.udid)?;
                 self.key_combo(25)
             }
+            crate::event::SimulatorClipboardAction::SelectAll => self.key_combo(4),
         }
     }
 
@@ -114,6 +258,7 @@ impl ClipboardJob {
                 "--udid",
                 &self.udid,
             ])
+            .env("AXE_HID_STABILIZATION_MS", "200")
             .stdin(Stdio::null())
             .output()
             .map_err(|error| format!("could not send simulator clipboard shortcut: {error}"))?;
@@ -220,6 +365,9 @@ fn on_touch(
             if session.start.take().is_none() {
                 return;
             }
+            if !session.dragging {
+                session.focus = Some(point);
+            }
             session.last = None;
             hid.dispatch(HidRequest::up(point));
             session.dragging = false;
@@ -235,6 +383,7 @@ fn on_touch(
         SimulatorTouchPhase::Tap => {
             session.start = None;
             session.last = None;
+            session.focus = Some(point);
             session.dragging = false;
             hid.dispatch(HidRequest::tap(point));
         }
@@ -303,20 +452,32 @@ fn handle_button_requests(
 fn handle_clipboard_requests(
     mut requests: MessageReader<SimulatorClipboardRequest>,
     active: Res<ActiveSimulatorView>,
-    attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
+    attachments: Query<(
+        Entity,
+        &SimulatorDevice,
+        &Axe,
+        &HidBroker,
+        &DeviceTouchSession,
+    )>,
     worker: Res<ClipboardWorker>,
 ) {
     for request in requests.read() {
         let target = request
             .view
             .filter(|entity| attachments.contains(*entity))
-            .or_else(|| active.select(attachments.iter().map(|(entity, _, _)| entity)));
+            .or_else(|| active.select(attachments.iter().map(|(entity, ..)| entity)));
         let Some(target) = target else {
             continue;
         };
-        let Ok((_, device, axe)) = attachments.get(target) else {
+        let Ok((_, device, axe, hid, touch)) = attachments.get(target) else {
             continue;
         };
+        if request.action == crate::event::SimulatorClipboardAction::SelectAll
+            && let Some(point) = touch.focus
+        {
+            hid.dispatch(HidRequest::triple_tap(point));
+            continue;
+        }
         let job = ClipboardJob {
             axe: axe.path().to_path_buf(),
             udid: device.udid.clone(),
@@ -421,47 +582,20 @@ fn control_coordinates(
 fn send_key_requests(
     mut requests: MessageReader<SimulatorKeyRequest>,
     active: Res<ActiveSimulatorView>,
-    attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
+    attachments: Query<(Entity, &SimulatorKeyboard)>,
 ) {
     for request in requests.read() {
         let target = request
             .view
             .filter(|entity| attachments.contains(*entity))
-            .or_else(|| active.select(attachments.iter().map(|(entity, _, _)| entity)));
+            .or_else(|| active.select(attachments.iter().map(|(entity, _)| entity)));
         let Some(target) = target else {
             continue;
         };
-        let Ok((_, device, axe)) = attachments.get(target) else {
+        let Ok((_, keyboard)) = attachments.get(target) else {
             continue;
         };
-        let mut command = axe.command();
-        match &request.key {
-            SimulatorKey::Text(text) => {
-                command.arg("type").arg(text);
-            }
-            SimulatorKey::Code(code) => {
-                command.arg("key").arg(code.to_string());
-            }
-            SimulatorKey::Modified { code, modifiers } => {
-                let modifiers = modifiers
-                    .hid_codes()
-                    .iter()
-                    .map(u8::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                command
-                    .arg("key-combo")
-                    .arg("--modifiers")
-                    .arg(modifiers)
-                    .arg("--key")
-                    .arg(code.to_string());
-            }
-            SimulatorKey::Button(button) => {
-                command.arg("button").arg(button.as_arg());
-            }
-        }
-        command.args(["--udid", &device.udid]);
-        Axe::run_detached(command);
+        keyboard.dispatch(request.key.clone());
     }
 }
 
@@ -518,5 +652,26 @@ mod tests {
 
         assert!((point.0 - 200.67).abs() < 0.01);
         assert!((point.1 - 436.67).abs() < 0.01);
+    }
+
+    #[test]
+    fn keyboard_batch_preserves_order_and_quotes_text() {
+        let batch = SimulatorKeyboardBatch {
+            keys: vec![
+                SimulatorKey::Text("a".into()),
+                SimulatorKey::Text("\"".into()),
+                SimulatorKey::Code(42),
+                SimulatorKey::Text("\\".into()),
+            ],
+        };
+
+        assert_eq!(
+            batch.steps(),
+            vec![
+                "type \"a\\\"\"".to_string(),
+                "key 42".to_string(),
+                "type \"\\\\\"".to_string(),
+            ]
+        );
     }
 }

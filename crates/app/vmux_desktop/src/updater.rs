@@ -161,9 +161,11 @@ fn poll_update_result(
     mut state: ResMut<vmux_layout::UpdateState>,
     mut status: ResMut<CurrentUpdateCheckStatus>,
     mut manual_requests: MessageReader<CheckForUpdatesRequest>,
+    mut git_requests: MessageReader<vmux_git::GitCheckForUpdatesRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let manual_requested = manual_requests.read().count() > 0 && !checker.in_flight;
+    let manual_requested =
+        (manual_requests.read().count() + git_requests.read().count()) > 0 && !checker.in_flight;
     let mut results = Vec::new();
     if let Ok(rx) = checker.rx.lock() {
         while let Ok(result) = rx.try_recv() {

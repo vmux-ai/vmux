@@ -3,40 +3,43 @@ use dioxus::prelude::*;
 use crate::platform::now_millis;
 
 pub fn use_ime_guard() -> ImeGuard {
-    ImeGuard {
-        composition: use_signal(Composition::default),
-    }
+    use_hook(|| ImeGuard {
+        state: CopyValue::new(ImeState::default()),
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ImeGuard {
-    composition: Signal<Composition>,
+    state: CopyValue<ImeState>,
 }
 
 impl ImeGuard {
     pub fn active(self) -> bool {
-        (self.composition)().active
+        self.state.peek().composition.active
     }
 
     pub fn start(mut self) {
-        let started = self.composition.peek().started();
-        self.composition.set(started);
+        self.state.write().start();
     }
 
     pub fn commit(mut self) {
-        let committed = self.composition.peek().committed(now_millis());
-        self.composition.set(committed);
+        self.state.write().commit(now_millis());
+    }
+
+    pub fn input(mut self, value: String) -> Option<String> {
+        self.state.write().input(value)
+    }
+
+    pub fn commit_input(mut self) -> Option<String> {
+        self.state.write().commit_input(now_millis())
     }
 
     pub fn swallows(mut self, event: &Event<KeyboardData>) -> bool {
         let data = event.data();
-        let (next, verdict) =
-            self.composition
-                .peek()
-                .saw_key(&data.key(), data.is_composing(), now_millis());
-        if *self.composition.peek() != next {
-            self.composition.set(next);
-        }
+        let verdict = self
+            .state
+            .write()
+            .saw_key(&data.key(), data.is_composing(), now_millis());
         match verdict {
             ImeVerdict::Editor => false,
             ImeVerdict::Composing => true,
@@ -45,6 +48,44 @@ impl ImeGuard {
                 true
             }
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+struct ImeState {
+    composition: Composition,
+    pending_input: Option<String>,
+}
+
+impl ImeState {
+    fn start(&mut self) {
+        self.composition = self.composition.started();
+        self.pending_input = None;
+    }
+
+    fn commit(&mut self, at: i64) {
+        self.composition = self.composition.committed(at);
+        self.pending_input = None;
+    }
+
+    fn input(&mut self, value: String) -> Option<String> {
+        if self.composition.active {
+            self.pending_input = Some(value);
+            return None;
+        }
+        self.pending_input = None;
+        Some(value)
+    }
+
+    fn commit_input(&mut self, at: i64) -> Option<String> {
+        self.composition = self.composition.committed(at);
+        self.pending_input.take()
+    }
+
+    fn saw_key(&mut self, key: &Key, composing: bool, at: i64) -> ImeVerdict {
+        let (next, verdict) = self.composition.saw_key(key, composing, at);
+        self.composition = next;
+        verdict
     }
 }
 
@@ -225,5 +266,22 @@ mod tests {
                 ImeVerdict::Editor
             );
         }
+    }
+
+    #[test]
+    fn composing_input_waits_for_the_browser_to_commit_it() {
+        let mut ime = ImeState::default();
+        ime.start();
+
+        assert_eq!(ime.input("あ".to_string()), None);
+        assert_eq!(ime.input("あい".to_string()), None);
+        assert_eq!(ime.commit_input(1_000), Some("あい".to_string()));
+    }
+
+    #[test]
+    fn ordinary_input_reaches_the_editor_immediately() {
+        let mut ime = ImeState::default();
+
+        assert_eq!(ime.input("hello".to_string()), Some("hello".to_string()));
     }
 }

@@ -184,6 +184,7 @@ struct AttachmentFailed;
 struct AttachedDevice {
     axe: Axe,
     hid: HidBroker,
+    keyboard: input::SimulatorKeyboard,
     device: SimulatorDevice,
     points: Option<(f32, f32)>,
     pixels: Option<(u32, u32)>,
@@ -217,6 +218,7 @@ impl SimulatorPlugin {
                 AttachmentFailed,
                 Axe,
                 HidBroker,
+                input::SimulatorKeyboard,
                 SimulatorDevice,
                 DevicePoints,
                 DevicePixels,
@@ -281,6 +283,7 @@ impl SimulatorPlugin {
                 attached.server,
                 attached.device,
                 attached.hid,
+                attached.keyboard,
                 attached.axe,
                 input::DeviceTouchSession::default(),
             ));
@@ -436,11 +439,14 @@ impl AttachedDevice {
         let pixels = device.pixel_size(&axe);
         let hid = HidBroker::start(&axe, &device)
             .map_err(|error| format!("could not start simulator input: {error}"))?;
+        let keyboard = input::SimulatorKeyboard::start(&axe, &device)
+            .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
         let server = StreamServer::start(&axe, device.clone(), pixels)
             .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
         Ok(Self {
             axe,
             hid,
+            keyboard,
             device,
             points,
             pixels,

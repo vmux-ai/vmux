@@ -154,9 +154,24 @@ pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
 )]
 pub struct SideSheetResizeEvent {
     pub width: f32,
+    pub settled: bool,
 }
 
 impl SideSheetResizeEvent {
+    pub fn live(width: f32) -> Self {
+        Self {
+            width,
+            settled: false,
+        }
+    }
+
+    pub fn settled(width: f32) -> Self {
+        Self {
+            width,
+            settled: true,
+        }
+    }
+
     pub fn clamped(self) -> f32 {
         if !self.width.is_finite() {
             return SIDE_SHEET_WIDTH_PX;

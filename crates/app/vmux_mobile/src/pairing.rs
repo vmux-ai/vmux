@@ -217,9 +217,12 @@ pub(crate) fn PairCard(props: PairCardProps) -> Element {
                         oninput: move |event| props.on_value.call(event.value()),
                     }
                     button {
-                        class: "h-10 shrink-0 rounded-xl bg-secondary px-4 text-xs font-semibold text-secondary-foreground disabled:opacity-50 active:bg-secondary/80",
+                        class: "flex h-10 shrink-0 items-center gap-2 rounded-xl bg-secondary px-4 text-xs font-semibold text-secondary-foreground disabled:opacity-70 active:bg-secondary/80",
                         r#type: "submit",
                         disabled: props.pairing,
+                        if props.pairing {
+                            span { class: "size-3.5 animate-spin rounded-full border-2 border-secondary-foreground/25 border-t-secondary-foreground motion-reduce:animate-none" }
+                        }
                         {if props.pairing { translate("mobile-pair-connecting") } else { translate("mobile-pair-connect") }}
                     }
                 }

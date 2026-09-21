@@ -3,9 +3,12 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_ui::components::icon::Icon;
+use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::diff::DiffTone;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
 use crate::view::{DiffViewRow, EditorDiffMarker, diff_view_rows, editor_diff_markers};
@@ -39,37 +42,34 @@ fn opt_no(n: Option<u32>) -> String {
     n.map(|v| v.to_string()).unwrap_or_default()
 }
 
-fn row_bg(kind: DiffKind) -> &'static str {
+fn diff_tone(kind: DiffKind) -> Option<DiffTone> {
     match kind {
-        DiffKind::Add => "background:rgba(80,200,120,0.13);",
-        DiffKind::Remove => "background:rgba(220,80,80,0.13);",
-        DiffKind::Staged => "background:rgba(80,200,120,0.05);",
-        _ => "",
+        DiffKind::Add => Some(DiffTone::Added),
+        DiffKind::Remove => Some(DiffTone::Deleted),
+        DiffKind::Staged => Some(DiffTone::Staged),
+        DiffKind::Context | DiffKind::Hunk => None,
     }
 }
 
 fn sign(kind: DiffKind) -> &'static str {
-    match kind {
-        DiffKind::Add => "+",
-        DiffKind::Remove => "-",
-        DiffKind::Staged => "\u{258e}",
-        _ => " ",
-    }
+    diff_tone(kind).map(DiffTone::sign).unwrap_or(" ")
 }
 
-fn sign_style(kind: DiffKind) -> &'static str {
-    match kind {
-        DiffKind::Add => "color:rgb(80,200,120);",
-        DiffKind::Remove => "color:rgb(220,80,80);",
-        DiffKind::Staged => "color:rgb(80,200,120);",
-        _ => "opacity:0.25;",
-    }
+fn row_class(kind: DiffKind) -> &'static str {
+    diff_tone(kind).map(DiffTone::row_class).unwrap_or("")
+}
+
+fn text_class(kind: DiffKind) -> &'static str {
+    diff_tone(kind)
+        .map(DiffTone::text_class)
+        .unwrap_or("text-muted-foreground")
 }
 
 #[derive(Clone, Copy)]
 pub struct GitStatusFeed {
     pub path: ReadSignal<String>,
     pub nonce: Signal<u32>,
+    pub repo_root: Signal<String>,
     pub has_diff: Signal<bool>,
     pub branch: Signal<String>,
     pub ahead: Signal<u32>,
@@ -83,6 +83,7 @@ impl GitStatusFeed {
         let Self {
             path,
             mut nonce,
+            mut repo_root,
             mut has_diff,
             mut branch,
             mut ahead,
@@ -92,7 +93,11 @@ impl GitStatusFeed {
         } = self;
 
         let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+            if s.path != path() {
+                return;
+            }
             message.set(String::new());
+            repo_root.set(s.repo_root);
             branch.set(s.branch);
             ahead.set(s.ahead);
             behind.set(s.behind);
@@ -130,6 +135,16 @@ pub fn GitFooter(
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
+    let mut pending_commit_msg = use_signal(String::new);
+    let _commit_result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
+        if result.action != "commit" {
+            return;
+        }
+        if result.ok && commit_msg().trim() == pending_commit_msg() {
+            commit_msg.set(String::new());
+        }
+        pending_commit_msg.set(String::new());
+    });
 
     let has_branch = !branch().is_empty();
     if !has_branch && !always_visible {
@@ -147,16 +162,20 @@ pub fn GitFooter(
                 span {
                     class: "flex min-w-0 max-w-[35%] shrink items-center gap-1.5 text-term-fg",
                     title: "{branch}",
-                    Icon { class: "h-3.5 w-3.5 shrink-0 opacity-80",
-                        line { x1: "6", x2: "6", y1: "3", y2: "15" }
-                        circle { cx: "18", cy: "6", r: "3" }
-                        circle { cx: "6", cy: "18", r: "3" }
-                        path { d: "M18 9a9 9 0 0 1-9 9" }
-                    }
+                    LineIconView { icon: LineIcon::GitBranch, class: "h-3.5 w-3.5 shrink-0 opacity-80" }
                     span { class: "truncate", "{branch}" }
                 }
                 if ahead() > 0 || behind() > 0 {
-                    span { class: "shrink-0 opacity-70", "\u{2191}{ahead} \u{2193}{behind}" }
+                    span { class: "flex shrink-0 items-center gap-2 opacity-70",
+                        span { class: "flex items-center gap-0.5",
+                            LineIconView { icon: LineIcon::ArrowUp, class: "h-3 w-3" }
+                            "{ahead}"
+                        }
+                        span { class: "flex items-center gap-0.5",
+                            LineIconView { icon: LineIcon::ArrowDown, class: "h-3 w-3" }
+                            "{behind}"
+                        }
+                    }
                 }
             }
 
@@ -169,14 +188,20 @@ pub fn GitFooter(
                         value: "{commit_msg}",
                         oninput: move |e| commit_msg.set(e.value()),
                     }
-                    button {
-                        class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10 disabled:opacity-40",
-                        disabled: commit_msg().is_empty(),
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
+                        disabled: commit_msg().trim().is_empty() || !pending_commit_msg().is_empty(),
                         onclick: move |_| {
-                            let m = commit_msg();
-                            if !m.is_empty() {
-                                let _ = send(&GitCommitRequest { path: path(), message: m });
-                                commit_msg.set(String::new());
+                            let m = commit_msg().trim().to_string();
+                            if !m.is_empty()
+                                && send(&GitCommitRequest {
+                                    path: path(),
+                                    message: m.clone(),
+                                })
+                                .is_ok()
+                            {
+                                pending_commit_msg.set(m);
                             }
                         },
                         {translate_with(
@@ -195,11 +220,13 @@ pub fn GitFooter(
             }
 
             if can_push {
-                button {
-                    class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-white/10",
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: path() });
                     },
+                    LineIconView { icon: LineIcon::Upload, class: "h-3 w-3" }
                     {translate("git-push")}
                 }
             }
@@ -210,35 +237,53 @@ pub fn GitFooter(
 
 #[component]
 pub fn DiffView(
+    repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
+    #[props(default)] path_bytes: Vec<u8>,
+    #[props(default)] reference: String,
     nonce: ReadSignal<u32>,
     visible: bool,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
+    let initial_path_bytes = path_bytes.clone();
+    let initial_reference = reference.clone();
+    let mut observed_path_bytes = use_signal(move || initial_path_bytes);
+    let mut observed_reference = use_signal(move || initial_reference);
     let mut lines = use_signal(Vec::<DiffLine>::new);
     let mut expanded = use_signal(Vec::<(usize, usize)>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
     let mut requested_path = use_signal(String::new);
+    let mut request_generation = use_signal(|| 0u64);
 
     let _vp = use_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
+        if p.generation != request_generation() {
+            return;
+        }
         markers.set(editor_diff_markers(&p.lines));
         lines.set(p.lines);
         expanded.set(Vec::new());
         loading.set(false);
-        error.set(String::new());
-    });
-    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
-        error.set(event.message);
-        loading.set(false);
+        error.set(p.error);
     });
 
+    use_effect(use_reactive!(|(path_bytes, reference)| {
+        observed_path_bytes.set(path_bytes);
+        observed_reference.set(reference);
+    }));
+
     use_effect(move || {
+        let root = repo_root();
         let p = path();
+        let raw_path = observed_path_bytes();
+        let reference = observed_reference();
         let _ = nonce();
-        if !p.is_empty() {
-            let path_changed = *requested_path.peek() != p;
-            requested_path.set(p.clone());
+        if !root.is_empty() && (!p.is_empty() || !reference.is_empty()) {
+            let request_key = format!("{root}\0{p}\0{raw_path:?}\0{reference}");
+            let path_changed = *requested_path.peek() != request_key;
+            requested_path.set(request_key);
+            let generation = request_generation.peek().wrapping_add(1);
+            request_generation.set(generation);
             if path_changed || lines.peek().is_empty() {
                 loading.set(true);
             }
@@ -248,7 +293,11 @@ pub fn DiffView(
                 expanded.set(Vec::new());
             }
             let _ = send(&GitDiffRequest {
+                repo_root: root,
                 path: p,
+                path_bytes: raw_path,
+                reference,
+                generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
             });
@@ -275,11 +324,13 @@ pub fn DiffView(
 
     rsx! {
         div {
-            class: if visible { "min-h-0 flex-1 overflow-auto" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 overflow-auto bg-background/35 font-mono text-xs leading-5" } else { "hidden" },
 
             if loading() {
-                div { class: "flex h-20 items-center justify-center font-sans text-xs text-muted-foreground",
-                    span { class: "animate-pulse", {translate("git-loading-diff")} }
+                div { class: "flex flex-col gap-2 p-3",
+                    for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
+                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                    }
                 }
             } else if !error().is_empty() {
                 div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }
@@ -293,23 +344,24 @@ pub fn DiffView(
                         let line = &rows[i];
                         rsx! {
                             div { key: "line-{i}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                div { class: "flex whitespace-pre", style: "{row_bg(line.kind)}",
-                                    span {
-                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
-                                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                                        "{opt_no(line.old_no)}"
+                                div { class: "group flex min-w-max whitespace-pre transition-colors {row_class(line.kind)}",
+                                    span { class: "sticky left-0 z-[1] flex shrink-0 select-none border-r border-foreground/[0.08] bg-background/95 shadow-[4px_0_10px_-8px_rgba(0,0,0,0.8)] backdrop-blur-sm",
+                                        span {
+                                            class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
+                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                            "{opt_no(line.old_no)}"
+                                        }
+                                        span {
+                                            class: "flex shrink-0 items-center justify-end border-l border-foreground/[0.045] px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                            "{opt_no(line.new_no)}"
+                                        }
+                                        span {
+                                            class: "flex w-6 shrink-0 items-center justify-center border-l border-foreground/[0.045] font-semibold {text_class(line.kind)}",
+                                            "{sign(line.kind)}"
+                                        }
                                     }
-                                    span {
-                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
-                                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                                        "{opt_no(line.new_no)}"
-                                    }
-                                    span {
-                                        class: "shrink-0 select-none px-1 text-center",
-                                        style: "{sign_style(line.kind)}",
-                                        "{sign(line.kind)}"
-                                    }
-                                    span { class: "pr-6",
+                                    span { class: "min-w-0 pr-8",
                                         for (j, styled) in line.spans.iter().enumerate() {
                                             span { key: "{j}", style: "{span_style(styled)}", "{styled.text}" }
                                         }
@@ -317,19 +369,35 @@ pub fn DiffView(
                                 }
                                 if let Some(h) = ends[i] {
                                     div {
-                                        class: "flex items-center justify-end gap-2 border-y border-foreground/[0.05] bg-foreground/[0.02] px-2 py-0.5 pr-6 font-sans text-xs select-none",
-                                        button {
-                                            class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
+                                        class: "flex min-w-full items-center justify-end gap-1.5 border-y border-foreground/[0.06] bg-background/70 px-3 py-1 font-sans text-[11px] select-none backdrop-blur-sm",
+                                        Button {
+                                            variant: ButtonVariant::Ghost,
+                                            class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",
                                             onclick: move |_| {
-                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
+                                                let _ = send(&GitHunkRequest {
+                                                    repo_root: repo_root(),
+                                                    path: path(),
+                                                    path_bytes: observed_path_bytes(),
+                                                    hunk: h,
+                                                    accept: true,
+                                                });
                                             },
+                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
                                             {translate("git-stage-hunk")}
                                         }
-                                        button {
-                                            class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
+                                        Button {
+                                            variant: ButtonVariant::Ghost,
+                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.08] bg-foreground/[0.025] px-2 text-[11px] text-muted-foreground hover:bg-ansi-1/10 hover:text-ansi-1",
                                             onclick: move |_| {
-                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
+                                                let _ = send(&GitHunkRequest {
+                                                    repo_root: repo_root(),
+                                                    path: path(),
+                                                    path_bytes: observed_path_bytes(),
+                                                    hunk: h,
+                                                    accept: false,
+                                                });
                                             },
+                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
                                             {translate("git-revert-hunk")}
                                         }
                                     }
@@ -350,9 +418,11 @@ pub fn DiffView(
                         rsx! {
                             div {
                                 key: "gap-{start}-{end}",
-                                class: "border-y border-cyan-400/10 bg-cyan-400/[0.035] font-sans",
-                                button {
-                                    class: "group flex h-7 w-full items-center gap-2 px-2 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
+                                class: "flex min-w-full items-center border-y border-foreground/[0.055] bg-foreground/[0.018] px-3 py-1 font-sans",
+                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
+                                Button {
+                                    variant: ButtonVariant::Ghost,
+                                    class: "mx-2 h-6 shrink-0 gap-1.5 rounded-full border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                                     title: translate_with(
                                         "git-show-unchanged-lines",
                                         &[("count", TranslationValue::Number(hidden as i64))],
@@ -360,18 +430,13 @@ pub fn DiffView(
                                     onclick: move |_| {
                                         expanded.write().push(reveal);
                                     },
-                                    svg {
-                                        class: if upward { "h-3.5 w-3.5 shrink-0 rotate-180 transition-transform group-hover:-translate-y-0.5" } else { "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5" },
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        path { d: "m6 9 6 6 6-6" }
-                                    }
-                                    span { "Show {hidden} unchanged lines" }
+                                    span { "⋯" }
+                                    span { {translate_with(
+                                        "git-show-unchanged-lines",
+                                        &[("count", TranslationValue::Number(hidden as i64))],
+                                    )} }
                                 }
+                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
                             }
                         }
                     }

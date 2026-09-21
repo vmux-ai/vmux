@@ -17,7 +17,7 @@ use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
     ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
-    ToolsRefreshRequest, ToolsSnapshot,
+    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_core::vault::{
     VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
@@ -116,10 +116,7 @@ impl Plugin for ToolsPlugin {
             }
             Err(error) => bevy::log::warn!("Vault watcher init failed: {error}"),
         }
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            vmux_core::host::page::NativelyHosted::page("vmux://tools/", "Tools"),
-        ));
+        app.world_mut().spawn((PAGE_MANIFEST, TOOLS_HOSTED_PAGE));
         app.world_mut().spawn((
             VAULT_PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page("vmux://vault/", "Vault"),
@@ -135,11 +132,13 @@ impl Plugin for ToolsPlugin {
                 ToolsRefreshRequest,
                 ToolActionRequest,
                 ToolOpenRequest,
+                ToolsNavigateRequest,
                 VaultActionRequest,
                 VaultRefreshRequest,
             )>::default())
             .add_observer(on_refresh_request)
             .add_observer(on_action_request)
+            .add_observer(on_navigate_request)
             .add_observer(on_vault_action_request)
             .add_observer(on_vault_refresh_request)
             .add_observer(on_open_request)
@@ -172,6 +171,9 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
     icon: Some(vmux_core::BuiltinIcon::Hammer),
     command_bar: true,
 };
+
+const TOOLS_HOSTED_PAGE: vmux_core::host::page::NativelyHosted =
+    vmux_core::host::page::NativelyHosted::subtree("vmux://tools/", "Tools");
 
 const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
     host: "vault",
@@ -267,6 +269,7 @@ struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
 struct InventoryItem {
     id: String,
     name: String,
+    icon: Option<String>,
     version: Option<String>,
     detail: String,
     status: ToolStatus,
@@ -292,6 +295,32 @@ fn on_open_request(
             url: Some(url.to_string()),
         },
     )));
+}
+
+fn on_navigate_request(
+    trigger: On<BinReceive<ToolsNavigateRequest>>,
+    parents: Query<&ChildOf>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    mut requests: MessageWriter<vmux_core::PageOpenRequest>,
+) {
+    let Some(url) = trigger.event().payload.canonical_url() else {
+        return;
+    };
+    let mut current = trigger.event().webview;
+    loop {
+        if stacks.contains(current) {
+            requests.write(vmux_core::PageOpenRequest {
+                target: vmux_core::PageOpenTarget::Stack(current),
+                url: url.to_string(),
+                request_id: None,
+            });
+            return;
+        }
+        let Ok(parent) = parents.get(current) else {
+            return;
+        };
+        current = parent.parent();
+    }
 }
 
 fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: ResMut<ToolsState>) {
@@ -854,6 +883,7 @@ fn build_category(
                 actions: package_actions(item.status, managed, item.removable),
                 id: item.id,
                 name: item.name,
+                icon: item.icon,
                 version: item.version,
                 detail: item.detail,
                 status: item.status,
@@ -871,6 +901,7 @@ fn build_category(
                 provider,
                 id: name.clone(),
                 name,
+                icon: None,
                 version: None,
                 detail: "Declared in tools.toml".to_string(),
                 status: ToolStatus::Missing,
@@ -934,6 +965,7 @@ fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<InventoryItem>, String
             InventoryItem {
                 id: name.clone(),
                 name,
+                icon: None,
                 version,
                 detail: if cask {
                     "Homebrew cask".to_string()
@@ -1011,6 +1043,7 @@ fn parse_npm_inventory(
             InventoryItem {
                 id: name.clone(),
                 name,
+                icon: None,
                 version: metadata
                     .get("version")
                     .and_then(|version| version.as_str())
@@ -1052,6 +1085,7 @@ fn scan_acp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
                 name: agent
                     .map(|agent| agent.name.clone())
                     .unwrap_or_else(|| receipt.name.clone()),
+                icon: agent.and_then(|agent| agent.icon.clone()),
                 version: receipt.version.clone(),
                 detail: agent
                     .and_then(|agent| agent.description.clone())
@@ -1096,6 +1130,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
             InventoryItem {
                 id: receipt.name.clone(),
                 name: receipt.name.clone(),
+                icon: None,
                 version: receipt.version.clone(),
                 detail: package
                     .map(|package| package.description.clone())
@@ -1131,6 +1166,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
             inventory.push(InventoryItem {
                 id: package.name.clone(),
                 name: package.name,
+                icon: None,
                 version: None,
                 detail: "Available on PATH".to_string(),
                 status: ToolStatus::Installed,
@@ -1209,6 +1245,7 @@ fn scan_mcp(manifest: &mut ToolsManifest, errors: &mut Vec<String>) -> ToolCateg
                 provider: ToolProvider::Mcp,
                 id: name.clone(),
                 name,
+                icon: None,
                 version: None,
                 detail,
                 status,
@@ -1273,6 +1310,7 @@ fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
             provider: ToolProvider::Dotfiles,
             id: package.clone(),
             name: package,
+            icon: None,
             version: None,
             detail,
             status,
@@ -1746,6 +1784,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tools_page_owns_provider_routes() {
+        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/extensions"));
+        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/homebrew"));
+        assert!(!TOOLS_HOSTED_PAGE.answers_for("vmux://toolbox/"));
+    }
+
+    #[test]
+    fn tools_tab_navigation_replaces_the_owning_stack() {
+        let mut app = App::new();
+        app.add_message::<vmux_core::PageOpenRequest>()
+            .add_observer(on_navigate_request);
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::Stack::default())
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ToolsNavigateRequest {
+                url: "vmux://tools/lsp".to_string(),
+            },
+        });
+
+        let messages = app
+            .world()
+            .resource::<Messages<vmux_core::PageOpenRequest>>();
+        let mut cursor = messages.get_cursor();
+        let requests = cursor.read(messages).collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, "vmux://tools/lsp");
+        assert!(matches!(
+            requests[0].target,
+            vmux_core::PageOpenTarget::Stack(target) if target == stack
+        ));
+    }
+
+    #[test]
     fn parses_brew_inventory_with_versions() {
         assert_eq!(
             parse_brew_versions(b"ripgrep 14.1.1\nopenssl@3 3.5.0 3.5.1\n"),
@@ -1767,6 +1843,28 @@ mod tests {
         assert_eq!(
             category.items[0].actions,
             [ToolAction::Install, ToolAction::Forget]
+        );
+    }
+
+    #[test]
+    fn category_preserves_inventory_icon() {
+        let category = build_category(
+            ToolProvider::Acp,
+            vec![InventoryItem {
+                id: "codex-acp".to_string(),
+                name: "Codex".to_string(),
+                icon: Some("https://cdn.example/codex.svg".to_string()),
+                version: Some("1.0.0".to_string()),
+                detail: String::new(),
+                status: ToolStatus::Installed,
+                removable: true,
+            }],
+            &ToolsManifest::default(),
+        );
+
+        assert_eq!(
+            category.items[0].icon.as_deref(),
+            Some("https://cdn.example/codex.svg")
         );
     }
 
@@ -1796,6 +1894,7 @@ mod tests {
                 InventoryItem {
                     id: "installed".to_string(),
                     name: "installed".to_string(),
+                    icon: None,
                     version: Some("1".to_string()),
                     detail: String::new(),
                     status: ToolStatus::Installed,
@@ -1804,6 +1903,7 @@ mod tests {
                 InventoryItem {
                     id: "missing".to_string(),
                     name: "missing".to_string(),
+                    icon: None,
                     version: None,
                     detail: String::new(),
                     status: ToolStatus::Missing,

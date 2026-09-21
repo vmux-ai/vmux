@@ -245,11 +245,12 @@ impl RepoRoots {
 }
 
 fn remember_space_project(
-    bound: Query<
-        (Entity, &vmux_layout::tab::TabWorkspace),
-        Changed<vmux_layout::tab::TabWorkspace>,
-    >,
-    worktrees: Query<&vmux_layout::tab::TabWorktree>,
+    bound: Query<(
+        Entity,
+        Ref<vmux_layout::tab::TabWorkspace>,
+        Option<Ref<vmux_layout::tab::TabWorktree>>,
+        Option<&vmux_layout::tab::Tab>,
+    )>,
     space_of_tab: SpaceOfTab,
     mut roots: ResMut<RepoRoots>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
@@ -261,27 +262,39 @@ fn remember_space_project(
     let Some(mut settings) = settings else {
         return;
     };
-    for (tab, workspace) in &bound {
+    for (tab_entity, workspace, worktree, tab) in &bound {
+        if !workspace.is_changed()
+            && !worktree
+                .as_ref()
+                .is_some_and(|worktree| worktree.is_changed())
+        {
+            continue;
+        }
         let dir = workspace.project_dir.trim();
         if dir.is_empty() {
             continue;
         }
-        let Some(space_id) = space_of_tab.of(tab) else {
+        let Some(space_id) = space_of_tab.of(tab_entity) else {
             continue;
         };
-        let held = worktrees
-            .get(tab)
-            .ok()
-            .map(|worktree| worktree.repo_root.trim().to_string())
-            .filter(|root| !root.is_empty() && root != dir);
-        let repo_root = match held {
-            Some(root) => Some(root),
-            None => roots.of(dir),
-        };
-        let repo_root = repo_root.as_deref();
-        let project = match repo_root {
-            Some(root) => vmux_setting::SpaceProject::checked_out(root, dir),
-            None => vmux_setting::SpaceProject::at(dir),
+        let project = match worktree.as_ref() {
+            Some(worktree) if !worktree.repo_root.trim().is_empty() => {
+                let checkout = tab
+                    .and_then(|tab| tab.startup_dir.as_deref())
+                    .filter(|path| !path.is_empty())
+                    .unwrap_or_else(|| {
+                        if worktree.checkout_dir.is_empty() {
+                            dir
+                        } else {
+                            &worktree.checkout_dir
+                        }
+                    });
+                vmux_setting::SpaceProject::checked_out(&worktree.repo_root, checkout)
+            }
+            _ => match roots.of(dir) {
+                Some(root) => vmux_setting::SpaceProject::checked_out(&root, dir),
+                None => vmux_setting::SpaceProject::at(dir),
+            },
         };
         let changed = settings
             .bypass_change_detection()
@@ -330,7 +343,10 @@ mod tests {
                     vmux_layout::space::SpaceId(space_id.to_string()),
                 ))
                 .id();
-            let tab = app.world_mut().spawn(ChildOf(space)).id();
+            let tab = app
+                .world_mut()
+                .spawn((vmux_layout::tab::Tab::default(), ChildOf(space)))
+                .id();
             let pane = app
                 .world_mut()
                 .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
@@ -378,6 +394,11 @@ mod tests {
         }
 
         fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
+            self.app
+                .world_mut()
+                .get_mut::<vmux_layout::tab::Tab>(self.tab)
+                .unwrap()
+                .startup_dir = Some(project_dir.to_string());
             self.app.world_mut().entity_mut(self.tab).insert((
                 vmux_layout::tab::TabWorkspace {
                     project_dir: project_dir.to_string(),
@@ -385,6 +406,31 @@ mod tests {
                 vmux_layout::tab::TabWorktree {
                     repo_root: repo_root.to_string(),
                     checkout_dir: project_dir.to_string(),
+                    branch: "vmux/test".to_string(),
+                    base_ref: "main".to_string(),
+                },
+            ));
+            self.app.update();
+        }
+
+        fn select_managed_worktree(
+            &mut self,
+            project_dir: &str,
+            checkout_dir: &str,
+            repo_root: &str,
+        ) {
+            self.app
+                .world_mut()
+                .get_mut::<vmux_layout::tab::Tab>(self.tab)
+                .unwrap()
+                .startup_dir = Some(checkout_dir.to_string());
+            self.app.world_mut().entity_mut(self.tab).insert((
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: project_dir.to_string(),
+                },
+                vmux_layout::tab::TabWorktree {
+                    repo_root: repo_root.to_string(),
+                    checkout_dir: checkout_dir.to_string(),
                     branch: "vmux/test".to_string(),
                     base_ref: "main".to_string(),
                 },
@@ -606,6 +652,21 @@ mod tests {
             fixture.remembered("work").as_deref(),
             Some("/worktrees/a1b2"),
             "the tab is working in the worktree, so that is what the space is on"
+        );
+    }
+
+    #[test]
+    fn a_managed_worktree_records_the_tab_cwd_as_the_checkout() {
+        let mut fixture = Fixture::start("work");
+        fixture.select_managed_worktree("/repo/dashboard", "/worktrees/a1b2", "/repo/dashboard");
+
+        assert_eq!(
+            fixture.checkouts("work"),
+            [Some("/worktrees/a1b2".to_string())]
+        );
+        assert_eq!(
+            fixture.remembered("work"),
+            Some("/worktrees/a1b2".to_string())
         );
     }
 

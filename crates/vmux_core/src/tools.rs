@@ -122,6 +122,7 @@ pub struct ToolItem {
     pub provider: ToolProvider,
     pub id: String,
     pub name: String,
+    pub icon: Option<String>,
     pub version: Option<String>,
     pub detail: String,
     pub status: ToolStatus,
@@ -196,6 +197,36 @@ pub struct ToolsRefreshRequest {
 )]
 pub struct ToolOpenRequest {
     pub path: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ToolsNavigateRequest {
+    pub url: String,
+}
+
+impl ToolsNavigateRequest {
+    pub fn canonical_url(&self) -> Option<&'static str> {
+        match self.url.trim().trim_end_matches('/') {
+            "vmux://tools/acp" => Some("vmux://tools/acp"),
+            "vmux://tools/lsp" => Some("vmux://tools/lsp"),
+            "vmux://tools/homebrew" => Some("vmux://tools/homebrew"),
+            "vmux://tools/npm" => Some("vmux://tools/npm"),
+            "vmux://tools/mcp" => Some("vmux://tools/mcp"),
+            "vmux://tools/dotfiles" => Some("vmux://tools/dotfiles"),
+            "vmux://tools/extensions" => Some("vmux://tools/extensions"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(

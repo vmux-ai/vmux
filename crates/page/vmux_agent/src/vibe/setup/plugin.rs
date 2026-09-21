@@ -72,7 +72,7 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
 }
 
 fn close_install_pane_after_success(url: &str) -> bool {
-    url.trim_end_matches('/') == "vmux://agents"
+    url.trim_end_matches('/') == "vmux://tools/acp"
 }
 
 fn detect_agent_install_outcome(
@@ -269,8 +269,8 @@ mod tests {
 
     #[test]
     fn successful_manager_install_closes_terminal_pane() {
-        assert!(close_install_pane_after_success("vmux://agents"));
-        assert!(close_install_pane_after_success("vmux://agents/"));
+        assert!(close_install_pane_after_success("vmux://tools/acp"));
+        assert!(close_install_pane_after_success("vmux://tools/acp/"));
         assert!(!close_install_pane_after_success(
             "vmux://sessions/codex/setup"
         ));

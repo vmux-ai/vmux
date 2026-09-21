@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::columns::{DirColumns, DirWindow};
 use crate::explorer::{EditorTabCommand, ExplorerPanel, SidebarView};
-use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
+use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, NoteInlineKind, NoteInlineNode,
@@ -27,6 +27,7 @@ use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::caret::EventSelection;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::diff::DiffTone;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
@@ -99,6 +100,7 @@ pub fn Page() -> Element {
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
+    let git_repo_root = use_signal(String::new);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_refresh_settled = use_signal(|| true);
     let git_branch = use_signal(String::new);
@@ -109,6 +111,7 @@ pub fn Page() -> Element {
     GitStatusFeed {
         path: git_path.into(),
         nonce: git_nonce,
+        repo_root: git_repo_root,
         has_diff: git_has_diff,
         branch: git_branch,
         ahead: git_ahead,
@@ -1243,6 +1246,7 @@ pub fn Page() -> Element {
                 Mode::Text => rsx! {
                     if git_has_diff() {
                         DiffView {
+                            repo_root: git_repo_root,
                             path: git_path,
                             nonce: git_nonce,
                             visible: file_view_mode() == FileViewMode::Diff,
@@ -1252,7 +1256,16 @@ pub fn Page() -> Element {
                     if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
                         {
                             let active = note_active();
+                            let source_position = source_cursor();
                             let block_count = note_blocks.read().len();
+                            let blank_line_slot = note_editing()
+                                .then(|| {
+                                    note_blank_line_slot(
+                                        &note_blocks.read(),
+                                        source_position.line,
+                                    )
+                                })
+                                .flatten();
                             rsx! {
                                 div {
                                     id: SCROLL_ID,
@@ -1292,10 +1305,26 @@ pub fn Page() -> Element {
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         NoteProperties { properties: note_properties() }
+                                        if blank_line_slot == Some(0) {
+                                            NoteBlankLine {
+                                                key: "blank-{source_position.line}",
+                                                line: source_position.line,
+                                                col: source_position.col,
+                                                keymap: keymap(),
+                                            }
+                                        }
                                         for index in 0..block_count {
                                             {
-                                                let editing =
-                                                    note_editing() && Some(index as u32) == active;
+                                                let cursor_in_block = note_blocks
+                                                    .read()
+                                                    .get(index)
+                                                    .is_some_and(|block| {
+                                                        block.start_line <= source_position.line
+                                                            && source_position.line < block.end_line
+                                                    });
+                                                let editing = note_editing()
+                                                    && Some(index as u32) == active
+                                                    && cursor_in_block;
                                                 rsx! {
                                                     NoteBlockView {
                                                         key: "block-{index}",
@@ -1317,6 +1346,14 @@ pub fn Page() -> Element {
                                                             Vec::new()
                                                         },
                                                         comp_sel_clamped,
+                                                    }
+                                                    if blank_line_slot == Some(index + 1) {
+                                                        NoteBlankLine {
+                                                            key: "blank-{source_position.line}",
+                                                            line: source_position.line,
+                                                            col: source_position.col,
+                                                            keymap: keymap(),
+                                                        }
                                                     }
                                                 }
                                             }
@@ -3020,6 +3057,43 @@ fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
         .or_else(|| (!blocks.is_empty()).then_some(0))
 }
 
+fn note_blank_line_slot(blocks: &[NoteBlock], line: u32) -> Option<usize> {
+    if blocks
+        .iter()
+        .any(|block| block.start_line <= line && line < block.end_line)
+    {
+        return None;
+    }
+    Some(
+        blocks
+            .iter()
+            .position(|block| line < block.start_line)
+            .unwrap_or(blocks.len()),
+    )
+}
+
+#[component]
+fn NoteBlankLine(line: u32, col: u32, keymap: vmux_core::KeymapKind) -> Element {
+    let text = " ".repeat(col as usize);
+    let chunks = NoteLineChunk::split(&text, Some(col), None);
+    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
+        "w-px"
+    } else {
+        "w-[2px]"
+    };
+    rsx! {
+        div {
+            id: "note-line-{line}",
+            "data-note-edit-line": "{line}",
+            class: "my-3 min-h-[1lh] w-full whitespace-pre-wrap break-words",
+            NoteSourceLine {
+                chunks,
+                caret_width_class: caret_width_class.to_string(),
+            }
+        }
+    }
+}
+
 fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint, extend: bool) {
     spawn(async move {
         let offset = TextRun::in_element(element_id)
@@ -4149,36 +4223,27 @@ pub(crate) fn row_class(selected: bool) -> String {
 }
 
 fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "+",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "~",
-        EditorDiffMarker::Deleted => "-",
-    }
+    diff_tone(marker).sign()
 }
 
 fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "text-ansi-2",
-        EditorDiffMarker::Modified => "text-ansi-3",
-        EditorDiffMarker::Deleted => "text-ansi-1",
-        EditorDiffMarker::Staged => "text-ansi-3/80",
-    }
+    diff_tone(marker).text_class()
 }
 
 fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
-        EditorDiffMarker::Modified => "bg-ansi-3/[0.06] hover:bg-ansi-3/[0.10]",
-        EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
-        EditorDiffMarker::Staged => "bg-ansi-3/[0.035] hover:bg-ansi-3/[0.07]",
-    }
+    diff_tone(marker).row_class()
 }
 
 fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+    diff_tone(marker).marker_class()
+}
+
+fn diff_tone(marker: EditorDiffMarker) -> DiffTone {
     match marker {
-        EditorDiffMarker::Added => "bg-ansi-2",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "bg-ansi-3",
-        EditorDiffMarker::Deleted => "bg-ansi-1",
+        EditorDiffMarker::Added => DiffTone::Added,
+        EditorDiffMarker::Modified => DiffTone::Modified,
+        EditorDiffMarker::Deleted => DiffTone::Deleted,
+        EditorDiffMarker::Staged => DiffTone::Staged,
     }
 }
 
@@ -4981,6 +5046,33 @@ fn NativeVideoHost(path: String) -> Element {
             },
             onresize: move |_| report.call(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod note_blank_line_tests {
+    use super::*;
+
+    fn block(start_line: u32, end_line: u32) -> NoteBlock {
+        NoteBlock {
+            start_line,
+            end_line,
+            source: "text".into(),
+            block: MdBlock::Paragraph {
+                inlines: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_blank_source_line_gets_its_own_visual_slot() {
+        let blocks = vec![block(1, 2), block(4, 5)];
+
+        assert_eq!(note_blank_line_slot(&blocks, 0), Some(0));
+        assert_eq!(note_blank_line_slot(&blocks, 2), Some(1));
+        assert_eq!(note_blank_line_slot(&blocks, 5), Some(2));
+        assert_eq!(note_blank_line_slot(&blocks, 1), None);
+        assert_eq!(note_blank_line_slot(&blocks, 4), None);
     }
 }
 

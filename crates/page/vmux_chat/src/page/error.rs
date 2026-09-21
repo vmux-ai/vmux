@@ -73,7 +73,7 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                     button {
                         class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
                         onclick: move |_| {
-                            let _ = send(&ChatOpenPage { url: "vmux://agents".to_string() });
+                            let _ = send(&ChatOpenPage { url: "vmux://tools/acp".to_string() });
                         },
                         svg {
                             class: "h-4 w-4 text-indigo-500",

@@ -10505,12 +10505,16 @@ dependencies = [
  "dioxus",
  "libc",
  "notify",
+ "rfd 0.15.4",
  "rkyv",
  "serde",
  "similar",
  "syntect",
  "tempfile",
  "two-face",
+ "url",
+ "vmux_core",
+ "vmux_native",
  "vmux_ui",
 ]
 

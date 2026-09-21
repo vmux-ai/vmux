@@ -75,6 +75,43 @@ pub fn ManagerPage(children: Element) -> Element {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagerTab {
+    pub id: String,
+    pub label: String,
+    pub href: String,
+}
+
+#[component]
+pub fn ManagerTabs(
+    active: String,
+    tabs: Vec<ManagerTab>,
+    onselect: EventHandler<String>,
+) -> Element {
+    rsx! {
+        nav { class: "flex shrink-0 overflow-x-auto border-b border-foreground/[0.07] px-5 py-2.5",
+            div { class: "mx-auto flex min-w-max items-center gap-0.5 rounded-xl bg-foreground/[0.06] p-1 ring-1 ring-inset ring-foreground/[0.06]",
+                for tab in tabs {
+                    a {
+                        href: "{tab.href}",
+                        onclick: move |event| {
+                            event.prevent_default();
+                            onselect.call(tab.href.clone());
+                        },
+                        aria_current: if tab.id == active { "page" } else { "false" },
+                        class: if tab.id == active {
+                            "flex h-7 items-center rounded-lg bg-background px-3 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08]"
+                        } else {
+                            "flex h-7 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                        },
+                        "{tab.label}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn ManagerHeader(
     title: String,
@@ -110,10 +147,15 @@ pub fn ManagerHeader(
 }
 
 #[component]
-pub fn ManagerList(children: Element) -> Element {
+pub fn ManagerList(children: Element, #[props(default)] class: String) -> Element {
+    let content_class = if class.is_empty() {
+        "mx-auto flex max-w-3xl flex-col gap-2.5".to_string()
+    } else {
+        class
+    };
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto px-5 py-5",
-            div { class: "mx-auto flex max-w-3xl flex-col gap-2.5", {children} }
+            div { class: "{content_class}", {children} }
         }
     }
 }
@@ -144,6 +186,21 @@ pub fn ManagerRow(
                 }
             }
             div { class: "flex shrink-0 items-center gap-2", {actions} }
+        }
+    }
+}
+
+#[component]
+pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
+    rsx! {
+        if let Some(src) = src.filter(|src| !src.is_empty()) {
+            img {
+                class: "h-6 w-6 rounded object-contain",
+                src,
+                draggable: "false",
+            }
+        } else {
+            span { class: "font-mono text-[10px] text-muted-foreground", "{fallback}" }
         }
     }
 }

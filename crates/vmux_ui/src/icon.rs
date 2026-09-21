@@ -1,27 +1,46 @@
-pub use wasm::{BuiltinIconView, LineIconView, PageIconView};
+pub use wasm::{BuiltinIconView, GitIconView, LineIconView, PageIconView};
+
+pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
     AlertCircle,
+    ArrowDown,
+    ArrowUp,
     BookOpen,
     Brain,
     Camera,
+    Check,
+    ChevronDown,
+    ChevronsUpDown,
     Clock,
     Copy,
     ExternalLink,
     File,
     FileOutput,
+    FastForward,
     GitBranch,
+    GitCommit,
+    GitFork,
+    GitMerge,
+    GitPullRequest,
     Globe,
     Image,
     Layout,
+    Minus,
     Notebook,
     Package,
     Pencil,
+    Plus,
+    RefreshCw,
+    RotateCcw,
     Search,
     Shield,
     ShieldCheck,
+    Tag,
     Terminal,
+    Trash,
+    Upload,
     Users,
     Wifi,
     Wrench,
@@ -35,6 +54,8 @@ impl LineIcon {
                 "M12 8v4",
                 "M12 16h.01",
             ],
+            Self::ArrowDown => &["M12 5v14", "m19 12-7 7-7-7"],
+            Self::ArrowUp => &["m5 12 7-7 7 7", "M12 19V5"],
             Self::BookOpen => &[
                 "M12 7v14",
                 "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
@@ -54,6 +75,9 @@ impl LineIcon {
                 "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
                 "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
             ],
+            Self::Check => &["m5 12 4 4L19 6"],
+            Self::ChevronDown => &["m6 9 6 6 6-6"],
+            Self::ChevronsUpDown => &["m7 15 5 5 5-5", "m7 9 5-5 5 5"],
             Self::Clock => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
             Self::Copy => &[
                 "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",
@@ -74,11 +98,32 @@ impl LineIcon {
                 "m10 17 3-3-3-3",
                 "M13 14H7",
             ],
+            Self::FastForward => &["m13 19 9-7-9-7v14Z", "m2 19 9-7-9-7v14Z"],
             Self::GitBranch => &[
                 "M6 3v12",
                 "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
                 "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
                 "M6 15c0 3 2 5 5 5h4",
+            ],
+            Self::GitCommit => &["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 3v6", "M12 15v6"],
+            Self::GitFork => &[
+                "M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M18 9a9 9 0 0 1-9 9",
+                "M6 9v12",
+            ],
+            Self::GitMerge => &[
+                "M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 3v3a12 12 0 0 0 12 12v3",
+            ],
+            Self::GitPullRequest => &[
+                "M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M13 6h3a2 2 0 0 1 2 2v7",
+                "m13 3-3 3 3 3",
+                "M6 9v12",
             ],
             Self::Globe => &[
                 "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
@@ -91,6 +136,7 @@ impl LineIcon {
                 "m21 15-5-5L5 21",
             ],
             Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            Self::Minus => &["M5 12h14"],
             Self::Notebook => &[
                 "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
                 "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
@@ -102,13 +148,33 @@ impl LineIcon {
                 "M12 22V12",
             ],
             Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+            Self::Plus => &["M12 5v14", "M5 12h14"],
+            Self::RefreshCw => &[
+                "M20 11a8.1 8.1 0 0 0-15.5-2",
+                "M4 4v5h5",
+                "M4 13a8.1 8.1 0 0 0 15.5 2",
+                "M20 20v-5h-5",
+            ],
+            Self::RotateCcw => &["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
             Self::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
             Self::Shield => &["M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"],
             Self::ShieldCheck => &[
                 "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
                 "m9 12 2 2 4-4",
             ],
+            Self::Tag => &[
+                "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42Z",
+                "M7.5 7.5h.01",
+            ],
             Self::Terminal => &["m4 17 6-6-6-6", "M12 19h8"],
+            Self::Trash => &[
+                "M3 6h18",
+                "M8 6V4h8v2",
+                "M19 6l-1 14H6L5 6",
+                "M10 11v5",
+                "M14 11v5",
+            ],
+            Self::Upload => &["m12 3 4 4", "m12 3-4 4", "M12 3v12", "M5 21h14"],
             Self::Users => &[
                 "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
                 "M5 21v-2a7 7 0 0 1 14 0v2",
@@ -129,7 +195,7 @@ impl LineIcon {
 }
 
 mod wasm {
-    use super::LineIcon;
+    use super::{GIT_ICON_URL, LineIcon};
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
@@ -148,6 +214,18 @@ mod wasm {
     }
 
     #[component]
+    pub fn GitIconView(class: String) -> Element {
+        rsx! {
+            Favicon {
+                favicon_url: GIT_ICON_URL.to_string(),
+                url: "git:///".to_string(),
+                class: class.clone(),
+                globe_class: class,
+            }
+        }
+    }
+
+    #[component]
     pub fn BuiltinIconView(icon: BuiltinIcon, class: String) -> Element {
         match icon {
             BuiltinIcon::Terminal => rsx! { Icon { class: "{class}",
@@ -158,7 +236,7 @@ mod wasm {
                 path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
                 path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
             } },
-            BuiltinIcon::Project | BuiltinIcon::GitBranch => rsx! { Icon { class: "{class}",
+            BuiltinIcon::Project => rsx! { Icon { class: "{class}",
                 path { d: "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z" }
                 path { d: "m12 15-3-3a22 22 0 0 1 2-3.95A12.58 12.58 0 0 1 22 2c0 2.72-.78 7.5-6.05 11a22.35 22.35 0 0 1-3.95 2Z" }
                 path { d: "M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" }
@@ -219,6 +297,9 @@ mod wasm {
                 path { d: "M10 5h4" }
                 path { d: "M10 18h4" }
             } },
+            BuiltinIcon::GitBranch => {
+                rsx! { GitIconView { class } }
+            }
             BuiltinIcon::Nushell => {
                 rsx! { BrandGlyph { class: class.clone(), d: "M0 16.338h1.25v-5.7c.417-.624 1.205-1.309 2.127-1.309 1.176 0 1.34.64 1.34 2.247v4.762h1.25v-5.685c0-1.458-.67-2.32-2.202-2.32-.923 0-1.964.46-2.59 1.264l-.103-1.1H0Zm10.177-7.842h-1.25v5.698c0 1.46.745 2.307 2.263 2.307.921 0 1.889-.431 2.514-1.22l.104 1.057h1.072V8.496h-1.25v5.773c-.432.67-1.265 1.25-2.129 1.25-.907 0-1.324-.446-1.324-1.458zm8.11-.997-.61.952 5.251 3.229-5.251 3.244.669.922L24 12.32v-1.28z" } }
             }

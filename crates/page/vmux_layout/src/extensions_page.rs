@@ -10,7 +10,7 @@ use vmux_ui::components::alert_dialog::{
 };
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
-    ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
+    ManagerPage, ManagerRow, ManagerSkeleton, ManagerThumbnail, ManagerTone,
 };
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -40,6 +40,12 @@ impl Approval {
 
 #[component]
 pub fn Page() -> Element {
+    let active_route = use_signal(|| crate::tools_page::ToolsRoute::Extensions);
+    rsx! { ExtensionsManager { active_route } }
+}
+
+#[component]
+pub(crate) fn ExtensionsManager(active_route: Signal<crate::tools_page::ToolsRoute>) -> Element {
     let locale = use_theme();
     let mut state = use_signal(ExtensionsEvent::default);
     let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
@@ -82,6 +88,7 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
+            crate::tools_page::ToolsManagerTabs { active_route }
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),
@@ -193,13 +200,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
             }
         }
         ManagerRow {
-            icon: rsx! {
-                if let Some(icon) = icon.as_ref() {
-                    img { class: "h-6 w-6 rounded object-contain", src: "{icon}" }
-                } else {
-                    span { class: "font-mono text-[10px] text-muted-foreground", "EXT" }
-                }
-            },
+            icon: rsx! { ManagerThumbnail { src: icon, fallback: "EXT".to_string() } },
             title: item.name.clone(),
             subtitle: format!("v{}", item.version),
             meta: rsx! {

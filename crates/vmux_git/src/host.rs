@@ -14,17 +14,34 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_core::host::page::NativelyHosted;
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{
-    GIT_CHANGED_EVENT, GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDiscardRequest,
-    GitHunkRequest, GitPushRequest, GitStageRequest, GitStatusRequest, GitUnstageRequest,
+    GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitAppAction,
+    GitAppActionRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest, GitDiffRequest,
+    GitDirectoryEvent, GitDirectoryRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest,
+    GitOperationRequest, GitPullRequest, GitPushRequest, GitRepositoryPickedEvent,
+    GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest, GitStageRequest,
+    GitStatusRequest, GitUnstageRequest,
 };
 use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
 pub struct GitPlugin;
 
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GitCheckForUpdatesRequest;
+
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),
+        ));
+        app.world_mut()
+            .spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
+        vmux_core::register_host_spawn(app, "git");
+        vmux_core::register_scheme_spawn(app, "git");
         let (tx, rx) = mpsc::channel();
         let proxy = app
             .world()
@@ -43,7 +60,7 @@ impl Plugin for GitPlugin {
                 app.insert_non_send(GitWatch {
                     watcher,
                     rx,
-                    watched: HashSet::new(),
+                    watch_references: HashMap::new(),
                     subscriptions: HashMap::new(),
                     repo_info_subscriptions: HashMap::new(),
                 });
@@ -56,6 +73,7 @@ impl Plugin for GitPlugin {
             .map(|wrapper| (**wrapper).clone());
         app.init_resource::<GitOutbox>()
             .init_resource::<GitStatusJobs>()
+            .add_message::<GitCheckForUpdatesRequest>()
             .insert_resource(RepoInfoCache {
                 entries: HashMap::new(),
                 canonical: HashMap::new(),
@@ -63,6 +81,10 @@ impl Plugin for GitPlugin {
                 wake: repo_info_wake,
             })
             .add_plugins(BinEventEmitterPlugin::<(
+                GitRepositoryRequest,
+                GitRepositoryPickerRequest,
+                GitBranchLogRequest,
+                GitDirectoryRequest,
                 GitStatusRequest,
                 GitDiffRequest,
                 GitStageRequest,
@@ -72,19 +94,36 @@ impl Plugin for GitPlugin {
                 GitPushRequest,
                 GitHunkRequest,
             )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                GitFetchRequest,
+                GitAppActionRequest,
+                GitOperationRequest,
+                GitPullRequest,
+                GitStageAllRequest,
+            )>::default())
+            .add_observer(on_repository_request)
+            .add_observer(on_repository_picker_request)
+            .add_observer(on_app_action_request)
+            .add_observer(on_branch_log_request)
+            .add_observer(on_directory_request)
             .add_observer(on_status_request)
             .add_observer(on_diff_request)
             .add_observer(on_stage_request)
             .add_observer(on_unstage_request)
             .add_observer(on_discard_request)
             .add_observer(on_commit_request)
+            .add_observer(on_fetch_request)
+            .add_observer(on_operation_request)
+            .add_observer(on_pull_request)
             .add_observer(on_push_request)
+            .add_observer(on_stage_all_request)
             .add_observer(on_hunk_request)
             .add_systems(
                 Update,
                 (
                     drain_git_watch,
                     poll_repo_info_cache,
+                    poll_repository_pickers,
                     sync_repo_info_watches,
                     drain_git_outbox,
                     dispatch_status_jobs,
@@ -94,10 +133,136 @@ impl Plugin for GitPlugin {
     }
 }
 
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "git",
+    title: "Git",
+    title_message_id: Some("git-title"),
+    replaces_command: None,
+    keywords: &[
+        "repository",
+        "changes",
+        "commit",
+        "branch",
+        "source control",
+    ],
+    icon: Some(vmux_core::BuiltinIcon::GitBranch),
+    command_bar: true,
+};
+
 #[derive(Component, Clone, Debug, Default)]
 pub struct GitDiffSource {
     pub content: String,
     pub dirty: bool,
+}
+
+struct GitDirectory;
+
+impl GitDirectory {
+    fn initial_path(path: &Path) -> PathBuf {
+        let mut current = path.to_path_buf();
+        while !current.is_dir() && current.pop() {}
+        if current.is_dir() && !current.as_os_str().is_empty() {
+            return current;
+        }
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    fn entries(path: &Path) -> Vec<vmux_core::event::FileDirEntry> {
+        let Ok(read) = std::fs::read_dir(path) else {
+            return Vec::new();
+        };
+        let mut entries = Vec::new();
+        for entry in read.flatten() {
+            let path = entry.path();
+            let is_dir = entry
+                .file_type()
+                .map(|kind| {
+                    kind.is_dir()
+                        || kind.is_symlink()
+                            && std::fs::metadata(&path)
+                                .map(|metadata| metadata.is_dir())
+                                .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            entries.push(vmux_core::event::FileDirEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
+                is_dir,
+            });
+        }
+        entries.sort_by(|left, right| {
+            right
+                .is_dir
+                .cmp(&left.is_dir)
+                .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        entries
+    }
+
+    fn event(path: &Path, preview: bool) -> GitDirectoryEvent {
+        let path = Self::initial_path(path);
+        let parent = path.parent().map(Path::to_path_buf);
+        let parent_path = parent
+            .as_ref()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let parent_entries = parent.as_deref().map(Self::entries).unwrap_or_default();
+        let repo_root = crate::host::runner::repo_root(&path)
+            .map(|root| root.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        GitDirectoryEvent {
+            entries: Self::entries(&path),
+            path: path.to_string_lossy().into_owned(),
+            parent_path,
+            parent_entries,
+            repo_root,
+            preview,
+        }
+    }
+}
+
+#[derive(Component)]
+struct PendingGitRepositoryPicker {
+    webview: Entity,
+    task: Task<Option<PathBuf>>,
+}
+
+struct GitRepositoryPicker;
+
+impl GitRepositoryPicker {
+    fn initial_directory(path: &Path) -> PathBuf {
+        let mut current = path.to_path_buf();
+        while !current.is_dir() && current.pop() {}
+        if current.is_dir() {
+            return current;
+        }
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    fn task(
+        path: PathBuf,
+        proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) -> Task<Option<PathBuf>> {
+        let initial = Self::initial_directory(&path);
+        IoTaskPool::get().spawn(async move {
+            let selected = rfd::AsyncFileDialog::new()
+                .set_title("Choose Git repository")
+                .set_directory(initial)
+                .pick_folder()
+                .await
+                .map(|folder| folder.path().to_path_buf());
+            if let Some(proxy) = proxy {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
+            selected
+        })
+    }
 }
 
 pub enum GitOutboxItem {
@@ -182,7 +347,7 @@ struct GitSubscription {
 struct GitWatch {
     watcher: RecommendedWatcher,
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
-    watched: HashSet<GitWatchTarget>,
+    watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
 }
@@ -192,6 +357,7 @@ struct RepoInfoCacheEntry {
     loaded: bool,
     dirty: bool,
     watched: bool,
+    idle_syncs: u8,
     pending: Option<Task<Option<crate::host::worktree::RepoInfo>>>,
     ignore_events_until: Option<Instant>,
 }
@@ -269,9 +435,11 @@ impl RepoInfoCache {
                 loaded: false,
                 dirty: true,
                 watched: false,
+                idle_syncs: 0,
                 pending: None,
                 ignore_events_until: None,
             });
+        entry.idle_syncs = 0;
         Self::poll_and_refresh(&path, entry, wake);
         entry.info.clone()
     }
@@ -287,6 +455,7 @@ impl RepoInfoCache {
             entry.info = info;
             entry.loaded = true;
             entry.watched = false;
+            entry.idle_syncs = 0;
             entry.pending = None;
             entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
         }
@@ -321,6 +490,26 @@ impl RepoInfoCache {
         if let Some(entry) = self.entries.get_mut(path) {
             entry.dirty = true;
         }
+    }
+
+    fn inactive_paths(&mut self) -> Vec<PathBuf> {
+        let mut inactive = Vec::new();
+        for (path, entry) in &mut self.entries {
+            if entry.pending.is_some() {
+                continue;
+            }
+            entry.idle_syncs = entry.idle_syncs.saturating_add(1);
+            if entry.idle_syncs > 1 {
+                inactive.push(path.clone());
+            }
+        }
+        inactive
+    }
+
+    fn remove(&mut self, path: &Path) {
+        self.entries.remove(path);
+        self.canonical.retain(|_, canonical| canonical != path);
+        self.guessed.remove(path);
     }
 }
 
@@ -365,11 +554,18 @@ fn git_watch_targets(
         .next()
         .map(|line| resolve_git_path(&root, line))
         .ok_or_else(|| crate::host::runner::GitError("missing common git directory".into()))?;
-    let mut targets = vec![GitWatchTarget {
-        path: git_dir.clone(),
-        recursive: false,
-        kind: GitWatchKind::Metadata,
-    }];
+    let mut targets = vec![
+        GitWatchTarget {
+            path: canon(&root),
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        },
+        GitWatchTarget {
+            path: git_dir.clone(),
+            recursive: false,
+            kind: GitWatchKind::Metadata,
+        },
+    ];
     if common_dir != git_dir {
         targets.push(GitWatchTarget {
             path: common_dir.clone(),
@@ -469,6 +665,78 @@ fn should_forward_git_watch_result(result: &notify::Result<notify::Event>) -> bo
 }
 
 impl GitWatch {
+    #[cfg(test)]
+    fn test() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(move |result| {
+            let _ = tx.send(result);
+        })
+        .unwrap();
+        Self {
+            watcher,
+            rx,
+            watch_references: HashMap::new(),
+            subscriptions: HashMap::new(),
+            repo_info_subscriptions: HashMap::new(),
+        }
+    }
+
+    fn acquire_targets(&mut self, targets: &[GitWatchTarget]) -> bool {
+        let mut acquired = Vec::new();
+        for target in targets {
+            if let Some(references) = self.watch_references.get_mut(target) {
+                *references += 1;
+                acquired.push(target.clone());
+                continue;
+            }
+            let mode = if target.recursive {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            if self.watcher.watch(&target.path, mode).is_err() {
+                self.release_targets(&acquired);
+                return false;
+            }
+            self.watch_references.insert(target.clone(), 1);
+            acquired.push(target.clone());
+        }
+        true
+    }
+
+    fn release_targets(&mut self, targets: &[GitWatchTarget]) {
+        for target in targets {
+            let remove = match self.watch_references.get_mut(target) {
+                Some(references) if *references > 1 => {
+                    *references -= 1;
+                    false
+                }
+                Some(_) => true,
+                None => false,
+            };
+            if !remove {
+                continue;
+            }
+            self.watch_references.remove(target);
+            if self
+                .watch_references
+                .keys()
+                .all(|other| other.path != target.path)
+            {
+                let _ = self.watcher.unwatch(&target.path);
+            }
+        }
+    }
+
+    fn evict_inactive_repo_info(&mut self, repo_info: &mut RepoInfoCache) {
+        for path in repo_info.inactive_paths() {
+            if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
+                self.release_targets(&targets);
+            }
+            repo_info.remove(&path);
+        }
+    }
+
     fn subscribe(
         &mut self,
         entity: Entity,
@@ -482,26 +750,17 @@ impl GitWatch {
         {
             return Ok(subscription.repo_root.clone());
         }
-        let (repo_root, targets) = git_watch_targets(&path).inspect_err(|_| {
-            self.subscriptions.remove(&entity);
-        })?;
-        let mut complete = true;
-        for target in &targets {
-            if self.watched.contains(target) {
-                continue;
+        let (repo_root, targets) = match git_watch_targets(&path) {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some(previous) = self.subscriptions.remove(&entity) {
+                    self.release_targets(&previous.targets);
+                }
+                return Err(error);
             }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_ok() {
-                self.watched.insert(target.clone());
-            } else {
-                complete = false;
-            }
-        }
-        self.subscriptions.insert(
+        };
+        let complete = self.acquire_targets(&targets);
+        let previous = self.subscriptions.insert(
             entity,
             GitSubscription {
                 path,
@@ -510,6 +769,9 @@ impl GitWatch {
                 complete,
             },
         );
+        if let Some(previous) = previous {
+            self.release_targets(&previous.targets);
+        }
         Ok(repo_root)
     }
 
@@ -523,26 +785,14 @@ impl GitWatch {
         if self.repo_info_subscriptions.get(&path) == Some(&targets) {
             return true;
         }
-        let mut complete = true;
-        for target in &targets {
-            if self.watched.contains(target) {
-                continue;
-            }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_ok() {
-                self.watched.insert(target.clone());
-            } else {
-                complete = false;
-            }
+        if !self.acquire_targets(&targets) {
+            return false;
         }
-        if complete {
-            self.repo_info_subscriptions.insert(path, targets);
+        let previous = self.repo_info_subscriptions.insert(path, targets);
+        if let Some(previous) = previous {
+            self.release_targets(&previous);
         }
-        complete
+        true
     }
 }
 
@@ -614,7 +864,9 @@ fn on_status_request(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(GitOutboxItem::Events {
                 webview,
-                emits: vec![Emit::Status(crate::host::runner::non_repository_status())],
+                emits: vec![Emit::Status(crate::host::runner::non_repository_status(
+                    &path,
+                ))],
             });
         return;
     }
@@ -644,6 +896,171 @@ fn on_status_request(
                     })],
                 })
         }
+    }
+}
+
+fn on_repository_request(
+    trigger: On<BinReceive<GitRepositoryRequest>>,
+    outbox: Res<GitOutbox>,
+    watch: Option<NonSendMut<GitWatch>>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
+) {
+    let webview = trigger.event().webview;
+    let path: PathBuf = trigger.event().payload.path.clone().into();
+    let repo_root = if let Some(mut watch) = watch {
+        match watch.subscribe(webview, &path) {
+            Ok(repo_root) => repo_root,
+            Err(error) => {
+                outbox
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(GitOutboxItem::Events {
+                        webview,
+                        emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                            message: error.0,
+                        })],
+                    });
+                return;
+            }
+        }
+    } else {
+        match crate::host::runner::repo_root(&path) {
+            Ok(repo_root) => repo_root,
+            Err(error) => {
+                outbox
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(GitOutboxItem::Events {
+                        webview,
+                        emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                            message: error.0,
+                        })],
+                    });
+                return;
+            }
+        }
+    };
+    if let Ok(mut page) = pages.get_mut(webview)
+        && let Some(url) = crate::GitUrl::from_path(&repo_root)
+        && page.url != url
+    {
+        page.url = url;
+    }
+    spawn_job(&outbox, webview, JobKind::Repository { path });
+}
+
+fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, outbox: Res<GitOutbox>) {
+    let request = &trigger.event().payload;
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::BranchLog {
+            repo_root: request.repo_root.clone().into(),
+            branch: request.branch.clone(),
+        },
+    );
+}
+
+fn on_app_action_request(
+    trigger: On<BinReceive<GitAppActionRequest>>,
+    child_of: Query<&ChildOf>,
+    mut page_open: MessageWriter<PageOpenRequest>,
+    mut update_requests: MessageWriter<GitCheckForUpdatesRequest>,
+) {
+    let target = child_of
+        .get(trigger.event().webview)
+        .ok()
+        .and_then(|stack| child_of.get(stack.parent()).ok())
+        .map(|pane| PageOpenTarget::NewStackInPane(pane.parent()))
+        .unwrap_or(PageOpenTarget::ActiveStack);
+    let url = match trigger.event().payload.action {
+        GitAppAction::EditConfig => {
+            let Ok(path) = runner::config_path(Path::new(&trigger.event().payload.repo_root))
+            else {
+                return;
+            };
+            let Ok(url) = url::Url::from_file_path(path) else {
+                return;
+            };
+            url.to_string()
+        }
+        GitAppAction::CheckForUpdates => {
+            update_requests.write(GitCheckForUpdatesRequest);
+            return;
+        }
+    };
+    page_open.write(PageOpenRequest {
+        target,
+        url,
+        request_id: None,
+    });
+}
+
+fn on_directory_request(
+    trigger: On<BinReceive<GitDirectoryRequest>>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let event = GitDirectory::event(Path::new(&request.path), request.preview);
+    if !request.preview
+        && let Ok(mut page) = pages.get_mut(trigger.event().webview)
+    {
+        if let Some(url) = crate::GitUrl::from_path(Path::new(&event.path)) {
+            page.url = url;
+        }
+        let name = Path::new(&event.path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Git".to_string());
+        page.title = format!("{name} · Git");
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        trigger.event().webview,
+        GIT_DIRECTORY_EVENT,
+        &event,
+    ));
+}
+
+fn on_repository_picker_request(
+    trigger: On<BinReceive<GitRepositoryPickerRequest>>,
+    pending: Query<&PendingGitRepositoryPicker>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if pending.iter().any(|picker| picker.webview == webview) {
+        return;
+    }
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
+    commands.spawn(PendingGitRepositoryPicker {
+        webview,
+        task: GitRepositoryPicker::task(path, proxy),
+    });
+}
+
+fn poll_repository_pickers(
+    mut pending: Query<(Entity, &mut PendingGitRepositoryPicker)>,
+    mut commands: Commands,
+) {
+    for (entity, mut picker) in &mut pending {
+        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
+            continue;
+        };
+        if let Some(path) = selected {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                picker.webview,
+                GIT_REPOSITORY_PICKED_EVENT,
+                &GitRepositoryPickedEvent {
+                    path: path.to_string_lossy().into_owned(),
+                },
+            ));
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -726,8 +1143,12 @@ fn sync_repo_info_watches(
     mut repo_info: ResMut<RepoInfoCache>,
 ) {
     let Some(mut watch) = watch else {
+        for path in repo_info.inactive_paths() {
+            repo_info.remove(&path);
+        }
         return;
     };
+    watch.evict_inactive_repo_info(&mut repo_info);
     let paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
@@ -751,11 +1172,16 @@ fn on_diff_request(
     outbox: Res<GitOutbox>,
 ) {
     let p = &trigger.event().payload;
+    let repo_root = PathBuf::from(&p.repo_root);
+    let path = crate::host::runner::RequestPath::new(&p.path, &p.path_bytes).resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
         JobKind::Diff {
-            path: p.path.clone().into(),
+            repo_root,
+            path,
+            reference: p.reference.clone(),
+            generation: p.generation,
             top_line: p.top_line,
             rows: p.rows,
             content: sources
@@ -768,32 +1194,38 @@ fn on_diff_request(
 }
 
 fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Stage {
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Stage { repo_root, path },
     );
 }
 
 fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Unstage {
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Unstage { repo_root, path },
     );
 }
 
 fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, outbox: Res<GitOutbox>) {
+    let payload = &trigger.event().payload;
+    let repo_root = PathBuf::from(&payload.repo_root);
+    let path = crate::host::runner::RequestPath::new(&payload.path, &payload.path_bytes)
+        .resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
-        JobKind::Discard {
-            path: trigger.event().payload.path.clone().into(),
-        },
+        JobKind::Discard { repo_root, path },
     );
 }
 
@@ -809,6 +1241,38 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, outbox: Res<GitO
     );
 }
 
+fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Fetch {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
+fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, outbox: Res<GitOutbox>) {
+    let request = &trigger.event().payload;
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation.clone(),
+        },
+    );
+}
+
+fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Pull {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
 fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbox>) {
     spawn_job(
         &outbox,
@@ -819,23 +1283,56 @@ fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbo
     );
 }
 
+fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, outbox: Res<GitOutbox>) {
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::StageAll {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
+}
+
 fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbox>) {
     let p = &trigger.event().payload;
+    let repo_root = PathBuf::from(&p.repo_root);
+    let path = crate::host::runner::RequestPath::new(&p.path, &p.path_bytes).resolve(&repo_root);
     spawn_job(
         &outbox,
         trigger.event().webview,
         JobKind::Hunk {
-            path: p.path.clone().into(),
+            repo_root,
+            path,
             hunk: p.hunk,
             accept: p.accept,
         },
     );
 }
 
-fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
+fn emit_events(
+    commands: &mut Commands,
+    pages: &mut Query<&mut vmux_core::PageMetadata>,
+    webview: Entity,
+    emits: Vec<Emit>,
+) {
     for emit in emits {
         let name = emit_event_name(&emit);
         match emit {
+            Emit::Repository(ev) => {
+                if let Ok(mut page) = pages.get_mut(webview) {
+                    if let Some(url) = crate::GitUrl::from_path(Path::new(&ev.repo_root)) {
+                        page.url = url;
+                    }
+                    page.title = match ev.branch.is_empty() {
+                        true => ev.repo_name.clone(),
+                        false => format!("{} · {}", ev.repo_name, ev.branch),
+                    };
+                }
+                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+            }
+            Emit::BranchLog(ev) => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+            }
             Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
             Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
             Emit::DiffViewport(ev) => {
@@ -850,6 +1347,7 @@ fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
 fn drain_git_outbox(
     outbox: Res<GitOutbox>,
     mut jobs: ResMut<GitStatusJobs>,
+    mut pages: Query<&mut vmux_core::PageMetadata>,
     mut commands: Commands,
 ) {
     let drained: OutboxQueue = {
@@ -859,12 +1357,12 @@ fn drain_git_outbox(
     for item in drained {
         match item {
             GitOutboxItem::Events { webview, emits } => {
-                emit_events(&mut commands, webview, emits);
+                emit_events(&mut commands, &mut pages, webview, emits);
             }
             GitOutboxItem::StatusBatch { repo_root, results } => {
                 jobs.complete(&repo_root);
                 for (webview, emits) in results {
-                    emit_events(&mut commands, webview, emits);
+                    emit_events(&mut commands, &mut pages, webview, emits);
                 }
             }
         }
@@ -876,6 +1374,16 @@ mod tests {
     use super::*;
     use crate::event::GitErrorEvent;
     use crate::host::runner::test_repo;
+
+    #[test]
+    fn repository_picker_starts_at_the_nearest_existing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("projects");
+        std::fs::create_dir(&existing).unwrap();
+        let missing = existing.join("github.com/vmux-ai/vmux");
+
+        assert_eq!(GitRepositoryPicker::initial_directory(&missing), existing);
+    }
 
     #[test]
     fn drain_empties_outbox() {
@@ -915,8 +1423,14 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         let (_, targets) = git_watch_targets(&file).unwrap();
+        let root = canon(repo.path());
         let git_dir = canon(&repo.path().join(".git"));
 
+        assert!(targets.contains(&GitWatchTarget {
+            path: root,
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        }));
         assert!(targets.contains(&GitWatchTarget {
             path: git_dir.clone(),
             recursive: false,
@@ -950,8 +1464,14 @@ mod tests {
         );
 
         let (_, targets) = git_watch_targets(&worktree.join("a.txt")).unwrap();
+        let worktree_root = canon(&worktree);
         let common = canon(&repo.path().join(".git"));
 
+        assert!(targets.contains(&GitWatchTarget {
+            path: worktree_root,
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        }));
         assert!(targets.iter().any(|target| {
             !target.recursive
                 && target.path != common
@@ -967,6 +1487,102 @@ mod tests {
             recursive: true,
             kind: GitWatchKind::Metadata,
         }));
+    }
+
+    #[test]
+    fn replacing_subscription_releases_only_unshared_watch_targets() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let first_file = test_repo::write(first.path(), "a.txt", "one\n");
+        let second_file = test_repo::write(second.path(), "b.txt", "two\n");
+        let first_info = crate::host::worktree::repo_info(first.path()).unwrap();
+        let first_targets = git_watch_targets(&first_file).unwrap().1;
+        let second_targets = git_watch_targets(&second_file).unwrap().1;
+        let entity = Entity::from_bits(1);
+        let mut watch = GitWatch::test();
+
+        watch.subscribe(entity, &first_file).unwrap();
+        assert!(watch.subscribe_repo_info(first.path(), Some(&first_info)));
+        assert!(first_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 2)
+        }));
+
+        watch.subscribe(entity, &second_file).unwrap();
+
+        assert!(first_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 1)
+        }));
+        assert!(second_targets.iter().all(|target| {
+            watch
+                .watch_references
+                .get(target)
+                .is_some_and(|references| *references == 1)
+        }));
+    }
+
+    #[test]
+    fn inactive_repo_info_entries_release_their_watch_targets() {
+        let active_repo = test_repo::init();
+        let stale_repo = test_repo::init();
+        let active_path = canon(active_repo.path());
+        let stale_path = canon(stale_repo.path());
+        let active_info = crate::host::worktree::repo_info(&active_path).unwrap();
+        let stale_info = crate::host::worktree::repo_info(&stale_path).unwrap();
+        let stale_targets = repo_info_watch_targets(&stale_path, Some(&stale_info));
+        let mut cache = RepoInfoCache {
+            entries: HashMap::from([
+                (
+                    active_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(active_info.clone()),
+                        loaded: true,
+                        dirty: false,
+                        watched: true,
+                        idle_syncs: 0,
+                        pending: None,
+                        ignore_events_until: None,
+                    },
+                ),
+                (
+                    stale_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(stale_info.clone()),
+                        loaded: true,
+                        dirty: false,
+                        watched: true,
+                        idle_syncs: 0,
+                        pending: None,
+                        ignore_events_until: None,
+                    },
+                ),
+            ]),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            wake: None,
+        };
+        let mut watch = GitWatch::test();
+        assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
+        assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
+
+        assert!(cache.get(&active_path).is_some());
+        watch.evict_inactive_repo_info(&mut cache);
+        assert!(cache.get(&active_path).is_some());
+        watch.evict_inactive_repo_info(&mut cache);
+
+        assert!(cache.entries.contains_key(&active_path));
+        assert!(!cache.entries.contains_key(&stale_path));
+        assert!(!watch.repo_info_subscriptions.contains_key(&stale_path));
+        assert!(
+            stale_targets
+                .iter()
+                .all(|target| !watch.watch_references.contains_key(target))
+        );
     }
 
     #[test]
@@ -1100,6 +1716,7 @@ mod tests {
                     loaded: false,
                     dirty: false,
                     watched: false,
+                    idle_syncs: 0,
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
                     ignore_events_until: None,
                 },

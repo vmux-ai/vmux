@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::event::{DiffKind, DiffLine, FileStatus, StyledSpan};
+use crate::event::{DiffKind, DiffLine, FileStatus, GitFileEntry, StyledSpan};
 
 pub struct ParsedStatus {
     pub branch: String,
@@ -13,15 +13,17 @@ pub struct ParsedStatus {
 
 pub struct ParsedStatuses {
     pub branch: String,
+    pub upstream: String,
     pub ahead: u32,
     pub behind: u32,
     pub has_upstream: bool,
     pub staged_count: u32,
-    file_statuses: HashMap<String, FileStatus>,
+    file_statuses: HashMap<Vec<u8>, FileStatus>,
+    file_entries: Vec<GitFileEntry>,
 }
 
 impl ParsedStatuses {
-    pub fn file_status(&self, target_rel: &str) -> FileStatus {
+    pub fn file_status(&self, target_rel: &[u8]) -> FileStatus {
         self.file_statuses
             .get(target_rel)
             .copied()
@@ -30,88 +32,162 @@ impl ParsedStatuses {
 
     pub fn into_file_statuses(self) -> HashMap<String, FileStatus> {
         self.file_statuses
+            .into_iter()
+            .map(|(path, status)| (String::from_utf8_lossy(&path).into_owned(), status))
+            .collect()
+    }
+
+    pub fn into_file_entries(self) -> Vec<GitFileEntry> {
+        self.file_entries
     }
 }
 
-fn entry_path(line: &str, kind_tokens: usize) -> &str {
-    line.splitn(kind_tokens + 1, ' ')
+fn entry_path(record: &[u8], kind_tokens: usize) -> &[u8] {
+    record
+        .splitn(kind_tokens + 1, |byte| *byte == b' ')
         .nth(kind_tokens)
-        .unwrap_or("")
-        .trim()
+        .unwrap_or_default()
 }
 
-fn xy_status(xy: &str) -> FileStatus {
-    let mut c = xy.chars();
-    let staged = c.next().unwrap_or('.');
-    let unstaged = c.next().unwrap_or('.');
+fn xy_status(xy: &[u8]) -> FileStatus {
+    let staged = xy.first().copied().unwrap_or(b'.');
+    let unstaged = xy.get(1).copied().unwrap_or(b'.');
     match (staged, unstaged) {
-        ('.', 'D') | ('D', _) => FileStatus::Deleted,
-        (s, u) if s != '.' && u != '.' => FileStatus::StagedModified,
-        (s, '.') if s != '.' => FileStatus::Staged,
-        ('.', u) if u != '.' => FileStatus::Modified,
+        (b'.', b'D') | (b'D', _) => FileStatus::Deleted,
+        (staged, unstaged) if staged != b'.' && unstaged != b'.' => FileStatus::StagedModified,
+        (staged, b'.') if staged != b'.' => FileStatus::Staged,
+        (b'.', unstaged) if unstaged != b'.' => FileStatus::Modified,
         _ => FileStatus::Clean,
     }
 }
 
-pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
+fn display_path(path: &[u8]) -> String {
+    String::from_utf8_lossy(path).into_owned()
+}
+
+fn staged_and_unstaged(xy: &[u8]) -> (bool, bool) {
+    (
+        xy.first().is_some_and(|value| *value != b'.'),
+        xy.get(1).is_some_and(|value| *value != b'.'),
+    )
+}
+
+pub fn parse_porcelain_v2_statuses(out: &[u8]) -> ParsedStatuses {
     let mut branch = String::new();
+    let mut upstream = String::new();
     let mut ahead = 0u32;
     let mut behind = 0u32;
     let mut has_upstream = false;
     let mut staged_count = 0u32;
     let mut file_statuses = HashMap::new();
+    let mut file_entries = Vec::new();
 
-    for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("# branch.head ") {
-            branch = rest.trim().to_string();
-        } else if line.starts_with("# branch.upstream ") {
+    let mut records = out.split(|byte| *byte == 0);
+    while let Some(record) = records.next() {
+        if let Some(rest) = record.strip_prefix(b"# branch.head ") {
+            branch = String::from_utf8_lossy(rest).trim().to_string();
+        } else if let Some(rest) = record.strip_prefix(b"# branch.upstream ") {
+            upstream = String::from_utf8_lossy(rest).trim().to_string();
             has_upstream = true;
-        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
-            for tok in rest.split_whitespace() {
-                if let Some(a) = tok.strip_prefix('+') {
-                    ahead = a.parse().unwrap_or(0);
-                } else if let Some(b) = tok.strip_prefix('-') {
-                    behind = b.parse().unwrap_or(0);
+        } else if let Some(rest) = record.strip_prefix(b"# branch.ab ") {
+            for token in rest.split(|byte| byte.is_ascii_whitespace()) {
+                if let Some(value) = token.strip_prefix(b"+") {
+                    ahead = String::from_utf8_lossy(value).parse().unwrap_or(0);
+                } else if let Some(value) = token.strip_prefix(b"-") {
+                    behind = String::from_utf8_lossy(value).parse().unwrap_or(0);
                 }
             }
-        } else if let Some(rest) = line.strip_prefix("1 ").or_else(|| line.strip_prefix("2 ")) {
-            let xy = rest.split_whitespace().next().unwrap_or("..");
-            if xy.starts_with(|c: char| c != '.') {
+        } else if let Some(rest) = record.strip_prefix(b"1 ") {
+            let xy = rest
+                .split(|byte| byte.is_ascii_whitespace())
+                .next()
+                .unwrap_or(b"..");
+            if xy.first().is_some_and(|value| *value != b'.') {
                 staged_count += 1;
             }
-            let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
-            let path = entry_path(line, kind_tokens)
-                .split('\t')
+            let path = entry_path(record, 8);
+            if !path.is_empty() {
+                let status = xy_status(xy);
+                file_statuses.insert(path.to_vec(), status);
+                let (staged, unstaged) = staged_and_unstaged(xy);
+                file_entries.push(GitFileEntry {
+                    path: display_path(path),
+                    path_bytes: path.to_vec(),
+                    previous_path: None,
+                    previous_path_bytes: None,
+                    status,
+                    staged,
+                    unstaged,
+                });
+            }
+        } else if let Some(rest) = record.strip_prefix(b"2 ") {
+            let xy = rest
+                .split(|byte| byte.is_ascii_whitespace())
                 .next()
-                .unwrap_or("");
-            if !path.is_empty() {
-                file_statuses.insert(path.to_string(), xy_status(xy));
+                .unwrap_or(b"..");
+            if xy.first().is_some_and(|value| *value != b'.') {
+                staged_count += 1;
             }
-        } else if let Some(rest) = line.strip_prefix("u ") {
+            let path = entry_path(record, 9);
+            let previous_path = records.next().filter(|path| !path.is_empty());
+            if !path.is_empty() {
+                let status = xy_status(xy);
+                file_statuses.insert(path.to_vec(), status);
+                let (staged, unstaged) = staged_and_unstaged(xy);
+                file_entries.push(GitFileEntry {
+                    path: display_path(path),
+                    path_bytes: path.to_vec(),
+                    previous_path: previous_path.map(display_path),
+                    previous_path_bytes: previous_path.map(<[u8]>::to_vec),
+                    status,
+                    staged,
+                    unstaged,
+                });
+            }
+        } else if let Some(rest) = record.strip_prefix(b"u ") {
             let _ = rest;
-            let path = entry_path(line, 10);
+            let path = entry_path(record, 10);
             if !path.is_empty() {
-                file_statuses.insert(path.to_string(), FileStatus::Conflicted);
+                file_statuses.insert(path.to_vec(), FileStatus::Conflicted);
+                file_entries.push(GitFileEntry {
+                    path: display_path(path),
+                    path_bytes: path.to_vec(),
+                    previous_path: None,
+                    previous_path_bytes: None,
+                    status: FileStatus::Conflicted,
+                    staged: true,
+                    unstaged: true,
+                });
             }
-        } else if let Some(path) = line.strip_prefix("? ") {
-            let path = path.trim();
-            if !path.is_empty() {
-                file_statuses.insert(path.to_string(), FileStatus::Untracked);
-            }
+        } else if let Some(path) = record.strip_prefix(b"? ")
+            && !path.is_empty()
+        {
+            file_statuses.insert(path.to_vec(), FileStatus::Untracked);
+            file_entries.push(GitFileEntry {
+                path: display_path(path),
+                path_bytes: path.to_vec(),
+                previous_path: None,
+                previous_path_bytes: None,
+                status: FileStatus::Untracked,
+                staged: false,
+                unstaged: true,
+            });
         }
     }
 
     ParsedStatuses {
         branch,
+        upstream,
         ahead,
         behind,
         has_upstream,
         staged_count,
         file_statuses,
+        file_entries,
     }
 }
 
-pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
+pub fn parse_porcelain_v2(out: &[u8], target_rel: &[u8]) -> ParsedStatus {
     let parsed = parse_porcelain_v2_statuses(out);
     let file_status = parsed.file_status(target_rel);
     ParsedStatus {
@@ -124,28 +200,11 @@ pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
     }
 }
 
-pub fn changed_paths(out: &str) -> HashSet<String> {
-    let mut set = HashSet::new();
-    for line in out.lines() {
-        let path = if line.starts_with("1 ") || line.starts_with("2 ") {
-            let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
-            entry_path(line, kind_tokens)
-                .split('\t')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        } else if line.starts_with("u ") {
-            entry_path(line, 10).to_string()
-        } else if let Some(rest) = line.strip_prefix("? ") {
-            rest.trim().to_string()
-        } else {
-            continue;
-        };
-        if !path.is_empty() {
-            set.insert(path);
-        }
-    }
-    set
+pub fn changed_paths(out: &[u8]) -> HashSet<String> {
+    parse_porcelain_v2_statuses(out)
+        .into_file_statuses()
+        .into_keys()
+        .collect()
 }
 
 fn span(text: &str, fg: [u8; 3]) -> Vec<StyledSpan> {
@@ -179,17 +238,34 @@ pub fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut saw_hunk = false;
+    let multi_file = diff
+        .lines()
+        .filter(|line| line.starts_with("diff --git"))
+        .count()
+        > 1;
 
     for raw in diff.lines() {
         if raw.starts_with("\\ No newline") {
             continue;
         }
-        if !saw_hunk
-            && (raw.starts_with("diff --git")
-                || raw.starts_with("index ")
-                || raw.starts_with("--- ")
-                || raw.starts_with("+++ "))
+        if let Some((_, path)) = raw.split_once(" b/")
+            && raw.starts_with("diff --git")
         {
+            saw_hunk = false;
+            old_no = 0;
+            new_no = 0;
+            if multi_file {
+                lines.push(DiffLine {
+                    kind: DiffKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    hunk: None,
+                    spans: span(path, HUNK),
+                });
+            }
+            continue;
+        }
+        if raw.starts_with("index ") || raw.starts_with("--- ") || raw.starts_with("+++ ") {
             continue;
         }
         if raw.starts_with("@@") {
@@ -205,6 +281,9 @@ pub fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
                 hunk: None,
                 spans: span(raw, HUNK),
             });
+            continue;
+        }
+        if !saw_hunk {
             continue;
         }
         match raw.chars().next() {
@@ -348,17 +427,45 @@ mod diff_tests {
     fn empty_diff_yields_no_lines() {
         assert!(parse_unified_diff("").is_empty());
     }
+
+    #[test]
+    fn separates_multiple_files_without_rendering_git_headers_as_code() {
+        let diff = format!("{DIFF}{}", DIFF.replace("f.rs", "g.rs"));
+        let lines = parse_unified_diff(&diff);
+        let files = lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+        assert_eq!(files, vec!["f.rs", "g.rs"]);
+        assert!(!lines.iter().any(|line| {
+            line.spans
+                .first()
+                .is_some_and(|span| span.text.starts_with("index "))
+        }));
+    }
 }
 
 #[cfg(test)]
 mod porcelain_tests {
     use super::*;
 
-    const OUT: &str = "# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n1 .M N... 100644 100644 100644 aaa bbb src/main.rs\n1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\n? notes.txt\n";
+    const OUT: &[u8] = concat!(
+        "# branch.oid abc123\0",
+        "# branch.head main\0",
+        "# branch.upstream origin/main\0",
+        "# branch.ab +2 -1\0",
+        "1 .M N... 100644 100644 100644 aaa bbb src/main.rs\0",
+        "1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\0",
+        "? notes.txt\0",
+    )
+    .as_bytes();
 
     #[test]
     fn parses_branch_and_ahead_behind() {
-        let p = parse_porcelain_v2(OUT, "src/main.rs");
+        let p = parse_porcelain_v2(OUT, b"src/main.rs");
         assert_eq!(p.branch, "main");
         assert_eq!(p.ahead, 2);
         assert_eq!(p.behind, 1);
@@ -368,7 +475,7 @@ mod porcelain_tests {
     #[test]
     fn target_unstaged_modified() {
         assert_eq!(
-            parse_porcelain_v2(OUT, "src/main.rs").file_status,
+            parse_porcelain_v2(OUT, b"src/main.rs").file_status,
             FileStatus::Modified
         );
     }
@@ -376,7 +483,7 @@ mod porcelain_tests {
     #[test]
     fn target_staged() {
         assert_eq!(
-            parse_porcelain_v2(OUT, "src/lib.rs").file_status,
+            parse_porcelain_v2(OUT, b"src/lib.rs").file_status,
             FileStatus::Staged
         );
     }
@@ -384,7 +491,7 @@ mod porcelain_tests {
     #[test]
     fn target_untracked() {
         assert_eq!(
-            parse_porcelain_v2(OUT, "notes.txt").file_status,
+            parse_porcelain_v2(OUT, b"notes.txt").file_status,
             FileStatus::Untracked
         );
     }
@@ -392,20 +499,20 @@ mod porcelain_tests {
     #[test]
     fn target_clean_when_absent() {
         assert_eq!(
-            parse_porcelain_v2(OUT, "README.md").file_status,
+            parse_porcelain_v2(OUT, b"README.md").file_status,
             FileStatus::Clean
         );
     }
 
     #[test]
     fn staged_count_counts_staged_column() {
-        assert_eq!(parse_porcelain_v2(OUT, "src/main.rs").staged_count, 1);
+        assert_eq!(parse_porcelain_v2(OUT, b"src/main.rs").staged_count, 1);
     }
 
     #[test]
     fn no_upstream_header() {
-        let out = "# branch.head feature\n";
-        let p = parse_porcelain_v2(out, "x");
+        let out = b"# branch.head feature\0";
+        let p = parse_porcelain_v2(out, b"x");
         assert!(!p.has_upstream);
         assert_eq!(p.ahead, 0);
         assert_eq!(p.behind, 0);
@@ -413,12 +520,12 @@ mod porcelain_tests {
 
     #[test]
     fn changed_paths_collects_all_entry_kinds() {
-        let out = "# branch.head main\n\
-1 .M N... 100644 100644 100644 aaa bbb src/main.rs\n\
-1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\n\
-2 R. N... 100644 100644 100644 eee fff R100 new.rs\told.rs\n\
-u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
-? notes.txt\n";
+        let out = b"# branch.head main\0\
+1 .M N... 100644 100644 100644 aaa bbb src/main.rs\0\
+1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\0\
+2 R. N... 100644 100644 100644 eee fff R100 new.rs\0old.rs\0\
+u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\0\
+? notes.txt\0";
         let set = changed_paths(out);
         assert!(set.contains("src/main.rs"));
         assert!(set.contains("src/lib.rs"));
@@ -427,6 +534,37 @@ u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
         assert!(set.contains("conflict.rs"));
         assert!(set.contains("notes.txt"));
         assert_eq!(set.len(), 5);
+    }
+
+    #[test]
+    fn preserves_special_pathnames_and_rename_sources() {
+        let path = "dir/tab\tline\nquote\"slash\\name ";
+        let previous = "old\tname\n";
+        let out = format!("2 R. N... 100644 100644 100644 aaa bbb R100 {path}\0{previous}\0");
+        let entries = parse_porcelain_v2_statuses(out.as_bytes()).into_file_entries();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, path);
+        assert_eq!(entries[0].path_bytes, path.as_bytes());
+        assert_eq!(entries[0].previous_path.as_deref(), Some(previous));
+        assert_eq!(
+            entries[0].previous_path_bytes.as_deref(),
+            Some(previous.as_bytes())
+        );
+    }
+
+    #[test]
+    fn preserves_non_utf8_pathname_bytes() {
+        let path = b"bad-\x80-name.txt";
+        let mut out = b"? ".to_vec();
+        out.extend_from_slice(path);
+        out.push(0);
+
+        let entries = parse_porcelain_v2_statuses(&out).into_file_entries();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path_bytes, path);
+        assert_eq!(entries[0].path, "bad-\u{fffd}-name.txt");
     }
 }
 

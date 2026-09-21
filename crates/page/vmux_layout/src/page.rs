@@ -16,9 +16,10 @@ use dioxus::prelude::*;
 use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::event::{
-    EXTENSION_POPUP_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest,
-    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
-    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionsEvent,
+    EXTENSION_POPUP_EVENT, EXTENSION_POPUP_SIZE_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest,
+    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
+    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
+    ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -30,6 +31,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::progress::{Progress, ProgressIndicator};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
     SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_CHEVRON_CLOSED,
     SIDEBAR_TREE_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeChildren,
@@ -38,7 +40,7 @@ use vmux_ui::components::tree_row::{
 use vmux_ui::favicon::{Favicon, favicon_src_for_url};
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView, PageIconView};
+use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::util::cn;
@@ -112,6 +114,10 @@ pub fn Page() -> Element {
         use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
     let extension_popup =
         use_event::<ExtensionPopupEvent>(EXTENSION_POPUP_EVENT, ExtensionPopupEvent::default);
+    let extension_popup_size = use_event::<ExtensionPopupSizeEvent>(
+        EXTENSION_POPUP_SIZE_EVENT,
+        ExtensionPopupSizeEvent::default,
+    );
     use_effect(move || {
         let _ = send(&ExtListRequest);
     });
@@ -256,22 +262,20 @@ pub fn Page() -> Element {
             }
             CommandBarPanel {}
             if !extension_popup().id.is_empty() {
-                ExtensionPopupModal { popup: extension_popup }
+                ExtensionPopupModal { popup: extension_popup, preferred_size: extension_popup_size() }
             }
             if sheet_resizing() {
                 div {
                     class: "pointer-events-auto fixed inset-0 z-[900] cursor-col-resize",
                     onmousemove: move |event: Event<MouseData>| {
                         let x = event.client_coordinates().x as f32 - sheet_left;
-                        sheet_width.set(crate::event::SideSheetResizeEvent { width: x }.clamped());
+                        let width = crate::event::SideSheetResizeEvent::live(x).clamped();
+                        sheet_width.set(width);
+                        let _ = send(&crate::event::SideSheetResizeEvent::live(width));
                     },
                     onmouseup: move |_| {
                         sheet_resizing.set(false);
-                        let _ = send(
-                            &crate::event::SideSheetResizeEvent {
-                                width: sheet_width(),
-                            },
-                        );
+                        let _ = send(&crate::event::SideSheetResizeEvent::settled(sheet_width()));
                     },
                 }
             }
@@ -280,10 +284,22 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
+fn ExtensionPopupModal(
+    popup: Signal<ExtensionPopupEvent>,
+    preferred_size: ExtensionPopupSizeEvent,
+) -> Element {
     let current = popup();
     let state = ExtensionPopupState { popup };
     let placement = ExtensionPopupPlacement::of(current.anchor);
+    let size = if preferred_size.id == current.id {
+        preferred_size
+    } else {
+        ExtensionPopupSizeEvent {
+            id: current.id.clone(),
+            width: 360.0,
+            height: 600.0,
+        }
+    };
     let reporter = ExtensionPopupBoundsReporter {
         region: use_signal(|| None::<Rc<MountedData>>),
     };
@@ -323,7 +339,7 @@ fn ExtensionPopupModal(popup: Signal<ExtensionPopupEvent>) -> Element {
             div {
                 key: "{current.id}",
                 class: "pointer-events-none absolute",
-                style: "{placement.style()}",
+                style: "{placement.style(&size)}",
                 onpointerdown: move |event| event.stop_propagation(),
                 onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
                 onresize: move |_: Event<ResizeData>| resized.publish(),
@@ -346,11 +362,13 @@ impl ExtensionPopupPlacement {
         }
     }
 
-    fn style(self) -> String {
+    fn style(self, size: &ExtensionPopupSizeEvent) -> String {
         format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min(360px,calc(100vw - 16px));height:min(600px,calc(100vh - {}px));",
+            "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
             self.right,
             self.top,
+            size.width.clamp(200.0, 360.0),
+            size.height.clamp(80.0, 600.0),
             self.top + 8
         )
     }
@@ -403,14 +421,28 @@ impl ExtensionPopupBoundsReporter {
 
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
+    let handle_class = if resizing() {
+        "relative flex h-10 w-2 items-center justify-center rounded-full bg-primary/20 shadow-sm ring-1 ring-primary/50"
+    } else {
+        "relative flex h-8 w-1.5 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-10 group-hover:w-2 group-hover:bg-primary/15 group-hover:opacity-100 group-hover:ring-primary/45"
+    };
+    let line_class = if resizing() {
+        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45"
+    } else {
+        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+    };
     rsx! {
         div {
-            class: "absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize",
+            class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-center justify-center",
+            style: "right:-10px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
             },
-            div { class: "mx-auto h-full w-px bg-transparent transition-colors duration-150 hover:bg-primary/40" }
+            div { class: "{line_class}" }
+            div { class: "{handle_class}",
+                div { class: "h-5 w-px rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
+            }
         }
     }
 }
@@ -911,6 +943,7 @@ struct ActiveSessionInfo {
 struct ActiveWorkspaceProject {
     root: vmux_core::event::ProjectRow,
     children: Vec<vmux_core::event::ProjectRow>,
+    choices: Vec<vmux_core::event::ProjectRow>,
 }
 
 impl ActiveWorkspaceProject {
@@ -925,7 +958,16 @@ impl ActiveWorkspaceProject {
             .take_while(|project| project.depth > 0)
             .cloned()
             .collect();
-        Some(Self { root, children })
+        let choices = projects
+            .iter()
+            .filter(|project| project.depth == 0 && !project.missing)
+            .cloned()
+            .collect();
+        Some(Self {
+            root,
+            children,
+            choices,
+        })
     }
 }
 
@@ -1063,11 +1105,13 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
     rsx! {
         div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2",
-                LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+                GitIconView { class: "size-3.5 shrink-0".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-semibold text-foreground", title: "{repository}", "{repository}" }
                 if boundary.is_worktree {
-                    span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary",
-                        {translate("layout-worktree")}
+                    span {
+                        class: "flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary",
+                        title: translate("layout-worktree"),
+                        LineIconView { icon: LineIcon::GitFork, class: "size-3".to_string() }
                     }
                 }
             }
@@ -1123,25 +1167,62 @@ fn ActiveSessionGit(boundary: crate::event::TabBoundary) -> Element {
 #[component]
 fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
     let root = project.root;
-    let root_path = root.path.clone();
+    let tree_path = root.path.clone();
+    let choices = project.choices;
+    let mut choosing = use_signal(|| false);
     rsx! {
-        div { class: "min-w-0 overflow-hidden rounded-md bg-foreground/[0.035]",
-            button {
-                r#type: "button",
-                class: "flex w-full min-w-0 cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
-                title: "{root.display_path}",
-                onclick: move |_| {
-                    let _ = send(&vmux_core::event::ProjectTreeToggle {
-                        path: root_path.clone(),
-                        pane_id: pane_id.to_string(),
-                    });
-                },
-                Icon {
-                    class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
-                    path { d: "m9 18 6-6-6-6" }
+        div { class: "relative min-w-0 rounded-md bg-foreground/[0.035]",
+            div { class: "group relative flex min-w-0 items-center rounded-md transition-colors hover:bg-glass-hover",
+                button {
+                    r#type: "button",
+                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1.5 pl-2 pr-10 text-left text-muted-foreground transition-colors group-hover:text-foreground",
+                    title: "{root.display_path}",
+                    onclick: move |_| {
+                        choosing.set(false);
+                        let _ = send(&vmux_core::event::ProjectTreeToggle {
+                            path: tree_path.clone(),
+                            pane_id: pane_id.to_string(),
+                        });
+                    },
+                    Icon {
+                        class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
+                        path { d: "m9 18 6-6-6-6" }
+                    }
+                    if root.is_worktree {
+                        LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
+                    } else {
+                        BuiltinIconView { icon: vmux_core::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "truncate text-[10px] font-medium text-foreground", "{root.label}" }
+                        if !root.branch.is_empty() {
+                            div { class: "truncate font-mono text-[9px] text-muted-foreground", "{root.branch}" }
+                        }
+                    }
                 }
-                BuiltinIconView { icon: vmux_core::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
-                span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground", "{root.label}" }
+                button {
+                    r#type: "button",
+                    class: "absolute right-1 top-1 z-10 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
+                    title: translate("git-switch-workspace"),
+                    aria_label: translate("git-switch-workspace"),
+                    onclick: move |event: MouseEvent| {
+                        event.stop_propagation();
+                        choosing.set(!choosing());
+                    },
+                    LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3.5".to_string() }
+                }
+            }
+            if choosing() {
+                div { class: "max-h-64 overflow-y-auto border-t border-foreground/[0.06] p-1",
+                    for choice in choices {
+                        ActiveWorkspaceChoice {
+                            key: "{choice.path}",
+                            project: choice,
+                            pane_id,
+                            on_pick: move |_| choosing.set(false),
+                        }
+                    }
+                }
             }
             SidebarTreeChildren { expanded: root.expanded,
                 div { class: "border-t border-foreground/[0.06] py-1",
@@ -1152,6 +1233,59 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             pane_id,
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ActiveWorkspaceChoice(
+    project: vmux_core::event::ProjectRow,
+    pane_id: u64,
+    on_pick: EventHandler<()>,
+) -> Element {
+    let path = project.path.clone();
+    let activate_path = path.clone();
+    let workspace_path = path.clone();
+    rsx! {
+        button {
+            r#type: "button",
+            class: if project.is_active {
+                "flex w-full min-w-0 items-center gap-2 rounded-md bg-primary/[0.10] px-2 py-1.5 text-left text-foreground"
+            } else {
+                "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+            },
+            title: "{project.display_path}",
+            onclick: move |_| {
+                on_pick.call(());
+                let _ = send(&vmux_core::event::space::ProjectCommandEvent {
+                    command: "activate".to_string(),
+                    path: Some(activate_path.clone()),
+                });
+                let _ = send(&TabWorkspaceRequest {
+                    path: workspace_path.clone(),
+                    branch: String::new(),
+                    checkout: String::new(),
+                    pane_id: pane_id.to_string(),
+                });
+            },
+            BuiltinIconView {
+                icon: vmux_core::BuiltinIcon::Project,
+                class: "size-3.5 shrink-0".to_string(),
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate text-[10px] font-medium", "{project.label}" }
+                if !project.branch.is_empty() {
+                    div { class: "truncate font-mono text-[9px] text-muted-foreground", "{project.branch}" }
+                }
+            }
+            if project.is_active {
+                span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-semibold text-primary", {translate("common-current")} }
+            } else if project.is_worktree {
+                LineIconView {
+                    icon: LineIcon::GitFork,
+                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
                 }
             }
         }
@@ -1211,13 +1345,13 @@ fn RemoteControl(remote: RemoteStateEvent) -> Element {
         div { class: "relative ml-1 shrink-0",
             div {
                 class: if remote.enabled {
-                    "flex h-7 items-center overflow-hidden rounded-full border border-success/25 bg-success/10 text-success"
+                    "group flex h-7 items-center overflow-hidden rounded-full border border-success/25 bg-success/10 text-success transition-colors hover:bg-success/20"
                 } else {
-                    "flex h-7 items-center overflow-hidden rounded-full border border-foreground/10 bg-foreground/[0.04] text-muted-foreground"
+                    "group flex h-7 items-center overflow-hidden rounded-full border border-foreground/10 bg-foreground/[0.04] text-muted-foreground transition-colors hover:bg-foreground/[0.09]"
                 },
                 button {
                     r#type: "button",
-                    class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold hover:bg-foreground/[0.06]",
+                    class: "flex h-full items-center gap-1.5 pl-2 pr-1.5 text-[10px] font-semibold",
                     aria_label: "Live",
                     onclick: move |_| open.set(!open()),
                     span { class: if remote.enabled { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-muted-foreground/50" } }
@@ -1270,8 +1404,14 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     let mut pairing_generation = use_signal(|| 0_u64);
     let mut pairing_started_paired = use_signal(|| false);
     let mut copied = use_signal(|| false);
+    let mut dismissed_pairing_link = use_signal(String::new);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
+    let pairing_visible = show_pairing()
+        || (active
+            && !remote.paired
+            && !remote.pairing_deep_link.is_empty()
+            && dismissed_pairing_link() != remote.pairing_deep_link);
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
         RemotePhase::Starting if remote.enabled => Some("Starting…"),
@@ -1279,7 +1419,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
         RemotePhase::Error => Some("Needs attention"),
     };
     let qr = if active
-        && show_pairing()
+        && pairing_visible
         && (!remote.paired || pairing_started_paired())
         && !remote.pairing_deep_link.is_empty()
     {
@@ -1325,6 +1465,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
+                        dismissed_pairing_link.set(String::new());
                         if remote.enabled {
                             pairing_generation.set(pairing_generation().wrapping_add(1));
                             show_pairing.set(false);
@@ -1357,8 +1498,12 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     }
                 }
             } else if transitioning {
-                div { class: "mt-2 h-1 overflow-hidden rounded-full bg-foreground/10",
-                    div { class: "h-full w-full rounded-full bg-success" }
+                div { class: "mt-3 flex flex-col gap-2",
+                    Skeleton { class: "h-1.5 w-full rounded-full bg-success/25" }
+                    div { class: "flex items-center gap-2",
+                        Skeleton { class: "h-2 w-24" }
+                        Skeleton { class: "ml-auto h-2 w-10" }
+                    }
                 }
             } else if active {
                 if let Some(svg) = qr {
@@ -1369,6 +1514,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
                                 pairing_generation.set(pairing_generation().wrapping_add(1));
+                                dismissed_pairing_link.set(remote.pairing_deep_link.clone());
                                 show_pairing.set(false);
                             },
                             "Close"
@@ -1423,7 +1569,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                                     }
                                 });
                             },
-                            "Connect device"
+                            if remote.paired { "Show QR" } else { "Connect device" }
                         }
                     }
                 }
