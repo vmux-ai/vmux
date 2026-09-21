@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-[dev-dependencies]
+[dependencies]
 tempfile = "3"
 
 [lints]

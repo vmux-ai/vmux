@@ -1,5 +1,35 @@
 use std::ffi::OsString;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
+
+pub struct AtomicFile;
+
+impl AtomicFile {
+    pub fn write(path: impl AsRef<Path>, bytes: &[u8]) -> io::Result<()> {
+        let path = path.as_ref();
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(bytes)?;
+        temporary.flush()?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path).map_err(|error| error.error)?;
+        Self::sync_parent(parent)
+    }
+
+    #[cfg(unix)]
+    fn sync_parent(parent: &Path) -> io::Result<()> {
+        std::fs::File::open(parent)?.sync_all()
+    }
+
+    #[cfg(not(unix))]
+    fn sync_parent(_parent: &Path) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PathIdentity(PathBuf);
@@ -151,6 +181,17 @@ impl From<PathBuf> for PathIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_file_creates_parent_and_replaces_existing_contents() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("nested/state.ron");
+
+        AtomicFile::write(&path, b"first").unwrap();
+        AtomicFile::write(&path, b"second").unwrap();
+
+        assert_eq!(std::fs::read(path).unwrap(), b"second");
+    }
 
     #[test]
     fn missing_leaf_uses_canonical_parent() {

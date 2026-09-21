@@ -172,7 +172,7 @@ pub fn fetch_catalog(
     archive::extract(&zip, ArchiveKind::Zip, staging.path(), "registry.json")?;
     let json = std::fs::read(staging.path().join("registry.json")).map_err(|e| e.to_string())?;
     let parsed = parse_registry(std::str::from_utf8(&json).map_err(|e| e.to_string())?)?;
-    store::write_atomic(&cached_path(store_root), &json).map_err(|e| e.to_string())?;
+    vmux_path::AtomicFile::write(cached_path(store_root), &json).map_err(|e| e.to_string())?;
     Ok(parsed)
 }
 

@@ -1658,29 +1658,13 @@ fn persist_settings_to_disk(
         let bytes = request.ron_bytes.as_bytes();
         let hash = settings_content_hash(bytes);
         last_hash.0 = Some(hash);
-        if let Err(e) = atomic_write(&watcher.path, bytes) {
+        if let Err(e) = vmux_path::AtomicFile::write(&watcher.path, bytes) {
             bevy::log::warn!(
                 "settings: failed to persist {}: {e}",
                 watcher.path.display()
             );
         }
     }
-}
-
-fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "settings path has no parent",
-        )
-    })?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    use std::io::Write;
-    tmp.write_all(bytes)?;
-    tmp.flush()?;
-    tmp.persist(path)
-        .map_err(|e| std::io::Error::other(format!("persist failed: {e}")))?;
-    Ok(())
 }
 
 #[cfg(test)]

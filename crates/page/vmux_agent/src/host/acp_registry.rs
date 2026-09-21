@@ -130,7 +130,7 @@ pub fn fetch_blocking() -> Result<Registry, String> {
     let registry = parse(&text)?;
     let dir = agents_dir();
     if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = vmux_editor::lsp::store::write_atomic(&cache_path(), text.as_bytes());
+        let _ = vmux_path::AtomicFile::write(cache_path(), text.as_bytes());
     }
     Ok(registry)
 }
