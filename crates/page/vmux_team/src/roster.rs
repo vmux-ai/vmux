@@ -1,7 +1,7 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::page::PageEmit;
-use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
+use vmux_api::page::PageEmit;
+use vmux_api::team::{TeamEvent, TeamMemberRow};
 
 pub struct TeamRosterPlugin;
 
@@ -42,7 +42,7 @@ impl Team {
     }
 
     fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::encode(TEAM_EVENT, &team.0) else {
+        let Some(emit) = PageEmit::from_event(&team.0) else {
             return;
         };
         emits.write(emit);

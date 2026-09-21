@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use vmux_api::command_bar::CommandBarPick;
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, CommandIssued, CommandIssuer, ReadAppCommands,
 };
 use vmux_core::event::{
-    ExplorerGoto, FILE_KEY_EVENT, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent,
-    FileKey, FileLineEnding, FileShapeSet, FileStatusPickerOpen,
+    ExplorerGoto, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent, FileKey,
+    FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
-use vmux_wire::command_bar::CommandBarPick;
 
 use crate::host::plugin::{EditState, FileView};
 use crate::host::shape::BufferShape;
@@ -29,9 +29,8 @@ fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Comm
         let AppCommand::File(key) = issue.command else {
             continue;
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             issue.caller,
-            FILE_KEY_EVENT,
             &FileKey::from(key),
         ));
     }
@@ -114,7 +113,7 @@ fn apply_status_picks(
                 });
             }
             CommandBarPick::Encoding { label, save } => {
-                let Some(encoding) = FileEncoding::of_label(label) else {
+                let Ok(encoding) = FileEncoding::try_from(label.as_str()) else {
                     continue;
                 };
                 let action = match save {
@@ -133,6 +132,7 @@ fn apply_status_picks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_api::BinEvent;
     use vmux_command::FileKeyCommand;
 
     #[derive(Resource, Default)]
@@ -140,12 +140,12 @@ mod tests {
 
     impl Echoed {
         fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<FileKey, rkyv::rancor::Error>(&trigger.payload)
+            let decoded = rkyv::from_bytes::<FileKey, rkyv::rancor::Error>(trigger.payload())
                 .map(|key| format!("{key:?}"))
                 .unwrap_or_else(|_| "undecodable".to_string());
             echoed
                 .0
-                .push((trigger.webview, format!("{}:{decoded}", trigger.id)));
+                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
         }
     }
 
@@ -186,7 +186,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{FILE_KEY_EVENT}:PanelChoose"))]
+            vec![(pressed, format!("{}:PanelChoose", FileKey::id()))]
         );
         assert!(
             !app.world()

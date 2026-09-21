@@ -52,19 +52,18 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::tools_page::ToolsRou
     let mut loaded = use_signal(|| false);
     let mut search = use_signal(String::new);
 
-    let _list = use_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |event| {
+    let _list = use_listener::<ExtensionsEvent, _>(move |event| {
         state.set(event);
         loaded.set(true);
     });
-    let _progress =
-        use_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |item| {
-            if matches!(item.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed) {
-                progress.write().remove(&item.key);
-            } else {
-                progress.write().insert(item.key.clone(), item);
-            }
-        });
-    let _status = use_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_| {});
+    let _progress = use_listener::<ExtInstallProgress, _>(move |item| {
+        if matches!(item.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed) {
+            progress.write().remove(&item.key);
+        } else {
+            progress.write().insert(item.key.clone(), item);
+        }
+    });
+    let _status = use_listener::<ExtStatusEvent, _>(move |_| {});
 
     use_effect(move || {
         locale();

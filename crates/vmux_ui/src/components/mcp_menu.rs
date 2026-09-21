@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
-use vmux_wire::mcp::{
-    MCP_SERVER_ACTION_RESULT_EVENT, MCP_SERVERS_EVENT, McpServerAction, McpServerActionRequest,
-    McpServerActionResult, McpServerEntry, McpServerStatus, McpServers, McpServersRequest,
+use vmux_api::mcp::{
+    McpServerAction, McpServerActionRequest, McpServerActionResult, McpServerEntry,
+    McpServerStatus, McpServers, McpServersRequest,
 };
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
@@ -28,24 +28,23 @@ pub fn use_mcp_connections() -> McpConnections {
     let mut servers = connections.servers;
     let mut loaded = connections.loaded;
     let mut loading = connections.loading;
-    let _servers = use_listener::<McpServers, _>(MCP_SERVERS_EVENT, move |incoming| {
+    let _servers = use_listener::<McpServers, _>(move |incoming| {
         servers.set(incoming.servers);
         loaded.set(true);
         loading.set(false);
     });
     let mut pending = connections.pending;
     let mut error = connections.error;
-    let _result =
-        use_listener::<McpServerActionResult, _>(MCP_SERVER_ACTION_RESULT_EVENT, move |result| {
-            if *pending.peek() == result.id {
-                pending.set(String::new());
-            }
-            if result.success {
-                error.set(String::new());
-            } else {
-                error.set(result.message);
-            }
-        });
+    let _result = use_listener::<McpServerActionResult, _>(move |result| {
+        if *pending.peek() == result.id {
+            pending.set(String::new());
+        }
+        if result.success {
+            error.set(String::new());
+        } else {
+            error.set(result.message);
+        }
+    });
     connections
 }
 

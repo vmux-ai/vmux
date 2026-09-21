@@ -7,8 +7,8 @@ pub mod panel;
 
 pub mod event;
 pub mod size;
-pub use vmux_wire::open_target;
-pub use vmux_wire::prompt_media;
+pub use vmux_api::open_target;
+pub use vmux_api::prompt_media;
 
 #[cfg(host)]
 pub mod host;

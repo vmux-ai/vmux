@@ -3,11 +3,11 @@ use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
 use crate::snapshot::{CommandBarPagesSnapshot, CommandBarSpacesSnapshot, Contributions};
 use bevy::prelude::default;
-use vmux_ui::i18n::{Locale, TranslationValue};
-use vmux_wire::command_bar::{
+use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarSpace, CommandBarTab, SearchEngine,
 };
+use vmux_ui::i18n::{Locale, TranslationValue};
 
 pub struct CommandBarEntry {
     pub id: String,

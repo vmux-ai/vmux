@@ -1,10 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::event::{
-    SPACE_KEY_EVENT, SPACES_LIST_EVENT, SpaceCommandEvent, SpaceKey, SpaceRow, SpacesListEvent,
-};
+use crate::event::{SpaceKey, SpaceRequest, SpaceRow, SpacesListEvent};
 use dioxus::prelude::*;
-use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent};
+use vmux_core::event::team::{TeamEvent, TeamRequest};
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -20,9 +18,9 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
-    let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let team = use_event::<TeamEvent>(TeamEvent::default);
 
-    let _listener = use_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
+    let _listener = use_listener::<SpacesListEvent, _>(move |data| {
         let active = data
             .spaces
             .iter()
@@ -88,7 +86,7 @@ pub fn Page() -> Element {
                             value: active_profile,
                             placeholder: translate("team-profile-name"),
                             onselect: move |profile_id| {
-                                let _ = send(&TeamCommandEvent {
+                                let _ = send(&TeamRequest {
                                     command: "switch_profile".to_string(),
                                     member_id: None,
                                     profile_id: Some(profile_id),
@@ -131,7 +129,7 @@ struct SpaceKeys {
 impl SpaceKeys {
     fn listen(self) {
         let mut keys = self;
-        let _resolved = use_listener::<SpaceKey, _>(SPACE_KEY_EVENT, move |key| keys.apply(key));
+        let _resolved = use_listener::<SpaceKey, _>(move |key| keys.apply(key));
     }
 
     fn apply(&mut self, key: SpaceKey) {
@@ -157,7 +155,7 @@ impl SpaceKeys {
         let Some(id) = self.selected_id() else {
             return;
         };
-        emit_command("attach", Some(id), None);
+        emit_command(SpaceRequest::Attach { space_id: id });
     }
 
     fn delete(&self) {
@@ -167,7 +165,7 @@ impl SpaceKeys {
         let Some(id) = self.selected_id() else {
             return;
         };
-        emit_command("delete", Some(id), None);
+        emit_command(SpaceRequest::Delete { space_id: id });
     }
 
     fn row(&self) -> usize {
@@ -194,12 +192,8 @@ fn new_space_name(typed: &str, count: usize) -> String {
     }
 }
 
-fn emit_command(command: &str, space_id: Option<String>, name: Option<String>) {
-    let _ = send(&SpaceCommandEvent {
-        command: command.to_string(),
-        space_id,
-        name,
-    });
+fn emit_command(command: SpaceRequest) {
+    let _ = send(&command);
 }
 
 #[component]
@@ -236,7 +230,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                         aria_label: space.name.clone(),
                         disabled: editing(),
                         onclick: move |_| {
-                        emit_command("attach", Some(nav_id.clone()), None);
+                        emit_command(SpaceRequest::Attach { space_id: nav_id.clone() });
                         },
                     }
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center justify-between",
@@ -250,7 +244,10 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                                     input_class: "pointer-events-auto min-w-0 flex-1 rounded-md bg-background/70 px-2 py-1 text-sm font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40".to_string(),
                                     title: translate("common-rename"),
                                     placeholder: translate("spaces-new-placeholder"),
-                                    on_commit: move |name| emit_command("rename", Some(rename_id.clone()), Some(name)),
+                                    on_commit: move |name| emit_command(SpaceRequest::Rename {
+                                        space_id: rename_id.clone(),
+                                        name,
+                                    }),
                                 }
                             if space.is_active {
                                 span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary", {translate("common-active")} }
@@ -267,7 +264,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                                 "aria-label": translate("spaces-delete"),
                                 onclick: move |e| {
                                     e.stop_propagation();
-                                    emit_command("delete", Some(delete_id.clone()), None);
+                                    emit_command(SpaceRequest::Delete { space_id: delete_id.clone() });
                                 },
                                 span { class: "text-base leading-none", "\u{00d7}" }
                             }
@@ -291,7 +288,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_value),
                     disabled: !deletable,
-                    on_select: move |_: String| emit_command("delete", Some(space.id.clone()), None),
+                    on_select: move |_: String| emit_command(SpaceRequest::Delete { space_id: space.id.clone() }),
                     attributes: vec![],
                     {translate("spaces-delete")}
                 }
@@ -317,7 +314,7 @@ fn NewSpaceCard(count: usize) -> Element {
                     restore_focus_id: "new-space".to_string(),
                     on_commit: move |name: String| {
                         creating.set(false);
-                        emit_command("new", None, Some(new_space_name(&name, count)));
+                        emit_command(SpaceRequest::Create { name: new_space_name(&name, count) });
                     },
                     on_cancel: move |_| creating.set(false),
                 }

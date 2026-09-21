@@ -1,9 +1,9 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::page::PageEmit;
-use vmux_wire::room::RemoteModelState;
+use vmux_api::page::PageEmit;
+use vmux_api::room::RemoteModelState;
 
-use crate::event::{MODEL_STATE_EVENT, ModelState};
+use crate::event::ModelState;
 
 pub struct ChatModelPlugin;
 
@@ -47,7 +47,7 @@ impl Picker {
     }
 
     fn emit(picker: Res<Picker>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::encode(MODEL_STATE_EVENT, &picker.0) else {
+        let Some(emit) = PageEmit::from_event(&picker.0) else {
             return;
         };
         emits.write(emit);

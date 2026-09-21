@@ -1,5 +1,3 @@
-pub const THEME_EVENT: &str = "theme";
-
 #[derive(
     Clone,
     Debug,
@@ -11,6 +9,7 @@ pub const THEME_EVENT: &str = "theme";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "theme", target = any)]
 pub struct ThemeEvent {
     pub radius: f32,
     pub locale: String,

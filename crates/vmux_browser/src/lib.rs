@@ -44,14 +44,13 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::{
-    RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent, SideSheetResizeEvent,
-    WindowDragRegionEvent,
+    RemoteCopyEvent, RemoteRequest, SideSheetRequest, SideSheetResizeEvent, WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::HeaderCommandEvent,
+    event::HeaderRequest,
     overlay::LayoutOverlayActive,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
@@ -140,7 +139,7 @@ impl Plugin for BrowserPlugin {
                 .takes::<vmux_core::PageMetadata>(),
             native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
-                .takes::<vmux_wire::error::ErrorPageData>(),
+                .takes::<vmux_api::error::ErrorPageData>(),
             native_page::NativePagePlugin::in_pane(&native_page::SIMULATOR_PAGE)
                 .takes::<vmux_core::PageMetadata>(),
         ));
@@ -186,13 +185,13 @@ impl Plugin for BrowserPlugin {
                     ..default()
                 },
                 BinEventEmitterPlugin::<(
-                    HeaderCommandEvent,
-                    SideSheetCommandEvent,
+                    HeaderRequest,
+                    SideSheetRequest,
                     SideSheetResizeEvent,
                     WindowDragRegionEvent,
-                    RemoteCommandEvent,
+                    RemoteRequest,
                     RemoteCopyEvent,
-                )>::for_hosts(&["layout"]),
+                )>::default(),
             ))
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
             .add_systems(
@@ -809,7 +808,7 @@ fn attach_cef_page_to_stack(
 
 fn attach_error_page_to_stack(
     stack: Entity,
-    failure: vmux_wire::error::ErrorPageData,
+    failure: vmux_api::error::ErrorPageData,
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
@@ -820,7 +819,7 @@ fn attach_error_page_to_stack(
         ..default()
     });
     commands.spawn((
-        Browser::native_page(vmux_wire::error::ERROR_PAGE_URL, &failure.title),
+        Browser::native_page(vmux_api::error::ERROR_PAGE_URL, &failure.title),
         failure,
         ChildOf(stack),
     ));
@@ -910,11 +909,11 @@ mod tests {
         };
         assert_eq!(meta.title_with(None), "host");
         assert_eq!(
-            meta.title_with(Some(&PageIdentity::of_title("reported"))),
+            meta.title_with(Some(&PageIdentity::from("reported"))),
             "reported"
         );
         assert_eq!(
-            meta.title_with(Some(&PageIdentity::of_title(""))),
+            meta.title_with(Some(&PageIdentity::from(""))),
             "host",
             "a page that blanks its own title has nothing to say, so the host name stands"
         );
@@ -1167,7 +1166,7 @@ mod tests {
                 .add_message::<PageOpenRequest>()
                 .add_message::<CefPageAttachRequest>()
                 .add_message::<vmux_setting::SettingsWriteRequest>()
-                .add_message::<vmux_space::SpaceCommandRequest>()
+                .add_message::<vmux_space::SpaceRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
                 .init_resource::<crate::PendingNavSnapshots>()
                 .init_resource::<crate::input::RecentBrowserInteraction>()

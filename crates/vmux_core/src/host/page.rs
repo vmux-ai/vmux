@@ -8,8 +8,8 @@ use bevy::{
 };
 use bevy_cef::prelude::BinReceive;
 use bevy_cef_core::prelude::CefEmbeddedHost;
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
+pub use vmux_api::PageReady;
 
 pub struct PagePlugin;
 
@@ -19,8 +19,6 @@ impl Plugin for PagePlugin {
             .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
     }
 }
-
-pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageManifest {
@@ -280,19 +278,6 @@ impl PageManifest {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageEmbedSet;
 
-#[derive(
-    Clone,
-    Copy,
-    Component,
-    Debug,
-    Default,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct PageReady {}
-
 pub fn mark_webview_page_ready(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
@@ -531,18 +516,6 @@ mod host_history_tests {
 #[cfg(test)]
 mod page_ready_tests {
     use super::*;
-
-    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    struct PageReadyPayloadProbe {}
-
-    #[test]
-    fn page_ready_cross_type_rkyv_compat() {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayloadProbe {}).expect("ser");
-        println!("PageReady archive byte length: {}", bytes.len());
-        println!("PageReady archive bytes: {:?}", &bytes[..]);
-        let _decoded =
-            rkyv::from_bytes::<PageReady, rkyv::rancor::Error>(&bytes).expect("cross-type decode");
-    }
 
     #[test]
     fn page_ready_self_rkyv_roundtrip() {

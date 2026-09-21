@@ -14,12 +14,18 @@ pub struct PageIdentity {
     pub icon: Option<crate::PageIcon>,
 }
 
-impl PageIdentity {
-    pub fn of_title(title: impl Into<String>) -> Self {
+impl From<String> for PageIdentity {
+    fn from(title: String) -> Self {
         Self {
-            title: Some(title.into()),
+            title: Some(title),
             icon: None,
         }
+    }
+}
+
+impl From<&str> for PageIdentity {
+    fn from(title: &str) -> Self {
+        Self::from(title.to_string())
     }
 }
 

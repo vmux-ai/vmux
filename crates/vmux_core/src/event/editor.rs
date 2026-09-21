@@ -2,40 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::CommandBarPicker;
 
-pub const FILE_META_EVENT: &str = "file_meta";
-pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
-pub const FILE_ERROR_EVENT: &str = "file_error";
-pub const FILE_RESIZE_EVENT: &str = "file_resize";
-pub const FILE_SCROLL_EVENT: &str = "file_scroll";
-pub const FILE_SCROLL_BY_EVENT: &str = "file_scroll_by";
-pub const FILE_FOLD_TOGGLE_EVENT: &str = "file_fold_toggle";
-pub const FILE_DIR_EVENT: &str = "file_dir";
-pub const FILE_THEME_EVENT: &str = "file_theme";
-pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
-pub const FILE_PREVIEW_EVENT: &str = "file_preview";
-pub const FILE_OPEN_EVENT: &str = "file_open";
-pub const FILE_MEDIA_EVENT: &str = "file_media";
-pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
-pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
-pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
-pub const FILE_KEY_EVENT: &str = "file_key";
-pub const FILE_POINTER_EVENT: &str = "file_pointer";
-pub const FILE_CURSOR_EVENT: &str = "file_cursor";
-pub const FILE_DIRTY_EVENT: &str = "file_dirty";
-pub const FILE_NOTE_EVENT: &str = "file_note";
-pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
-pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
-pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
-pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
-pub const FILE_SHAPE_EVENT: &str = "file_shape";
-pub const FILE_SHAPE_SET_EVENT: &str = "file_shape_set";
-pub const FILE_ENCODING_EVENT: &str = "file_encoding";
-pub const FILE_ENCODING_SET_EVENT: &str = "file_encoding_set";
-pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
-pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
-pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
-pub const FILE_FIND_EVENT: &str = "file_find";
-
 #[derive(
     Debug,
     Clone,
@@ -102,6 +68,7 @@ pub struct FileLine {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "meta", target = "files")]
 pub struct FileMetaEvent {
     pub path: String,
     pub abs_path: String,
@@ -198,12 +165,6 @@ impl FileEncoding {
         Self::Iso8859_1,
     ];
 
-    pub fn of_label(label: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|candidate| candidate.label() == label)
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             Self::Utf8 => "UTF-8",
@@ -222,6 +183,28 @@ impl FileEncoding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedEncodingLabel;
+
+impl std::fmt::Display for UnsupportedEncodingLabel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("unsupported file encoding label")
+    }
+}
+
+impl std::error::Error for UnsupportedEncodingLabel {}
+
+impl TryFrom<&str> for FileEncoding {
+    type Error = UnsupportedEncodingLabel;
+
+    fn try_from(label: &str) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
+            .ok_or(UnsupportedEncodingLabel)
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -232,6 +215,7 @@ impl FileEncoding {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "viewport", target = "files")]
 pub struct FileViewportPatch {
     pub first_row: u32,
     pub total_rows: u32,
@@ -412,6 +396,7 @@ pub struct NoteBlock {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "note", target = "files")]
 pub struct FileNoteEvent {
     pub title: String,
     pub properties: Vec<crate::knowledge::KnowledgeProperty>,
@@ -432,6 +417,7 @@ pub struct FileNoteEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "property_edit", target = "files")]
 pub struct FilePropertyEdit {
     pub original_key: String,
     pub key: String,
@@ -451,6 +437,7 @@ pub struct FilePropertyEdit {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "knowledge", name = "link_open", target = "files")]
 pub struct KnowledgeLinkOpen {
     pub path: String,
     pub title: String,
@@ -468,6 +455,7 @@ pub struct KnowledgeLinkOpen {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "error", target = "files")]
 pub struct FileErrorEvent {
     pub message: String,
     #[serde(default)]
@@ -485,6 +473,7 @@ pub struct FileErrorEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "resize", target = "files")]
 pub struct FileResizeEvent {
     pub char_height: f32,
     pub viewport_height: f32,
@@ -501,6 +490,7 @@ pub struct FileResizeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "video_rect", target = "files")]
 pub struct FileVideoRect {
     pub path: String,
     pub x: f32,
@@ -521,6 +511,7 @@ pub struct FileVideoRect {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "scroll", target = "files")]
 pub struct FileScrollEvent {
     pub top_row: u32,
     pub needs_rows: bool,
@@ -539,6 +530,7 @@ pub struct FileScrollEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "scroll_by", target = "files")]
 pub struct FileScrollByEvent {
     pub lines: i32,
 }
@@ -556,11 +548,12 @@ pub struct FileScrollByEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "fold_toggle", target = "files")]
 pub struct FileFoldToggle {
     pub line: u32,
 }
 
-pub use vmux_wire::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
+pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 
 #[derive(
     Debug,
@@ -590,6 +583,7 @@ pub struct FileDirEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "dir", target = "files")]
 pub struct FileDirEvent {
     pub path: String,
     pub abs_path: String,
@@ -609,6 +603,7 @@ pub struct FileDirEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "theme", target = "files")]
 pub struct FileThemeEvent {
     pub font_family: String,
     pub font_size: f32,
@@ -626,6 +621,7 @@ pub struct FileThemeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "preview_request", target = "files")]
 pub struct FilePreviewRequest {
     pub path: String,
     pub thumb: bool,
@@ -671,6 +667,7 @@ pub enum PreviewKind {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "preview", target = "files")]
 pub struct FilePreviewEvent {
     pub path: String,
     pub thumb: bool,
@@ -688,6 +685,7 @@ pub struct FilePreviewEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "open", target = "files")]
 pub struct FileOpenEvent {
     pub path: String,
 }
@@ -703,6 +701,7 @@ pub struct FileOpenEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "media", target = "files")]
 pub struct FileMediaEvent {
     pub kind: crate::media::MediaKind,
     pub mime: String,
@@ -721,6 +720,7 @@ pub struct FileMediaEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "open_external_request", target = "files")]
 pub struct FileOpenExternalRequest {
     pub path: String,
 }
@@ -736,6 +736,7 @@ pub struct FileOpenExternalRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "text_input", target = "files")]
 pub struct FileTextInput {
     pub text: String,
 }
@@ -752,6 +753,7 @@ pub struct FileTextInput {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "pointer", target = "files")]
 pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
@@ -770,6 +772,7 @@ pub struct FilePointerEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "cursor", target = "files")]
 pub struct FileCursorEvent {
     pub mode: crate::editor::EditMode,
     pub mode_label: String,
@@ -796,6 +799,7 @@ pub struct FileCursorEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "dirty", target = "files")]
 pub struct FileDirtyEvent {
     pub dirty: bool,
 }
@@ -832,6 +836,7 @@ pub enum FileViewMode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "view_mode", target = "files")]
 pub struct FileViewModeEvent {
     pub mode: FileViewMode,
 }
@@ -848,6 +853,7 @@ pub struct FileViewModeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "view_mode_set", target = "files")]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
 }
@@ -864,6 +870,7 @@ pub struct FileViewModeSet {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "keymap", target = "files")]
 pub struct FileKeymapEvent {
     pub keymap: crate::editor::KeymapKind,
 }
@@ -880,6 +887,7 @@ pub struct FileKeymapEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "keymap_set", target = "files")]
 pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
 }
@@ -896,6 +904,7 @@ pub struct FileKeymapSet {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "shape", target = "files")]
 pub struct FileShapeEvent {
     pub indent: FileIndent,
     pub line_ending: FileLineEnding,
@@ -913,6 +922,7 @@ pub struct FileShapeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "shape_set", target = "files")]
 pub struct FileShapeSet {
     pub indent: FileIndent,
     pub line_ending: FileLineEnding,
@@ -930,6 +940,7 @@ pub struct FileShapeSet {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "encoding", target = "files")]
 pub struct FileEncodingEvent {
     pub encoding: FileEncoding,
 }
@@ -963,6 +974,7 @@ pub enum FileEncodingAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "encoding_set", target = "files")]
 pub struct FileEncodingSet {
     pub encoding: FileEncoding,
     pub action: FileEncodingAction,
@@ -980,6 +992,7 @@ pub struct FileEncodingSet {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "status_picker_open", target = "files")]
 pub struct FileStatusPickerOpen {
     pub picker: CommandBarPicker,
 }
@@ -1002,6 +1015,7 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "key", target = "files")]
 pub enum FileKey {
     ToggleExplorer,
     RevealInExplorer,
@@ -1026,6 +1040,7 @@ pub enum FileKey {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "tidy_prompt", target = "files")]
 pub struct FileTidyPromptEvent {
     pub count: u32,
 }
@@ -1060,7 +1075,8 @@ pub enum TidyChoice {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct FileTidyActionEvent {
+#[vmux_api::ui_event(namespace = "file", name = "tidy_request", target = "files")]
+pub struct FileTidyRequest {
     pub choice: TidyChoice,
 }
 
@@ -1075,6 +1091,7 @@ pub struct FileTidyActionEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "file", name = "external_change", target = "files")]
 pub struct FileExternalChange {
     pub path: String,
 }
@@ -1091,6 +1108,7 @@ pub struct FileExternalChange {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "file", name = "find_request", target = "files")]
 pub struct FileFindRequest {
     pub query: String,
     pub step: bool,

@@ -1,4 +1,4 @@
-use crate::event::{COMMAND_BAR_KEY_EVENT, CommandBarKey};
+use crate::event::CommandBarKey;
 use crate::{AppCommand, CommandIssued, ReadAppCommands};
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
@@ -16,9 +16,8 @@ fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Comm
         let AppCommand::CommandBar(key) = issue.command else {
             continue;
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             issue.caller,
-            COMMAND_BAR_KEY_EVENT,
             &CommandBarKey::from(key),
         ));
     }
@@ -28,18 +27,19 @@ fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Comm
 mod tests {
     use super::*;
     use crate::CommandBarKeyCommand;
+    use vmux_api::BinEvent;
 
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
 
     impl Echoed {
         fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<CommandBarKey, rkyv::rancor::Error>(&trigger.payload)
+            let decoded = rkyv::from_bytes::<CommandBarKey, rkyv::rancor::Error>(trigger.payload())
                 .map(|key| format!("{key:?}"))
                 .unwrap_or_else(|_| "undecodable".to_string());
             echoed
                 .0
-                .push((trigger.webview, format!("{}:{decoded}", trigger.id)));
+                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
         }
     }
 
@@ -78,7 +78,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{COMMAND_BAR_KEY_EVENT}:Next"))]
+            vec![(pressed, format!("{}:Next", CommandBarKey::id()))]
         );
         assert!(
             !app.world()

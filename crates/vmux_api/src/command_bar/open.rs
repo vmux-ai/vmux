@@ -1,7 +1,5 @@
 use super::{AgentModels, AgentModes, CommandBarPickRow, CommandBarPicker};
 
-pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
-
 #[derive(
     Clone,
     Copy,
@@ -112,6 +110,7 @@ impl SearchEngine {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "command_bar", name = "open", targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub open_id: OpenId,

@@ -301,8 +301,8 @@ impl AcpShared {
             .filter(|model| !model.is_empty());
         RemoteSession {
             sid: self.sid.clone(),
-            room_id: vmux_wire::room::RoomId::for_session(&self.sid),
-            title: vmux_wire::room::Message::conversation_title(&self.remote_messages(), &name),
+            room_id: vmux_api::room::RoomId::for_session(&self.sid),
+            title: vmux_api::room::Message::conversation_title(&self.remote_messages(), &name),
             name,
             runtime: "acp".to_string(),
             model,

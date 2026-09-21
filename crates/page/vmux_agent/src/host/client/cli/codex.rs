@@ -211,7 +211,7 @@ impl CodexModels {
 
     fn from_config_with_fallback(
         path: &Path,
-        fallback: impl FnOnce() -> Vec<vmux_wire::room::ModelOptionEntry>,
+        fallback: impl FnOnce() -> Vec<vmux_api::room::ModelOptionEntry>,
     ) -> CliModelCatalog {
         let config = std::fs::read_to_string(path)
             .ok()
@@ -227,7 +227,7 @@ impl CodexModels {
         if !selected.is_empty() && !models.iter().any(|model| model.id == selected) {
             models.insert(
                 0,
-                vmux_wire::room::ModelOptionEntry {
+                vmux_api::room::ModelOptionEntry {
                     id: selected.clone(),
                     name: selected.clone(),
                     description: String::new(),
@@ -245,12 +245,12 @@ impl CodexModels {
         CliModelCatalog { selected, models }
     }
 
-    fn bundled_catalog() -> Vec<vmux_wire::room::ModelOptionEntry> {
-        static CATALOG: OnceLock<Vec<vmux_wire::room::ModelOptionEntry>> = OnceLock::new();
+    fn bundled_catalog() -> Vec<vmux_api::room::ModelOptionEntry> {
+        static CATALOG: OnceLock<Vec<vmux_api::room::ModelOptionEntry>> = OnceLock::new();
         CATALOG.get_or_init(Self::discover_bundled_catalog).clone()
     }
 
-    fn discover_bundled_catalog() -> Vec<vmux_wire::room::ModelOptionEntry> {
+    fn discover_bundled_catalog() -> Vec<vmux_api::room::ModelOptionEntry> {
         let Some(codex) = crate::exec::find_executable("codex") else {
             return Vec::new();
         };
@@ -268,7 +268,7 @@ impl CodexModels {
     fn run_catalog_command(
         mut command: Command,
         timeout: Duration,
-    ) -> Vec<vmux_wire::room::ModelOptionEntry> {
+    ) -> Vec<vmux_api::room::ModelOptionEntry> {
         let Ok(mut child) = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else {
             return Vec::new();
         };
@@ -309,19 +309,19 @@ impl CodexModels {
         Self::parse_catalog(&bytes).unwrap_or_default()
     }
 
-    fn read_catalog(path: &Path) -> Option<Vec<vmux_wire::room::ModelOptionEntry>> {
+    fn read_catalog(path: &Path) -> Option<Vec<vmux_api::room::ModelOptionEntry>> {
         let bytes = std::fs::read(path).ok()?;
         Self::parse_catalog(&bytes)
     }
 
-    fn parse_catalog(bytes: &[u8]) -> Option<Vec<vmux_wire::room::ModelOptionEntry>> {
+    fn parse_catalog(bytes: &[u8]) -> Option<Vec<vmux_api::room::ModelOptionEntry>> {
         let catalog = serde_json::from_slice::<CodexModelFile>(bytes).ok()?;
         Some(
             catalog
                 .models
                 .into_iter()
                 .filter(|model| model.visibility.is_empty() || model.visibility == "list")
-                .map(|model| vmux_wire::room::ModelOptionEntry {
+                .map(|model| vmux_api::room::ModelOptionEntry {
                     id: model.slug,
                     name: model.display_name,
                     description: model.description,
@@ -903,7 +903,7 @@ mod tests {
         )
         .unwrap();
         let fallback = || {
-            vec![vmux_wire::room::ModelOptionEntry {
+            vec![vmux_api::room::ModelOptionEntry {
                 id: "gpt-bundled".to_string(),
                 name: "GPT Bundled".to_string(),
                 description: String::new(),

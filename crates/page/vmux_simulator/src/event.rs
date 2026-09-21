@@ -1,5 +1,3 @@
-pub const SIMULATOR_READY_EVENT: &str = "simulator_ready";
-
 #[derive(
     Clone,
     Debug,
@@ -11,6 +9,7 @@ pub const SIMULATOR_READY_EVENT: &str = "simulator_ready";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "simulator", name = "ready", target = "simulator")]
 pub struct SimulatorReady {
     pub port: u16,
     pub capability: String,
@@ -32,6 +31,7 @@ pub struct SimulatorReady {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "simulator", name = "touch", target = "simulator")]
 pub struct SimulatorTouch {
     pub phase: SimulatorTouchPhase,
     pub x: f32,
@@ -70,6 +70,7 @@ pub enum SimulatorTouchPhase {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "simulator", name = "key", target = "simulator")]
 pub enum SimulatorKey {
     Text(String),
     Code(u16),
@@ -149,6 +150,7 @@ pub enum SimulatorClipboardAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "simulator", name = "clipboard", target = "simulator")]
 pub struct SimulatorClipboard {
     pub action: SimulatorClipboardAction,
 }
@@ -165,6 +167,11 @@ pub struct SimulatorClipboard {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(
+    namespace = "simulator",
+    name = "software_keyboard",
+    target = "simulator"
+)]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {
@@ -178,7 +185,7 @@ impl HardwareButton {
 }
 
 impl SimulatorKey {
-    pub fn of_browser_key(key: &str) -> Option<Self> {
+    fn parse_browser_key(key: &str) -> Option<Self> {
         let code = match key {
             "Enter" => 40,
             "Escape" => 41,
@@ -287,6 +294,25 @@ impl SimulatorKey {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidSimulatorKey;
+
+impl std::fmt::Display for InvalidSimulatorKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("invalid simulator browser key")
+    }
+}
+
+impl std::error::Error for InvalidSimulatorKey {}
+
+impl TryFrom<&str> for SimulatorKey {
+    type Error = InvalidSimulatorKey;
+
+    fn try_from(key: &str) -> Result<Self, Self::Error> {
+        Self::parse_browser_key(key).ok_or(InvalidSimulatorKey)
+    }
+}
+
 impl SimulatorKeyModifiers {
     pub fn is_empty(self) -> bool {
         !self.control && !self.shift && !self.alt && !self.meta
@@ -317,35 +343,32 @@ mod tests {
     #[test]
     fn a_printable_key_is_typed_rather_than_coded() {
         assert_eq!(
-            SimulatorKey::of_browser_key("a"),
-            Some(SimulatorKey::Text("a".into()))
+            SimulatorKey::try_from("a"),
+            Ok(SimulatorKey::Text("a".into()))
         );
         assert_eq!(
-            SimulatorKey::of_browser_key("あ"),
-            Some(SimulatorKey::Text("あ".into()))
+            SimulatorKey::try_from("あ"),
+            Ok(SimulatorKey::Text("あ".into()))
         );
     }
 
     #[test]
     fn keys_with_no_text_become_hid_codes() {
+        assert_eq!(SimulatorKey::try_from("Enter"), Ok(SimulatorKey::Code(40)));
         assert_eq!(
-            SimulatorKey::of_browser_key("Enter"),
-            Some(SimulatorKey::Code(40))
+            SimulatorKey::try_from("Backspace"),
+            Ok(SimulatorKey::Code(42))
         );
         assert_eq!(
-            SimulatorKey::of_browser_key("Backspace"),
-            Some(SimulatorKey::Code(42))
-        );
-        assert_eq!(
-            SimulatorKey::of_browser_key("ArrowUp"),
-            Some(SimulatorKey::Code(82))
+            SimulatorKey::try_from("ArrowUp"),
+            Ok(SimulatorKey::Code(82))
         );
     }
 
     #[test]
     fn a_modifier_or_unknown_named_key_is_dropped() {
         for key in ["Shift", "Meta", "F13", "Unidentified"] {
-            assert_eq!(SimulatorKey::of_browser_key(key), None, "{key}");
+            assert!(SimulatorKey::try_from(key).is_err(), "{key}");
         }
     }
 

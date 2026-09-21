@@ -1,15 +1,15 @@
-use vmux_wire::agent::supports_inline_agent_transition;
-use vmux_wire::chat::SlashCommandEntry;
-use vmux_wire::command_bar::{
-    AgentModels, AgentModes, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick,
-    CommandBarPicker, CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry,
+use vmux_api::agent::supports_inline_agent_transition;
+use vmux_api::chat::SlashCommandEntry;
+use vmux_api::command_bar::{
+    AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
+    CommandBarPromptContext, CommandBarQuery, CommandBarRequest, ExCommandName, HistoryEntry,
     PathEntry, is_data_uri,
 };
-use vmux_wire::open_target::OpenTarget;
-use vmux_wire::prompt_media::ChatAttachment;
-use vmux_wire::protocol::AcpModeOption;
-use vmux_wire::room::ModelOptionEntry;
-use vmux_wire::space::ProjectRow;
+use vmux_api::open_target::OpenTarget;
+use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::protocol::AcpModeOption;
+use vmux_api::room::ModelOptionEntry;
+use vmux_api::space::ProjectRow;
 
 use crate::components::agent_menu::ComposerAgentOption;
 use crate::i18n::translate;
@@ -153,7 +153,7 @@ pub struct PaletteDraft {
     pub completions_partial: bool,
     pub completions_total: usize,
     pub history: Vec<HistoryEntry>,
-    pub sessions: Vec<vmux_wire::chat::ResumableSessionEntry>,
+    pub sessions: Vec<vmux_api::chat::ResumableSessionEntry>,
     pub sessions_pending: bool,
 }
 
@@ -569,13 +569,13 @@ impl ComposerState {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Submission {
     pub close: bool,
-    pub action: Option<CommandBarActionEvent>,
+    pub action: Option<CommandBarRequest>,
     pub inline_target: Option<String>,
     pub retype: Option<String>,
 }
 
 impl Submission {
-    fn closing(action: CommandBarActionEvent) -> Self {
+    fn closing(action: CommandBarRequest) -> Self {
         Self {
             close: true,
             action: Some(action),
@@ -584,7 +584,7 @@ impl Submission {
         }
     }
 
-    fn silent(action: CommandBarActionEvent) -> Self {
+    fn silent(action: CommandBarRequest) -> Self {
         Self {
             close: false,
             action: Some(action),
@@ -727,9 +727,9 @@ impl PaletteState {
         {
             let action = if prompt_target_matches_query(item, &self.query) && attachments.is_empty()
             {
-                CommandBarActionEvent::open(target_url, self.open_target)
+                CommandBarRequest::open(target_url, self.open_target)
             } else {
-                CommandBarActionEvent::prompt(self.query.trim(), target_url, attachments)
+                CommandBarRequest::prompt(self.query.trim(), target_url, attachments)
             };
             return Submission {
                 close: true,
@@ -758,53 +758,53 @@ impl PaletteState {
         supports_inline_agent_transition(url).then(|| url.to_string())
     }
 
-    fn acted(&self, item: &CommandBarResultItem) -> Option<CommandBarActionEvent> {
+    fn acted(&self, item: &CommandBarResultItem) -> Option<CommandBarRequest> {
         match item {
             CommandBarResultItem::Slash { .. } => None,
             CommandBarResultItem::Resume { entry, .. } => {
-                Some(CommandBarActionEvent::open(&entry.url, self.open_target))
+                Some(CommandBarRequest::open(&entry.url, self.open_target))
             }
-            CommandBarResultItem::Terminal { path } => Some(CommandBarActionEvent::Terminal {
+            CommandBarResultItem::Terminal { path } => Some(CommandBarRequest::Terminal {
                 value: path.clone(),
             }),
             CommandBarResultItem::Editor { path } | CommandBarResultItem::File { path, .. } => {
-                Some(CommandBarActionEvent::open(
+                Some(CommandBarRequest::open(
                     &format!("file://{path}"),
                     self.open_target,
                 ))
             }
-            CommandBarResultItem::WorkDir { path, .. } => Some(CommandBarActionEvent::open(
+            CommandBarResultItem::WorkDir { path, .. } => Some(CommandBarRequest::open(
                 &format!("file://{path}"),
                 self.open_target,
             )),
             CommandBarResultItem::Stack {
                 pane_id, tab_index, ..
-            } => Some(CommandBarActionEvent::SwitchTab {
+            } => Some(CommandBarRequest::SwitchTab {
                 pane: *pane_id,
                 index: *tab_index,
             }),
-            CommandBarResultItem::Command { id, .. } => Some(CommandBarActionEvent::Command {
+            CommandBarResultItem::Command { id, .. } => Some(CommandBarRequest::Command {
                 id: id.clone(),
                 open: self.open_target,
             }),
             CommandBarResultItem::Ex { name, .. } => {
-                Some(CommandBarActionEvent::Ex { line: name.clone() })
+                Some(CommandBarRequest::Ex { line: name.clone() })
             }
             CommandBarResultItem::Pick { pick, .. } => {
-                Some(CommandBarActionEvent::Pick { pick: pick.clone() })
+                Some(CommandBarRequest::Pick { pick: pick.clone() })
             }
             CommandBarResultItem::Space { id, .. } => {
-                Some(CommandBarActionEvent::Space { id: id.clone() })
+                Some(CommandBarRequest::Space { id: id.clone() })
             }
             CommandBarResultItem::Page { url, .. }
             | CommandBarResultItem::Navigate { url }
             | CommandBarResultItem::History { url, .. } => {
-                (!url.is_empty()).then(|| CommandBarActionEvent::open(url, self.open_target))
+                (!url.is_empty()).then(|| CommandBarRequest::open(url, self.open_target))
             }
             CommandBarResultItem::RecentFile { url, .. } => {
-                Some(CommandBarActionEvent::open(url, self.open_target))
+                Some(CommandBarRequest::open(url, self.open_target))
             }
-            CommandBarResultItem::Search { engine, query } => Some(CommandBarActionEvent::open(
+            CommandBarResultItem::Search { engine, query } => Some(CommandBarRequest::open(
                 &engine.search_url(query),
                 self.open_target,
             )),
@@ -827,7 +827,7 @@ impl PaletteState {
             let Some(line) = ExLine::parse(&self.query) else {
                 return Submission::default();
             };
-            return Submission::closing(CommandBarActionEvent::Ex { line });
+            return Submission::closing(CommandBarRequest::Ex { line });
         }
         self.submit_typed(attachments)
     }
@@ -841,7 +841,7 @@ impl PaletteState {
             let Some(pick) = CommandBarPick::goto_line(&self.query) else {
                 return Submission::default();
             };
-            return Submission::closing(CommandBarActionEvent::Pick { pick });
+            return Submission::closing(CommandBarRequest::Pick { pick });
         }
         let Some(item) = self.row(self.selected) else {
             return Submission::default();
@@ -857,7 +857,7 @@ impl PaletteState {
             if let Some(item) = self.default_target.as_ref() {
                 return self.activate(item, attachments);
             }
-            return Submission::silent(CommandBarActionEvent::prompt("", "", attachments));
+            return Submission::silent(CommandBarRequest::prompt("", "", attachments));
         }
         if self.space_switch {
             let Some(item) = self.row(self.selected) else {
@@ -877,7 +877,7 @@ impl PaletteState {
         if let Some(item) = self.default_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::closing(CommandBarActionEvent::prompt(
+        Submission::closing(CommandBarRequest::prompt(
             self.query.trim(),
             "",
             attachments,
@@ -900,7 +900,7 @@ impl PaletteState {
         if let Some(item) = self.effective_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::closing(CommandBarActionEvent::prompt(
+        Submission::closing(CommandBarRequest::prompt(
             self.query.trim(),
             "",
             attachments,
@@ -912,13 +912,13 @@ impl PaletteState {
             && CommandBarQuery(&self.query)
                 .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
-            return Submission::closing(CommandBarActionEvent::open(&self.query, self.open_target));
+            return Submission::closing(CommandBarRequest::open(&self.query, self.open_target));
         }
         if let Some(item) = self.row(self.selected) {
             return self.activate(item, attachments);
         }
         if !self.query.is_empty() {
-            return Submission::silent(CommandBarActionEvent::open(&self.query, self.open_target));
+            return Submission::silent(CommandBarRequest::open(&self.query, self.open_target));
         }
         Submission::default()
     }
@@ -1320,7 +1320,7 @@ impl ProjectPath {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::command_bar::{
+    use vmux_api::command_bar::{
         CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
     };
 
@@ -1376,7 +1376,7 @@ mod tests {
                         url: "vmux://settings/".into(),
                         title: "Settings".into(),
                         keywords: vec!["preferences".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: false,
                     },
@@ -1385,7 +1385,7 @@ mod tests {
                         url: "vmux://sessions/vibe/".into(),
                         title: "Vibe".into(),
                         keywords: vec!["vibe".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
                     },
@@ -1394,7 +1394,7 @@ mod tests {
                         url: "vmux://sessions/codex/cli".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
                     },
@@ -1930,7 +1930,7 @@ mod tests {
         let typed = PaletteState::modal(&state, PaletteDraft::typed(":noh"));
         assert_eq!(
             typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Ex {
+            Some(CommandBarRequest::Ex {
                 line: "noh".to_string()
             })
         );
@@ -1938,7 +1938,7 @@ mod tests {
         let picked = PaletteState::modal(&state, PaletteDraft::typed(":").at(1).navigating());
         assert_eq!(
             picked.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Ex {
+            Some(CommandBarRequest::Ex {
                 line: ExCommandName::ALL[1].name.to_string()
             }),
             "an empty line still runs the row the user walked to: {:?}",
@@ -1975,7 +1975,7 @@ mod tests {
         assert_eq!(narrowed.rows.len(), 1, "{:?}", narrowed.rows);
         assert_eq!(
             narrowed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            Some(CommandBarRequest::Pick {
                 pick: CommandBarPick::Encoding {
                     label: "Shift_JIS".to_string(),
                     save: false,
@@ -1991,7 +1991,7 @@ mod tests {
 
         assert_eq!(
             palette.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            Some(CommandBarRequest::Pick {
                 pick: CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
             })
         );
@@ -2005,7 +2005,7 @@ mod tests {
         assert!(typed.rows.is_empty(), "{:?}", typed.rows);
         assert_eq!(
             typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            Some(CommandBarRequest::Pick {
                 pick: CommandBarPick::GotoLine { line: 41 },
             })
         );
@@ -2114,7 +2114,7 @@ mod tests {
         assert!(submitted.close);
         assert_eq!(
             submitted.action,
-            Some(CommandBarActionEvent::prompt(
+            Some(CommandBarRequest::prompt(
                 "fix the failing test",
                 "vmux://sessions/vibe/",
                 &[]
@@ -2138,7 +2138,7 @@ mod tests {
 
         assert_eq!(
             submitted.action,
-            Some(CommandBarActionEvent::prompt(
+            Some(CommandBarRequest::prompt(
                 "fix the failing test",
                 "vmux://sessions/codex/cli",
                 &[]
@@ -2156,7 +2156,7 @@ mod tests {
 
         assert_eq!(
             submitted.action,
-            Some(CommandBarActionEvent::open(
+            Some(CommandBarRequest::open(
                 "vmux://sessions/vibe/",
                 palette.open_target
             ))
@@ -2179,7 +2179,7 @@ mod tests {
 
         assert_eq!(
             submitted.action,
-            Some(CommandBarActionEvent::prompt(
+            Some(CommandBarRequest::prompt(
                 "",
                 "vmux://sessions/vibe/",
                 &attached
@@ -2204,7 +2204,7 @@ mod tests {
         assert!(!submitted.close, "the composer keeps its draft on screen");
         assert_eq!(
             submitted.action,
-            Some(CommandBarActionEvent::prompt("", "", &attached))
+            Some(CommandBarRequest::prompt("", "", &attached))
         );
     }
 
@@ -2216,7 +2216,7 @@ mod tests {
         let typed = PaletteState::modal(&state, PaletteDraft::typed("https://example.com"));
         assert_eq!(
             typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::open(
+            Some(CommandBarRequest::open(
                 "https://example.com",
                 Some(OpenTarget::InPlace)
             ))
@@ -2226,7 +2226,7 @@ mod tests {
         let opened = page.submit_modal(&[]);
         assert_eq!(
             opened.action,
-            Some(CommandBarActionEvent::open(
+            Some(CommandBarRequest::open(
                 "vmux://settings/",
                 Some(OpenTarget::InPlace)
             )),
@@ -2242,7 +2242,7 @@ mod tests {
 
         assert_eq!(
             palette.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Space {
+            Some(CommandBarRequest::Space {
                 id: "work".to_string()
             })
         );
@@ -2255,7 +2255,7 @@ mod tests {
 
         assert_eq!(
             palette.submit_start(&[]).action,
-            Some(CommandBarActionEvent::SwitchTab { pane: 8, index: 1 })
+            Some(CommandBarRequest::SwitchTab { pane: 8, index: 1 })
         );
     }
 
@@ -2277,7 +2277,7 @@ mod tests {
         assert!(opened.close);
         assert_eq!(
             opened.action,
-            Some(CommandBarActionEvent::open(
+            Some(CommandBarRequest::open(
                 "file:///work/main.rs",
                 palette.open_target
             ))
@@ -2306,7 +2306,7 @@ mod tests {
 
         assert_eq!(
             palette.submit_action(&[]).action,
-            Some(CommandBarActionEvent::prompt(
+            Some(CommandBarRequest::prompt(
                 "fix the failing test",
                 "vmux://sessions/codex/cli",
                 &[]

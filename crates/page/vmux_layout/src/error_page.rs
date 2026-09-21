@@ -1,9 +1,9 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_api::error::ErrorPageData;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
-use vmux_wire::error::ErrorPageData;
 
 #[component]
 pub fn Page() -> Element {

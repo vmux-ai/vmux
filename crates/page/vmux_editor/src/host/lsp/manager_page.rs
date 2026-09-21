@@ -5,9 +5,8 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use vmux_core::event::{
-    InstallPhase, LSP_CATALOG_EVENT, LSP_INSTALL_PROGRESS_EVENT, LSP_PKG_STATUS_EVENT,
-    LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest, LspPackage,
-    LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
+    InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
+    LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
 };
 use vmux_core::host::page::NativelyHosted;
 
@@ -68,7 +67,7 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     let installed = store::is_installed(root, &p.name);
     let on_path = !installed
         && matches!(
-            store::resolved_command(root, &p.name),
+            store::resolved_command(root, p.name.as_str()),
             store::Resolution::OnPath
         );
     let catalog_version = purl::parse(&p.source_id).and_then(|x| x.version);
@@ -101,7 +100,7 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
         catalog_version
     };
     LspPackage {
-        name: p.name.clone(),
+        name: p.name.as_str().to_string(),
         description: p.description.clone(),
         languages: p.languages.clone(),
         categories: p.categories.clone(),
@@ -155,7 +154,11 @@ fn install_named(outbox: &ManagerOutbox, active: &ActiveInstalls, entity: Entity
     std::thread::spawn(move || {
         let root = store::default_root();
         let pkgs = catalog::ensure_catalog(&root, false).unwrap_or_default();
-        let Some(pkg) = pkgs.iter().find(|p| p.name == name).cloned() else {
+        let Some(pkg) = pkgs
+            .iter()
+            .find(|package| package.name.as_str() == name)
+            .cloned()
+        else {
             active
                 .0
                 .lock()
@@ -249,7 +252,20 @@ fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Re
     let sink = outbox.clone();
     std::thread::spawn(move || {
         let root = store::default_root();
-        if let Err(e) = store::remove(&root, &name) {
+        let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
+            push(
+                &sink,
+                entity,
+                ManagerMsg::Progress(LspInstallProgress {
+                    name,
+                    phase: InstallPhase::Failed,
+                    pct: None,
+                    message: "invalid package name".to_string(),
+                }),
+            );
+            return;
+        };
+        if let Err(e) = store::remove(&root, &package) {
             push(
                 &sink,
                 entity,
@@ -319,17 +335,13 @@ fn drain_manager_outbox(
         match msg {
             ManagerMsg::Catalog(ev) => {
                 if browsers.can_emit_to(&entity) {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(entity, LSP_CATALOG_EVENT, &ev));
+                    commands.trigger(BinHostEmitEvent::from_event(entity, &ev));
                 }
             }
             ManagerMsg::Progress(ev) => {
                 for target in install_targets(entity, &ev.name, &views) {
                     if browsers.can_emit_to(&target) {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            target,
-                            LSP_INSTALL_PROGRESS_EVENT,
-                            &ev,
-                        ));
+                        commands.trigger(BinHostEmitEvent::from_event(target, &ev));
                     }
                 }
             }
@@ -350,11 +362,7 @@ fn drain_manager_outbox(
                 }
                 for target in targets {
                     if browsers.can_emit_to(&target) {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            target,
-                            LSP_PKG_STATUS_EVENT,
-                            &ev,
-                        ));
+                        commands.trigger(BinHostEmitEvent::from_event(target, &ev));
                     }
                 }
             }
@@ -369,7 +377,7 @@ mod tests {
 
     fn pkg(name: &str, source_id: &str) -> Package {
         Package {
-            name: name.into(),
+            name: crate::lsp::package_path::PackageName::parse(name).unwrap(),
             description: String::new(),
             languages: vec![],
             categories: vec![],
@@ -405,8 +413,10 @@ mod tests {
         std::fs::create_dir_all(store::packages_dir(root).join("foo")).unwrap();
         let mut bin = std::collections::BTreeMap::new();
         bin.insert("foo".to_string(), "foo-bin".to_string());
+        let name = crate::lsp::package_path::PackageName::parse("foo").unwrap();
         store::write_receipt(
             root,
+            &name,
             &store::Receipt {
                 name: "foo".into(),
                 version: Some("1.0".into()),

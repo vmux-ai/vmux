@@ -1,22 +1,17 @@
-pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
-pub const CHAT_HISTORY_PAGE_EVENT: &str = "chat_history_page";
-pub const COMPOSER_CONTEXT_EVENT: &str = "composer_context";
-pub const MODE_STATE_EVENT: &str = "mode_state";
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
-pub use vmux_wire::chat::{
-    CHAT_KEY_EVENT, ChatKey, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
+pub use vmux_api::chat::{
+    ChatKey, ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    SlashCommandEntry, SlashCommands,
 };
-pub use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
-    ChatSubmitAttachment,
+pub use vmux_api::prompt_media::{
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
+    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
+    ChatPickFiles, ChatSubmitAttachment,
 };
-pub use vmux_wire::protocol::ApprovalDecision;
-pub use vmux_wire::room::ModelOptionEntry;
+pub use vmux_api::protocol::ApprovalDecision;
+pub use vmux_api::room::ModelOptionEntry;
 
 #[derive(
     Clone,
@@ -59,6 +54,7 @@ impl QueuedPromptSnapshot {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "chat", name = "snapshot", targets = ["sessions", "agent", "start"])]
 pub struct ChatSnapshot {
     pub messages_json: String,
     pub messages_start: u32,
@@ -99,6 +95,7 @@ pub struct ChatSnapshot {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "composer_context", targets = ["sessions", "agent", "start"])]
 pub struct ComposerContext {
     pub cwd: String,
     pub workspace_name: String,
@@ -126,6 +123,7 @@ pub struct ComposerContext {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "mode_state", targets = ["sessions", "agent", "start"])]
 pub struct ModeState {
     pub current_mode_id: String,
     pub modes: Vec<vmux_service::protocol::AcpModeOption>,
@@ -141,6 +139,7 @@ pub struct ModeState {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(name = "select_mode", targets = ["sessions", "agent", "start"])]
 pub struct SelectMode {
     pub mode_id: String,
 }
@@ -155,6 +154,7 @@ pub struct SelectMode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "history_request", targets = ["sessions", "agent", "start"])]
 pub struct ChatHistoryRequest {
     pub before: u32,
     pub limit: u32,
@@ -170,6 +170,7 @@ pub struct ChatHistoryRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "chat", name = "history_page", targets = ["sessions", "agent", "start"])]
 pub struct ChatHistoryPage {
     pub items_json: String,
     pub start: u32,
@@ -187,6 +188,7 @@ pub struct ChatHistoryPage {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "submit", targets = ["sessions", "agent", "start"])]
 pub struct ChatSubmit {
     pub text: String,
     pub attachments: Vec<ChatSubmitAttachment>,
@@ -202,6 +204,7 @@ pub struct ChatSubmit {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "choice_selected", targets = ["sessions", "agent", "start"])]
 pub struct ChatChoiceSelected {
     pub index: u32,
 }
@@ -216,6 +219,7 @@ pub struct ChatChoiceSelected {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "approval", targets = ["sessions", "agent", "start"])]
 pub struct ChatApproval {
     pub call_id: String,
     pub decision: ApprovalDecision,
@@ -231,6 +235,7 @@ pub struct ChatApproval {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "cancel", targets = ["sessions", "agent", "start"])]
 pub struct ChatCancel;
 
 #[derive(
@@ -243,6 +248,7 @@ pub struct ChatCancel;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "resume", targets = ["sessions", "agent", "start"])]
 pub struct ChatResume;
 
 #[derive(
@@ -255,6 +261,7 @@ pub struct ChatResume;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "clear_queue", targets = ["sessions", "agent", "start"])]
 pub struct ChatClearQueue;
 
 #[derive(
@@ -267,6 +274,7 @@ pub struct ChatClearQueue;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "cancel_queued_prompt", targets = ["sessions", "agent", "start"])]
 pub struct ChatCancelQueuedPrompt {
     pub id: u64,
 }
@@ -281,6 +289,7 @@ pub struct ChatCancelQueuedPrompt {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "escape", targets = ["sessions", "agent", "start"])]
 pub struct ChatEscape;
 
 #[derive(
@@ -293,9 +302,8 @@ pub struct ChatEscape;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "select_workspace", targets = ["sessions", "agent", "start"])]
 pub struct ChatSelectWorkspace;
-
-pub const CHAT_PROJECT_BRANCHES_EVENT: &str = "chat_project_branches";
 
 #[derive(
     Clone,
@@ -307,6 +315,7 @@ pub const CHAT_PROJECT_BRANCHES_EVENT: &str = "chat_project_branches";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "branches_request", targets = ["sessions", "agent", "start"])]
 pub struct ChatBranchesRequest {
     pub project: String,
 }
@@ -321,6 +330,7 @@ pub struct ChatBranchesRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "chat", name = "project_branches", targets = ["sessions", "agent", "start"])]
 pub struct ChatProjectBranches {
     pub project: String,
     pub branches: Vec<ChatBranch>,
@@ -338,14 +348,13 @@ pub use vmux_core::event::ProjectBranch as ChatBranch;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "go_to_branch", targets = ["sessions", "agent", "start"])]
 pub struct ChatGoToBranch {
     pub project: String,
     pub branch: String,
     #[serde(default)]
     pub checkout: String,
 }
-
-pub const MODEL_STATE_EVENT: &str = "model_state";
 
 #[derive(
     Clone,
@@ -357,6 +366,7 @@ pub const MODEL_STATE_EVENT: &str = "model_state";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(name = "model_state", targets = ["sessions", "agent", "start"])]
 pub struct ModelState {
     pub current_model_id: String,
     pub current_model_name: String,
@@ -378,6 +388,7 @@ pub struct ModelState {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(name = "select_model", targets = ["sessions", "agent", "start"])]
 pub struct SelectModel {
     pub model_id: String,
 }
@@ -392,6 +403,7 @@ pub struct SelectModel {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(name = "set_agent_effort", targets = ["sessions", "agent", "start"])]
 pub struct SetAgentEffort {
     pub agent_key: String,
     pub level: String,
@@ -407,6 +419,7 @@ pub struct SetAgentEffort {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "chat", name = "open_page", targets = ["sessions", "agent", "start"])]
 pub struct ChatOpenPage {
     pub url: String,
 }
@@ -421,11 +434,12 @@ pub struct ChatOpenPage {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "runtime", name = "switch_request", targets = ["sessions", "agent", "start"])]
 pub struct RuntimeSwitchRequest {
     pub to: String,
 }
 
-pub use vmux_wire::chat::{
+pub use vmux_api::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, ToolName, WORKING_VERB_IDS,
     latest_tool_location,
 };

@@ -2,24 +2,20 @@ use crate::CommandBar;
 use crate::build_command_bar_open_payload;
 use crate::host::payload::CommandBarPicks;
 use std::time::{Duration, Instant};
+use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPick, CommandBarPicker};
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
     StackInPaneChosen,
 };
-use vmux_wire::command_bar::{CommandBarPick, CommandBarPicker};
 
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::project_files::{ProjectCompletions, RankBias};
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathEntry,
-    SearchEngine, SearchEngineSetting,
-};
-use crate::event::{
-    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
+    CommandBarPanelCloseEvent, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest,
+    CommandBarSizeEvent, OpenId, PathCompleteRequest, PathEntry, SearchEngine, SearchEngineSetting,
 };
 use crate::open::OpenCommand;
 use crate::open_target::OpenTarget;
@@ -33,7 +29,7 @@ use crate::{
 };
 use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::event::space::SpaceCommandEvent;
+use vmux_core::event::space::SpaceRequest;
 use vmux_core::host::page::HostsPage;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -62,17 +58,13 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
-                CommandBarActionEvent,
+                CommandBarRequest,
                 PathCompleteRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
-            )>::for_hosts(&[
-                "command-bar",
-                "start",
-                "layout",
-            ]))
-            .add_observer(on_command_bar_action)
+            )>::default())
+            .add_observer(on_command_bar_request)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
             .add_observer(on_command_bar_rendered)
@@ -149,7 +141,7 @@ pub struct CommandBarNativeSize {
 pub struct PendingCommandBarReveal {
     frames: u8,
     open_id: OpenId,
-    payload: Option<Vec<u8>>,
+    payload: Option<CommandBarOpenEvent>,
     started_at: Option<Instant>,
 }
 
@@ -293,7 +285,7 @@ fn native_command_bar_reveal_timed_out(
 
 fn should_retry_command_bar_open_payload(
     open_id: OpenId,
-    payload: Option<&[u8]>,
+    payload: Option<&CommandBarOpenEvent>,
     rendered_open_id: Option<OpenId>,
 ) -> bool {
     open_id.is_open() && payload.is_some() && rendered_open_id != Some(open_id)
@@ -572,29 +564,24 @@ fn handle_open_command_bar(
     if let Some(picker) = picker {
         payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        layout_e,
-        LAYOUT_COMMAND_BAR_OPEN_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(layout_e, &payload));
 }
 
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         layout,
-        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
         &CommandBarPanelCloseEvent,
     ));
 }
 
 #[derive(SystemParam)]
-struct CommandBarActionQueries<'w, 's> {
+struct CommandBarRequestQueries<'w, 's> {
     child_of_q: Query<'w, 's, &'static ChildOf>,
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
     focus: Res<'w, CommandBarWorkspaceSnapshot>,
 }
 
-impl CommandBarActionQueries<'_, '_> {
+impl CommandBarRequestQueries<'_, '_> {
     fn focused_stack(&self) -> Option<Entity> {
         self.focus.stack
     }
@@ -674,8 +661,8 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     }
 }
 
-fn on_command_bar_action(
-    trigger: On<BinReceive<CommandBarActionEvent>>,
+fn on_command_bar_request(
+    trigger: On<BinReceive<CommandBarRequest>>,
     search_engine: Option<Res<SearchEngineSetting>>,
     mut modal_q: Query<
         (
@@ -686,7 +673,7 @@ fn on_command_bar_action(
         ),
         With<CommandBar>,
     >,
-    queries: CommandBarActionQueries,
+    queries: CommandBarRequestQueries,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
@@ -723,7 +710,7 @@ fn on_command_bar_action(
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
     match evt {
-        CommandBarActionEvent::Prompt {
+        CommandBarRequest::Prompt {
             text,
             target_url,
             attachments: submitted,
@@ -732,7 +719,7 @@ fn on_command_bar_action(
             let attachments = submitted
                 .iter()
                 .filter(|attachment| !attachment.path.is_empty())
-                .map(|attachment| vmux_wire::protocol::AgentAttachment {
+                .map(|attachment| vmux_api::protocol::AgentAttachment {
                     path: attachment.path.clone(),
                     name: attachment.name.clone(),
                     mime_type: attachment.mime_type.clone(),
@@ -745,7 +732,7 @@ fn on_command_bar_action(
                     && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
-                        && vmux_wire::agent::supports_inline_agent_transition(&url)
+                        && vmux_api::agent::supports_inline_agent_transition(&url)
                     {
                         inline_transition.write(InlineTransitionRequested { stack, webview });
                         if let Some(proxy) = proxy.as_deref() {
@@ -771,7 +758,7 @@ fn on_command_bar_action(
                 }
             }
         }
-        CommandBarActionEvent::Open { value, open } => {
+        CommandBarRequest::Open { value, open } => {
             let value = &Home::expanded_file_url(value);
             let expanded = Home::resolve(value);
             let is_path = expanded.exists();
@@ -803,7 +790,7 @@ fn on_command_bar_action(
                     search_engine.map(|setting| setting.0).unwrap_or_default(),
                 );
                 let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
-                    && vmux_wire::agent::supports_inline_agent_transition(&url)
+                    && vmux_api::agent::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
                     inline_transition.write(InlineTransitionRequested { stack, webview });
@@ -835,7 +822,7 @@ fn on_command_bar_action(
                 }
             }
         }
-        CommandBarActionEvent::Terminal { value } => {
+        CommandBarRequest::Terminal { value } => {
             let known_terminal = running_terminals.get(value).copied();
             if let Some(entity) = known_terminal {
                 focus_pane_entity(entity, &mut commands, &queries.child_of_q);
@@ -886,7 +873,7 @@ fn on_command_bar_action(
                 }
             }
         }
-        CommandBarActionEvent::Command { id, open } => {
+        CommandBarRequest::Command { id, open } => {
             let is_contributed = resource_params
                 .p2()
                 .commands()
@@ -918,32 +905,30 @@ fn on_command_bar_action(
                 writer_params.p0().write(cmd);
             }
         }
-        CommandBarActionEvent::Space { id } => {
+        CommandBarRequest::Space { id } => {
             custom_keyboard_restore = true;
             if !id.is_empty() {
                 commands.trigger(BinReceive {
                     webview,
-                    payload: SpaceCommandEvent {
-                        command: "attach".to_string(),
-                        space_id: Some(id.clone()),
-                        name: None,
+                    payload: SpaceRequest::Attach {
+                        space_id: id.clone(),
                     },
                 });
             }
         }
-        CommandBarActionEvent::SwitchTab { pane, index } => {
+        CommandBarRequest::SwitchTab { pane, index } => {
             stack_chosen.write(StackInPaneChosen {
                 pane_bits: *pane,
                 index: *index,
             });
         }
-        CommandBarActionEvent::Ex { line } => {
+        CommandBarRequest::Ex { line } => {
             ex_lines.write(crate::host::ExLineSubmitted {
                 stack: queries.focused_stack(),
                 line: line.clone(),
             });
         }
-        CommandBarActionEvent::Pick { pick } => {
+        CommandBarRequest::Pick { pick } => {
             if let CommandBarPick::Picker(next) = pick {
                 if let Some(bar) = BrowserBarCommand::opening(*next) {
                     let cmd = AppCommand::Browser(BrowserCommand::Bar(bar));
@@ -960,7 +945,7 @@ fn on_command_bar_action(
                 });
             }
         }
-        CommandBarActionEvent::Dismiss => {}
+        CommandBarRequest::Dismiss => {}
     }
 
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
@@ -1043,9 +1028,9 @@ fn reveal_command_bar(
             native_size.is_some(),
         ) {
             commands.entity(entity).remove::<PendingCommandBarReveal>();
-            commands.trigger(BinReceive::<CommandBarActionEvent> {
+            commands.trigger(BinReceive::<CommandBarRequest> {
                 webview: entity,
-                payload: CommandBarActionEvent::Dismiss,
+                payload: CommandBarRequest::Dismiss,
             });
             continue;
         }
@@ -1086,7 +1071,7 @@ fn retry_pending_command_bar_open(
             continue;
         }
         let rendered_open_id = rendered.map(|rendered| rendered.0);
-        let Some(payload) = pending.payload.as_deref() else {
+        let Some(payload) = pending.payload.as_ref() else {
             continue;
         };
         if !should_retry_command_bar_open_payload(pending.open_id, Some(payload), rendered_open_id)
@@ -1103,11 +1088,7 @@ fn retry_pending_command_bar_open(
         {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_bytes(
-            entity,
-            COMMAND_BAR_OPEN_EVENT,
-            payload.to_vec(),
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
         last_emit.insert(entity, now);
     }
@@ -1143,9 +1124,8 @@ fn on_path_complete_request(
         completions = index.matches(&roots, &bias, query, asking);
     }
     let completions = completions.unwrap_or_else(|| complete_path(query));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         asking,
-        PATH_COMPLETE_RESPONSE,
         &completions.response(),
     ));
 }
@@ -1209,9 +1189,8 @@ fn answer_settled_project_index(
         let Some(completions) = index.settled_for(asked.webview, &roots, &bias) else {
             continue;
         };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             asked.webview,
-            PATH_COMPLETE_RESPONSE,
             &completions.response(),
         ));
     }
@@ -1343,6 +1322,7 @@ mod tests {
     use crate::{command_bar_open_payload, localized_command_name};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_api::BinEvent;
     use vmux_core::overlay::OverlayState;
 
     #[test]
@@ -1385,24 +1365,28 @@ mod tests {
 
     #[test]
     fn command_bar_open_payload_retries_until_rendered_ack() {
+        let payload = CommandBarOpenEvent {
+            open_id: OpenId(7),
+            ..Default::default()
+        };
         assert!(should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             None
         ));
         assert!(should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             Some(OpenId(6))
         ));
         assert!(!should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             Some(OpenId(7))
         ));
         assert!(!should_retry_command_bar_open_payload(
             OpenId::NONE,
-            Some(b"payload"),
+            Some(&payload),
             None
         ));
         assert!(!should_retry_command_bar_open_payload(
@@ -1410,19 +1394,6 @@ mod tests {
             None,
             None
         ));
-    }
-
-    #[test]
-    fn command_bar_open_retry_uses_binary_host_emit() {
-        let source = include_str!("handler.rs");
-        let retry_fn = source
-            .split("fn retry_pending_command_bar_open")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_command_bar").next())
-            .unwrap_or_default();
-
-        assert!(retry_fn.contains("BinHostEmitEvent::from_bytes"));
-        assert!(!retry_fn.contains("HostEmitEvent::new"));
     }
 
     #[derive(Resource, Default)]
@@ -1671,7 +1642,10 @@ mod tests {
                 PendingCommandBarReveal {
                     frames: u8::MAX,
                     open_id: OpenId(7),
-                    payload: Some(b"payload".to_vec()),
+                    payload: Some(CommandBarOpenEvent {
+                        open_id: OpenId(7),
+                        ..Default::default()
+                    }),
                     started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
                 },
             ))
@@ -1700,7 +1674,10 @@ mod tests {
                 PendingCommandBarReveal {
                     frames: 0,
                     open_id: OpenId(7),
-                    payload: Some(b"payload".to_vec()),
+                    payload: Some(CommandBarOpenEvent {
+                        open_id: OpenId(7),
+                        ..Default::default()
+                    }),
                     started_at: Some(Instant::now()),
                 },
             ))
@@ -1728,7 +1705,10 @@ mod tests {
         let pending = PendingCommandBarReveal {
             frames: 0,
             open_id: OpenId(7),
-            payload: Some(Vec::new()),
+            payload: Some(CommandBarOpenEvent {
+                open_id: OpenId(7),
+                ..Default::default()
+            }),
             started_at: Some(Instant::now()),
         };
 
@@ -1895,12 +1875,12 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct EmittedToPage(Vec<(Entity, String, Vec<u8>)>);
+    struct EmittedToPage(Vec<(Entity, &'static str, Vec<u8>)>);
 
     fn capture_page_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedToPage>) {
         emitted
             .0
-            .push((trigger.webview, trigger.id.clone(), trigger.payload.clone()));
+            .push((trigger.webview(), trigger.id(), trigger.payload().to_vec()));
     }
 
     fn panel_app() -> App {
@@ -1921,22 +1901,23 @@ mod tests {
         app
     }
 
-    fn emitted_to_page(app: &App) -> Vec<(Entity, String)> {
+    fn emitted_to_page(app: &App) -> Vec<(Entity, &'static str)> {
         app.world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .map(|(webview, id, _)| (*webview, id.clone()))
+            .map(|(webview, id, _)| (*webview, *id))
             .collect()
     }
 
     fn open_payload(app: &App) -> CommandBarOpenEvent {
+        let event_id = CommandBarOpenEvent::id();
         let (_, _, bytes) = app
             .world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .find(|(_, id, _)| id == LAYOUT_COMMAND_BAR_OPEN_EVENT)
+            .find(|(_, id, _)| id == &event_id)
             .expect("no open payload emitted");
         rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(bytes)
             .expect("open payload should round-trip")
@@ -1959,7 +1940,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+            vec![(layout, CommandBarOpenEvent::id())]
         );
     }
 
@@ -1988,7 +1969,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+            vec![(layout, CommandBarOpenEvent::id())]
         );
         assert_eq!(open_payload(&app).url, "");
     }
@@ -2008,7 +1989,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
+            vec![(layout, CommandBarPanelCloseEvent::id())]
         );
     }
 
@@ -2028,7 +2009,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())],
+            vec![(layout, CommandBarPanelCloseEvent::id())],
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
@@ -2049,7 +2030,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+            vec![(layout, CommandBarOpenEvent::id())]
         );
         assert_eq!(open_payload(&app).picker, Some(CommandBarPicker::Space));
     }
@@ -2096,11 +2077,10 @@ mod tests {
             ))
             .id();
 
-        app.world_mut()
-            .trigger(BinReceive::<CommandBarActionEvent> {
-                webview: modal,
-                payload: CommandBarActionEvent::Dismiss,
-            });
+        app.world_mut().trigger(BinReceive::<CommandBarRequest> {
+            webview: modal,
+            payload: CommandBarRequest::Dismiss,
+        });
         app.world_mut().flush();
 
         let vis_after_close = *app.world().get::<Visibility>(modal).unwrap();

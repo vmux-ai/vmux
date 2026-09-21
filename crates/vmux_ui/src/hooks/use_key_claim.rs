@@ -2,15 +2,13 @@ use crate::hooks::use_event::use_event;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
-use vmux_core::input::{
-    KEY_CLAIMS_EVENT, KeyClaims, KeyStroke, KeyVerdict, PageKeyContext, Unclaimed,
-};
+use vmux_core::input::{KeyClaims, KeyStroke, KeyVerdict, PageKeyContext, Unclaimed};
 
 pub fn use_key_claim(
     unclaimed: Unclaimed,
     context: impl Fn() -> Vec<String> + 'static,
 ) -> KeyClaim {
-    let claims = use_event::<KeyClaims>(KEY_CLAIMS_EVENT, KeyClaims::default);
+    let claims = use_event::<KeyClaims>(KeyClaims::default);
     let resolves = use_hook(crate::transport::Host::resolves_keys);
 
     use_effect(move || {

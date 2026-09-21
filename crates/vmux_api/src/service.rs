@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROCESSES_LIST_EVENT: &str = "processes_list";
-
-pub const PROCESSES_NAVIGATE_EVENT: &str = "processes_navigate";
-
 #[derive(
     Debug,
     Clone,
@@ -14,6 +10,7 @@ pub const PROCESSES_NAVIGATE_EVENT: &str = "processes_navigate";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "processes", name = "list", target = "services")]
 pub struct ProcessesListEvent {
     pub connected: bool,
     pub processes: Vec<ProcessEntry>,
@@ -76,6 +73,7 @@ pub fn format_mem(bytes: u64) -> String {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "processes", name = "navigate", target = "services")]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
     pub navigate: bool,
@@ -84,6 +82,7 @@ pub struct ProcessNavigateEvent {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "process", name = "kill", target = "services")]
 pub struct ProcessKillEvent {
     pub process_id: String,
     pub kill: bool,
@@ -92,6 +91,7 @@ pub struct ProcessKillEvent {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "process", name = "kill_all", target = "services")]
 pub struct ProcessKillAllEvent {
     pub kill_all: bool,
 }

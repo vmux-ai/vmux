@@ -1,7 +1,5 @@
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
-pub const SPACES_LIST_EVENT: &str = "spaces_list";
-pub const SPACE_KEY_EVENT: &str = "space-key";
 
 #[derive(
     Clone,
@@ -15,6 +13,7 @@ pub const SPACE_KEY_EVENT: &str = "space-key";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "space", name = "key", targets = ["spaces", "layout"])]
 pub enum SpaceKey {
     Next,
     Previous,
@@ -34,6 +33,7 @@ pub enum SpaceKey {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "spaces", name = "list", targets = ["spaces", "layout"])]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
 }
@@ -62,7 +62,6 @@ pub struct SpaceRow {
 #[derive(
     Clone,
     Debug,
-    Default,
     PartialEq,
     Eq,
     serde::Serialize,
@@ -71,12 +70,14 @@ pub struct SpaceRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpaceCommandEvent {
-    pub command: String,
-    #[serde(default)]
-    pub space_id: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
+#[vmux_api::ui_event(namespace = "space", name = "request", targets = ["spaces", "layout"])]
+pub enum SpaceRequest {
+    OpenPage,
+    Attach { space_id: String },
+    Delete { space_id: String },
+    Rename { space_id: String, name: String },
+    Create { name: String },
 }
 
 #[derive(
@@ -89,7 +90,8 @@ pub struct SpaceCommandEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ProjectCommandEvent {
+#[vmux_api::ui_event(namespace = "project", name = "request", targets = ["spaces", "layout", "git"])]
+pub struct ProjectRequest {
     pub command: String,
     #[serde(default)]
     pub path: Option<String>,
@@ -164,6 +166,7 @@ impl ProjectRowKind {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "project", name = "tree_toggle", target = "layout")]
 pub struct ProjectTreeToggle {
     pub path: String,
     #[serde(default)]
@@ -221,24 +224,26 @@ mod tests {
 
     #[test]
     fn attach_event_carries_target_space_id() {
-        let event = SpaceCommandEvent {
-            command: "attach".to_string(),
-            space_id: Some("work".to_string()),
-            name: None,
+        let event = SpaceRequest::Attach {
+            space_id: "work".to_string(),
         };
-        assert_eq!(event.space_id.as_deref(), Some("work"));
+        assert_eq!(
+            event,
+            SpaceRequest::Attach {
+                space_id: "work".to_string()
+            }
+        );
     }
 
     #[test]
-    fn space_command_event_rkyv_roundtrip() {
-        let original = SpaceCommandEvent {
-            command: "attach".to_string(),
-            space_id: Some("work".to_string()),
-            name: Some("Work".to_string()),
+    fn space_request_rkyv_roundtrip() {
+        let original = SpaceRequest::Rename {
+            space_id: "work".to_string(),
+            name: "Work".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
-        let recovered = rkyv::from_bytes::<SpaceCommandEvent, rkyv::rancor::Error>(&bytes)
-            .expect("deserialize");
+        let recovered =
+            rkyv::from_bytes::<SpaceRequest, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original, recovered);
     }
 

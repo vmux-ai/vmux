@@ -18,14 +18,13 @@ use vmux_core::host::page::NativelyHosted;
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{
-    GIT_CHANGED_EVENT, GIT_DIRECTORY_EVENT, GIT_REPOSITORY_PICKED_EVENT, GitAppAction,
-    GitAppActionRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest, GitDiffRequest,
-    GitDirectoryEvent, GitDirectoryRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest,
-    GitOperationRequest, GitPullRequest, GitPushRequest, GitRepositoryPickedEvent,
+    GitAppAction, GitAppActionRequest, GitBranchLogRequest, GitChangedEvent, GitCommitRequest,
+    GitDiffRequest, GitDirectoryEvent, GitDirectoryRequest, GitDiscardRequest, GitFetchRequest,
+    GitHunkRequest, GitOperationRequest, GitPullRequest, GitPushRequest, GitRepositoryPickedEvent,
     GitRepositoryPickerRequest, GitRepositoryRequest, GitStageAllRequest, GitStageRequest,
     GitStatusRequest, GitUnstageRequest,
 };
-use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
+use crate::host::job::{Emit, JobKind, run_job};
 
 pub struct GitPlugin;
 
@@ -1013,9 +1012,8 @@ fn on_directory_request(
             .unwrap_or_else(|| "Git".to_string());
         page.title = format!("{name} · Git");
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         trigger.event().webview,
-        GIT_DIRECTORY_EVENT,
         &event,
     ));
 }
@@ -1047,9 +1045,8 @@ fn poll_repository_pickers(
             continue;
         };
         if let Some(path) = selected {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 picker.webview,
-                GIT_REPOSITORY_PICKED_EVENT,
                 &GitRepositoryPickedEvent {
                     path: path.to_string_lossy().into_owned(),
                 },
@@ -1108,11 +1105,7 @@ fn drain_git_watch(
         .map(|(entity, _)| *entity)
         .collect();
     for entity in affected {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            GIT_CHANGED_EVENT,
-            &GitChangedEvent {},
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &GitChangedEvent {}));
     }
     let affected_repo_info: Vec<PathBuf> = watch
         .repo_info_subscriptions
@@ -1311,7 +1304,6 @@ fn emit_events(
     emits: Vec<Emit>,
 ) {
     for emit in emits {
-        let name = emit_event_name(&emit);
         match emit {
             Emit::Repository(ev) => {
                 if let Ok(mut page) = pages.get_mut(webview) {
@@ -1323,18 +1315,14 @@ fn emit_events(
                         false => format!("{} · {}", ev.repo_name, ev.branch),
                     };
                 }
-                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+                commands.trigger(BinHostEmitEvent::from_event(webview, &ev))
             }
-            Emit::BranchLog(ev) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
-            }
-            Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-            Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-            Emit::DiffViewport(ev) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
-            }
-            Emit::Result(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-            Emit::Error(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+            Emit::BranchLog(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Emit::DiffViewport(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Emit::Result(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Emit::Error(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
         }
     }
 }

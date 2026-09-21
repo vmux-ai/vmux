@@ -4,15 +4,14 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
-    MODE_STATE_EVENT, MODEL_STATE_EVENT, ModeState, ModelOptionEntry, ModelState,
-    SLASH_COMMANDS_EVENT, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
+    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_session::AcpSession;
-use vmux_wire::room::RemoteModelState;
 
 pub(super) struct ChatModelPlugin;
 
@@ -33,10 +32,8 @@ impl Plugin for ChatModelPlugin {
                 SelectModel,
                 SetAgentEffort,
                 SelectMode,
-            )>::for_hosts(super::CHAT_EVENT_HOSTS))
-            .add_plugins(
-                BinEventEmitterPlugin::<(StartSelectModel, StartSelectMode)>::for_hosts(&["start"]),
-            )
+            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(StartSelectModel, StartSelectMode)>::default())
             .add_systems(
                 Startup,
                 (
@@ -261,7 +258,7 @@ struct AgentModeMemory {
     url: String,
     selected: String,
     #[serde(default)]
-    modes: Vec<vmux_wire::protocol::AcpModeOption>,
+    modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 struct AgentSelectionKey;
@@ -430,14 +427,9 @@ pub(super) fn emit_model_state(
         .iter()
         .map(|level| level.to_string())
         .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(webview, &state));
+    commands.trigger(BinHostEmitEvent::from_event(
         webview,
-        MODEL_STATE_EVENT,
-        &state,
-    ));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        SLASH_COMMANDS_EVENT,
         &SlashCommands::for_agent(cross_runtime, model_state.is_some()),
     ));
 }
@@ -454,11 +446,7 @@ pub(super) fn emit_mode_state(
         },
         None => ModeState::default(),
     };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        MODE_STATE_EVENT,
-        &state,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(webview, &state));
 }
 
 pub(super) fn effort_current_for<'a>(
@@ -547,7 +535,7 @@ fn publish_agent_models(
         if memory.url.is_empty() || memory.models.is_empty() {
             continue;
         }
-        next.push(vmux_wire::command_bar::AgentModels {
+        next.push(vmux_api::command_bar::AgentModels {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
@@ -571,7 +559,7 @@ fn publish_agent_modes(
         if memory.url.is_empty() || memory.modes.is_empty() {
             continue;
         }
-        next.push(vmux_wire::command_bar::AgentModes {
+        next.push(vmux_api::command_bar::AgentModes {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
@@ -966,7 +954,7 @@ impl AgentModeSelections {
         agent_id: &str,
         url: &str,
         selected: &str,
-        modes: &[vmux_wire::protocol::AcpModeOption],
+        modes: &[vmux_api::protocol::AcpModeOption],
     ) {
         if modes.is_empty() {
             return;

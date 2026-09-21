@@ -46,8 +46,8 @@ mod macos {
     use std::sync::atomic::{AtomicU64, Ordering};
     use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid};
-    use vmux_layout::bookmark::{BookmarkMenuTarget, BookmarkOp, ShowBookmarkMenuRequest};
-    use vmux_layout::event::{BOOKMARK_MENU_ACTION_EVENT, BookmarkMenuActionEvent};
+    use vmux_layout::bookmark::{BookmarkMenuTarget, BookmarkMutation, ShowBookmarkMenuRequest};
+    use vmux_layout::event::BookmarkMenuRequest;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
     thread_local! {
@@ -71,7 +71,7 @@ mod macos {
     #[derive(Clone)]
     enum BookmarkMenuAction {
         Open(String),
-        Apply(BookmarkOp),
+        Apply(BookmarkMutation),
         BeginNewFolder {
             parent: Option<String>,
             expand: bool,
@@ -238,7 +238,7 @@ mod macos {
         builder.item(
             locale.translate("layout-unpin-page"),
             true,
-            BookmarkMenuAction::Apply(BookmarkOp::Unpin {
+            BookmarkMenuAction::Apply(BookmarkMutation::Unpin {
                 uuid: uuid.to_string(),
             }),
         );
@@ -247,7 +247,7 @@ mod macos {
             builder.item(
                 locale.translate("layout-remove-bookmark"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkOp::Remove {
+                BookmarkMenuAction::Apply(BookmarkMutation::Remove {
                     uuid: uuid.to_string(),
                 }),
             );
@@ -294,11 +294,11 @@ mod macos {
             }),
             true,
             BookmarkMenuAction::Apply(if pinned {
-                BookmarkOp::Unpin {
+                BookmarkMutation::Unpin {
                     uuid: uuid.to_string(),
                 }
             } else {
-                BookmarkOp::Pin {
+                BookmarkMutation::Pin {
                     uuid: uuid.to_string(),
                 }
             }),
@@ -308,7 +308,7 @@ mod macos {
             builder.item(
                 locale.translate("layout-move-to-bookmarks"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkOp::Move {
+                BookmarkMenuAction::Apply(BookmarkMutation::Move {
                     uuid: uuid.to_string(),
                     folder: None,
                 }),
@@ -324,7 +324,7 @@ mod macos {
                     &[("folder", TranslationValue::String(&folder.label))],
                 ),
                 true,
-                BookmarkMenuAction::Apply(BookmarkOp::Move {
+                BookmarkMenuAction::Apply(BookmarkMutation::Move {
                     uuid: uuid.to_string(),
                     folder: Some(folder.uuid),
                 }),
@@ -334,7 +334,7 @@ mod macos {
         builder.item(
             locale.translate("common-remove"),
             true,
-            BookmarkMenuAction::Apply(BookmarkOp::Remove {
+            BookmarkMenuAction::Apply(BookmarkMutation::Remove {
                 uuid: uuid.to_string(),
             }),
         );
@@ -370,7 +370,7 @@ mod macos {
                 "common-collapse"
             }),
             true,
-            BookmarkMenuAction::Apply(BookmarkOp::ToggleFolder {
+            BookmarkMenuAction::Apply(BookmarkMutation::ToggleFolder {
                 uuid: uuid.to_string(),
             }),
         );
@@ -379,7 +379,7 @@ mod macos {
         builder.item(
             locale.translate("layout-bookmark-current-page"),
             current_page_enabled,
-            BookmarkMenuAction::Apply(BookmarkOp::Add {
+            BookmarkMenuAction::Apply(BookmarkMutation::Add {
                 metadata: current_page,
                 folder: Some(uuid.to_string()),
             }),
@@ -402,7 +402,7 @@ mod macos {
             builder.item(
                 locale.translate("layout-move-to-bookmarks"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkOp::MoveFolder {
+                BookmarkMenuAction::Apply(BookmarkMutation::MoveFolder {
                     uuid: uuid.to_string(),
                     parent: None,
                 }),
@@ -418,7 +418,7 @@ mod macos {
                     &[("folder", TranslationValue::String(&folder.label))],
                 ),
                 true,
-                BookmarkMenuAction::Apply(BookmarkOp::MoveFolder {
+                BookmarkMenuAction::Apply(BookmarkMutation::MoveFolder {
                     uuid: uuid.to_string(),
                     parent: Some(folder.uuid),
                 }),
@@ -428,7 +428,7 @@ mod macos {
         builder.item(
             locale.translate("layout-remove-folder"),
             true,
-            BookmarkMenuAction::Apply(BookmarkOp::RemoveFolder {
+            BookmarkMenuAction::Apply(BookmarkMutation::RemoveFolder {
                 uuid: uuid.to_string(),
             }),
         );
@@ -539,7 +539,7 @@ mod macos {
 
     pub(super) fn apply_bookmark_menu_selection(
         mut reader: MessageReader<BookmarkMenuSelection>,
-        mut bookmark_ops: MessageWriter<BookmarkOp>,
+        mut bookmark_mutations: MessageWriter<BookmarkMutation>,
         mut app_commands: MessageWriter<AppCommand>,
         mut sequence: ResMut<BookmarkMenuActionSequence>,
         browsers: Option<NonSend<Browsers>>,
@@ -555,11 +555,12 @@ mod macos {
                     )));
                 }
                 BookmarkMenuAction::Apply(operation) => {
-                    bookmark_ops.write(operation.clone());
+                    bookmark_mutations.write(operation.clone());
                 }
                 BookmarkMenuAction::BeginNewFolder { parent, expand } => {
                     if *expand && let Some(uuid) = parent {
-                        bookmark_ops.write(BookmarkOp::ToggleFolder { uuid: uuid.clone() });
+                        bookmark_mutations
+                            .write(BookmarkMutation::ToggleFolder { uuid: uuid.clone() });
                     }
                     if let Some(browsers) = browsers.as_deref() {
                         emit_ui_action(
@@ -600,10 +601,9 @@ mod macos {
             return;
         }
         sequence.0 = sequence.0.wrapping_add(1);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             webview,
-            BOOKMARK_MENU_ACTION_EVENT,
-            &BookmarkMenuActionEvent {
+            &BookmarkMenuRequest {
                 sequence: sequence.0,
                 action: action.to_string(),
                 uuid,

@@ -1,6 +1,3 @@
-pub const MCP_SERVERS_EVENT: &str = "mcp-servers";
-pub const MCP_SERVER_ACTION_RESULT_EVENT: &str = "mcp-server-action-result";
-
 #[derive(
     Clone,
     Copy,
@@ -54,6 +51,11 @@ pub struct McpServerEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(
+    namespace = "mcp",
+    name = "servers",
+    targets = ["command-bar", "layout", "sessions", "agent", "start"]
+)]
 pub struct McpServers {
     pub servers: Vec<McpServerEntry>,
 }
@@ -69,6 +71,11 @@ pub struct McpServers {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+)]
+#[vmux_api::ui_event(
+    namespace = "mcp",
+    name = "servers_request",
+    targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServersRequest;
 
@@ -103,6 +110,11 @@ pub enum McpServerAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(
+    namespace = "mcp",
+    name = "server_action_request",
+    targets = ["command-bar", "layout", "sessions", "agent", "start"]
+)]
 pub struct McpServerActionRequest {
     pub id: String,
     pub action: McpServerAction,
@@ -119,6 +131,11 @@ pub struct McpServerActionRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+)]
+#[vmux_api::host_event(
+    namespace = "mcp",
+    name = "server_action_result",
+    targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServerActionResult {
     pub id: String,

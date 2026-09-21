@@ -2,8 +2,7 @@ use std::fmt;
 
 use crate::transport::Host;
 use crate::transport::HostPayload;
-
-const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
+use vmux_api::{HostEvent, PageReady, UiEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
@@ -36,7 +35,8 @@ impl fmt::Display for EventListenerError {
 
 pub fn send<T>(payload: &T) -> Result<(), EventListenerError>
 where
-    T: for<'a> rkyv::Serialize<
+    T: UiEvent
+        + for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
                 rkyv::util::AlignedVec,
                 rkyv::ser::allocator::ArenaHandle<'a>,
@@ -46,19 +46,19 @@ where
 {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
         .map_err(|_| EventListenerError::SerializePayload)?;
-    Host::emit(std::any::type_name::<T>(), &bytes)
+    Host::emit(T::id(), &bytes)
 }
 
-pub fn try_cef_bin_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
+pub fn try_cef_bin_listen<T, F>(on_event: F) -> Result<(), EventListenerError>
 where
-    T: rkyv::Archive + 'static,
+    T: HostEvent + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
 {
     let mut on_event = on_event;
     Host::listen(
-        name,
+        T::id(),
         Box::new(move |bytes| {
             if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
                 on_event(msg);
@@ -67,11 +67,6 @@ where
     )
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-struct PageReadyPayload {}
-
 pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayload {})
-        .map_err(|_| EventListenerError::SerializePayload)?;
-    Host::emit(PAGE_READY_BIN_EVENT_ID, &bytes)
+    send(&PageReady)
 }

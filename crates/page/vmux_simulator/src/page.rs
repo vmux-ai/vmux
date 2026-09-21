@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HardwareButton, SIMULATOR_READY_EVENT, SimulatorClipboard, SimulatorClipboardAction,
-    SimulatorKey, SimulatorKeyModifiers, SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch,
+    HardwareButton, SimulatorClipboard, SimulatorClipboardAction, SimulatorKey,
+    SimulatorKeyModifiers, SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch,
     SimulatorTouchPhase,
 };
 use crate::url::SimulatorRoute;
@@ -19,9 +19,9 @@ use vmux_ui::script::PageScript;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_event::<SimulatorReady>(SIMULATOR_READY_EVENT, SimulatorReady::default);
+    let ready = use_event::<SimulatorReady>(SimulatorReady::default);
     let route = try_consume_context::<vmux_core::PageMetadata>()
-        .and_then(|metadata| SimulatorRoute::of_url(&metadata.url));
+        .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 
     let announced = ready();
     rsx! {
@@ -372,7 +372,7 @@ impl Keystroke {
         if !modifiers.is_empty() {
             return SimulatorKey::modified_browser_code(&event.code().to_string(), modifiers);
         }
-        SimulatorKey::of_browser_key(&key)
+        SimulatorKey::try_from(key.as_str()).ok()
     }
 
     fn modifiers(event: &Event<KeyboardData>) -> SimulatorKeyModifiers {

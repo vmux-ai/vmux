@@ -1,11 +1,10 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::page::PageEmit;
-use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachment, ChatAttachments,
-    ChatMediaEntries, ChatMediaEntry,
+use vmux_api::page::PageEmit;
+use vmux_api::prompt_media::{
+    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
 };
-use vmux_wire::room::RemoteMediaEntry;
+use vmux_api::room::RemoteMediaEntry;
 
 use crate::room::Submitted;
 
@@ -81,7 +80,7 @@ impl Media {
         if media.0.request_id == 0 {
             return;
         }
-        let Some(emit) = PageEmit::encode(CHAT_MEDIA_ENTRIES_EVENT, &media.0) else {
+        let Some(emit) = PageEmit::from_event(&media.0) else {
             return;
         };
         emits.write(emit);
@@ -96,7 +95,14 @@ impl Attachments {
         let payload = ChatAttachments {
             attachments: attachments.0.clone(),
         };
-        let Some(emit) = PageEmit::encode(CHAT_ATTACHMENTS_EVENT, &payload) else {
+        let Some(emit) = PageEmit::from_event(&payload) else {
+            return;
+        };
+        emits.write(emit);
+        let previews = ChatAttachmentPreviews {
+            attachments: attachments.0.clone(),
+        };
+        let Some(emit) = PageEmit::from_event(&previews) else {
             return;
         };
         emits.write(emit);

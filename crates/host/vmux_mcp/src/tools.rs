@@ -1,6 +1,8 @@
 use serde::Serialize;
 use serde_json::Value;
-use vmux_client::protocol::AgentCommand;
+use vmux_client::protocol::{
+    AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentSpaceCommand,
+};
 use vmux_macro::McpTool;
 
 #[derive(Clone, Debug, Serialize)]
@@ -154,11 +156,11 @@ impl McpParamTool {
                 let limit = limit.unwrap_or(20).min(100);
                 Ok(AgentCommand::BrowserHistorySearch { query, limit })
             }
-            McpParamTool::CreateSpace { name } => Ok(AgentCommand::SpaceCommand {
-                command: "new".to_string(),
-                space_id: None,
-                name: name.filter(|n| !n.trim().is_empty()),
-            }),
+            McpParamTool::CreateSpace { name } => {
+                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
+                    name: name.filter(|name| !name.trim().is_empty()),
+                }))
+            }
             McpParamTool::RenameSpace { space_id, name } => {
                 if space_id.trim().is_empty() {
                     return Err("rename_space.space_id is empty".into());
@@ -166,21 +168,18 @@ impl McpParamTool {
                 if name.trim().is_empty() {
                     return Err("rename_space.name is empty".into());
                 }
-                Ok(AgentCommand::SpaceCommand {
-                    command: "rename".to_string(),
-                    space_id: Some(space_id),
-                    name: Some(name),
-                })
+                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
+                    space_id,
+                    name,
+                }))
             }
             McpParamTool::DeleteSpace { space_id } => {
                 if space_id.trim().is_empty() {
                     return Err("delete_space.space_id is empty".into());
                 }
-                Ok(AgentCommand::SpaceCommand {
-                    command: "delete".to_string(),
-                    space_id: Some(space_id),
-                    name: None,
-                })
+                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
+                    space_id,
+                }))
             }
             McpParamTool::Notify { title, body } => Ok(AgentCommand::Notify { title, body }),
         }
@@ -2052,38 +2051,64 @@ pub fn dispatch_in_shell(
                 .and_then(Value::as_str)
                 .map(str::to_string)
         };
-        let bookmark_cmd = |command: &str| {
-            DispatchTarget::Command(AgentCommand::BookmarkCommand {
-                command: command.to_string(),
-                uuid: str_arg("uuid"),
-                name: str_arg("name"),
-                url: str_arg("url"),
-                title: str_arg("title"),
-                favicon_url: str_arg("favicon_url"),
-            })
-        };
         match tool {
             Some(ToolKind::BookmarkAdd) => {
-                if str_arg("url").unwrap_or_default().is_empty() {
+                let Some(url) = str_arg("url").filter(|url| !url.trim().is_empty()) else {
                     return Err("bookmark_add.url is required".to_string());
-                }
-                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand {
-                    command: "add".to_string(),
-                    uuid: str_arg("folder"),
-                    name: None,
-                    url: str_arg("url"),
-                    title: str_arg("title"),
-                    favicon_url: str_arg("favicon_url"),
-                }));
+                };
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                    AgentBookmarkCommand::Add {
+                        page: AgentBookmarkPage {
+                            url,
+                            title: str_arg("title"),
+                            favicon_url: str_arg("favicon_url"),
+                        },
+                        folder: str_arg("folder"),
+                    },
+                )));
             }
-            Some(ToolKind::BookmarkRemove) => return Ok(bookmark_cmd("remove")),
-            Some(ToolKind::BookmarkPin) => return Ok(bookmark_cmd("pin")),
-            Some(ToolKind::BookmarkUnpin) => return Ok(bookmark_cmd("unpin")),
-            Some(ToolKind::BookmarkFolderCreate) => {
-                if str_arg("name").unwrap_or_default().is_empty() {
-                    return Err("bookmark_folder_create.name is required".to_string());
+            Some(ToolKind::BookmarkRemove) => {
+                let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) else {
+                    return Err("bookmark_remove.uuid is required".to_string());
+                };
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                    AgentBookmarkCommand::Remove { uuid },
+                )));
+            }
+            Some(ToolKind::BookmarkPin) => {
+                if let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) {
+                    return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                        AgentBookmarkCommand::Pin { uuid },
+                    )));
                 }
-                return Ok(bookmark_cmd("folder_create"));
+                let Some(url) = str_arg("url").filter(|url| !url.trim().is_empty()) else {
+                    return Err("bookmark_pin requires uuid or url".to_string());
+                };
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                    AgentBookmarkCommand::PinUrl {
+                        page: AgentBookmarkPage {
+                            url,
+                            title: str_arg("title"),
+                            favicon_url: str_arg("favicon_url"),
+                        },
+                    },
+                )));
+            }
+            Some(ToolKind::BookmarkUnpin) => {
+                let Some(uuid) = str_arg("uuid").filter(|uuid| !uuid.trim().is_empty()) else {
+                    return Err("bookmark_unpin.uuid is required".to_string());
+                };
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                    AgentBookmarkCommand::Unpin { uuid },
+                )));
+            }
+            Some(ToolKind::BookmarkFolderCreate) => {
+                let Some(name) = str_arg("name").filter(|name| !name.trim().is_empty()) else {
+                    return Err("bookmark_folder_create.name is required".to_string());
+                };
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                    AgentBookmarkCommand::CreateFolder { name },
+                )));
             }
             _ => {}
         }
@@ -3531,17 +3556,10 @@ mod tests {
         )
         .unwrap();
         match cmd {
-            AgentCommand::BookmarkCommand {
-                command,
-                url,
-                title,
-                uuid,
-                ..
-            } => {
-                assert_eq!(command, "add");
-                assert_eq!(url.as_deref(), Some("https://a.test"));
-                assert_eq!(title.as_deref(), Some("A"));
-                assert_eq!(uuid.as_deref(), Some("f1"));
+            AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add { page, folder }) => {
+                assert_eq!(page.url, "https://a.test");
+                assert_eq!(page.title.as_deref(), Some("A"));
+                assert_eq!(folder.as_deref(), Some("f1"));
             }
             other => panic!("expected BookmarkCommand, got {other:?}"),
         }
@@ -3552,9 +3570,8 @@ mod tests {
         let cmd =
             dispatch_command("bookmark_folder_create", serde_json::json!({"name": "PRs"})).unwrap();
         match cmd {
-            AgentCommand::BookmarkCommand { command, name, .. } => {
-                assert_eq!(command, "folder_create");
-                assert_eq!(name.as_deref(), Some("PRs"));
+            AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name }) => {
+                assert_eq!(name, "PRs");
             }
             other => panic!("expected BookmarkCommand, got {other:?}"),
         }
@@ -3568,14 +3585,12 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::SpaceCommand {
-                command,
+            DispatchTarget::Command(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
                 space_id,
                 name,
-            }) => {
-                assert_eq!(command, "rename");
-                assert_eq!(space_id.as_deref(), Some("work"));
-                assert_eq!(name.as_deref(), Some("Client A"));
+            })) => {
+                assert_eq!(space_id, "work");
+                assert_eq!(name, "Client A");
             }
             other => panic!("expected SpaceCommand, got {other:?}"),
         }
@@ -3586,8 +3601,9 @@ mod tests {
         let target =
             dispatch_from_tool_call("create_space", serde_json::json!({"name": "Work"})).unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::SpaceCommand { command, name, .. }) => {
-                assert_eq!(command, "new");
+            DispatchTarget::Command(AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
+                name,
+            })) => {
                 assert_eq!(name.as_deref(), Some("Work"));
             }
             other => panic!("expected SpaceCommand, got {other:?}"),

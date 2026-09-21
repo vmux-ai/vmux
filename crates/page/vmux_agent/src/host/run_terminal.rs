@@ -585,7 +585,7 @@ impl ProjectsDirectory {
 }
 
 impl<'a> AgentCwd<'a> {
-    pub(crate) fn of_tab(tab_cwd: Option<&'a str>) -> Self {
+    pub(crate) fn from_tab(tab_cwd: Option<&'a str>) -> Self {
         Self { tab_cwd }
     }
 
@@ -628,7 +628,7 @@ mod tests {
         std::fs::create_dir_all(&agent_dir).unwrap();
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
-            AgentCwd::of_tab(Some(tab_dir.to_string_lossy().as_ref()))
+            AgentCwd::from_tab(Some(tab_dir.to_string_lossy().as_ref()))
                 .or_agent_launch(Some(agent_dir.to_string_lossy().as_ref()))
                 .unwrap(),
             canonical_tab_dir
@@ -669,7 +669,7 @@ mod tests {
     pub(crate) fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = AgentCwd::of_tab(None)
+        let got = AgentCwd::from_tab(None)
             .or_agent_launch(Some(&dir.to_string_lossy()))
             .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -678,8 +678,8 @@ mod tests {
 
     #[test]
     pub(crate) fn run_terminal_cwd_requires_tab_or_agent_workspace() {
-        assert!(AgentCwd::of_tab(None).or_agent_launch(Some("")).is_err());
-        assert!(AgentCwd::of_tab(None).or_agent_launch(None).is_err());
+        assert!(AgentCwd::from_tab(None).or_agent_launch(Some("")).is_err());
+        assert!(AgentCwd::from_tab(None).or_agent_launch(None).is_err());
     }
 
     #[test]
@@ -687,7 +687,7 @@ mod tests {
         let agent_dir = std::env::temp_dir();
 
         assert!(
-            AgentCwd::of_tab(Some("/no/such/vmux-tab-workspace"))
+            AgentCwd::from_tab(Some("/no/such/vmux-tab-workspace"))
                 .or_agent_launch(agent_dir.to_str())
                 .is_err()
         );
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     pub(crate) fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(AgentCwd::of_tab(Some(".")).or_agent_launch(None).is_err());
+        assert!(AgentCwd::from_tab(Some(".")).or_agent_launch(None).is_err());
     }
 
     #[test]

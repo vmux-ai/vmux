@@ -6,9 +6,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
-use vmux_layout::event::{
-    REMOTE_STATE_EVENT, RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent,
-};
+use vmux_layout::event::{RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteStateEvent};
 use vmux_service::RemotePaths;
 
 pub(crate) struct RemotePlugin;
@@ -16,7 +14,7 @@ pub(crate) struct RemotePlugin;
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RemoteState>()
-            .add_observer(on_remote_command)
+            .add_observer(on_remote_request)
             .add_observer(on_remote_copy)
             .add_systems(Startup, reconcile_remote_on_startup)
             .add_systems(
@@ -134,7 +132,7 @@ fn reconcile_remote_on_startup(state: Res<RemoteState>) {
     }
 }
 
-fn on_remote_command(trigger: On<BinReceive<RemoteCommandEvent>>, mut state: ResMut<RemoteState>) {
+fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut state: ResMut<RemoteState>) {
     let enabled = trigger.event().payload.enabled;
     if enabled == state.enabled && state.phase != RemotePhase::Error {
         return;
@@ -217,11 +215,7 @@ fn push_remote_state_emit(
         if last.get(&cef_e) == Some(&payload) && !page_ready.is_changed() {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            cef_e,
-            REMOTE_STATE_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
         last.insert(cef_e, payload.clone());
     }
 }

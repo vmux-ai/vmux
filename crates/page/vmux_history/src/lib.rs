@@ -1,4 +1,4 @@
-pub use vmux_wire::history as event;
+pub use vmux_api::history as event;
 #[cfg(ui)]
 pub mod page;
 pub mod ranking;

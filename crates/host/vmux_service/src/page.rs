@@ -20,7 +20,7 @@ pub fn Page() -> Element {
         processes: Vec::new(),
     });
     let mut history = use_signal(ServiceHistory::default);
-    let _processes = use_listener::<ProcessesListEvent, _>(PROCESSES_LIST_EVENT, move |event| {
+    let _processes = use_listener::<ProcessesListEvent, _>(move |event| {
         history.write().push(&event);
         state.set(event);
     });

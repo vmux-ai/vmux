@@ -22,28 +22,27 @@ pub fn Page() -> Element {
     let mut progress = use_signal(HashMap::<String, LspInstallProgress>::new);
     let mut loading = use_signal(|| true);
 
-    let _catalog = use_listener::<LspCatalogEvent, _>(LSP_CATALOG_EVENT, move |event| {
+    let _catalog = use_listener::<LspCatalogEvent, _>(move |event| {
         packages.set(event.packages);
         loading.set(false);
     });
-    let _progress =
-        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |item| {
-            let name = item.name.clone();
-            let phase = item.phase;
-            progress.write().insert(name.clone(), item);
-            if let Some(package) = packages
-                .write()
-                .iter_mut()
-                .find(|package| package.name == name)
-            {
-                package.status = match phase {
-                    InstallPhase::Failed => LspPkgStatus::Failed,
-                    InstallPhase::Done => LspPkgStatus::Installed,
-                    _ => LspPkgStatus::Installing,
-                };
-            }
-        });
-    let _status = use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+    let _progress = use_listener::<LspInstallProgress, _>(move |item| {
+        let name = item.name.clone();
+        let phase = item.phase;
+        progress.write().insert(name.clone(), item);
+        if let Some(package) = packages
+            .write()
+            .iter_mut()
+            .find(|package| package.name == name)
+        {
+            package.status = match phase {
+                InstallPhase::Failed => LspPkgStatus::Failed,
+                InstallPhase::Done => LspPkgStatus::Installed,
+                _ => LspPkgStatus::Installing,
+            };
+        }
+    });
+    let _status = use_listener::<LspPkgStatusEvent, _>(move |status| {
         let name = status.name.clone();
         if let Some(package) = packages
             .write()

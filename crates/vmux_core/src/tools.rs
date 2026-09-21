@@ -1,6 +1,3 @@
-pub const TOOLS_SNAPSHOT_EVENT: &str = "tools-snapshot";
-pub const TOOL_ACTION_RESULT_EVENT: &str = "tool-action-result";
-
 #[derive(
     Clone,
     Copy,
@@ -158,6 +155,7 @@ pub struct ToolCategory {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "tools", name = "snapshot", target = "tools")]
 pub struct ToolsSnapshot {
     pub root: String,
     pub vault: crate::vault::VaultSnapshot,
@@ -180,6 +178,7 @@ pub struct ToolsSnapshot {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "tools", name = "refresh_request", target = "tools")]
 pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
@@ -195,6 +194,7 @@ pub struct ToolsRefreshRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "tool", name = "open_request", target = "tools")]
 pub struct ToolOpenRequest {
     pub path: String,
 }
@@ -210,6 +210,7 @@ pub struct ToolOpenRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "tools", name = "navigate_request", target = "tools")]
 pub struct ToolsNavigateRequest {
     pub url: String,
 }
@@ -240,6 +241,7 @@ impl ToolsNavigateRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "tool", name = "action_request", target = "tools")]
 pub struct ToolActionRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,
@@ -259,6 +261,7 @@ pub struct ToolActionRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "tool", name = "action_result", target = "tools")]
 pub struct ToolActionResult {
     pub provider: ToolProvider,
     pub action: ToolAction,

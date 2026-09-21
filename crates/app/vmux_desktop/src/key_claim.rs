@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
-use vmux_core::input::{KEY_CLAIMS_EVENT, KeyClaims, PageKeyContext};
+use vmux_core::input::{KeyClaims, PageKeyContext};
 
 pub struct KeyClaimPlugin;
 
@@ -62,11 +62,7 @@ fn push_key_claims(
             continue;
         }
         let claims: KeyClaims = keymap.in_context(&context).claims();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            KEY_CLAIMS_EVENT,
-            &claims,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &claims));
     }
 }
 
@@ -74,6 +70,7 @@ fn push_key_claims(
 mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
+    use vmux_api::BinEvent;
     use vmux_command::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
@@ -99,16 +96,16 @@ mod tests {
             mut pushed: ResMut<Self>,
             mut rejected: ResMut<Rejected>,
         ) {
-            if trigger.id != KEY_CLAIMS_EVENT {
-                rejected.0.push(trigger.id.clone());
+            if trigger.id() != KeyClaims::id() {
+                rejected.0.push(trigger.id().to_string());
                 return;
             }
-            let Ok(claims) = rkyv::from_bytes::<KeyClaims, rkyv::rancor::Error>(&trigger.payload)
+            let Ok(claims) = rkyv::from_bytes::<KeyClaims, rkyv::rancor::Error>(trigger.payload())
             else {
                 rejected.0.push("undecodable payload".to_string());
                 return;
             };
-            pushed.0.push((trigger.webview, claims));
+            pushed.0.push((trigger.webview(), claims));
         }
     }
 

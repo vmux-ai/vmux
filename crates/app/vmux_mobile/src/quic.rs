@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
+use vmux_api::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 use vmux_remote::DeviceId;
 use vmux_remote::PeerRole;
 use vmux_remote::framing::{Frame, FrameStream};
@@ -8,7 +9,6 @@ use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
 use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType, RelaySetup};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 

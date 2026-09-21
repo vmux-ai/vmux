@@ -6,11 +6,11 @@ use crate::format::composer::is_handoff_boundary;
 use crate::transcript::ChatItemRow;
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_wire::prompt_media::ChatAttachment;
 
 #[component]
 fn QueuedAttachments(

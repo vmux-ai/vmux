@@ -1,14 +1,14 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_service::chat::group_turns_tail;
-use vmux_wire::chat::ChatItem;
-use vmux_wire::page::PageEmit;
-use vmux_wire::room::{
+use vmux_api::chat::ChatItem;
+use vmux_api::page::PageEmit;
+use vmux_api::room::{
     AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
     RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
+use vmux_service::chat::group_turns_tail;
 
-use crate::event::{CHAT_SNAPSHOT_EVENT, ChatSnapshot};
+use crate::event::ChatSnapshot;
 
 pub struct ChatRoomPlugin;
 
@@ -155,7 +155,7 @@ pub struct Snapshot(pub ChatSnapshot);
 
 impl Snapshot {
     fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::encode(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
+        let Some(emit) = PageEmit::from_event(&snapshot.0) else {
             return;
         };
         emits.write(emit);
@@ -206,7 +206,7 @@ impl Snapshot {
             agent_name: session.name.clone(),
             conversation_title: session.name.clone(),
             agent_icon,
-            accent_color: vmux_wire::avatar::agent_color(agent_segment),
+            accent_color: vmux_api::avatar::agent_color(agent_segment),
             ..ChatSnapshot::default()
         };
     }
@@ -254,7 +254,7 @@ impl PageStatus for RemoteStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::chat::ChatBlock;
+    use vmux_api::chat::ChatBlock;
 
     struct Started(App);
 
@@ -523,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             started.snapshot().accent_color,
-            vmux_wire::avatar::agent_color("ada")
+            vmux_api::avatar::agent_color("ada")
         );
     }
 }

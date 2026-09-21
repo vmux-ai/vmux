@@ -2,9 +2,7 @@
 
 use std::rc::Rc;
 
-use crate::{
-    EVENT, PRESSED_EVENT, ShortcutBinding, ShortcutPressedEvent, ShortcutStroke, ShortcutsEvent,
-};
+use crate::{ShortcutBinding, ShortcutPressedEvent, ShortcutStroke, ShortcutsEvent};
 use dioxus::prelude::*;
 use vmux_ui::hooks::{use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -16,10 +14,10 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(|| Rc::new(ShortcutCatalog::default()));
     let mut probe = use_signal(ShortcutProbe::default);
-    let _listener = use_listener::<ShortcutsEvent, _>(EVENT, move |event| {
+    let _listener = use_listener::<ShortcutsEvent, _>(move |event| {
         state.set(Rc::new(ShortcutCatalog::from(event)));
     });
-    let _pressed = use_listener::<ShortcutPressedEvent, _>(PRESSED_EVENT, move |event| {
+    let _pressed = use_listener::<ShortcutPressedEvent, _>(move |event| {
         record_stroke(probe, state, event.stroke, event.pressed_at_ms);
     });
 

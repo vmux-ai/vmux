@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_api::team::{ProfileRow, TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::inline_edit::InlineEdit;
@@ -11,12 +12,11 @@ use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::translate;
-use vmux_wire::team::{ProfileRow, TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let team = use_event::<TeamEvent>(TeamEvent::default);
 
     let snapshot = team();
     let profiles = snapshot.profiles;
@@ -110,7 +110,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                     Avatar {
                                         src: None,
                                         seed: active.id.clone(),
-                                        background: vmux_wire::avatar::hash_color(&active.id),
+                                        background: vmux_api::avatar::hash_color(&active.id),
                                         alt: active.name.clone(),
                                         class: "size-8",
                                     }
@@ -131,7 +131,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                                 Avatar {
                                                     src: None,
                                                     seed: profile.id.clone(),
-                                                    background: vmux_wire::avatar::hash_color(&profile.id),
+                                                    background: vmux_api::avatar::hash_color(&profile.id),
                                                     alt: profile.name.clone(),
                                                     class: "size-7",
                                                 }
@@ -199,7 +199,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
 }
 
 fn emit_profile_command(command: &str, profile_id: Option<String>, profile_name: Option<String>) {
-    let _ = send(&TeamCommandEvent {
+    let _ = send(&TeamRequest {
         command: command.to_string(),
         member_id: None,
         profile_id,

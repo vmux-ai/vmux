@@ -12,15 +12,15 @@ use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_api::mcp::{
+    McpServerAction, McpServerActionRequest, McpServerActionResult, McpServerEntry,
+    McpServerStatus, McpServers, McpServersRequest,
+};
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
 use vmux_tools::{McpServerManifest, McpTransport, load_manifest, write_manifest};
-use vmux_wire::mcp::{
-    MCP_SERVER_ACTION_RESULT_EVENT, MCP_SERVERS_EVENT, McpServerAction, McpServerActionRequest,
-    McpServerActionResult, McpServerEntry, McpServerStatus, McpServers, McpServersRequest,
-};
 
 pub struct McpConnectionPlugin;
 
@@ -131,9 +131,8 @@ impl McpConnections {
             if !browsers.can_emit_to(&task.target) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
+            commands.trigger(BinHostEmitEvent::from_event(
                 task.target,
-                MCP_SERVER_ACTION_RESULT_EVENT,
                 &McpServerActionResult {
                     id: task.request.id.clone(),
                     action: task.request.action,
@@ -176,11 +175,7 @@ impl McpConnections {
             if !browsers.can_emit_to(&task.target) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                task.target,
-                MCP_SERVERS_EVENT,
-                &snapshot,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(task.target, &snapshot));
         }
     }
 }

@@ -1,1 +1,1 @@
-pub use vmux_wire::icon::*;
+pub use vmux_api::icon::*;

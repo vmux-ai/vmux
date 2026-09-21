@@ -9,14 +9,13 @@ use crate::event::{
     SimulatorClipboard, SimulatorKey, SimulatorSoftwareKeyboard, SimulatorTouch,
     SimulatorTouchPhase,
 };
-use crate::url::PAGE_HOST;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use vmux_wire::protocol::{SimulatorAction, SimulatorButton};
+use vmux_api::protocol::{SimulatorAction, SimulatorButton};
 
 pub(super) struct SimulatorInputPlugin;
 
@@ -41,7 +40,7 @@ impl Plugin for SimulatorInputPlugin {
                 SimulatorKey,
                 SimulatorClipboard,
                 SimulatorSoftwareKeyboard,
-            )>::for_hosts(&[PAGE_HOST]))
+            )>::default())
             .add_observer(on_touch)
             .add_observer(on_key)
             .add_observer(on_clipboard)

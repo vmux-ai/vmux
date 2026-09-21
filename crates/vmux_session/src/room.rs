@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use vmux_wire::room::{
+use vmux_api::room::{
     ClientOpId, EventId, MemberId, MemberKind, Message, RoomEvent, RoomId, RoomRole,
 };
 
@@ -130,10 +130,10 @@ pub enum RoomIntent {
 }
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpReceived(pub vmux_wire::room::RoomEvent);
+pub struct RoomOpReceived(pub vmux_api::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpCommitted(pub vmux_wire::room::RoomEvent);
+pub struct RoomOpCommitted(pub vmux_api::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, Eq, PartialEq)]
 pub struct CrdtChangeReceived {
@@ -402,7 +402,7 @@ fn cleanup_orphaned_rooms(
 mod tests {
     use super::*;
     use crate::variant::AgentVariant;
-    use vmux_wire::agent::AgentKind;
+    use vmux_api::agent::AgentKind;
 
     #[test]
     fn projects_agent_session_into_stable_room_entities() {
@@ -448,7 +448,7 @@ mod tests {
             .unwrap()
             .0
             .push(Message::Assistant {
-                blocks: vec![vmux_wire::room::AssistantBlock::Text("hi".to_string())],
+                blocks: vec![vmux_api::room::AssistantBlock::Text("hi".to_string())],
             });
         app.world_mut()
             .get_mut::<AgentConversationTitle>(session)

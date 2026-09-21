@@ -7,11 +7,7 @@ pub(crate) struct RelaunchPlugin;
 impl Plugin for RelaunchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            bevy_cef::prelude::BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(&[
-                "debug",
-                "extensions",
-                "layout",
-            ]),
+            bevy_cef::prelude::BinEventEmitterPlugin::<(RestartRequestEvent,)>::default(),
             bevy_cef::prelude::JsEmitEventPlugin::<PageRelaunchRequest>::default(),
         ))
         .add_observer(on_restart_request)

@@ -13,6 +13,7 @@ pub mod install;
 pub mod lint;
 pub mod manager;
 pub mod manager_page;
+pub mod package_path;
 pub mod purl;
 pub mod reader;
 pub mod registry;

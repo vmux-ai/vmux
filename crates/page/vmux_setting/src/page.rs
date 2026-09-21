@@ -1,9 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    CheckForUpdatesEvent, SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
-    SettingsListEvent, SettingsSchemaEvent, UPDATE_CHECK_STATUS_EVENT, UpdateCheckStatus,
-    UpdateCheckStatusEvent,
+    CheckForUpdatesEvent, SettingsListEvent, SettingsRequest, SettingsSchemaEvent,
+    UpdateCheckStatus, UpdateCheckStatusEvent,
 };
 use crate::schema::{SettingsSchema, WidgetKind};
 use dioxus::prelude::*;
@@ -27,12 +26,12 @@ pub fn Page() -> Element {
     let mut schema = use_signal(SettingsSchema::default);
     let mut search = use_signal(String::new);
 
-    let _values = use_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
+    let _values = use_listener::<SettingsListEvent, _>(move |data| {
         let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
         snapshot.set(parsed);
     });
 
-    let _schema = use_listener::<SettingsSchemaEvent, _>(SETTINGS_SCHEMA_EVENT, move |data| {
+    let _schema = use_listener::<SettingsSchemaEvent, _>(move |data| {
         if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
             schema.set(parsed);
         }
@@ -185,7 +184,7 @@ fn text_matches(value: &str, query: &str) -> bool {
 }
 
 fn emit_update(path: &str, value: Value) {
-    let _ = send(&SettingsCommandEvent {
+    let _ = send(&SettingsRequest {
         path: path.to_string(),
         value: value.to_string(),
     });
@@ -308,14 +307,13 @@ fn SectionView(
 fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -> Element {
     let mut status = use_signal(UpdateCheckStatus::default);
     let mut updater_unavailable = use_signal(|| false);
-    let _status_listener =
-        use_listener::<UpdateCheckStatusEvent, _>(UPDATE_CHECK_STATUS_EVENT, move |event| {
-            let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
-            if updater_unavailable() != unavailable {
-                updater_unavailable.set(unavailable);
-            }
-            status.set(event.status);
-        });
+    let _status_listener = use_listener::<UpdateCheckStatusEvent, _>(move |event| {
+        let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
+        if updater_unavailable() != unavailable {
+            updater_unavailable.set(unavailable);
+        }
+        status.set(event.status);
+    });
     let mut visible_value = value;
     if updater_unavailable()
         && let Some(object) = visible_value.as_object_mut()

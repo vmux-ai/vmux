@@ -8,8 +8,8 @@ use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_chat::event::{
-    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
-    CHAT_SNAPSHOT_EVENT, ChatHistoryPage, ChatHistoryRequest, ChatSnapshot, QueuedPromptSnapshot,
+    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_INITIAL_ITEM_LIMIT, ChatHistoryPage, ChatHistoryRequest,
+    ChatSnapshot, QueuedPromptSnapshot,
 };
 use vmux_core::PageMetadata;
 use vmux_core::team::{Profile, User};
@@ -21,18 +21,16 @@ pub(super) struct ChatTranscriptPlugin;
 
 impl Plugin for ChatTranscriptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(ChatHistoryRequest,)>::for_hosts(
-            super::CHAT_EVENT_HOSTS,
-        ))
-        .add_observer(on_chat_history_request)
-        .add_observer(reset_chat_synced_on_page_ready)
-        .add_systems(
-            Update,
-            (
-                (track_turn_duration, push_chat_to_page).chain(),
-                sync_chat_to_ready_views,
-            ),
-        );
+        app.add_plugins(BinEventEmitterPlugin::<(ChatHistoryRequest,)>::default())
+            .add_observer(on_chat_history_request)
+            .add_observer(reset_chat_synced_on_page_ready)
+            .add_systems(
+                Update,
+                (
+                    (track_turn_duration, push_chat_to_page).chain(),
+                    sync_chat_to_ready_views,
+                ),
+            );
     }
 }
 
@@ -153,11 +151,7 @@ fn push_chat_to_page(
                 "chat snapshot pushed"
             );
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            CHAT_SNAPSHOT_EVENT,
-            &snapshot,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(webview, &snapshot));
         last_push.insert(stack, now);
     }
 }
@@ -327,9 +321,8 @@ fn sync_chat_to_ready_views(
         if !browsers.can_emit_to(&webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             webview,
-            CHAT_SNAPSHOT_EVENT,
             &snapshot_of(
                 messages,
                 message_times,
@@ -425,9 +418,8 @@ fn on_chat_history_request(
         request.before as usize,
         request.limit.clamp(1, CHAT_HISTORY_MAX_PAGE_SIZE) as usize,
     );
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         webview,
-        CHAT_HISTORY_PAGE_EVENT,
         &ChatHistoryPage {
             items_json: serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string()),
             start: u32::try_from(page.start).unwrap_or(u32::MAX),

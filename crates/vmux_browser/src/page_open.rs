@@ -1,5 +1,5 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_wire::error::ErrorPageData;
+use vmux_api::error::ErrorPageData;
 
 use vmux_core::{
     CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,

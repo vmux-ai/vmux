@@ -24,11 +24,9 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
         app.add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
             KeyStroke,
             PageKeyContext,
-        )>::for_hosts(Self::SENDERS));
+        )>::default());
     }
 }
-
-pub const KEY_CLAIMS_EVENT: &str = "key-claims";
 
 #[derive(
     Debug,
@@ -42,6 +40,17 @@ pub const KEY_CLAIMS_EVENT: &str = "key-claims";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "page", name = "key_context", targets = [
+        "terminal",
+        "files",
+        "projects",
+        "knowledge",
+        "command-bar",
+        "layout",
+        "agent",
+        "start",
+        "spaces",
+    ])]
 pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
@@ -58,6 +67,17 @@ pub struct PageKeyContext {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "key", name = "claims", targets = [
+    "terminal",
+    "files",
+    "projects",
+    "knowledge",
+    "command-bar",
+    "layout",
+    "agent",
+    "start",
+    "spaces",
+])]
 pub struct KeyClaims {
     pub keys: Vec<ClaimedKey>,
 }
@@ -158,6 +178,17 @@ impl KeyModifiers {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "key", name = "stroke", targets = [
+        "terminal",
+        "files",
+        "projects",
+        "knowledge",
+        "command-bar",
+        "layout",
+        "agent",
+        "start",
+        "spaces",
+    ])]
 pub struct KeyStroke {
     pub key: String,
     #[serde(default)]

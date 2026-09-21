@@ -5,9 +5,7 @@ mod hid;
 mod input;
 mod stream;
 
-use crate::event::{
-    HardwareButton, SIMULATOR_READY_EVENT, SimulatorClipboardAction, SimulatorReady,
-};
+use crate::event::{HardwareButton, SimulatorClipboardAction, SimulatorReady};
 use crate::url::{PAGE_HOST, PAGE_URL, SimulatorRoute};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -15,9 +13,9 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::*;
 use hid::HidBroker;
 use stream::StreamServer;
+use vmux_api::protocol::SimulatorAction;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
-use vmux_wire::protocol::SimulatorAction;
 
 pub use device::{Axe, SimulatorDevice};
 
@@ -205,7 +203,7 @@ impl SimulatorPlugin {
         mut commands: Commands,
     ) {
         for (entity, metadata, attached_route, device, starting, failed) in &views {
-            let Some(route) = SimulatorRoute::of_url(&metadata.url) else {
+            let Ok(route) = SimulatorRoute::try_from(metadata.url.as_str()) else {
                 continue;
             };
             let matches = attached_route.is_some_and(|current| current.0 == route)
@@ -336,11 +334,7 @@ impl SimulatorPlugin {
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                SIMULATOR_READY_EVENT,
-                &payload,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
             commands
                 .entity(entity)
                 .insert(SimulatorAnnouncement(payload.clone()));

@@ -9,7 +9,7 @@ pub mod pairing;
 pub mod paths;
 
 pub mod protocol {
-    pub use vmux_wire::protocol::*;
+    pub use vmux_api::protocol::*;
 }
 
 pub use daemon::*;

@@ -9,11 +9,9 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
-        HEADER_HEIGHT_PX, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-        PaneTreeEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TAB_BOUNDARY_EVENT,
-        TABS_EVENT, TabBoundary, TabBoundaryEvent, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT,
-        UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent, UpdateProgressEvent,
-        UpdateReadyEvent,
+        HEADER_HEIGHT_PX, LayoutStateEvent, PaneNode, PaneTreeEvent, StackNode, StackRow,
+        StacksHostEvent, TabBoundary, TabBoundaryEvent, TabRow, TabsHostEvent, UpdateClearedEvent,
+        UpdateProgressEvent, UpdateReadyEvent,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
@@ -151,11 +149,7 @@ fn push_layout_state_emit(
     if !should_emit_cached_payload(&body, previous, page_ready_changed) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        cef_e,
-        LAYOUT_STATE_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, body);
 }
 
@@ -281,7 +275,7 @@ fn push_stacks_host_emit(
     if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, STACKS_EVENT, &payload));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, ron_body);
 }
 
@@ -399,11 +393,7 @@ fn push_pane_tree_emit(
     if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        cef_e,
-        PANE_TREE_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, ron_body);
 }
 
@@ -497,11 +487,7 @@ fn push_projects_host_emit(
     if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        cef_e,
-        TAB_BOUNDARY_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, ron_body);
 }
 
@@ -624,11 +610,7 @@ fn push_bookmarks_host_emit(
     if !page_ready_changed && last.get(&cef_e) == Some(&body) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        cef_e,
-        vmux_layout::event::BOOKMARKS_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, body);
 }
 
@@ -711,7 +693,7 @@ fn push_tabs_host_emit(
     if !page_ready_changed && last.get(&cef_e) == Some(&body) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, TABS_EVENT, &payload));
+    commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
     last.insert(cef_e, body);
 }
 
@@ -733,18 +715,15 @@ fn push_update_notice_emit(
         return;
     }
     match &*state {
-        UpdateState::Idle => commands.trigger(BinHostEmitEvent::from_rkyv(
-            cef_e,
-            UPDATE_CLEARED_EVENT,
-            &UpdateClearedEvent,
-        )),
+        UpdateState::Idle => {
+            commands.trigger(BinHostEmitEvent::from_event(cef_e, &UpdateClearedEvent))
+        }
         UpdateState::Downloading {
             version,
             downloaded,
             total,
-        } => commands.trigger(BinHostEmitEvent::from_rkyv(
+        } => commands.trigger(BinHostEmitEvent::from_event(
             cef_e,
-            UPDATE_PROGRESS_EVENT,
             &UpdateProgressEvent {
                 version: version.clone(),
                 downloaded: *downloaded,
@@ -752,9 +731,8 @@ fn push_update_notice_emit(
                 installing: false,
             },
         )),
-        UpdateState::Installing { version } => commands.trigger(BinHostEmitEvent::from_rkyv(
+        UpdateState::Installing { version } => commands.trigger(BinHostEmitEvent::from_event(
             cef_e,
-            UPDATE_PROGRESS_EVENT,
             &UpdateProgressEvent {
                 version: version.clone(),
                 downloaded: 0,
@@ -762,9 +740,8 @@ fn push_update_notice_emit(
                 installing: true,
             },
         )),
-        UpdateState::Ready { version } => commands.trigger(BinHostEmitEvent::from_rkyv(
+        UpdateState::Ready { version } => commands.trigger(BinHostEmitEvent::from_event(
             cef_e,
-            UPDATE_READY_EVENT,
             &UpdateReadyEvent {
                 version: version.clone(),
             },

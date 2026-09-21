@@ -9,12 +9,10 @@ use bevy_cef::prelude::{
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
-    EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSION_POPUP_EVENT,
-    EXTENSION_POPUP_SIZE_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL, ExtActionRequest,
-    ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
-    ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
-    ExtUninstallRequest, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
-    ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
+    EXTENSIONS_PAGE_URL, ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase,
+    ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus,
+    ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest,
+    ExtensionPopupCloseRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::overlay::WindowOverlay;
@@ -43,7 +41,7 @@ impl Plugin for ExtensionsPlugin {
                 ExtToggleRequest,
                 ExtUninstallRequest,
                 ExtBrowseStoreRequest,
-            )>::for_hosts(&["extensions", "tools"]))
+            )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtListRequest,
                 ExtActionRequest,
@@ -51,11 +49,7 @@ impl Plugin for ExtensionsPlugin {
                 ExtOpenManagerRequest,
                 ExtensionPopupBoundsRequest,
                 ExtensionPopupCloseRequest,
-            )>::for_hosts(&[
-                "extensions",
-                "layout",
-                "tools",
-            ]))
+            )>::default())
             .add_plugins((
                 JsEmitEventPlugin::<AddExtensionRequest>::default(),
                 JsEmitEventPlugin::<ExtensionPopupSizeRequest>::default(),
@@ -373,9 +367,8 @@ fn on_action_request(
             },
             Visibility::Hidden,
         ));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         owner,
-        EXTENSION_POPUP_EVENT,
         &ExtensionPopupEvent {
             id,
             name: entry.name,
@@ -640,9 +633,8 @@ fn on_extension_popup_size(
     let Ok(popup) = popups.get(trigger.event().webview) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         popup.owner,
-        EXTENSION_POPUP_SIZE_EVENT,
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),
             width: request.width.clamp(200.0, 360.0),
@@ -785,19 +777,9 @@ fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut command
             continue;
         }
         match msg {
-            OutMsg::List(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                EXTENSIONS_LIST_EVENT,
-                &ev,
-            )),
-            OutMsg::Progress(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                EXT_INSTALL_PROGRESS_EVENT,
-                &ev,
-            )),
-            OutMsg::Status(ev) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(entity, EXT_STATUS_EVENT, &ev))
-            }
+            OutMsg::List(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
+            OutMsg::Progress(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
+            OutMsg::Status(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
             OutMsg::WebStoreInstallResult { id, success } => {
                 let detail = serde_json::json!({ "id": id, "success": success });
                 let script = format!(

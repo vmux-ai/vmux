@@ -29,7 +29,7 @@ pub struct WriteCommandBarSnapshots;
 pub struct CommandBarWorkspaceSnapshot {
     pub stack: Option<Entity>,
     pub pane: Option<Entity>,
-    pub tabs: Vec<vmux_wire::command_bar::CommandBarTab>,
+    pub tabs: Vec<vmux_api::command_bar::CommandBarTab>,
     pub stack_count: usize,
     pub project_root: Option<String>,
 }
@@ -42,12 +42,12 @@ pub struct CommandBarProjectRoots {
 
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModels {
-    pub agents: Vec<vmux_wire::command_bar::AgentModels>,
+    pub agents: Vec<vmux_api::command_bar::AgentModels>,
 }
 
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModes {
-    pub agents: Vec<vmux_wire::command_bar::AgentModes>,
+    pub agents: Vec<vmux_api::command_bar::AgentModes>,
 }
 
 #[derive(Resource, Default, Clone, Debug)]

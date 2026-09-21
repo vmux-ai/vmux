@@ -11,7 +11,7 @@ use tokio::sync::watch;
 
 use vmux_remote::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
-use vmux_wire::protocol::{ServiceMessage, SharedMessage};
+use vmux_api::protocol::{ServiceMessage, SharedMessage};
 
 use vmux_remote::framing::{Frame, FrameError, FrameStream};
 use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType};
@@ -254,7 +254,7 @@ async fn stream_session_events(
 ) {
     let SharedMessage::Agent {
         sid,
-        action: vmux_wire::protocol::AgentAction::Attach,
+        action: vmux_api::protocol::AgentAction::Attach,
     } = request
     else {
         return;
@@ -309,9 +309,9 @@ async fn stream_session_events(
 async fn resolve(
     state: &super::server::RemoteState,
     sid: &str,
-    event: vmux_wire::protocol::SharedEvent,
-) -> Option<vmux_wire::protocol::SharedEvent> {
-    use vmux_wire::protocol::SharedEvent as Shared;
+    event: vmux_api::protocol::SharedEvent,
+) -> Option<vmux_api::protocol::SharedEvent> {
+    use vmux_api::protocol::SharedEvent as Shared;
     match event {
         Shared::AcpAgentInfo { .. }
         | Shared::AcpModelInfo { .. }
@@ -325,7 +325,7 @@ async fn resolve(
 
 async fn write_event(
     send: &mut quinn::SendStream,
-    event: &vmux_wire::protocol::SharedEvent,
+    event: &vmux_api::protocol::SharedEvent,
     opened: &mut bool,
 ) -> Result<(), ()> {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
@@ -352,7 +352,7 @@ async fn subscribe(
 async fn session_snapshot(
     state: &super::server::RemoteState,
     sid: &str,
-) -> Option<vmux_wire::protocol::SharedEvent> {
+) -> Option<vmux_api::protocol::SharedEvent> {
     let snapshot = if state.acp.lock().await.contains(sid) {
         state.acp.lock().await.snapshot(sid)
     } else {
@@ -439,9 +439,9 @@ mod live {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use tokio::sync::{Mutex, broadcast};
+    use vmux_api::protocol::SharedResponse;
     use vmux_remote::DeviceId;
     use vmux_remote::quic::endpoint::{SelfSignedIdentity, Trust};
-    use vmux_wire::protocol::SharedResponse;
 
     struct Harness {
         address: std::net::SocketAddr,
@@ -534,10 +534,10 @@ mod live {
         rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(body).expect("decode")
     }
 
-    async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_wire::protocol::SharedEvent> {
+    async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_api::protocol::SharedEvent> {
         let frame = CONTROL.accept(recv).await.ok()?;
         let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
-        rkyv::from_bytes::<vmux_wire::protocol::SharedEvent, rkyv::rancor::Error>(body).ok()
+        rkyv::from_bytes::<vmux_api::protocol::SharedEvent, rkyv::rancor::Error>(body).ok()
     }
 
     #[tokio::test]
@@ -548,7 +548,7 @@ mod live {
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
             "ghost",
-            vmux_wire::protocol::AgentAction::Attach,
+            vmux_api::protocol::AgentAction::Attach,
         ))
         .expect("encode");
         CONTROL

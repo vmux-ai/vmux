@@ -9,13 +9,14 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_command::event::LAYOUT_COMMAND_BAR_OPEN_EVENT;
+use vmux_api::BinEvent;
+use vmux_api::command_bar::CommandBarOpenEvent;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{
     Header, LayoutCef,
-    event::{STACKS_EVENT, TABS_EVENT},
+    event::{StacksHostEvent, TabsHostEvent},
     side_sheet::SideSheet,
 };
 
@@ -249,17 +250,17 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if !matches!(
-        trigger.id.as_str(),
-        TABS_EVENT | STACKS_EVENT | LAYOUT_COMMAND_BAR_OPEN_EVENT
-    ) {
+    if trigger.id() != TabsHostEvent::id()
+        && trigger.id() != StacksHostEvent::id()
+        && trigger.id() != CommandBarOpenEvent::id()
+    {
         return;
     }
-    let Ok(mut cap) = layouts.get_mut(trigger.webview) else {
+    let Ok(mut cap) = layouts.get_mut(trigger.webview()) else {
         return;
     };
     cap.0 = LAYOUT_ACTIVE_FRAME_RATE;
-    browsers.set_windowless_frame_rate(&trigger.webview, LAYOUT_ACTIVE_FRAME_RATE);
+    browsers.set_windowless_frame_rate(&trigger.webview(), LAYOUT_ACTIVE_FRAME_RATE);
     burst.last_emit = Some(std::time::Instant::now());
     if let Some(proxy) = proxy {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -346,7 +347,11 @@ fn sync_layout_cef_frame_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::event::PANE_TREE_EVENT;
+    use vmux_layout::event::PaneTreeEvent;
+
+    #[derive(rkyv::Archive, rkyv::Serialize)]
+    #[vmux_api::host_event(name = "other", target = any)]
+    struct OtherEvent;
 
     #[test]
     fn layout_frame_rate_bursts_after_input() {
@@ -372,7 +377,7 @@ mod tests {
         app.world_mut().insert_non_send(Browsers::default());
         let other = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinHostEmitEvent::from_bytes(other, "other", Vec::new()));
+            .trigger(BinHostEmitEvent::from_event(other, &OtherEvent));
         assert!(
             app.world()
                 .resource::<LayoutFrameRateBurst>()
@@ -384,10 +389,9 @@ mod tests {
             .world_mut()
             .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
             .id();
-        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            PANE_TREE_EVENT,
-            Vec::new(),
+            &PaneTreeEvent::default(),
         ));
         assert!(
             app.world()
@@ -399,8 +403,10 @@ mod tests {
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
             LAYOUT_IDLE_FRAME_RATE
         );
-        app.world_mut()
-            .trigger(BinHostEmitEvent::from_bytes(layout, "tabs", Vec::new()));
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
+            layout,
+            &TabsHostEvent::default(),
+        ));
         assert!(
             app.world()
                 .resource::<LayoutFrameRateBurst>()
@@ -415,10 +421,9 @@ mod tests {
         app.world_mut()
             .entity_mut(layout)
             .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
-        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            LAYOUT_COMMAND_BAR_OPEN_EVENT,
-            Vec::new(),
+            &CommandBarOpenEvent::default(),
         ));
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,

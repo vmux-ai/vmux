@@ -8,7 +8,7 @@ pub mod model;
 #[cfg(ui)]
 pub mod page;
 
-pub use vmux_wire::space as event;
+pub use vmux_api::space as event;
 
 #[cfg(host)]
 mod host;

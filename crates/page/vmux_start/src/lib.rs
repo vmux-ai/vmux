@@ -12,7 +12,7 @@ pub use host::StartPlugin;
 
 pub mod roster;
 
-pub use vmux_wire::agent::supports_inline_agent_transition;
+pub use vmux_api::agent::supports_inline_agent_transition;
 
 #[cfg(host)]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]

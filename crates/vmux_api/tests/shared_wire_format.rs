@@ -1,4 +1,4 @@
-use vmux_wire::protocol::{
+use vmux_api::protocol::{
     AgentAction, AgentAttachment, ApprovalDecision, ClientMessage, SharedAgentCommand,
     SharedMessage,
 };

@@ -3,23 +3,20 @@
 use std::rc::Rc;
 
 use crate::event::{
-    BOOKMARK_MENU_ACTION_EVENT, BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkMenuActionEvent,
-    BookmarkNode, BookmarkRow, BookmarkTextInputEvent, BookmarksCommandEvent, BookmarksHostEvent,
-    FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutOverlayEvent, LayoutStateEvent,
-    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, REMOTE_STATE_EVENT, ReloadEvent,
-    RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT, StackNode,
-    StackRow, StacksHostEvent, TABS_EVENT, TabDropPlacement, TabRow, TabsCommandEvent,
-    TabsHostEvent, WindowDragRegionEvent,
+    BookmarkContextMenuEvent, BookmarkMenuRequest, BookmarkNode, BookmarkRequest, BookmarkRow,
+    BookmarkTextInputEvent, BookmarksHostEvent, FolderRow, HeaderRequest, LayoutOverlayEvent,
+    LayoutStateEvent, PaneNode, PaneTreeEvent, ReloadEvent, RemoteCopyEvent, RemotePhase,
+    RemoteRequest, RemoteStateEvent, StackNode, StackRow, StacksHostEvent, TabDropPlacement,
+    TabRow, TabsHostEvent, TabsRequest, WindowDragRegionEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_command::panel::CommandBarPanel;
-use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::event::team::{TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_core::event::{
-    EXTENSION_POPUP_EVENT, EXTENSION_POPUP_SIZE_EVENT, EXTENSIONS_LIST_EVENT, ExtActionRequest,
-    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
-    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
-    ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
+    ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow,
+    ExtensionPopupAnchor, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
+    ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent, TabWorkspaceRequest,
 };
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -51,81 +48,69 @@ pub fn Page() -> Element {
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
     let mut layout_state_received = use_signal(|| false);
-    let layout_listener = use_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+    let layout_listener = use_listener::<LayoutStateEvent, _>(move |data| {
         layout_state_received.set(true);
         layout_state.set(data);
     });
 
     let mut stacks_state = use_signal(StacksHostEvent::default);
     let mut stacks_state_received = use_signal(|| false);
-    let stacks_listener = use_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
+    let stacks_listener = use_listener::<StacksHostEvent, _>(move |data| {
         stacks_state_received.set(true);
         stacks_state.set(data);
     });
 
     let mut tabs_state = use_signal(TabsHostEvent::default);
     let mut tabs_state_received = use_signal(|| false);
-    let tabs_listener = use_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+    let tabs_listener = use_listener::<TabsHostEvent, _>(move |data| {
         tabs_state_received.set(true);
         tabs_state.set(data);
     });
 
     let mut bookmarks_state = use_signal(BookmarksHostEvent::default);
-    let _bookmarks_listener = use_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
+    let _bookmarks_listener = use_listener::<BookmarksHostEvent, _>(move |data| {
         bookmarks_state.set(data);
     });
-    let bookmark_menu_action = use_event::<BookmarkMenuActionEvent>(
-        BOOKMARK_MENU_ACTION_EVENT,
-        BookmarkMenuActionEvent::default,
-    );
+    let bookmark_menu_action = use_event::<BookmarkMenuRequest>(BookmarkMenuRequest::default);
     use_context_provider(|| bookmark_menu_action);
 
     let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
+    let _reload_listener = use_listener::<ReloadEvent, _>(move |_| {
         reload_key.set(reload_key() + 1);
     });
 
     let mut pane_tree_state = use_signal(PaneTreeEvent::default);
     let mut pane_tree_state_received = use_signal(|| false);
-    let pane_tree_listener = use_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
+    let pane_tree_listener = use_listener::<PaneTreeEvent, _>(move |data| {
         pane_tree_state_received.set(true);
         pane_tree_state.set(data);
     });
 
     let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
     let mut spaces_state_received = use_signal(|| false);
-    let spaces_listener = use_listener::<vmux_core::event::space::SpacesListEvent, _>(
-        vmux_core::event::space::SPACES_LIST_EVENT,
-        move |data| {
+    let spaces_listener =
+        use_listener::<vmux_core::event::space::SpacesListEvent, _>(move |data| {
             spaces_state_received.set(true);
             spaces_state.set(data);
-        },
-    );
+        });
 
-    let projects_state = use_event::<crate::event::TabBoundaryEvent>(
-        crate::event::TAB_BOUNDARY_EVENT,
-        crate::event::TabBoundaryEvent::default,
-    );
+    let projects_state =
+        use_event::<crate::event::TabBoundaryEvent>(crate::event::TabBoundaryEvent::default);
 
-    let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
-    let remote_state = use_event::<RemoteStateEvent>(REMOTE_STATE_EVENT, RemoteStateEvent::default);
+    let team_state = use_event::<TeamEvent>(TeamEvent::default);
+    let remote_state = use_event::<RemoteStateEvent>(RemoteStateEvent::default);
 
-    let extensions_state =
-        use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
-    let extension_popup =
-        use_event::<ExtensionPopupEvent>(EXTENSION_POPUP_EVENT, ExtensionPopupEvent::default);
-    let extension_popup_size = use_event::<ExtensionPopupSizeEvent>(
-        EXTENSION_POPUP_SIZE_EVENT,
-        ExtensionPopupSizeEvent::default,
-    );
+    let extensions_state = use_event::<ExtensionsEvent>(ExtensionsEvent::default);
+    let extension_popup = use_event::<ExtensionPopupEvent>(ExtensionPopupEvent::default);
+    let extension_popup_size =
+        use_event::<ExtensionPopupSizeEvent>(ExtensionPopupSizeEvent::default);
     use_effect(move || {
         let _ = send(&ExtListRequest);
     });
 
     let mut update_phase = use_signal(|| None::<UpdatePhase>);
-    let _update_progress_listener = use_listener::<crate::event::UpdateProgressEvent, _>(
-        crate::event::UPDATE_PROGRESS_EVENT,
-        move |evt| {
+    let _update_progress_listener =
+        use_listener::<crate::event::UpdateProgressEvent, _>(move |evt| {
             update_phase.set(Some(if evt.installing {
                 UpdatePhase::Installing {
                     version: evt.version,
@@ -137,20 +122,14 @@ pub fn Page() -> Element {
                     total: evt.total,
                 }
             }));
-        },
-    );
-    let _update_ready_listener = use_listener::<crate::event::UpdateReadyEvent, _>(
-        crate::event::UPDATE_READY_EVENT,
-        move |evt| {
-            update_phase.set(Some(UpdatePhase::Ready {
-                version: evt.version,
-            }))
-        },
-    );
-    let _update_cleared_listener = use_listener::<crate::event::UpdateClearedEvent, _>(
-        crate::event::UPDATE_CLEARED_EVENT,
-        move |_| update_phase.set(None),
-    );
+        });
+    let _update_ready_listener = use_listener::<crate::event::UpdateReadyEvent, _>(move |evt| {
+        update_phase.set(Some(UpdatePhase::Ready {
+            version: evt.version,
+        }))
+    });
+    let _update_cleared_listener =
+        use_listener::<crate::event::UpdateClearedEvent, _>(move |_| update_phase.set(None));
 
     let state = layout_state();
     let stacks = stacks_state();
@@ -795,15 +774,7 @@ fn HeaderView(
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = send(&BookmarksCommandEvent {
-                                    command: "toggle_active".into(),
-                                    uuid: None,
-                                    name: None,
-                                    url: None,
-                                    metadata: None,
-                                    folder: None,
-                                    target_uuid: None,
-                                });
+                                let _ = send(&BookmarkRequest::ToggleActive);
                             },
                             Icon { class: "h-4 w-4",
                                 path {
@@ -823,9 +794,9 @@ fn HeaderView(
                             },
                             onclick: move |_| {
                                 if let Some(uuid) = pinned_uuid.clone() {
-                                    bookmark_cmd("unpin", Some(uuid));
+                                    bookmark_cmd(BookmarkIdCommand::Unpin, uuid);
                                 } else if let Some(metadata) = active_metadata.clone() {
-                                    add_to_bookmarks("pin_url", metadata, None);
+                                    add_to_bookmarks(BookmarkPageCommand::Pin, metadata, None);
                                 }
                             },
                             Icon { class: "h-4 w-4",
@@ -861,7 +832,6 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     let draft = use_signal(|| space.name.clone());
     let menu_value = use_signal(|| space.id.clone());
     let rename_id = space.id.clone();
-    let open_space_id = space.id.clone();
 
     rsx! {
         LayoutContextMenu {
@@ -879,11 +849,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                         aria_label: space.name.clone(),
                         disabled: editing(),
                         onclick: move |_| {
-                            let _ = send(&vmux_core::event::space::SpaceCommandEvent {
-                                command: "open_page".to_string(),
-                                space_id: Some(open_space_id.clone()),
-                                name: None,
-                            });
+                            let _ = send(&vmux_core::event::space::SpaceRequest::OpenPage);
                         },
                     },
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
@@ -902,10 +868,9 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                             title: translate("common-rename"),
                             on_active_change: set_bookmark_text_input_active,
                             on_commit: move |name| {
-                                let _ = send(&vmux_core::event::space::SpaceCommandEvent {
-                                    command: "rename".to_string(),
-                                    space_id: Some(rename_id.clone()),
-                                    name: Some(name),
+                                let _ = send(&vmux_core::event::space::SpaceRequest::Rename {
+                                    space_id: rename_id.clone(),
+                                    name,
                                 });
                             },
                         }
@@ -1263,7 +1228,7 @@ fn ActiveWorkspaceChoice(
             title: "{project.display_path}",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_core::event::space::ProjectCommandEvent {
+                let _ = send(&vmux_core::event::space::ProjectRequest {
                     command: "activate".to_string(),
                     path: Some(activate_path.clone()),
                 });
@@ -1316,7 +1281,7 @@ fn ActiveWorkspaceProjectRow(project: vmux_core::event::ProjectRow, pane_id: u64
                             pane_id: pane_id.to_string(),
                         });
                     } else {
-                        let _ = send(&crate::event::SideSheetCommandEvent {
+                        let _ = send(&crate::event::SideSheetRequest {
                             command: "open_project_path".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_id: 0,
@@ -1367,7 +1332,7 @@ fn RemoteControl(remote: RemoteStateEvent) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
-                        let _ = send(&RemoteCommandEvent {
+                        let _ = send(&RemoteRequest {
                             enabled: !remote.enabled,
                         });
                     },
@@ -1474,7 +1439,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             pairing_generation.set(pairing_generation().wrapping_add(1));
                             show_pairing.set(false);
                         }
-                        let _ = send(&RemoteCommandEvent {
+                        let _ = send(&RemoteRequest {
                             enabled: !remote.enabled,
                         });
                     },
@@ -1494,7 +1459,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         r#type: "button",
                         class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
                         onclick: move |_| {
-                            let _ = send(&RemoteCommandEvent {
+                            let _ = send(&RemoteRequest {
                                 enabled: remote.enabled,
                             });
                         },
@@ -1616,7 +1581,7 @@ fn BookmarksSection(
     let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     use_effect(move || {
@@ -1667,7 +1632,7 @@ fn BookmarksSection(
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
-                request_bookmark_menu("menu_root", None, None);
+                request_bookmark_menu(BookmarkRequest::MenuRoot);
             },
             div {
                 "data-bookmark-drop": "root",
@@ -1802,7 +1767,7 @@ fn BookmarksSection(
 }
 
 fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
-    let _ = send(&crate::event::SideSheetCommandEvent {
+    let _ = send(&crate::event::SideSheetRequest {
         command: if expanded {
             "expand_section".to_string()
         } else {
@@ -2385,7 +2350,7 @@ impl TabDrag {
             .cloned()
             .unwrap_or_else(|| state.source_id.clone());
         if state.source_index != state.target_index {
-            let _ = send(&TabsCommandEvent {
+            let _ = send(&TabsRequest {
                 command: "reorder".to_string(),
                 tab_id: Some(state.source_id.clone()),
                 target_tab_id: Some(target_id.clone()),
@@ -2458,7 +2423,7 @@ impl TabDrag {
                 }
             });
         }
-        let _ = send(&TabsCommandEvent {
+        let _ = send(&TabsRequest {
             command: "switch".to_string(),
             tab_id: Some(tab_id),
             target_tab_id: None,
@@ -2640,7 +2605,7 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
-                        let _ = send(&TabsCommandEvent {
+                        let _ = send(&TabsRequest {
                             command: "close".to_string(),
                             tab_id: Some(id_close.clone()),
                             target_tab_id: None,
@@ -2659,14 +2624,14 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("add", bookmark_metadata.clone(), None),
+                    on_select: move |_: String| add_to_bookmarks(BookmarkPageCommand::Add, bookmark_metadata.clone(), None),
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_metadata.clone(), None),
+                    on_select: move |_: String| add_to_bookmarks(BookmarkPageCommand::Pin, pin_metadata.clone(), None),
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
@@ -2736,7 +2701,7 @@ fn NewTabButton() -> Element {
                 title: translate("layout-new-tab"),
                 class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
                 onclick: move |_| {
-                    let _ = send(&TabsCommandEvent {
+                    let _ = send(&TabsRequest {
                         command: "new".to_string(),
                         tab_id: None,
                         target_tab_id: None,
@@ -2853,7 +2818,7 @@ fn NavButton(
             class,
             onclick: move |_| {
                 if !disabled {
-                    let _ = send(&HeaderCommandEvent {
+                    let _ = send(&HeaderRequest {
                         header_command: command.to_string(),
                     });
                 }
@@ -2877,7 +2842,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
-                let _ = send(&HeaderCommandEvent {
+                let _ = send(&HeaderRequest {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
@@ -2913,7 +2878,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("team-profiles"),
                     onclick: move |_| {
-                        let _ = send(&TeamCommandEvent {
+                        let _ = send(&TeamRequest {
                             command: "open".to_string(),
                             member_id: None,
                             profile_id: None,
@@ -2942,7 +2907,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                     title: "{m.name}",
                                     class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
                                     onclick: move |_| {
-                                        let _ = send(&TeamCommandEvent {
+                                        let _ = send(&TeamRequest {
                                             command: "focus".to_string(),
                                             member_id: Some(id.clone()),
                                             profile_id: None,
@@ -2970,7 +2935,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                             class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
                             title: translate("team-profiles"),
                             onclick: move |_| {
-                                let _ = send(&TeamCommandEvent {
+                                let _ = send(&TeamRequest {
                                     command: "open".to_string(),
                                     member_id: None,
                                     profile_id: None,
@@ -3266,9 +3231,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                 div { class: "pointer-events-none absolute inset-0 z-10 rounded-md ring-2 ring-primary/70" }
             }
             BookmarkContextMenu {
-                command: "menu_pin".to_string(),
-                uuid: Some(row.uuid.clone()),
-                metadata: None,
+                command: BookmarkRequest::MenuPin { uuid: row.uuid.clone() },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -3325,7 +3288,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                         ContextMenuItem {
                             index: 1usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid_unpin.clone(); move |_: String| bookmark_cmd("unpin", Some(id.clone())) },
+                            on_select: { let id = uuid_unpin.clone(); move |_: String| bookmark_cmd(BookmarkIdCommand::Unpin, id.clone()) },
                             attributes: vec![],
                             {translate("layout-unpin-page")}
                         }
@@ -3333,7 +3296,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                             ContextMenuItem {
                                 index: 2usize,
                                 value: Into::<ReadSignal<String>>::into(menu_val),
-                                on_select: { let id = row.uuid.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
+                                on_select: { let id = row.uuid.clone(); move |_: String| bookmark_cmd(BookmarkIdCommand::Remove, id.clone()) },
                                 attributes: vec![],
                                 {translate("layout-remove-bookmark")}
                             }
@@ -3346,87 +3309,59 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
 }
 
 fn open_bookmark(url: String) {
-    let _ = send(&BookmarksCommandEvent {
-        command: "open".into(),
-        url: Some(url),
-        uuid: None,
-        name: None,
-        metadata: None,
-        folder: None,
-        target_uuid: None,
-    });
+    let _ = send(&BookmarkRequest::Open { url });
 }
 
-fn bookmark_cmd(command: &str, uuid: Option<String>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: command.into(),
-        uuid,
-        name: None,
-        url: None,
-        metadata: None,
-        folder: None,
-        target_uuid: None,
-    });
+#[derive(Clone, Copy)]
+enum BookmarkIdCommand {
+    Remove,
+    Pin,
+    Unpin,
+    ToggleFolder,
+    RemoveFolder,
 }
 
-fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: command.into(),
-        uuid: None,
-        name: None,
-        url: None,
-        metadata: Some(metadata),
-        folder,
-        target_uuid: None,
-    });
+fn bookmark_cmd(command: BookmarkIdCommand, uuid: String) {
+    let command = match command {
+        BookmarkIdCommand::Remove => BookmarkRequest::Remove { uuid },
+        BookmarkIdCommand::Pin => BookmarkRequest::Pin { uuid },
+        BookmarkIdCommand::Unpin => BookmarkRequest::Unpin { uuid },
+        BookmarkIdCommand::ToggleFolder => BookmarkRequest::ToggleFolder { uuid },
+        BookmarkIdCommand::RemoveFolder => BookmarkRequest::RemoveFolder { uuid },
+    };
+    let _ = send(&command);
+}
+
+#[derive(Clone, Copy)]
+enum BookmarkPageCommand {
+    Add,
+    Pin,
+}
+
+fn add_to_bookmarks(command: BookmarkPageCommand, metadata: PageMetadata, folder: Option<String>) {
+    let command = match command {
+        BookmarkPageCommand::Add => BookmarkRequest::Add { metadata, folder },
+        BookmarkPageCommand::Pin => BookmarkRequest::PinUrl { metadata },
+    };
+    let _ = send(&command);
 }
 
 fn move_bookmark(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: "move".into(),
-        uuid: Some(uuid),
-        name: None,
-        url: None,
-        metadata: None,
-        folder,
-        target_uuid: None,
-    });
+    let _ = send(&BookmarkRequest::Move { uuid, folder });
 }
 
 fn move_pin(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: "move_pin".into(),
-        uuid: Some(uuid),
-        name: None,
-        url: None,
-        metadata: None,
-        folder,
-        target_uuid: None,
-    });
+    let _ = send(&BookmarkRequest::MovePin { uuid, folder });
 }
 
 fn reorder_pin(uuid: String, target_uuid: String) -> bool {
-    send(&BookmarksCommandEvent {
-        command: "reorder_pin".into(),
-        uuid: Some(uuid),
-        name: None,
-        url: None,
-        metadata: None,
-        folder: None,
-        target_uuid: Some(target_uuid),
-    })
-    .is_ok()
+    send(&BookmarkRequest::ReorderPin { uuid, target_uuid }).is_ok()
 }
 
 fn move_bookmark_folder(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: "move_folder".into(),
-        uuid: Some(uuid),
-        name: None,
-        url: None,
-        metadata: None,
-        folder,
-        target_uuid: None,
+    let _ = send(&BookmarkRequest::MoveFolder {
+        uuid,
+        parent: folder,
     });
 }
 
@@ -3435,15 +3370,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     if name.is_empty() {
         return;
     }
-    let _ = send(&BookmarksCommandEvent {
-        command: "rename".into(),
-        uuid: Some(uuid),
-        name: Some(name),
-        url: None,
-        metadata: None,
-        folder: None,
-        target_uuid: None,
-    });
+    let _ = send(&BookmarkRequest::Rename { uuid, name });
 }
 
 fn create_bookmark_folder(name: String, parent: Option<String>) {
@@ -3451,15 +3378,7 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
     if name.is_empty() {
         return;
     }
-    let _ = send(&BookmarksCommandEvent {
-        command: "new_folder".into(),
-        uuid: None,
-        name: Some(name),
-        url: None,
-        metadata: None,
-        folder: parent,
-        target_uuid: None,
-    });
+    let _ = send(&BookmarkRequest::CreateFolder { name, parent });
 }
 
 fn begin_bookmark_drag(
@@ -3544,10 +3463,10 @@ fn perform_bookmark_drop(
             }
         }
         (BookmarkDragItem::Page { metadata }, BookmarkDropTarget::Root) => {
-            add_to_bookmarks("add", metadata, None)
+            add_to_bookmarks(BookmarkPageCommand::Add, metadata, None)
         }
         (BookmarkDragItem::Page { metadata }, BookmarkDropTarget::Folder(folder)) => {
-            add_to_bookmarks("add", metadata, Some(folder))
+            add_to_bookmarks(BookmarkPageCommand::Add, metadata, Some(folder))
         }
         (BookmarkDragItem::Bookmark { uuid }, BookmarkDropTarget::Root) => {
             move_bookmark(uuid, None)
@@ -3686,7 +3605,7 @@ fn BookmarkFolder(
     let child_draft = use_signal(|| translate("layout-new-folder"));
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = uuid.clone();
@@ -3778,9 +3697,10 @@ fn BookmarkFolder(
                 }
             } else {
                 BookmarkContextMenu {
-                    command: "menu_folder".to_string(),
-                    uuid: Some(folder.uuid.clone()),
-                    metadata: active_metadata,
+                    command: BookmarkRequest::MenuFolder {
+                        uuid: folder.uuid.clone(),
+                        active_page: active_metadata,
+                    },
                     trigger: rsx! {
                         div {
                             "data-bookmark-drag-source": "true",
@@ -3803,7 +3723,7 @@ fn BookmarkFolder(
                                             if bookmark_drag_blocks_click(drag_state) {
                                                 return;
                                             }
-                                            bookmark_cmd("toggle_folder", Some(id.clone()));
+                                            bookmark_cmd(BookmarkIdCommand::ToggleFolder, id.clone());
                                         }
                                     },
                                     trailing: rsx! {
@@ -3822,7 +3742,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("toggle_folder", Some(id.clone())) },
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd(BookmarkIdCommand::ToggleFolder, id.clone()) },
                             attributes: vec![],
                             {if collapsed { translate("common-expand") } else { translate("common-collapse") }}
                         }
@@ -3836,7 +3756,7 @@ fn BookmarkFolder(
                                 move |_: String| {
                                     if let Some(page) = page.clone() {
                                         add_to_bookmarks(
-                                            "add",
+                                            BookmarkPageCommand::Add,
                                             PageMetadata {
                                                 title: page.title,
                                                 url: page.url,
@@ -3856,7 +3776,7 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: move |_: String| {
                                 if collapsed {
-                                    bookmark_cmd("toggle_folder", Some(new_folder_uuid.clone()));
+                                    bookmark_cmd(BookmarkIdCommand::ToggleFolder, new_folder_uuid.clone());
                                 }
                                 begin_new_folder(creating_child, child_draft);
                             },
@@ -3890,7 +3810,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: remove_index,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd(BookmarkIdCommand::RemoveFolder, id.clone()) },
                             attributes: vec![],
                             {translate("layout-remove-folder")}
                         }
@@ -3976,7 +3896,7 @@ fn BookmarkEntry(
     };
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| title.clone());
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = row.uuid.clone();
@@ -4040,9 +3960,7 @@ fn BookmarkEntry(
             }
         } else {
             BookmarkContextMenu {
-                command: "menu_bookmark".to_string(),
-                uuid: Some(row.uuid.clone()),
-                metadata: None,
+                command: BookmarkRequest::MenuBookmark { uuid: row.uuid.clone() },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -4101,8 +4019,12 @@ fn BookmarkEntry(
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: {
                             let id = uuid_pin.clone();
-                            let command = if row.pinned { "unpin" } else { "pin" };
-                            move |_: String| bookmark_cmd(command, Some(id.clone()))
+                            let command = if row.pinned {
+                                BookmarkIdCommand::Unpin
+                            } else {
+                                BookmarkIdCommand::Pin
+                            };
+                            move |_: String| bookmark_cmd(command, id.clone())
                         },
                         attributes: vec![],
                         {if row.pinned { translate("layout-unpin-page") } else { translate("layout-pin") }}
@@ -4124,7 +4046,7 @@ fn BookmarkEntry(
                     ContextMenuItem {
                         index: remove_index,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
+                        on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd(BookmarkIdCommand::Remove, id.clone()) },
                         attributes: vec![],
                         {translate("common-remove")}
                     }
@@ -4135,34 +4057,18 @@ fn BookmarkEntry(
     }
 }
 
-fn request_bookmark_menu(command: &str, uuid: Option<String>, metadata: Option<PageMetadata>) {
-    let _ = send(&BookmarksCommandEvent {
-        command: command.to_string(),
-        uuid,
-        name: None,
-        url: None,
-        metadata,
-        folder: None,
-        target_uuid: None,
-    });
+fn request_bookmark_menu(command: BookmarkRequest) {
+    let _ = send(&command);
 }
 
 fn commit_folder_rename(uuid: String, name: String) {
     let name = name.trim().to_string();
     let command = if name.is_empty() {
-        "remove_folder"
+        BookmarkRequest::RemoveFolder { uuid }
     } else {
-        "rename_folder"
+        BookmarkRequest::RenameFolder { uuid, name }
     };
-    let _ = send(&BookmarksCommandEvent {
-        command: command.into(),
-        uuid: Some(uuid),
-        name: if name.is_empty() { None } else { Some(name) },
-        url: None,
-        metadata: None,
-        folder: None,
-        target_uuid: None,
-    });
+    let _ = send(&command);
 }
 
 #[component]
@@ -4181,13 +4087,7 @@ fn LayoutContextMenu(children: Element) -> Element {
 }
 
 #[component]
-fn BookmarkContextMenu(
-    command: String,
-    uuid: Option<String>,
-    metadata: Option<PageMetadata>,
-    trigger: Element,
-    menu: Element,
-) -> Element {
+fn BookmarkContextMenu(command: BookmarkRequest, trigger: Element, menu: Element) -> Element {
     #[cfg(target_os = "macos")]
     {
         let _ = menu;
@@ -4199,7 +4099,7 @@ fn BookmarkContextMenu(
                 oncontextmenu: move |event: Event<MouseData>| {
                     event.prevent_default();
                     event.stop_propagation();
-                    request_bookmark_menu(&command, uuid.clone(), metadata.clone());
+                    request_bookmark_menu(command.clone());
                 },
                 {trigger}
             }
@@ -4208,8 +4108,6 @@ fn BookmarkContextMenu(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = command;
-        let _ = uuid;
-        let _ = metadata;
         rsx! {
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![], {trigger} }
@@ -4318,7 +4216,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks(
-                        "add",
+                        BookmarkPageCommand::Add,
                         bookmark_metadata.clone(),
                         None,
                     ),
@@ -4339,7 +4237,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             };
                             let folder_uuid = folder.uuid.clone();
                             move |_: String| add_to_bookmarks(
-                                "add",
+                                BookmarkPageCommand::Add,
                                 metadata.clone(),
                                 Some(folder_uuid.clone()),
                             )
@@ -4355,7 +4253,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: pin_index,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks(
-                        "pin_url",
+                        BookmarkPageCommand::Pin,
                         pin_metadata.clone(),
                         None,
                     ),
@@ -4379,7 +4277,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = send(&crate::event::SideSheetCommandEvent {
+                let _ = send(&crate::event::SideSheetRequest {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_id: 0,
@@ -4438,7 +4336,7 @@ impl StackCommand {
     }
 
     fn dispatch(self, command: &str) {
-        let _ = send(&crate::event::SideSheetCommandEvent {
+        let _ = send(&crate::event::SideSheetRequest {
             command: command.to_string(),
             pane_id: self.pane_id.to_string(),
             stack_id: self.stack_id,

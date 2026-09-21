@@ -95,7 +95,7 @@ impl SimulatorRoute {
         })
     }
 
-    pub fn of_url(url: &str) -> Option<Self> {
+    fn parse_url(url: &str) -> Option<Self> {
         let rest = url.strip_prefix("vmux://")?;
         let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
         if host != PAGE_HOST {
@@ -133,6 +133,25 @@ impl SimulatorRoute {
 
     pub fn url(version: &IosVersion, device_name: Option<&str>) -> String {
         format!("vmux://{PAGE_HOST}{}", Self::path(version, device_name))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidSimulatorRoute;
+
+impl std::fmt::Display for InvalidSimulatorRoute {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("invalid simulator route")
+    }
+}
+
+impl std::error::Error for InvalidSimulatorRoute {}
+
+impl TryFrom<&str> for SimulatorRoute {
+    type Error = InvalidSimulatorRoute;
+
+    fn try_from(url: &str) -> Result<Self, Self::Error> {
+        Self::parse_url(url).ok_or(InvalidSimulatorRoute)
     }
 }
 
@@ -181,34 +200,35 @@ mod tests {
     #[test]
     fn whole_urls_route_here_only_for_this_host() {
         assert_eq!(
-            SimulatorRoute::of_url(UNPINNED_URL),
-            Some(SimulatorRoute::Unpinned)
+            SimulatorRoute::try_from(UNPINNED_URL),
+            Ok(SimulatorRoute::Unpinned)
         );
         assert_eq!(
-            SimulatorRoute::of_url("vmux://simulator/ios/27.0")
+            SimulatorRoute::try_from("vmux://simulator/ios/27.0")
+                .ok()
                 .and_then(|r| r.version().map(IosVersion::as_str).map(str::to_string)),
             Some("27.0".to_string())
         );
-        assert!(SimulatorRoute::of_url("vmux://simulator/ios/27.0?x=1").is_some());
+        assert!(SimulatorRoute::try_from("vmux://simulator/ios/27.0?x=1").is_ok());
     }
 
     #[test]
     fn bare_simulator_urls_are_unpinned() {
         assert_eq!(
-            SimulatorRoute::of_url("vmux://simulator/"),
-            Some(SimulatorRoute::Unpinned)
+            SimulatorRoute::try_from("vmux://simulator/"),
+            Ok(SimulatorRoute::Unpinned)
         );
         assert_eq!(
-            SimulatorRoute::of_url("vmux://simulator"),
-            Some(SimulatorRoute::Unpinned)
+            SimulatorRoute::try_from("vmux://simulator"),
+            Ok(SimulatorRoute::Unpinned)
         );
     }
 
     #[test]
     fn another_host_does_not_route_here() {
-        assert_eq!(SimulatorRoute::of_url("vmux://terminal/ios"), None);
-        assert_eq!(SimulatorRoute::of_url("vmux://simulator/android/15"), None);
-        assert_eq!(SimulatorRoute::of_url("https://simulator/ios"), None);
+        assert!(SimulatorRoute::try_from("vmux://terminal/ios").is_err());
+        assert!(SimulatorRoute::try_from("vmux://simulator/android/15").is_err());
+        assert!(SimulatorRoute::try_from("https://simulator/ios").is_err());
     }
 
     #[test]
@@ -269,7 +289,7 @@ mod tests {
         let version = IosVersion::parse("27.0").expect("version");
         let url = SimulatorRoute::url(&version, Some("iPhone 17 Pro"));
 
-        let route = SimulatorRoute::of_url(&url).expect("route");
+        let route = SimulatorRoute::try_from(url.as_str()).expect("route");
 
         assert_eq!(url, "vmux://simulator/ios/27.0/iPhone%2017%20Pro");
         assert_eq!(route.device_name(), Some("iPhone 17 Pro"));

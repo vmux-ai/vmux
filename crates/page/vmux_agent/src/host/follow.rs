@@ -439,7 +439,7 @@ fn handle_agent_file_search(
 struct SearchGrouping;
 
 impl SearchGrouping {
-    fn group(matches: &[vmux_wire::protocol::FileSearchMatch]) -> Vec<ExplorerSearchFile> {
+    fn group(matches: &[vmux_api::protocol::FileSearchMatch]) -> Vec<ExplorerSearchFile> {
         let mut files: Vec<ExplorerSearchFile> = Vec::new();
         for result in matches {
             let hit = ExplorerSearchMatch {
@@ -505,9 +505,8 @@ fn tidy_follow_pane(
         .max_by_key(|(stack, _, _)| last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN))
         .map(|(_, page, _)| *page);
     if let Some(page) = active_page {
-        commands.trigger(bevy_cef::prelude::BinHostEmitEvent::from_rkyv(
+        commands.trigger(bevy_cef::prelude::BinHostEmitEvent::from_event(
             page,
-            vmux_core::event::FILE_TIDY_PROMPT_EVENT,
             &vmux_core::event::FileTidyPromptEvent { count },
         ));
         commands
@@ -617,8 +616,8 @@ fn tidy_page_on_idle(
     }
 }
 
-pub(crate) fn on_tidy_action(
-    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyActionEvent>>,
+pub(crate) fn on_tidy_request(
+    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyRequest>>,
     child_of: Query<&ChildOf>,
     pending: Query<&crate::tidy::PendingTidy>,
     mut settings: ResMut<AppSettings>,
@@ -1223,7 +1222,7 @@ mod tests {
             for request in reader.read() {
                 if matches!(request.command, ServiceAgentCommand::Run { .. }) {
                     let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 = AgentCwd::of_tab(tab.startup_dir.as_deref())
+                    captured.0 = AgentCwd::from_tab(tab.startup_dir.as_deref())
                         .or_agent_launch(None)
                         .ok();
                 }

@@ -1,7 +1,4 @@
-use crate::event::{
-    COMMAND_BAR_KEY_EVENT, CommandBarKey, CommandBarOpenEvent, START_PROJECT_BRANCHES_EVENT,
-    StartProjectBranches,
-};
+use crate::event::{CommandBarKey, CommandBarOpenEvent, StartProjectBranches};
 use crate::page::composer::{
     ComposerChips, ComposerMenuSet, use_project_picking, use_prompt_recall,
 };
@@ -11,11 +8,12 @@ use crate::page::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, PaletteKeys, Readline, TypedDigit, use_palette_signals,
 };
 use crate::prompt_media::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    ChatAttachments, ChatMediaEntries, ChatPasteMedia, ChatPickFiles, inline_media_query,
-    merge_chat_attachments,
+    ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatPasteMedia, ChatPickFiles,
+    inline_media_query, merge_chat_attachments,
 };
 use dioxus::prelude::*;
+use vmux_api::chat::{PromptHistory, ResumableSessions, ResumeListRequest};
+use vmux_api::command_bar::CommandBarQuery;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
@@ -38,11 +36,6 @@ use vmux_ui::launcher::style::{
 };
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 use vmux_ui::scroll::ScrollIntoView;
-use vmux_wire::chat::{
-    PROMPT_HISTORY_EVENT, PromptHistory, RESUMABLE_SESSIONS_EVENT, ResumableSessions,
-    ResumeListRequest,
-};
-use vmux_wire::command_bar::CommandBarQuery;
 
 mod composer;
 mod media;
@@ -111,15 +104,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let mut recall = use_prompt_recall();
-    let _prompt_history = use_listener::<PromptHistory, _>(PROMPT_HISTORY_EVENT, move |incoming| {
+    let _prompt_history = use_listener::<PromptHistory, _>(move |incoming| {
         recall.remember(incoming.prompts);
     });
 
     let mut picking = use_project_picking();
-    let _project_branches =
-        use_listener::<StartProjectBranches, _>(START_PROJECT_BRANCHES_EVENT, move |incoming| {
-            picking.remember(incoming.project, incoming.branches);
-        });
+    let _project_branches = use_listener::<StartProjectBranches, _>(move |incoming| {
+        picking.remember(incoming.project, incoming.branches);
+    });
 
     use_effect(move || {
         picking.read_ahead(&vmux_ui::launcher::palette::ActiveProject::resolve(
@@ -127,21 +119,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         ));
     });
 
-    let _sessions =
-        use_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |incoming| {
-            let mut sessions = feeds.sessions;
-            let mut total = feeds.sessions_total;
-            let mut loading = feeds.sessions_loading;
-            total.set(incoming.total);
-            loading.set(false);
-            if incoming.offset == 0 {
-                sessions.set(incoming.sessions.clone());
-                return;
-            }
-            let mut held = sessions.peek().clone();
-            held.extend(incoming.sessions.iter().cloned());
-            sessions.set(held);
-        });
+    let _sessions = use_listener::<ResumableSessions, _>(move |incoming| {
+        let mut sessions = feeds.sessions;
+        let mut total = feeds.sessions_total;
+        let mut loading = feeds.sessions_loading;
+        total.set(incoming.total);
+        loading.set(false);
+        if incoming.offset == 0 {
+            sessions.set(incoming.sessions.clone());
+            return;
+        }
+        let mut held = sessions.peek().clone();
+        held.extend(incoming.sessions.iter().cloned());
+        sessions.set(held);
+    });
     use_effect(move || {
         let query = (signals.query)();
         let wants = CommandBarQuery(&query)
@@ -189,7 +180,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         signals,
         on_dismiss,
     };
-    let _key_listener = use_listener::<CommandBarKey, _>(COMMAND_BAR_KEY_EVENT, move |key| {
+    let _key_listener = use_listener::<CommandBarKey, _>(move |key| {
         let query = signals.query.peek().clone();
         if let Some(filter) = McpQuery::read(&query) {
             let entries = mcp.filtered(filter);
@@ -271,31 +262,28 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         });
     };
 
-    let _attachments_listener =
-        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
-            if !is_start {
-                return;
-            }
-            let current = attachments.peek().clone();
-            attachments.set(merge_chat_attachments(&current, &selected.attachments));
-            focus_prompt_end(PROMPT_INPUT_ID);
-        });
+    let _attachments_listener = use_listener::<ChatAttachments, _>(move |selected| {
+        if !is_start {
+            return;
+        }
+        let current = attachments.peek().clone();
+        attachments.set(merge_chat_attachments(&current, &selected.attachments));
+        focus_prompt_end(PROMPT_INPUT_ID);
+    });
 
-    let _attachment_previews_listener =
-        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
-            if !is_start {
-                return;
-            }
-            media.remember_previews(&loaded.attachments);
-        });
+    let _attachment_previews_listener = use_listener::<ChatAttachmentPreviews, _>(move |loaded| {
+        if !is_start {
+            return;
+        }
+        media.remember_previews(&loaded.attachments);
+    });
 
-    let _media_entries_listener =
-        use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
-            if !is_start {
-                return;
-            }
-            media.receive(response);
-        });
+    let _media_entries_listener = use_listener::<ChatMediaEntries, _>(move |response| {
+        if !is_start {
+            return;
+        }
+        media.receive(response);
+    });
 
     let composer = palette.composer.clone();
     {
@@ -708,15 +696,7 @@ fn BookmarkButton() -> Element {
             onclick: move |event| {
                 event.prevent_default();
                 event.stop_propagation();
-                let _ = send(&crate::event::BookmarksCommandEvent {
-                    command: "toggle_active".into(),
-                    uuid: None,
-                    name: None,
-                    url: None,
-                    metadata: None,
-                    folder: None,
-                    target_uuid: None,
-                });
+                let _ = send(&crate::event::BookmarkRequest::ToggleActive);
             },
             Icon { class: "h-4 w-4",
                 path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }

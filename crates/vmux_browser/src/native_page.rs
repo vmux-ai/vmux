@@ -150,7 +150,7 @@ pub static FILES_PAGE: NativePage = NativePage::pane("file://", vmux_editor::pag
 
 #[cfg(target_os = "macos")]
 pub static PROJECTS_PAGE: NativePage =
-    NativePage::pane(vmux_wire::space::PROJECTS_PAGE_URL, vmux_editor::page::Page)
+    NativePage::pane(vmux_api::space::PROJECTS_PAGE_URL, vmux_editor::page::Page)
         .titled("Projects")
         .sharing_dom("editor")
         .owning_subtree();
@@ -191,7 +191,7 @@ pub static SIMULATOR_PAGE: NativePage =
 
 #[cfg(target_os = "macos")]
 pub static SPACES_PAGE: NativePage =
-    NativePage::pane(vmux_wire::space::SPACES_PAGE_URL, vmux_space::page::Page).titled("Spaces");
+    NativePage::pane(vmux_api::space::SPACES_PAGE_URL, vmux_space::page::Page).titled("Spaces");
 
 #[cfg(target_os = "macos")]
 pub static TOOLS_PAGE: NativePage =
@@ -214,7 +214,7 @@ pub static EXTENSIONS_PAGE: NativePage = NativePage::pane(
 
 #[cfg(target_os = "macos")]
 pub static ERROR_PAGE: NativePage = NativePage::pane(
-    vmux_wire::error::ERROR_PAGE_URL,
+    vmux_api::error::ERROR_PAGE_URL,
     vmux_layout::error_page::Page,
 )
 .titled("Error");

@@ -6,8 +6,7 @@ use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::Browser;
 use vmux_layout::active_panes::ActivePanes;
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_layout::stack::{Stack, active_stack_in_pane};
-use vmux_layout::target::active_webview_for_tab;
+use vmux_layout::stack::Stack;
 
 pub(crate) struct ScrollPlugin;
 
@@ -36,11 +35,8 @@ pub(crate) fn run_scrolls(
     mut snap_writer: MessageWriter<BrowserSnapshotRequest>,
 ) {
     for request in reader.read() {
-        let webview = request
-            .pane
-            .as_deref()
-            .and_then(|target| vmux_layout::target::parse_browser_target(target, &panes, &stacks))
-            .and_then(|target| {
+        let webview = if let Some(target) = request.pane.as_deref() {
+            vmux_layout::target::parse_browser_target(target, &panes, &stacks).and_then(|target| {
                 vmux_layout::target::webview_for_target(
                     target,
                     &pane_children,
@@ -49,20 +45,16 @@ pub(crate) fn run_scrolls(
                     &terminals,
                 )
             })
-            .or_else(|| {
-                active
-                    .local()
-                    .pane
-                    .filter(|p| panes.contains(*p))
-                    .and_then(|pane| {
-                        active_webview_for_tab(
-                            active_stack_in_pane(pane, &pane_children, &stack_ts),
-                            &browsers,
-                            &terminals,
-                        )
-                    })
-            })
-            .or_else(|| crate::snapshot::most_recent_browser(&browsers, &terminals, &stack_ts));
+        } else {
+            crate::snapshot::default_browser(
+                &active,
+                &panes,
+                &terminals,
+                &browsers,
+                &pane_children,
+                &stack_ts,
+            )
+        };
         if let Some(webview) = webview {
             let js = match (request.to.as_deref(), request.delta) {
                 (Some("top"), _) => "window.scrollTo(0,0)".to_string(),

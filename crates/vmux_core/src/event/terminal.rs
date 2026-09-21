@@ -1,16 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::{TermCursor, TermLine, TermSelectionRange};
+use super::{AnsiPalette, RgbColor, TermCursor, TermLine, TermSelectionRange};
 
-pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
-pub const TERM_KEY_EVENT: &str = "term_key";
-pub const TERM_MOUSE_EVENT: &str = "term_mouse";
-pub const TERM_RESIZE_EVENT: &str = "term_resize";
-pub const TERM_LINK_OPEN_EVENT: &str = "term_link_open";
-pub const TERM_SCROLL_EVENT: &str = "term_scroll";
-pub const TERM_THEME_EVENT: &str = "term_theme";
-pub const TERM_TITLE_EVENT: &str = "term_title";
-pub const TERM_LOADING_EVENT: &str = "term_loading";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -23,6 +14,7 @@ pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "service", name = "unavailable", target = "terminal")]
 pub struct ServiceUnavailableEvent {
     pub message: String,
 }
@@ -30,11 +22,12 @@ pub struct ServiceUnavailableEvent {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "term", name = "theme", target = "terminal")]
 pub struct TermThemeEvent {
-    pub foreground: [u8; 3],
-    pub background: [u8; 3],
-    pub cursor: [u8; 3],
-    pub ansi: [[u8; 3]; 16],
+    pub foreground: RgbColor,
+    pub background: RgbColor,
+    pub cursor: RgbColor,
+    pub ansi: AnsiPalette,
     #[serde(default)]
     pub font_family: String,
     #[serde(default)]
@@ -60,6 +53,7 @@ pub struct TermThemeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "term", name = "loading", target = "terminal")]
 pub struct TermLoadingEvent {
     pub loading: bool,
     pub label: String,
@@ -77,6 +71,7 @@ pub struct TermLoadingEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "agent", name = "prompt_draft", target = "terminal")]
 pub struct AgentPromptDraftEvent {
     pub draft: String,
     pub skipped: bool,
@@ -98,6 +93,7 @@ pub struct TermViewportEvent {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "term", name = "viewport", target = "terminal")]
 pub struct TermViewportPatch {
     pub changed_lines: Vec<(u32, TermLine)>,
     pub cursor: TermCursor,
@@ -141,6 +137,7 @@ impl TermViewportPatch {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "term", name = "scroll", target = "terminal")]
 pub struct TermScrollEvent {
     pub top_row: u32,
     pub follow: bool,
@@ -177,6 +174,7 @@ pub const MOD_SUPER: u8 = 8;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "term", name = "mouse", target = "terminal")]
 pub struct TermMouseEvent {
     pub button: u8,
     pub col: u16,
@@ -199,6 +197,7 @@ pub struct TermMouseEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "term", name = "link_open_request", target = "terminal")]
 pub struct TermLinkOpenRequest {
     pub url: String,
 }
@@ -214,6 +213,7 @@ pub struct TermLinkOpenRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::ui_event(namespace = "term", name = "resize", target = "terminal")]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,
@@ -234,6 +234,7 @@ pub struct TermResizeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[vmux_api::host_event(namespace = "term", name = "title", target = "terminal")]
 pub struct TermTitleEvent {
     pub title: String,
 }

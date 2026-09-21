@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_wire::prompt_media::ChatAttachment;
+use vmux_api::prompt_media::ChatAttachment;
 
 use crate::components::prompt_box::PromptBox;
 use crate::file_icon::FilePath;

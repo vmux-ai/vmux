@@ -2,8 +2,7 @@ use crate::explorer::{SEARCH_INPUT_ID, SidebarView};
 use crate::page::{ExplorerPane, Mode, focus_file_input};
 use dioxus::prelude::*;
 use vmux_core::event::{
-    CompletionItem, FILE_KEY_EVENT, FileCompletionCommit, FileGotoRequest, FileKey, FileLine,
-    RefItem,
+    CompletionItem, FileCompletionCommit, FileGotoRequest, FileKey, FileLine, RefItem,
 };
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::focus::FocusClaim;
@@ -36,7 +35,7 @@ impl FileKeys {
 
     fn listen(&self) {
         let keys = *self;
-        let _resolved = use_listener::<FileKey, _>(FILE_KEY_EVENT, move |key| keys.apply(key));
+        let _resolved = use_listener::<FileKey, _>(move |key| keys.apply(key));
     }
 
     fn apply(&self, key: FileKey) {

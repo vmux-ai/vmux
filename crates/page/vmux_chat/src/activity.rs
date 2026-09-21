@@ -1,9 +1,9 @@
 use crate::event::{ChatBlock, ChatItem};
 use dioxus::prelude::*;
+use vmux_api::chat::ToolName;
 use vmux_ui::file_icon::{FileIcon, FilePath, TypeIcon};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_wire::chat::ToolName;
 
 #[component]
 pub fn ActivityIconView(kind: ActivityIcon) -> Element {

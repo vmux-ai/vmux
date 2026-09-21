@@ -54,7 +54,7 @@ pub use self::provider::AgentExecutableOverride;
 pub use self::run_terminal::AgentTerminalRegions;
 pub use vmux_space::cwd::valid_cwd;
 
-pub(crate) use self::follow::on_tidy_action;
+pub(crate) use self::follow::on_tidy_request;
 pub(crate) use self::run_terminal::agent_terminal_shell;
 pub(crate) use self::workspace::{
     PendingAgentChoice, PendingAgentProject, RepositoryNeedsWorktree,

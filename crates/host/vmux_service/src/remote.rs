@@ -1,4 +1,4 @@
-pub use vmux_wire::room::{
+pub use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };

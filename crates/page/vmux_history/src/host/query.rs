@@ -3,7 +3,6 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 
 use crate::event::{
-    HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HISTORY_SUGGESTIONS_RESPONSE_EVENT,
     HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
     HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
@@ -21,13 +20,8 @@ impl Plugin for HistoryQueryPlugin {
                 HistoryDeleteRequest,
                 HistoryClearAllRequest,
                 HistoryOpenRequest,
-                HistoryChangedEvent,
-            )>::for_hosts(&["history"]),
-            BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&[
-                "command-bar",
-                "start",
-                "layout",
-            ]),
+            )>::default(),
+            BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::default(),
         ))
         .add_message::<HistoryOpenIntent>()
         .add_observer(on_history_query_request)
@@ -70,9 +64,8 @@ fn on_history_query_request(
         entries: page,
         has_more,
     };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         trigger.event().webview,
-        HISTORY_QUERY_RESPONSE_EVENT,
         &payload,
     ));
 }
@@ -195,11 +188,7 @@ fn broadcast_history_changed(
         if !browsers.can_emit_to(&e) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            e,
-            HISTORY_CHANGED_EVENT,
-            &HistoryChangedEvent,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(e, &HistoryChangedEvent));
     }
 }
 
@@ -239,9 +228,8 @@ fn on_history_suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(BinHostEmitEvent::from_event(
         trigger.event().webview,
-        HISTORY_SUGGESTIONS_RESPONSE_EVENT,
         &HistorySuggestionsResponse {
             request_id: req.request_id,
             entries,

@@ -12,9 +12,8 @@ use vmux_layout::{
 use vmux_ui::i18n::Locale;
 
 use crate::event::{
-    CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
-    SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent, SettingsListEvent,
-    SettingsSchemaEvent, UPDATE_CHECK_STATUS_EVENT, UpdateCheckStatusEvent,
+    CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_PAGE_URL,
+    SettingsListEvent, SettingsRequest, SettingsSchemaEvent, UpdateCheckStatusEvent,
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest};
@@ -28,11 +27,9 @@ impl Plugin for SettingsViewPlugin {
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
                 vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
-                BinEventEmitterPlugin::<(SettingsCommandEvent, CheckForUpdatesEvent)>::for_hosts(
-                    &["settings"],
-                ),
+                BinEventEmitterPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
             ))
-            .add_observer(on_settings_command)
+            .add_observer(on_settings_request)
             .add_observer(on_check_for_updates)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(
@@ -146,11 +143,7 @@ fn broadcast_settings_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            SETTINGS_LIST_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         commands.entity(entity).insert(SettingsListSent);
     }
     if settings.is_changed() {
@@ -158,11 +151,7 @@ fn broadcast_settings_to_views(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                SETTINGS_LIST_EVENT,
-                &payload,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         }
     }
 }
@@ -185,11 +174,7 @@ fn broadcast_schema_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            SETTINGS_SCHEMA_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         commands.entity(entity).insert(SettingsSchemaSent);
     }
     if settings.is_changed() {
@@ -197,11 +182,7 @@ fn broadcast_schema_to_views(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                SETTINGS_SCHEMA_EVENT,
-                &payload,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         }
     }
 }
@@ -227,11 +208,7 @@ fn broadcast_update_status_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            UPDATE_CHECK_STATUS_EVENT,
-            &payload,
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         commands.entity(entity).insert(UpdateCheckStatusSent);
     }
     if status.is_changed() {
@@ -239,17 +216,13 @@ fn broadcast_update_status_to_views(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                UPDATE_CHECK_STATUS_EVENT,
-                &payload,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         }
     }
 }
 
-fn on_settings_command(
-    trigger: On<BinReceive<SettingsCommandEvent>>,
+fn on_settings_request(
+    trigger: On<BinReceive<SettingsRequest>>,
     mut settings: ResMut<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {

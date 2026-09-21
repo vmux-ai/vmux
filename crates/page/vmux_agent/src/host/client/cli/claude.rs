@@ -170,7 +170,7 @@ impl ClaudeModels {
         let selected = Self::alias_of(&configured).unwrap_or_else(|| configured.clone());
         let mut models = ["fable", "opus", "sonnet"]
             .into_iter()
-            .map(|id| vmux_wire::room::ModelOptionEntry {
+            .map(|id| vmux_api::room::ModelOptionEntry {
                 id: id.to_string(),
                 name: Self::display_name(id),
                 description: String::new(),
@@ -179,7 +179,7 @@ impl ClaudeModels {
         if !selected.is_empty() && !models.iter().any(|model| model.id == selected) {
             models.insert(
                 0,
-                vmux_wire::room::ModelOptionEntry {
+                vmux_api::room::ModelOptionEntry {
                     id: selected.clone(),
                     name: selected.clone(),
                     description: String::new(),

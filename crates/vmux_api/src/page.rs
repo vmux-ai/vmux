@@ -2,14 +2,15 @@ use bevy_ecs::message::Message;
 
 #[derive(Message)]
 pub struct PageEmit {
-    pub id: &'static str,
+    pub id: String,
     pub bytes: Vec<u8>,
 }
 
 impl PageEmit {
-    pub fn encode<T>(id: &'static str, payload: &T) -> Option<Self>
+    pub fn from_event<T>(payload: &T) -> Option<Self>
     where
-        T: for<'a> rkyv::Serialize<
+        T: crate::HostEvent
+            + for<'a> rkyv::Serialize<
                 rkyv::api::high::HighSerializer<
                     rkyv::util::AlignedVec,
                     rkyv::ser::allocator::ArenaHandle<'a>,
@@ -19,7 +20,7 @@ impl PageEmit {
     {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload).ok()?;
         Some(Self {
-            id,
+            id: T::id().to_string(),
             bytes: bytes.to_vec(),
         })
     }

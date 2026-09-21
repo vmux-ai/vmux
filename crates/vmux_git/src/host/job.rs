@@ -76,18 +76,6 @@ pub enum Emit {
     Error(GitErrorEvent),
 }
 
-pub fn emit_event_name(e: &Emit) -> &'static str {
-    match e {
-        Emit::Repository(_) => GIT_REPOSITORY_EVENT,
-        Emit::BranchLog(_) => GIT_BRANCH_LOG_EVENT,
-        Emit::Status(_) => GIT_STATUS_EVENT,
-        Emit::DiffMeta(_) => GIT_DIFF_META_EVENT,
-        Emit::DiffViewport(_) => GIT_DIFF_VIEWPORT_EVENT,
-        Emit::Result(_) => GIT_RESULT_EVENT,
-        Emit::Error(_) => GIT_ERROR_EVENT,
-    }
-}
-
 fn result_then_status(
     repo_root: &std::path::Path,
     path: &std::path::Path,

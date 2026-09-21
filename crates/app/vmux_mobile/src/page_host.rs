@@ -5,30 +5,31 @@ use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
-    SelectModel, SetAgentEffort,
+    ChatApproval, ChatCancel, ChatEscape, ChatSnapshot, ChatSubmit, ModelState, SelectModel,
+    SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
 use vmux_chat::prompt::{Attach, Attachments, Browsed};
 use vmux_chat::room::{Reported, Snapshot, Submitted};
-use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
+use vmux_start::event::StartDataRequest;
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
 use crate::runtime::World;
-use vmux_ui::hooks::EventListenerError;
-use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
-use vmux_ui::platform::sleep_ms;
-use vmux_wire::command_bar::CommandBarActionEvent;
-use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
+use vmux_api::BinEvent;
+use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarRequest};
+use vmux_api::prompt_media::{
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries,
     ChatMediaListRequest,
 };
-use vmux_wire::room::{
+use vmux_api::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_wire::team::TEAM_EVENT;
+use vmux_api::team::TeamEvent;
+use vmux_ui::hooks::EventListenerError;
+use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
+use vmux_ui::platform::sleep_ms;
 
 use crate::remote::next_client_op_id;
 use crate::session::Session;
@@ -91,16 +92,16 @@ pub(crate) fn use_composer_exchange() -> ComposerExchange {
 
 impl PageHost for MobileHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-        if names::<ChatSubmit>(id) {
+        if id == ChatSubmit::id() {
             return self.submit(decode(bytes)?);
         }
-        if names::<ChatCancel>(id) || names::<ChatEscape>(id) {
+        if id == ChatCancel::id() || id == ChatEscape::id() {
             return self.cancel();
         }
-        if names::<ChatApproval>(id) {
+        if id == ChatApproval::id() {
             return self.approve(decode(bytes)?);
         }
-        if names::<SelectModel>(id) {
+        if id == SelectModel::id() {
             let payload: SelectModel = decode(bytes)?;
             return self.agent_call(move |api, sid| async move {
                 if let Err(error) = api.select_model(&sid, &payload.model_id).await {
@@ -108,7 +109,7 @@ impl PageHost for MobileHost {
                 }
             });
         }
-        if names::<SetAgentEffort>(id) {
+        if id == SetAgentEffort::id() {
             let payload: SetAgentEffort = decode(bytes)?;
             return self.agent_call(move |api, sid| async move {
                 if let Err(error) = api.set_effort(&sid, &payload.level).await {
@@ -116,64 +117,74 @@ impl PageHost for MobileHost {
                 }
             });
         }
-        if names::<ChatMediaListRequest>(id) {
+        if id == ChatMediaListRequest::id() {
             let mut request = self.composer.media_request;
             request.set(Some(decode(bytes)?));
             return Ok(());
         }
-        if names::<ChatAttachPaths>(id) {
+        if id == ChatAttachPaths::id() {
             return self.attach(decode(bytes)?);
         }
-        if names::<CommandBarActionEvent>(id) {
+        if id == CommandBarRequest::id() {
             return self.act(decode(bytes)?);
         }
-        if names::<StartDataRequest>(id) {
+        if id == StartDataRequest::id() {
             return Ok(());
         }
         Err(EventListenerError::Unsupported)
     }
 
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
-        match id {
-            CHAT_SNAPSHOT_EVENT => {
-                World::with(|world| {
-                    world.listen(CHAT_SNAPSHOT_EVENT, on_bytes);
-                    world.refresh::<Snapshot>();
-                });
-            }
-            START_COMMAND_BAR_OPEN_EVENT => {
-                World::with(|world| {
-                    world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);
-                    world.refresh::<Launcher>();
-                });
-            }
-            CHAT_ATTACHMENTS_EVENT => {
-                World::with(|world| {
-                    world.listen(CHAT_ATTACHMENTS_EVENT, on_bytes);
-                    world.refresh::<Attachments>();
-                });
-            }
-            MODEL_STATE_EVENT => {
-                self.poll_models();
-                World::with(|world| {
-                    world.listen(MODEL_STATE_EVENT, on_bytes);
-                    world.refresh::<Picker>();
-                });
-            }
-            CHAT_MEDIA_ENTRIES_EVENT => {
-                self.poll_media();
-                World::with(|world| world.listen(CHAT_MEDIA_ENTRIES_EVENT, on_bytes));
-            }
-            TEAM_EVENT => {
-                self.poll_team();
-                World::with(|world| {
-                    world.listen(TEAM_EVENT, on_bytes);
-                    world.refresh::<Team>();
-                });
-            }
-            _ => return Err(EventListenerError::Unsupported),
+        if id == ChatSnapshot::id() {
+            World::with(|world| {
+                world.listen(ChatSnapshot::id(), on_bytes);
+                world.refresh::<Snapshot>();
+            });
+            return Ok(());
         }
-        Ok(())
+        if id == CommandBarOpenEvent::id() {
+            World::with(|world| {
+                world.listen(CommandBarOpenEvent::id(), on_bytes);
+                world.refresh::<Launcher>();
+            });
+            return Ok(());
+        }
+        if id == ChatAttachments::id() {
+            World::with(|world| {
+                world.listen(ChatAttachments::id(), on_bytes);
+                world.refresh::<Attachments>();
+            });
+            return Ok(());
+        }
+        if id == ChatAttachmentPreviews::id() {
+            World::with(|world| {
+                world.listen(ChatAttachmentPreviews::id(), on_bytes);
+                world.refresh::<Attachments>();
+            });
+            return Ok(());
+        }
+        if id == ModelState::id() {
+            self.poll_models();
+            World::with(|world| {
+                world.listen(ModelState::id(), on_bytes);
+                world.refresh::<Picker>();
+            });
+            return Ok(());
+        }
+        if id == ChatMediaEntries::id() {
+            self.poll_media();
+            World::with(|world| world.listen(ChatMediaEntries::id(), on_bytes));
+            return Ok(());
+        }
+        if id == TeamEvent::id() {
+            self.poll_team();
+            World::with(|world| {
+                world.listen(TeamEvent::id(), on_bytes);
+                world.refresh::<Team>();
+            });
+            return Ok(());
+        }
+        Err(EventListenerError::Unsupported)
     }
 }
 
@@ -251,29 +262,29 @@ impl MobileHost {
         Ok(())
     }
 
-    fn act(&self, action: CommandBarActionEvent) -> Result<(), EventListenerError> {
+    fn act(&self, action: CommandBarRequest) -> Result<(), EventListenerError> {
         match action {
-            CommandBarActionEvent::Prompt {
+            CommandBarRequest::Prompt {
                 text, target_url, ..
             } => {
                 self.session
                     .start_chat(self.api.clone(), self.sessions, text, target_url);
                 Ok(())
             }
-            CommandBarActionEvent::SwitchTab { index, .. } => {
+            CommandBarRequest::SwitchTab { index, .. } => {
                 let Some(session) = self.sessions.read().get(index).cloned() else {
                     return Err(EventListenerError::Unsupported);
                 };
                 self.session.open(session);
                 Ok(())
             }
-            CommandBarActionEvent::Dismiss => Ok(()),
-            CommandBarActionEvent::Open { .. }
-            | CommandBarActionEvent::Terminal { .. }
-            | CommandBarActionEvent::Command { .. }
-            | CommandBarActionEvent::Space { .. }
-            | CommandBarActionEvent::Ex { .. }
-            | CommandBarActionEvent::Pick { .. } => Err(EventListenerError::Unsupported),
+            CommandBarRequest::Dismiss => Ok(()),
+            CommandBarRequest::Open { .. }
+            | CommandBarRequest::Terminal { .. }
+            | CommandBarRequest::Command { .. }
+            | CommandBarRequest::Space { .. }
+            | CommandBarRequest::Ex { .. }
+            | CommandBarRequest::Pick { .. } => Err(EventListenerError::Unsupported),
         }
     }
 
@@ -386,10 +397,6 @@ impl MobileHost {
             }
         });
     }
-}
-
-fn names<T: ?Sized>(id: &str) -> bool {
-    id == std::any::type_name::<T>()
 }
 
 fn decode<T>(bytes: &[u8]) -> Result<T, EventListenerError>

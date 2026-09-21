@@ -1,7 +1,7 @@
 use crate::{
-    CAPTURE_STATE_EVENT, EVENT, PAGE_URL, ShortcutBinding, ShortcutCaptureEvent,
-    ShortcutCaptureStateEvent, ShortcutCaptureToken, ShortcutEntry, ShortcutGroup, ShortcutStroke,
-    ShortcutUrl, ShortcutsEvent, set_capture_target,
+    PAGE_URL, ShortcutBinding, ShortcutCaptureEvent, ShortcutCaptureStateEvent,
+    ShortcutCaptureToken, ShortcutEntry, ShortcutGroup, ShortcutStroke, ShortcutUrl,
+    ShortcutsEvent, set_capture_target,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -26,7 +26,7 @@ impl Plugin for ShortcutPlugin {
         app.init_resource::<ShortcutCaptureTarget>()
             .add_plugins((
                 HostedPagePlugin::<Shortcuts>::default(),
-                BinEventEmitterPlugin::<(ShortcutCaptureEvent,)>::for_hosts(&["shortcuts"]),
+                BinEventEmitterPlugin::<(ShortcutCaptureEvent,)>::default(),
             ))
             .add_observer(send_shortcuts)
             .add_observer(update_shortcut_capture)
@@ -100,11 +100,7 @@ impl ShortcutCaptureTarget {
 
 impl ShortcutCaptureStateEvent {
     fn emit(commands: &mut Commands, webview: Entity, active: bool) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            CAPTURE_STATE_EVENT,
-            &Self { active },
-        ));
+        commands.trigger(BinHostEmitEvent::from_event(webview, &Self { active }));
     }
 }
 
@@ -165,7 +161,7 @@ fn send_shortcuts(
         .unwrap_or_else(Locale::preferred);
     let context = contexts.get(webview).unwrap_or(KeyContext::NONE);
     let payload = ShortcutsEvent::build(&keymap, context, &locale);
-    commands.trigger(BinHostEmitEvent::from_rkyv(webview, EVENT, &payload));
+    commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
 }
 
 fn update_shortcut_capture(

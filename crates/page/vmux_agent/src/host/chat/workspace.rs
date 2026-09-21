@@ -4,8 +4,8 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use super::AgentChatView;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
-    CHAT_PROJECT_BRANCHES_EVENT, COMPOSER_CONTEXT_EVENT, ChatBranch, ChatBranchesRequest,
-    ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace, ComposerContext,
+    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace,
+    ComposerContext,
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
 use vmux_session::AcpSession;
@@ -19,7 +19,7 @@ impl Plugin for ChatWorkspacePlugin {
             ChatSelectWorkspace,
             ChatBranchesRequest,
             ChatGoToBranch,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
+        )>::default())
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_branches_request)
             .add_observer(on_chat_go_to_branch)
@@ -95,11 +95,7 @@ fn push_composer_context_to_page(
             .get(&webview)
             .is_none_or(|entry| entry.input != input || entry.context != context);
         if changed || ready.is_changed() {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                webview,
-                COMPOSER_CONTEXT_EVENT,
-                &context,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(webview, &context));
         }
         cache
             .entries
@@ -252,9 +248,8 @@ fn drain_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(BinHostEmitEvent::from_event(
             read.webview,
-            CHAT_PROJECT_BRANCHES_EVENT,
             &ChatProjectBranches {
                 project: read.project.clone(),
                 branches,

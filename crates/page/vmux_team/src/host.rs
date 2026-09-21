@@ -5,9 +5,7 @@ use bevy_ecs::system::SystemParam;
 use vmux_agent::AgentRunState;
 use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
 use vmux_core::agent::SessionId;
-use vmux_core::event::team::{
-    ProfileRow, TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
-};
+use vmux_core::event::team::{ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_core::page::PageReady;
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
@@ -30,10 +28,8 @@ impl Plugin for TeamPlugin {
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(Update, answer_list_team)
             .add_plugins(HostedPagePlugin::<Team>::default())
-            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
-                "team", "layout", "spaces",
-            ]))
-            .add_observer(on_team_command)
+            .add_plugins(BinEventEmitterPlugin::<(TeamRequest,)>::default())
+            .add_observer(on_team_request)
             .add_observer(reset_team_sent_on_page_ready);
     }
 }
@@ -381,7 +377,7 @@ fn emit_team(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         commands.entity(entity).insert(TeamListSent);
         last.insert(entity, payload);
     }
@@ -416,8 +412,8 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
     Entity::try_from_bits(bits)
 }
 
-fn on_team_command(
-    trigger: On<BinReceive<TeamCommandEvent>>,
+fn on_team_request(
+    trigger: On<BinReceive<TeamRequest>>,
     mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
     mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
     user: Query<Entity, With<User>>,
@@ -650,7 +646,7 @@ mod tests {
         app.add_message::<AppCommand>()
             .add_message::<vmux_command::CommandIssued>()
             .add_message::<ProfileSwitchRequested>()
-            .add_observer(on_team_command);
+            .add_observer(on_team_request);
         app
     }
 
@@ -671,9 +667,9 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TeamRequest> {
             webview: Entity::PLACEHOLDER,
-            payload: TeamCommandEvent {
+            payload: TeamRequest {
                 command: "focus".to_string(),
                 member_id: Some(stack.to_bits().to_string()),
                 profile_id: None,
@@ -693,9 +689,9 @@ mod tests {
         app.insert_resource(ActiveSpaceEntity(Some(space)));
         let team = spawn_team_stack(app.world_mut(), space);
 
-        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TeamRequest> {
             webview: Entity::PLACEHOLDER,
-            payload: TeamCommandEvent {
+            payload: TeamRequest {
                 command: "open".to_string(),
                 member_id: None,
                 profile_id: None,

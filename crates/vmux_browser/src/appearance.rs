@@ -6,7 +6,6 @@ use vmux_layout::LayoutCef;
 
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
-use vmux_ui::theme::THEME_EVENT;
 
 use crate::{browser_accept_language_list, theme_event};
 pub(crate) struct AppearancePlugin;
@@ -51,7 +50,7 @@ fn on_webview_ready_send_theme(
     let entity = trigger.event().webview;
     if browsers.can_emit_to(&entity) {
         let payload = theme_event(&settings);
-        commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
+        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
     }
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
@@ -99,7 +98,7 @@ pub(crate) fn sync_appearance_to_cef(
     let payload = theme_event(&settings);
     for entity in &ready {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
         }
     }
 }

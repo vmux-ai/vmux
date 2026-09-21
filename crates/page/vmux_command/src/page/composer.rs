@@ -3,6 +3,9 @@ use crate::event::{
 };
 use crate::page::signals::PaletteSignals;
 use dioxus::prelude::*;
+use vmux_api::chat::PromptHistoryRequest;
+use vmux_api::room::ModelOptionEntry;
+use vmux_api::space::ProjectBranch;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
     AgentMenuData, BranchMenuData, ComposerChip, ComposerMenu, ComposerMenuKind, ModelMenuData,
@@ -13,9 +16,6 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::launcher::palette::ComposerState;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, move_prompt_history};
-use vmux_wire::chat::PromptHistoryRequest;
-use vmux_wire::room::ModelOptionEntry;
-use vmux_wire::space::ProjectBranch;
 
 pub struct ComposerChips {
     pub agent: ComposerChip,
@@ -273,7 +273,7 @@ impl ComposerMenuSet {
         let permission = PermissionMenuData {
             modes: composer.permission_modes.clone(),
             current_mode_id: composer.permission_current_id.clone(),
-            on_select: EventHandler::new(move |mode: vmux_wire::protocol::AcpModeOption| {
+            on_select: EventHandler::new(move |mode: vmux_api::protocol::AcpModeOption| {
                 let _ = send(&StartSelectMode {
                     agent_key: permission_agent_key.clone(),
                     mode_id: mode.id,
@@ -369,7 +369,7 @@ impl ComposerMenuSet {
         true
     }
 
-    fn roots(&self) -> Vec<&vmux_wire::space::ProjectRow> {
+    fn roots(&self) -> Vec<&vmux_api::space::ProjectRow> {
         let mut roots = Vec::new();
         for project in &self.project.projects {
             if project.depth == 0 {

@@ -37,7 +37,7 @@ impl Plugin for ProcessesMonitorPlugin {
                 ProcessNavigateEvent,
                 ProcessKillEvent,
                 ProcessKillAllEvent,
-            )>::for_hosts(&["services"]))
+            )>::default())
             .add_systems(
                 Update,
                 (
@@ -333,11 +333,7 @@ fn broadcast_to_monitors(
 
     for entity in &monitors {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                PROCESSES_LIST_EVENT,
-                &event,
-            ));
+            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
         }
     }
 }

@@ -519,7 +519,7 @@ fn sync_simulator_shortcuts(
         .and_then(|children| {
             children.iter().find(|entity| {
                 pages.get(*entity).is_ok_and(|metadata| {
-                    vmux_simulator::url::SimulatorRoute::of_url(&metadata.url).is_some()
+                    vmux_simulator::url::SimulatorRoute::try_from(metadata.url.as_str()).is_ok()
                 })
             })
         });
@@ -587,11 +587,7 @@ fn process_monitored_keys(
             if capture.token != token {
                 continue;
             }
-            ecs.trigger(BinHostEmitEvent::from_rkyv(
-                token.target,
-                vmux_shortcut::PRESSED_EVENT,
-                &capture.event,
-            ));
+            ecs.trigger(BinHostEmitEvent::from_event(token.target, &capture.event));
         }
     }
     if let Some(simulator_buttons) = simulator_buttons.as_mut() {

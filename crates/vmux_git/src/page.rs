@@ -5,10 +5,9 @@ use std::path::Path;
 
 use dioxus::prelude::*;
 use vmux_core::event::FileDirEntry;
-use vmux_core::event::space::ProjectCommandEvent;
+use vmux_core::event::space::ProjectRequest;
 use vmux_core::event::{
-    PAGE_CONTEXT_EVENT, PageContextEvent, PageContextRequest, TAB_WORKSPACE_EVENT,
-    TabWorkspaceEvent, TabWorkspaceRequest,
+    PageContextEvent, PageContextRequest, TabWorkspaceEvent, TabWorkspaceRequest,
 };
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -71,7 +70,7 @@ pub fn Page() -> Element {
     let mut nonce = use_signal(|| 0u32);
     let markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
 
-    let _context = use_listener::<PageContextEvent, _>(PAGE_CONTEXT_EVENT, move |context| {
+    let _context = use_listener::<PageContextEvent, _>(move |context| {
         let path = crate::GitUrl::parse(&context.page_url)
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or(context.working_directory);
@@ -101,7 +100,7 @@ pub fn Page() -> Element {
         branch_log.set(None);
         GitWorkspace::browse(&path, false);
     });
-    let _repository = use_listener::<GitRepositoryEvent, _>(GIT_REPOSITORY_EVENT, move |event| {
+    let _repository = use_listener::<GitRepositoryEvent, _>(move |event| {
         if event.path != workspace() && event.repo_root != workspace() {
             return;
         }
@@ -148,7 +147,7 @@ pub fn Page() -> Element {
         loading.set(false);
         message.set(String::new());
     });
-    let _directory = use_listener::<GitDirectoryEvent, _>(GIT_DIRECTORY_EVENT, move |event| {
+    let _directory = use_listener::<GitDirectoryEvent, _>(move |event| {
         if event.preview {
             if event.path == directory_preview_path() {
                 directory_children.set(Some(event.entries));
@@ -182,20 +181,19 @@ pub fn Page() -> Element {
         loading.set(false);
         message.set(String::new());
     });
-    let _branch_log = use_listener::<GitBranchLogEvent, _>(GIT_BRANCH_LOG_EVENT, move |event| {
+    let _branch_log = use_listener::<GitBranchLogEvent, _>(move |event| {
         if event.repo_root == workspace() && event.branch == selected_branch() {
             branch_log.set(Some(event));
         }
     });
-    let _repository_picked =
-        use_listener::<GitRepositoryPickedEvent, _>(GIT_REPOSITORY_PICKED_EVENT, move |event| {
-            if event.path.is_empty() {
-                return;
-            }
-            loading.set(true);
-            GitWorkspace::browse(&event.path, false);
-        });
-    let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |result| {
+    let _repository_picked = use_listener::<GitRepositoryPickedEvent, _>(move |event| {
+        if event.path.is_empty() {
+            return;
+        }
+        loading.set(true);
+        GitWorkspace::browse(&event.path, false);
+    });
+    let _result = use_listener::<GitResultEvent, _>(move |result| {
         {
             let mut entries = command_log.write();
             GitCommandLogEntry::from_result(&result).append(&mut entries);
@@ -224,7 +222,7 @@ pub fn Page() -> Element {
         nonce.set(nonce().wrapping_add(1));
         GitWorkspace::request(&workspace());
     });
-    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
+    let _error = use_listener::<GitErrorEvent, _>(move |event| {
         {
             let mut entries = command_log.write();
             GitCommandLogEntry::error(&event.message).append(&mut entries);
@@ -233,11 +231,11 @@ pub fn Page() -> Element {
         fetching.set(false);
         message.set(event.message);
     });
-    let _changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
+    let _changed = use_listener::<GitChangedEvent, _>(move |_| {
         nonce.set(nonce().wrapping_add(1));
         GitWorkspace::request(&workspace());
     });
-    let _workspace = use_listener::<TabWorkspaceEvent, _>(TAB_WORKSPACE_EVENT, move |event| {
+    let _workspace = use_listener::<TabWorkspaceEvent, _>(move |event| {
         if !event.error.is_empty() {
             GitCommandLogEntry::error(&event.error).append(&mut command_log.write());
             message.set(event.error);
@@ -623,7 +621,7 @@ impl GitWorkspace {
     }
 
     fn activate(path: &str) {
-        let _ = send(&ProjectCommandEvent {
+        let _ = send(&ProjectRequest {
             command: "activate".to_string(),
             path: Some(path.to_string()),
         });
@@ -636,7 +634,7 @@ impl GitWorkspace {
     }
 
     fn select_branch(repo_root: &str, branch: &GitBranchEntry) {
-        let _ = send(&ProjectCommandEvent {
+        let _ = send(&ProjectRequest {
             command: "activate".to_string(),
             path: Some(repo_root.to_string()),
         });
@@ -649,7 +647,7 @@ impl GitWorkspace {
     }
 
     fn select_branch_name(repo_root: &str, branch: &str) {
-        let _ = send(&ProjectCommandEvent {
+        let _ = send(&ProjectRequest {
             command: "activate".to_string(),
             path: Some(repo_root.to_string()),
         });

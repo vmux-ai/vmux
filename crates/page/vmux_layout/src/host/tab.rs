@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::event::TabDropPlacement;
-use crate::event::TabsCommandEvent;
+use crate::event::TabsRequest;
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
     host::swap::{find_kind_index, move_sibling, resolve_next, resolve_prev, swap_siblings},
@@ -32,10 +32,8 @@ impl Plugin for TabPlugin {
             .init_resource::<crate::window::FocusedWindow>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
-                "layout",
-            ]))
-            .add_observer(on_tabs_command_emit)
+            .add_plugins(BinEventEmitterPlugin::<(TabsRequest,)>::default())
+            .add_observer(on_tabs_request)
             .add_systems(
                 Update,
                 handle_tab_commands
@@ -430,8 +428,8 @@ fn sync_tab_order(
     }
 }
 
-fn on_tabs_command_emit(
-    trigger: On<BinReceive<TabsCommandEvent>>,
+fn on_tabs_request(
+    trigger: On<BinReceive<TabsRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
@@ -1099,9 +1097,9 @@ mod tests {
             .id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsCommandEvent {
+            payload: TabsRequest {
                 command: "close".to_string(),
                 tab_id: Some(tab.to_bits().to_string()),
                 target_tab_id: None,
@@ -1124,9 +1122,9 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsCommandEvent {
+            payload: TabsRequest {
                 command: "close".to_string(),
                 tab_id: None,
                 target_tab_id: None,
@@ -1159,9 +1157,9 @@ mod tests {
             .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsCommandEvent {
+            payload: TabsRequest {
                 command: "reorder".to_string(),
                 tab_id: Some(first.to_bits().to_string()),
                 target_tab_id: Some(third.to_bits().to_string()),
@@ -1257,7 +1255,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .init_resource::<LastTabCloseAt>()
             .add_systems(Update, crate::archive::handle_close_tab_requests)
-            .add_observer(on_tabs_command_emit);
+            .add_observer(on_tabs_request);
 
         let webview = app.world_mut().spawn_empty().id();
         let window = app.world_mut().spawn(PrimaryWindow).id();
@@ -1285,9 +1283,9 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+        app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsCommandEvent {
+            payload: TabsRequest {
                 command: "close".to_string(),
                 tab_id: Some(d.to_bits().to_string()),
                 target_tab_id: None,

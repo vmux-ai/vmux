@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use bevy::prelude::*;
 
 use crate::terminal::TerminalKind;
-pub use vmux_wire::agent::AgentKind;
+pub use vmux_api::agent::AgentKind;
 
 pub fn effort_levels(agent_key: &str) -> &'static [&'static str] {
     match agent_key {
@@ -63,7 +63,7 @@ pub struct SpawnAgentInStackRequest {
     pub session_id: Option<String>,
     pub stack: Entity,
     pub initial_prompt: Option<String>,
-    pub initial_attachments: Vec<vmux_wire::protocol::AgentAttachment>,
+    pub initial_attachments: Vec<vmux_api::protocol::AgentAttachment>,
 }
 
 #[derive(Debug, Clone)]
