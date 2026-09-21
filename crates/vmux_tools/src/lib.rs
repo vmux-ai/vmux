@@ -197,7 +197,7 @@ impl DotfilePlan {
 }
 
 pub fn root_dir() -> PathBuf {
-    super::config_dir().join("tools")
+    vmux_profile::config_dir().join("tools")
 }
 
 pub fn manifest_path() -> PathBuf {
@@ -213,7 +213,7 @@ pub fn dotfiles_dir() -> PathBuf {
 }
 
 fn migrate_legacy_storage() -> Result<(), String> {
-    migrate_legacy_storage_in(&super::config_dir())
+    migrate_legacy_storage_in(&vmux_profile::config_dir())
 }
 
 fn migrate_legacy_storage_in(config_dir: &Path) -> Result<(), String> {

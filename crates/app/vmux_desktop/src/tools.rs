@@ -13,7 +13,6 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady};
-use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
@@ -25,6 +24,7 @@ use vmux_core::vault::{
     VaultActionResult, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultSnapshot,
 };
 use vmux_layout::LayoutCef;
+use vmux_tools::{self as manifest_store, ToolsManifest};
 
 pub struct ToolsPlugin;
 

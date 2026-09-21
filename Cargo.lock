@@ -10190,6 +10190,7 @@ dependencies = [
  "vmux_space",
  "vmux_start",
  "vmux_terminal",
+ "vmux_tools",
  "vmux_ui",
  "vmux_wire",
 ]
@@ -10280,7 +10281,7 @@ dependencies = [
  "tokio",
  "vmux_client",
  "vmux_mcp",
- "vmux_profile",
+ "vmux_tools",
 ]
 
 [[package]]
@@ -10435,6 +10436,7 @@ dependencies = [
  "vmux_start",
  "vmux_team",
  "vmux_terminal",
+ "vmux_tools",
  "vmux_ui",
  "vmux_wire",
 ]
@@ -10926,6 +10928,17 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_tools"
+version = "0.0.34"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "vmux_profile",
 ]
 
 [[package]]
