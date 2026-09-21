@@ -492,6 +492,7 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
+            update_channel: Default::default(),
             agent: AgentSettings::default(),
             spaces: Default::default(),
             projects: Default::default(),

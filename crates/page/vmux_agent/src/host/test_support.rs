@@ -45,6 +45,7 @@ pub(crate) fn test_settings() -> AppSettings {
         shortcuts: ShortcutSettings::default(),
         terminal: None,
         auto_update: false,
+        update_channel: Default::default(),
         agent: vmux_setting::AgentSettings::default(),
         spaces: Default::default(),
         projects: Default::default(),

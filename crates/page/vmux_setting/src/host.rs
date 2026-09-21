@@ -12,7 +12,7 @@ pub use runtime::{
     ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH,
     KeyComboDef, SettingsLoadSet, SettingsRuntimePlugin, SettingsSaveRequest, SettingsWriteRequest,
     ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
-    TerminalSettings, TerminalTheme,
+    TerminalSettings, TerminalTheme, UpdateChannel,
 };
 pub use view::Settings;
 pub use vmux_command::event::SearchEngine;

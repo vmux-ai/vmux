@@ -1,0 +1,190 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAILWINDCSS_VERSION: "4.2.4"
+  DIOXUS_CLI_VERSION: "0.7.9"
+  BINARYEN_VERSION: "127"
+  DX_HOME: ${{ github.workspace }}/.dx
+
+jobs:
+  publish:
+    name: Publish Preview Build
+    runs-on: macos-latest
+    env:
+      VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve CEF version
+        id: cef
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^name = "cef"$/{getline; print $2; exit}' Cargo.lock)
+          if [ -z "${version:-}" ]; then
+            echo "::error file=Cargo.lock::could not resolve 'cef' crate version"
+            exit 1
+          fi
+          echo "CEF_VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set preview version
+        run: |
+          set -euo pipefail
+          base=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          date=$(date -u +%Y%m%d)
+          version=$(./scripts/nightly-version.sh "$base" "$date" "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT")
+          sed -i '' "0,/^version = \".*\"/s//version = \"${version}\"/" Cargo.toml
+          echo "NIGHTLY_DATE=$date" >> "$GITHUB_ENV"
+          echo "NIGHTLY_VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-mac
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.9-cef${{ steps.cef.outputs.version }}-v3
+
+      - name: Cache binaryen
+        uses: actions/cache@v5
+        with:
+          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
+      - name: Cache CEF framework
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/Chromium Embedded Framework.framework
+          key: cef-${{ runner.os }}-${{ steps.cef.outputs.version }}
+
+      - name: Cache tailwindcss
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add local binaries to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
+            command -v export-cef-dir >/dev/null 2>&1 || cargo install "export-cef-dir@${CEF_VERSION}"
+            export-cef-dir --force "$HOME/.local/share"
+          fi
+          ./scripts/install-dioxus-cli.sh
+          ./scripts/install-dioxus-binaryen.sh
+          command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
+          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.9'; then
+            cargo install --path patches/cargo-packager-0.11.8 --locked --force
+          fi
+          TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+
+      - name: Build, sign, notarize, and package
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+        run: ./scripts/build-mac-release.sh
+
+      - name: Create preview assets
+        env:
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          app_asset="target/release/Vmux-nightly-aarch64-apple-darwin.app.tar.gz"
+          dmg_asset="target/release/Vmux-nightly-aarch64.dmg"
+          tar -C target/release -czf "$app_asset" Vmux.app
+          cargo packager signer sign "$app_asset" \
+            --private-key "$VMUX_UPDATE_PRIVATE_KEY" \
+            --password "$VMUX_UPDATE_PRIVATE_KEY_PASSWORD"
+          mv "target/release/Vmux_${NIGHTLY_VERSION}_aarch64.dmg" "$dmg_asset"
+
+      - name: Create preview update manifest
+        run: |
+          set -euo pipefail
+          app_name="Vmux-nightly-aarch64-apple-darwin.app.tar.gz"
+          dmg_name="Vmux-nightly-aarch64.dmg"
+          signature=$(<"target/release/${app_name}.sig")
+          published=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n \
+            --arg version "v${NIGHTLY_VERSION}" \
+            --arg pub_date "$published" \
+            --arg app_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/${app_name}" \
+            --arg signature "$signature" \
+            --arg dmg_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/${dmg_name}" \
+            --arg dmg_name "$dmg_name" \
+            '{
+              version: $version,
+              pub_date: $pub_date,
+              platforms: {
+                "macos-aarch64": {
+                  url: $app_url,
+                  signature: $signature,
+                  format: "app"
+                }
+              },
+              downloads: {
+                "macos-aarch64": {
+                  url: $dmg_url,
+                  filename: $dmg_name
+                }
+              }
+            }' > target/release/updates-preview.json
+
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=nightly
+          assets=(
+            target/release/Vmux-nightly-aarch64.dmg
+            target/release/Vmux-nightly-aarch64-apple-darwin.app.tar.gz
+            target/release/Vmux-nightly-aarch64-apple-darwin.app.tar.gz.sig
+            target/release/updates-preview.json
+          )
+          title="Vmux Preview v${NIGHTLY_VERSION}"
+          notes="Automated preview build from ${GITHUB_SHA} on ${NIGHTLY_DATE}."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+              -f sha="$GITHUB_SHA" -F force=true
+            gh release upload "$tag" "${assets[@]}" --clobber
+            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease
+          else
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "$notes" \
+              --prerelease \
+              "${assets[@]}"
+          fi

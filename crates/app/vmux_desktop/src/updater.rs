@@ -4,14 +4,15 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use vmux_setting::{
-    AppSettings,
+    AppSettings, UpdateChannel,
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
 };
 
 impl Plugin for UpdatePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(UpdateConfig {
-            endpoint: self.updater.endpoint.clone(),
+            stable_endpoint: self.updater.stable_endpoint.clone(),
+            preview_endpoint: self.updater.preview_endpoint.clone(),
             pubkey: self.updater.pubkey.clone(),
             initial_delay: self.updater.initial_delay,
             poll_interval: self.updater.poll_interval,
@@ -21,7 +22,9 @@ impl Plugin for UpdatePlugin {
     }
 }
 
-const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
+const DEFAULT_STABLE_ENDPOINT: &str = "https://vmux.ai/updates.json";
+const DEFAULT_PREVIEW_ENDPOINT: &str =
+    "https://github.com/vmux-ai/vmux/releases/download/nightly/updates-preview.json";
 
 fn default_pubkey() -> String {
     default_pubkey_from_env(
@@ -38,7 +41,8 @@ fn default_pubkey_from_env(runtime: Option<String>, build_time: Option<&'static 
 
 #[derive(Clone, Debug)]
 pub struct VmuxUpdater {
-    endpoint: String,
+    stable_endpoint: String,
+    preview_endpoint: String,
     pubkey: String,
     initial_delay: Duration,
     poll_interval: Duration,
@@ -56,7 +60,8 @@ impl VmuxUpdater {
 
 #[derive(Clone, Debug)]
 pub struct VmuxUpdaterBuilder {
-    endpoint: String,
+    stable_endpoint: String,
+    preview_endpoint: String,
     pubkey: String,
     initial_delay: Duration,
     poll_interval: Duration,
@@ -65,7 +70,8 @@ pub struct VmuxUpdaterBuilder {
 impl Default for VmuxUpdaterBuilder {
     fn default() -> Self {
         Self {
-            endpoint: DEFAULT_ENDPOINT.to_string(),
+            stable_endpoint: DEFAULT_STABLE_ENDPOINT.to_string(),
+            preview_endpoint: DEFAULT_PREVIEW_ENDPOINT.to_string(),
             pubkey: default_pubkey(),
             initial_delay: Duration::from_secs(5),
             poll_interval: Duration::from_secs(3600),
@@ -75,7 +81,12 @@ impl Default for VmuxUpdaterBuilder {
 
 impl VmuxUpdaterBuilder {
     pub fn endpoint(mut self, url: &str) -> Self {
-        self.endpoint = url.to_string();
+        self.stable_endpoint = url.to_string();
+        self
+    }
+
+    pub fn preview_endpoint(mut self, url: &str) -> Self {
+        self.preview_endpoint = url.to_string();
         self
     }
 
@@ -96,7 +107,8 @@ impl VmuxUpdaterBuilder {
 
     pub fn build(self) -> VmuxUpdater {
         VmuxUpdater {
-            endpoint: self.endpoint,
+            stable_endpoint: self.stable_endpoint,
+            preview_endpoint: self.preview_endpoint,
             pubkey: self.pubkey,
             initial_delay: self.initial_delay,
             poll_interval: self.poll_interval,
@@ -110,10 +122,20 @@ pub struct UpdatePlugin {
 
 #[derive(Resource)]
 struct UpdateConfig {
-    endpoint: String,
+    stable_endpoint: String,
+    preview_endpoint: String,
     pubkey: String,
     initial_delay: Duration,
     poll_interval: Duration,
+}
+
+impl UpdateConfig {
+    fn endpoint(&self, channel: UpdateChannel) -> &str {
+        match channel {
+            UpdateChannel::Stable => &self.stable_endpoint,
+            UpdateChannel::Preview => &self.preview_endpoint,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -123,6 +145,7 @@ struct UpdateChecker {
     timer: Timer,
     done: bool,
     in_flight: bool,
+    channel: Option<UpdateChannel>,
 }
 
 enum UpdateResult {
@@ -150,6 +173,7 @@ fn init_update_checker(mut commands: Commands, config: Res<UpdateConfig>) {
         timer: Timer::from_seconds(config.initial_delay.as_secs_f32(), TimerMode::Once),
         done: false,
         in_flight: false,
+        channel: None,
     });
 }
 
@@ -222,6 +246,16 @@ fn poll_update_result(
         }
     }
 
+    let channel_changed = checker
+        .channel
+        .is_some_and(|channel| channel != settings.update_channel);
+    if channel_changed {
+        checker.done = false;
+    }
+    if checker.channel.is_none() {
+        checker.channel = Some(settings.update_channel);
+    }
+
     if checker.done {
         return;
     }
@@ -237,7 +271,12 @@ fn poll_update_result(
         false
     };
 
-    if !should_start_update_check(manual_requested, settings.auto_update, automatic_due) {
+    if !should_start_update_check(
+        manual_requested,
+        settings.auto_update,
+        automatic_due,
+        channel_changed,
+    ) {
         return;
     }
 
@@ -246,10 +285,11 @@ fn poll_update_result(
     checker.timer.reset();
 
     let tx = checker.tx.clone();
-    let endpoint = config.endpoint.clone();
+    let endpoint = config.endpoint(settings.update_channel).to_string();
     let pubkey = config.pubkey.clone();
     let wake = make_wake(proxy.as_deref());
     checker.in_flight = true;
+    checker.channel = Some(settings.update_channel);
     status.0 = UpdateCheckStatus::Checking;
 
     std::thread::spawn(move || {
@@ -261,8 +301,9 @@ fn should_start_update_check(
     manual_requested: bool,
     auto_update: bool,
     automatic_due: bool,
+    channel_changed: bool,
 ) -> bool {
-    manual_requested || (auto_update && automatic_due)
+    manual_requested || channel_changed || (auto_update && automatic_due)
 }
 
 fn make_wake(proxy: Option<&EventLoopProxyWrapper>) -> Box<dyn Fn() + Send> {
@@ -392,8 +433,24 @@ mod tests {
     }
 
     #[test]
-    fn default_endpoint_is_vmux_ai_updates_json() {
-        assert_eq!(DEFAULT_ENDPOINT, "https://vmux.ai/updates.json");
+    fn default_endpoints_match_release_channels() {
+        let updater = VmuxUpdaterBuilder::default().build();
+        let config = UpdateConfig {
+            stable_endpoint: updater.stable_endpoint,
+            preview_endpoint: updater.preview_endpoint,
+            pubkey: updater.pubkey,
+            initial_delay: updater.initial_delay,
+            poll_interval: updater.poll_interval,
+        };
+
+        assert_eq!(
+            config.endpoint(UpdateChannel::Stable),
+            "https://vmux.ai/updates.json"
+        );
+        assert_eq!(
+            config.endpoint(UpdateChannel::Preview),
+            "https://github.com/vmux-ai/vmux/releases/download/nightly/updates-preview.json"
+        );
     }
 
     #[test]
@@ -406,14 +463,19 @@ mod tests {
 
     #[test]
     fn manual_update_check_bypasses_auto_update_setting() {
-        assert!(should_start_update_check(true, false, false));
+        assert!(should_start_update_check(true, false, false, false));
     }
 
     #[test]
     fn automatic_update_check_requires_enabled_setting_and_due_timer() {
-        assert!(should_start_update_check(false, true, true));
-        assert!(!should_start_update_check(false, false, true));
-        assert!(!should_start_update_check(false, true, false));
+        assert!(should_start_update_check(false, true, true, false));
+        assert!(!should_start_update_check(false, false, true, false));
+        assert!(!should_start_update_check(false, true, false, false));
+    }
+
+    #[test]
+    fn changing_release_channel_checks_immediately() {
+        assert!(should_start_update_check(false, false, false, true));
     }
 
     #[test]
