@@ -10943,7 +10943,6 @@ dependencies = [
  "dioxus",
  "libc",
  "portable-pty",
- "rfd 0.15.4",
  "rkyv",
  "serde",
  "sysinfo",

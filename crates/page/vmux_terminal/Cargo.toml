@@ -26,7 +26,6 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 portable-pty = { workspace = true }
-rfd = { workspace = true }
 sysinfo = "0.38"
 tracing = "0.1"
 url = { workspace = true }
