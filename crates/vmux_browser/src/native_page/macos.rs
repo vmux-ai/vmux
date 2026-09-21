@@ -170,7 +170,7 @@ fn open_native_pages(world: &mut World) {
             None => vmux_native::Instance::default(),
         };
         if current.is_some_and(|(current, window)| {
-            current.transparent == page.transparent && window == window_entity
+            current.is_transparent() == page.is_transparent() && window == window_entity
         }) {
             let remounted = {
                 let mut hosted = world.non_send_mut::<HostedPages>();
@@ -185,7 +185,7 @@ fn open_native_pages(world: &mut World) {
                     .entity_mut(entity)
                     .remove::<vmux_core::page::PageReady>();
             }
-            info!("native_page: navigated {entity:?} to {}", page.url);
+            info!("native_page: navigated {entity:?} to {}", page.url());
             continue;
         }
         if current.is_some() {
@@ -202,7 +202,7 @@ fn open_native_pages(world: &mut World) {
                 page,
                 &**window,
                 bounds,
-                embedder.embed(entity, page.url),
+                embedder.embed(entity, page.url()),
                 instance,
             ))
         });
@@ -222,7 +222,7 @@ fn open_native_pages(world: &mut World) {
                     .set_externally_hosted(entity);
                 info!(
                     "native_page: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
-                    page.url
+                    page.url()
                 );
                 world.non_send_mut::<HostedPages>().0.insert(
                     entity,
@@ -237,7 +237,7 @@ fn open_native_pages(world: &mut World) {
             Some(Err(error)) => {
                 error!(
                     "native_page: build_as_child failed for {}: {error}",
-                    page.url
+                    page.url()
                 )
             }
         }
@@ -395,7 +395,7 @@ impl Placement {
                 >();
                 for (entity, meta, terminal) in pages.iter(world) {
                     let url = if terminal {
-                        super::TERMINAL_PAGE.url
+                        super::TERMINAL_PAGE.url()
                     } else {
                         &meta.url
                     };
@@ -480,6 +480,7 @@ impl PageEmbedder {
                 simulator_frames: SimulatorFrameProxy::default(),
             }),
             waker: Rc::new(self.waker.clone()),
+            layer: None,
         }
     }
 }

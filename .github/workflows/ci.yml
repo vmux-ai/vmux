@@ -99,7 +99,7 @@ jobs:
         id: pkgs
         run: |
           ARGS=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | "-p " + .name' \
+            | jq -r '.packages[] | select(.manifest_path | test("patches|crates/app/vmux_mobile|/examples/") | not) | "-p " + .name' \
             | tr '\n' ' ')
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
@@ -173,8 +173,16 @@ jobs:
       - name: Install CEF framework
         run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
 
+      - name: Compute workspace packages (excluding patches)
+        id: pkgs
+        run: |
+          ARGS=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.manifest_path | test("patches|crates/app/vmux_mobile|/examples/") | not) | "-p " + .name' \
+            | tr '\n' ' ')
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
       - name: Run tests
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test ${{ steps.pkgs.outputs.args }}
 
       - name: Test lean desktop features
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
@@ -351,8 +359,15 @@ jobs:
       - name: Build the phone app
         run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
 
+      # Building does not compile the crate's `cfg(test)` half, and the same `required-features`
+      # that makes a bare build vacuous makes a bare `cargo test` skip the bin outright. Three
+      # `Credentials` initializers rotted a field behind exactly that gap. These tests are portable
+      # logic, so they run on the host rather than needing a simulator.
       - name: Test the phone app
-        run: cargo test --locked -p vmux_mobile --features mobile --bin vmux_mobile
+        run: cargo test --locked -p vmux_mobile --features mobile --lib --bins
+
+      - name: Build the phone example
+        run: cargo build --locked -p vmux_mobile_navigation_example
 
       - name: Check the pages that ship on the phone
         run: |

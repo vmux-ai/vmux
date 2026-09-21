@@ -1,11 +1,29 @@
 mod expand;
 mod named_fields;
+mod route;
+mod screen;
 mod string_id;
 mod variant_names;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
+use syn::{Attribute, Data, DeriveInput, Fields, ItemFn, LitStr, parse_macro_input};
+
+#[proc_macro_derive(Route, attributes(route, blank))]
+pub fn derive_route(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match route::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn screen(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as screen::Args);
+    let component = parse_macro_input!(input as ItemFn);
+    screen::expand(args, component).into()
+}
 
 #[proc_macro_attribute]
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {

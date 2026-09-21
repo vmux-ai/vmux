@@ -297,6 +297,7 @@ layout-unpin-page = Odepnij tę stronę
 layout-manage-extensions = Zarządzaj rozszerzeniami
 layout-new-stack = Nowy stos
 layout-close-tab = Zamknij kartę
+layout-close-other-tabs = Zamknij pozostałe karty
 layout-bookmark = Zakładka
 layout-pin = Przypnij
 layout-unpin = Odepnij

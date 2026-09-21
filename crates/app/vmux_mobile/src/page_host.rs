@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use dioxus::core::ReactiveContext;
@@ -50,6 +50,11 @@ pub(crate) struct MobileHost {
 
 thread_local! {
     static EPOCH: Cell<u64> = const { Cell::new(0) };
+    static INSTALLED: RefCell<Option<Rc<MobileHost>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn installed() -> Option<Rc<MobileHost>> {
+    INSTALLED.with_borrow(Clone::clone)
 }
 
 pub(crate) fn install(
@@ -63,13 +68,15 @@ pub(crate) fn install(
         epoch.set(next);
         next
     });
-    install_host(Rc::new(MobileHost {
+    let host = Rc::new(MobileHost {
         epoch,
         api,
         sessions,
         session,
         composer,
-    }));
+    });
+    INSTALLED.with_borrow_mut(|slot| *slot = Some(host.clone()));
+    install_host(host);
 }
 
 fn superseded(epoch: u64) -> bool {

@@ -1,7 +1,6 @@
 use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
 use crate::runtime::World;
 use crate::take_resumed;
-use crate::transition;
 use dioxus::prelude::*;
 use std::time::Duration;
 use vmux_chat::room::{Conversation, LiveTurn, Log, Reported};
@@ -42,7 +41,6 @@ impl Session {
     }
 
     pub(crate) fn open(&self, session: RemoteSession) {
-        transition::NativeSheet::open();
         let mut handle = *self;
         handle.current.set(Some(session.clone()));
         World::with(|world| {
@@ -107,7 +105,6 @@ impl Session {
 
     pub(crate) fn leave(&self) {
         let mut handle = *self;
-        let dismissing = transition::NativeSheet::close();
         handle.generation.set((handle.generation)().wrapping_add(1));
         handle.current.set(None);
         World::with(|world| {
@@ -116,7 +113,6 @@ impl Session {
             world.insert(LiveTurn::default());
         });
         handle.connected.set(false);
-        dismissing.finish();
     }
 
     pub(crate) fn start_chat(

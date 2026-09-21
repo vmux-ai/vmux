@@ -1,12 +1,9 @@
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::Cell;
-    use std::collections::VecDeque;
     use std::ptr;
-    use std::sync::{LazyLock, Mutex};
 
     use block2::RcBlock;
-    use dioxus::mobile::tao::platform::ios::WindowExtIOS;
     use dispatch2::DispatchQueue;
     use objc2::rc::Retained;
     use objc2::runtime::{Bool, NSObjectProtocol, ProtocolObject};
@@ -35,8 +32,7 @@ mod platform {
         static REQUESTING: Cell<bool> = const { Cell::new(false) };
     }
 
-    static RESULTS: LazyLock<Mutex<VecDeque<Result<String, String>>>> =
-        LazyLock::new(|| Mutex::new(VecDeque::new()));
+    static RESULTS: crate::feed::Feed<Result<String, String>> = crate::feed::Feed::new();
 
     struct ScannerIvars {
         capture: Option<Capture>,
@@ -239,17 +235,14 @@ mod platform {
                 }
             }
             if let Some(result) = result {
-                RESULTS
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .push_back(result);
+                RESULTS.offer(result);
             }
             self.dismissViewControllerAnimated_completion(true, None);
         }
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext) {
-        ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
+    pub fn install(root_controller: &UIViewController) {
+        ROOT_CONTROLLER.set((root_controller as *const UIViewController).cast_mut());
     }
 
     pub enum ScannerSupport {
@@ -304,10 +297,7 @@ mod platform {
                             present_denied(marker)
                         };
                         if let Err(message) = outcome {
-                            RESULTS
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .push_back(Err(message));
+                            RESULTS.offer(Err(message));
                         }
                     });
                 });
@@ -393,19 +383,18 @@ mod platform {
         Ok(())
     }
 
-    pub fn take_result() -> Option<Result<String, String>> {
-        RESULTS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .pop_front()
+    pub async fn next_result() -> Result<String, String> {
+        RESULTS.next().await
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 mod platform {
+    #![allow(dead_code)]
+
     use vmux_ui::i18n::translate;
 
-    pub fn install(_: &dioxus::mobile::DesktopContext) {}
+    pub fn install(_: &()) {}
 
     pub enum ScannerSupport {
         Available,
@@ -422,8 +411,8 @@ mod platform {
         Err(translate("mobile-qr-unsupported-platform"))
     }
 
-    pub fn take_result() -> Option<Result<String, String>> {
-        None
+    pub async fn next_result() -> Result<String, String> {
+        std::future::pending().await
     }
 }
 
