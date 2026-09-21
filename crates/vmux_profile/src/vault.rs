@@ -67,7 +67,9 @@ pub struct VaultStatus {
 }
 
 impl VaultStatus {
-    pub fn agent_json(&self) -> String {
+    pub fn snapshot(&self) -> vmux_wire::vault::VaultStatusSnapshot {
+        use vmux_wire::vault::VaultStatusSnapshot;
+
         let remote = self.sanitized_remote();
         let connected = self.initialized && remote.is_some();
         let provider = if !connected {
@@ -75,24 +77,21 @@ impl VaultStatus {
         } else {
             remote.as_deref().map(Self::provider)
         };
-        let mut status = serde_json::json!({
-            "root": self.root,
-            "connected": connected,
-            "encrypted": self.encrypted,
-            "unlocked": self.unlocked,
-            "recoveryKey": self.recovery_enabled,
-            "automaticBackup": true,
-            "provider": provider,
-            "branch": self.branch,
-            "localChanges": self.dirty,
-            "ahead": self.ahead,
-            "behind": self.behind,
-            "syncNeeded": self.dirty > 0 || self.ahead > 0 || self.behind > 0,
-        });
-        if let Some(remote) = remote {
-            status["remote"] = serde_json::Value::String(remote);
+        VaultStatusSnapshot {
+            root: self.root.to_string_lossy().into_owned(),
+            connected,
+            encrypted: self.encrypted,
+            unlocked: self.unlocked,
+            recovery_key: self.recovery_enabled,
+            automatic_backup: true,
+            provider,
+            remote,
+            branch: self.branch.clone(),
+            local_changes: self.dirty,
+            ahead: self.ahead,
+            behind: self.behind,
+            sync_needed: self.dirty > 0 || self.ahead > 0 || self.behind > 0,
         }
-        serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string())
     }
 
     fn sanitized_remote(&self) -> Option<String> {
@@ -114,14 +113,16 @@ impl VaultStatus {
         Some(remote.to_string())
     }
 
-    fn provider(remote: &str) -> &'static str {
+    fn provider(remote: &str) -> vmux_wire::vault::VaultProvider {
+        use vmux_wire::vault::VaultProvider;
+
         if Path::new(remote).is_absolute() {
-            return "cloud_folder";
+            return VaultProvider::CloudFolder;
         }
         if Self::is_github_remote(remote) {
-            return "github";
+            return VaultProvider::Github;
         }
-        "git"
+        VaultProvider::Git
     }
 
     fn is_github_remote(remote: &str) -> bool {
@@ -2541,35 +2542,48 @@ mod tests {
             behind: 0,
             ..Default::default()
         };
-        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+        let status = status.snapshot();
 
-        assert_eq!(status["connected"], true);
-        assert_eq!(status["encrypted"], true);
-        assert_eq!(status["unlocked"], true);
-        assert_eq!(status["recoveryKey"], true);
-        assert_eq!(status["automaticBackup"], true);
-        assert_eq!(status["provider"], "github");
-        assert_eq!(status["remote"], "https://github.com/vmux-ai/vault.git");
-        assert_eq!(status["localChanges"], 2);
-        assert_eq!(status["ahead"], 1);
-        assert_eq!(status["syncNeeded"], true);
+        assert!(status.connected);
+        assert!(status.encrypted);
+        assert!(status.unlocked);
+        assert!(status.recovery_key);
+        assert!(status.automatic_backup);
+        assert_eq!(
+            status.provider,
+            Some(vmux_wire::vault::VaultProvider::Github)
+        );
+        assert_eq!(
+            status.remote.as_deref(),
+            Some("https://github.com/vmux-ai/vault.git")
+        );
+        assert_eq!(status.local_changes, 2);
+        assert_eq!(status.ahead, 1);
+        assert!(status.sync_needed);
     }
 
     #[test]
     fn agent_status_matches_github_hosts_exactly() {
         for (remote, provider) in [
-            ("git@github.com:vmux-ai/vault.git", "github"),
-            ("https://notgithub.com/vmux-ai/vault.git", "git"),
-            ("/Volumes/github.com/vault.git", "cloud_folder"),
+            (
+                "git@github.com:vmux-ai/vault.git",
+                vmux_wire::vault::VaultProvider::Github,
+            ),
+            (
+                "https://notgithub.com/vmux-ai/vault.git",
+                vmux_wire::vault::VaultProvider::Git,
+            ),
+            (
+                "/Volumes/github.com/vault.git",
+                vmux_wire::vault::VaultProvider::CloudFolder,
+            ),
         ] {
             let status = VaultStatus {
                 initialized: true,
                 remote: remote.to_string(),
                 ..VaultStatus::default()
             };
-            let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
-
-            assert_eq!(status["provider"], provider);
+            assert_eq!(status.snapshot().provider, Some(provider));
         }
     }
 
@@ -2580,11 +2594,17 @@ mod tests {
             remote: "https://user:secret@github.com/vmux-ai/vault.git".to_string(),
             ..VaultStatus::default()
         };
-        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+        let status = status.snapshot();
 
-        assert_eq!(status["provider"], "github");
-        assert_eq!(status["remote"], "https://github.com/vmux-ai/vault.git");
-        assert!(!status.to_string().contains("secret"));
+        assert_eq!(
+            status.provider,
+            Some(vmux_wire::vault::VaultProvider::Github)
+        );
+        assert_eq!(
+            status.remote.as_deref(),
+            Some("https://github.com/vmux-ai/vault.git")
+        );
+        assert!(!serde_json::to_string(&status).unwrap().contains("secret"));
     }
 
     #[test]
@@ -2594,11 +2614,11 @@ mod tests {
             remote: "https://user:secret@[".to_string(),
             ..VaultStatus::default()
         };
-        let status: serde_json::Value = serde_json::from_str(&status.agent_json()).unwrap();
+        let status = status.snapshot();
 
-        assert_eq!(status["connected"], false);
-        assert!(status.get("remote").is_none());
-        assert!(!status.to_string().contains("secret"));
+        assert!(!status.connected);
+        assert!(status.remote.is_none());
+        assert!(!serde_json::to_string(&status).unwrap().contains("secret"));
     }
 
     #[test]

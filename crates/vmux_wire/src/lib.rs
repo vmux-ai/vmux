@@ -18,6 +18,7 @@ pub mod service;
 pub mod space;
 pub mod team;
 pub mod terminal;
+pub mod vault;
 
 pub use agent::AgentKind;
 pub use icon::{BuiltinIcon, PageIcon};

@@ -198,8 +198,8 @@ pub(super) fn handle_agent_queries(
             AgentQuery::VaultStatus => {
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
-                    result: AgentQueryResult::Text(
-                        vmux_core::profile::vault::status().agent_json(),
+                    result: AgentQueryResult::VaultStatus(
+                        vmux_core::profile::vault::status().snapshot(),
                     ),
                 });
             }

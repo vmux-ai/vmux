@@ -780,6 +780,12 @@ pub fn query_result_to_mcp_response(result: vmux_client::protocol::AgentQueryRes
                 "content": [{"type": "text", "text": text}]
             })
         }
+        AgentQueryResult::VaultStatus(snapshot) => {
+            let text = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
+            json!({
+                "content": [{"type": "text", "text": text}]
+            })
+        }
         AgentQueryResult::Text(text) => {
             json!({
                 "content": [{"type": "text", "text": text}]

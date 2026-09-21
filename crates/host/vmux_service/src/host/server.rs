@@ -268,6 +268,10 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
         AgentQueryResult::Layout(snapshot) => {
             (serde_json::to_string(&snapshot).unwrap_or_default(), false)
         }
+        AgentQueryResult::VaultStatus(snapshot) => (
+            serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
+            false,
+        ),
         AgentQueryResult::Text(text) => (text, false),
         AgentQueryResult::Settings(json) => (json, false),
         AgentQueryResult::Spaces(json) => (json, false),
