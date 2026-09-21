@@ -42,10 +42,12 @@ pub mod prelude {
 
 pub struct RunOnMainThread;
 
+#[cfg(target_os = "macos")]
 pub struct CefOsCryptKey {
     current: zeroize::Zeroizing<[u8; Self::KEY_LENGTH]>,
 }
 
+#[cfg(target_os = "macos")]
 impl CefOsCryptKey {
     pub const KEY_LENGTH: usize = 16;
 
@@ -60,6 +62,7 @@ impl CefOsCryptKey {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub type CefOsCryptKeyProvider = fn() -> Result<CefOsCryptKey, String>;
 
 #[derive(Debug, Clone)]
@@ -71,6 +74,7 @@ pub struct CefPlugin {
     pub accept_language_list: String,
     pub embedded_scheme: String,
     pub embedded_hosts: CefEmbeddedHosts,
+    #[cfg(target_os = "macos")]
     pub os_crypt_key_provider: Option<CefOsCryptKeyProvider>,
 }
 
@@ -84,6 +88,7 @@ impl Default for CefPlugin {
             accept_language_list: "en-US,en;q=0.9".to_string(),
             embedded_scheme: compile_time_cef_embedded_scheme().to_string(),
             embedded_hosts: CefEmbeddedHosts::default(),
+            #[cfg(target_os = "macos")]
             os_crypt_key_provider: None,
         }
     }
@@ -107,6 +112,7 @@ impl Plugin for CefPlugin {
                 root_cache_path: self.root_cache_path.clone(),
                 locale: self.locale.clone(),
                 accept_language_list: self.accept_language_list.clone(),
+                #[cfg(target_os = "macos")]
                 os_crypt_key_provider: self.os_crypt_key_provider,
             },
             WebviewCoreComponentsPlugin,

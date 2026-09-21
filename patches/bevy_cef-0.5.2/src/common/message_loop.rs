@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use crate::CefOsCryptKeyProvider;
 use crate::RunOnMainThread;
 use crate::common::WebviewSource;
@@ -17,6 +18,7 @@ pub struct MessageLoopPlugin {
     pub root_cache_path: Option<String>,
     pub locale: String,
     pub accept_language_list: String,
+    #[cfg(target_os = "macos")]
     pub os_crypt_key_provider: Option<CefOsCryptKeyProvider>,
 }
 

@@ -181,6 +181,7 @@ impl Plugin for BrowserPlugin {
                     locale: startup_locale,
                     accept_language_list: startup_accept_language_list,
                     embedded_hosts,
+                    #[cfg(target_os = "macos")]
                     os_crypt_key_provider: cef_os_crypt_key_provider(),
                     ..default()
                 },
@@ -252,11 +253,6 @@ fn cef_command_line_config() -> CommandLineConfig {
 #[cfg(target_os = "macos")]
 fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
     Some(cef_os_crypt_key)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
-    None
 }
 
 #[cfg(target_os = "macos")]
