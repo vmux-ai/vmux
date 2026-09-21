@@ -65,7 +65,7 @@ pub struct PageAgentAwaitingApproval {
     pub sid: String,
     pub call_id: String,
     pub name: String,
-    pub args_json: String,
+    pub args: serde_json::Value,
 }
 
 #[derive(Message)]
@@ -77,7 +77,7 @@ pub struct PageAgentApprovalResolved {
 #[derive(Message)]
 pub struct PageAgentSnapshot {
     pub sid: String,
-    pub messages_json: String,
+    pub messages: Vec<crate::message::Message>,
 }
 
 #[derive(Message)]

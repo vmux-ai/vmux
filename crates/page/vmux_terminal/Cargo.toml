@@ -16,6 +16,7 @@ path = "src/lib.rs"
 dioxus = { workspace = true }
 serde = { workspace = true }
 rkyv = { workspace = true }
+serde_json = { workspace = true }
 unicode-width = "0.2"
 vmux_core = { path = "../../vmux_core" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }

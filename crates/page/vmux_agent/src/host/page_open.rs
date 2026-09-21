@@ -614,31 +614,22 @@ fn handle_swap_stack_session(
             bevy::log::warn!("swap: cross-agent handoff requires an ACP target");
             continue;
         }
-        let imported = match ev.handoff.as_ref() {
-            Some(handoff) => {
-                let Ok(messages) =
-                    serde_json::from_str::<Vec<crate::Message>>(&handoff.messages_json)
-                else {
-                    bevy::log::warn!("swap: invalid handoff transcript");
-                    continue;
-                };
-                Some((
-                    crate::handoff::ImportedConversation {
-                        source_agent: handoff.source_agent.clone(),
-                        source_kind: handoff.source_kind,
-                        source_sid: handoff.source_sid.clone(),
-                        messages,
-                        truncated: handoff.truncated,
-                        first_prompt: None,
-                    },
-                    crate::handoff::PendingHandoff {
-                        context: handoff.context.clone(),
-                        sent: false,
-                    },
-                ))
-            }
-            None => None,
-        };
+        let imported = ev.handoff.as_ref().map(|handoff| {
+            (
+                crate::handoff::ImportedConversation {
+                    source_agent: handoff.source_agent.clone(),
+                    source_kind: handoff.source_kind,
+                    source_sid: handoff.source_sid.clone(),
+                    messages: handoff.messages.clone(),
+                    truncated: handoff.truncated,
+                    first_prompt: None,
+                },
+                crate::handoff::PendingHandoff {
+                    context: handoff.context.clone(),
+                    sent: false,
+                },
+            )
+        });
 
         commands
             .entity(ev.stack)
@@ -1076,7 +1067,7 @@ mod tests {
                     source_agent: "Codex".into(),
                     source_kind: AgentKind::Codex,
                     source_sid: "cx-1".into(),
-                    messages_json: serde_json::to_string(&messages).unwrap(),
+                    messages: messages.clone(),
                     context: "prior conversation".into(),
                     truncated: false,
                 }),

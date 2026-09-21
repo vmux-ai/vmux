@@ -4,7 +4,6 @@ use bevy_cef::prelude::BinEventEmitterPlugin;
 use crate::AgentVariant;
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
-use crate::message::Message;
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
 use crate::systems::{approval, surface_errors};
@@ -223,8 +222,8 @@ fn consume_page_agent_stream(
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
             && let Ok((_, mut messages, mut times, _, _, _, _, _, _, imported)) = q.get_mut(entity)
-            && let Ok(mut parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
+            let mut parsed = snapshot.messages.clone();
             sanitize_replayed_messages(
                 &mut parsed,
                 imported.and_then(|imported| imported.first_prompt.as_deref()),
@@ -279,8 +278,6 @@ fn consume_page_agent_stream(
         let Some(&entity) = by_sid.get(&approval.sid) else {
             continue;
         };
-        let args: serde_json::Value =
-            serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
         if let Ok((_, _, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
             let auto_allowed = service.is_some()
                 && acp.is_some()
@@ -289,7 +286,7 @@ fn consume_page_agent_stream(
                 *state = AgentRunState::AwaitingApproval {
                     call_id: approval.call_id.clone(),
                     name: approval.name.clone(),
-                    args: args.clone(),
+                    args: approval.args.clone(),
                 };
             }
         }
@@ -297,7 +294,7 @@ fn consume_page_agent_stream(
             session: entity,
             call_id: approval.call_id.clone(),
             name: approval.name.clone(),
-            args,
+            args: approval.args.clone(),
         });
     }
     for resolved in resolved_approvals.read() {
@@ -362,7 +359,7 @@ mod tests {
             sid: "s1".into(),
             call_id: "call-1".into(),
             name: "run".into(),
-            args_json: "{}".into(),
+            args: serde_json::json!({}),
         });
 
         app.update();

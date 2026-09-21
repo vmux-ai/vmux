@@ -415,13 +415,11 @@ fn on_resume_session(
         let task = IoTaskPool::get().spawn(async move {
             let messages = strategies.load_transcript(kind, &source_sid)?;
             let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
-            let messages_json = serde_json::to_string(&messages)
-                .map_err(|err| format!("serialize imported conversation: {err}"))?;
             Ok(StackSessionHandoff {
                 source_agent,
                 source_kind: kind,
                 source_sid,
-                messages_json,
+                messages,
                 context: built.text,
                 truncated: built.truncated,
             })
