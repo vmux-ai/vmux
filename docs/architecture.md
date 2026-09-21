@@ -79,17 +79,15 @@ Vmux Safe Storage root
 
 MCP credentials live in encrypted Application Support files authenticated to their account
 name. Vault keys live there as envelopes authenticated to the Vault ID and encrypted by the
-per-Vault wrapping key. Existing `ai.vmux.mcp` and `ai.vmux.vault` items migrate lazily on
-first use and remain available during the rollback window. The CLI asks the desktop for Vault
-status through the authenticated service connection and has no credential or Vault-key broker
-commands.
+per-Vault wrapping key. Pre-Safe-Storage browser sessions, MCP credentials, and Vault keys are
+treated as absent. The CLI asks the desktop for Vault status through the authenticated service
+connection and has no credential or Vault-key broker commands.
 
 The macOS CEF patch pinned by `cef/manifest.toml` exports an embedder-only OSCrypt setter. The
 desktop supplies the 128-bit browser-derived key in memory before CEF initialization. During
-migration it also supplies the legacy Chromium key for `v10` ciphertext while new ciphertext uses
-the derived key and a distinct `vm1` prefix. The prefix selects the key before decryption, avoiding
-unauthenticated CBC trial decryption. Chromium's existing raw-key IPC carries only this
-browser-scoped material to sandboxed browser helpers, never the root or another subsystem's key.
+initialization CEF receives only the derived key and new ciphertext uses a distinct `vm1` prefix.
+Chromium's existing raw-key IPC carries only this browser-scoped material to sandboxed browser
+helpers, never the root or another subsystem's key.
 
 `cef/manifest.toml` pins the CEF, Chromium, and depot_tools source revisions, patch revision,
 release asset, and SHA-256 checksum. `.github/workflows/build-cef.yml` builds the macOS ARM64

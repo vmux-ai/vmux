@@ -137,12 +137,6 @@ impl VaultWrappingKey {
 }
 
 #[cfg(target_os = "macos")]
-pub struct BrowserEncryptionKeys {
-    pub current: BrowserKey,
-    pub legacy: Option<BrowserKey>,
-}
-
-#[cfg(target_os = "macos")]
 enum RootKeySource {
     Keychain,
     #[cfg(any(test, debug_assertions))]
@@ -206,15 +200,9 @@ impl SafeStorageContext {
         Err(SafeStorageError::DesktopProcessRequired)
     }
 
+    #[cfg(test)]
     fn is_test(&self) -> bool {
-        #[cfg(any(test, debug_assertions))]
-        {
-            matches!(self.root_key_source, RootKeySource::FixedTest)
-        }
-        #[cfg(not(any(test, debug_assertions)))]
-        {
-            false
-        }
+        matches!(self.root_key_source, RootKeySource::FixedTest)
     }
 }
 
@@ -224,16 +212,9 @@ pub struct SafeStorage;
 #[cfg(any(target_os = "macos", test))]
 impl SafeStorage {
     #[cfg(target_os = "macos")]
-    pub fn browser_keys() -> Result<BrowserEncryptionKeys, SafeStorageError> {
+    pub fn browser_key() -> Result<BrowserKey, SafeStorageError> {
         let context = SafeStorageContext::current();
-        let cipher = Self::cipher(&context, true)?;
-        let current = cipher.browser_key()?;
-        let legacy = if context.is_test() {
-            None
-        } else {
-            root::RootKeyStore::legacy_browser_key(&context)?
-        };
-        Ok(BrowserEncryptionKeys { current, legacy })
+        Self::cipher(&context, true)?.browser_key()
     }
 
     #[cfg(target_os = "macos")]

@@ -1,6 +1,4 @@
-use std::num::NonZeroU32;
-
-use ring::{aead, hkdf, pbkdf2};
+use ring::{aead, hkdf};
 use zeroize::Zeroizing;
 
 use super::{
@@ -168,18 +166,6 @@ impl hkdf::KeyType for DerivedKeyLength {
     }
 }
 
-pub(super) fn derive_legacy_browser_key(password: &[u8]) -> BrowserKey {
-    let mut key = [0_u8; BROWSER_KEY_LENGTH];
-    pbkdf2::derive(
-        pbkdf2::PBKDF2_HMAC_SHA1,
-        NonZeroU32::new(1003).unwrap(),
-        b"saltysalt",
-        password,
-        &mut key,
-    );
-    BrowserKey::new(key)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,16 +219,5 @@ mod tests {
         *encrypted.last_mut().unwrap() ^= 1;
 
         assert!(cipher.unwrap_vault_key("vault", &encrypted).is_err());
-    }
-
-    #[test]
-    fn legacy_browser_key_matches_chromium_derivation() {
-        assert_eq!(
-            derive_legacy_browser_key(b"peanuts").as_bytes(),
-            &[
-                0xd9, 0xa0, 0x9d, 0x49, 0x9b, 0x4e, 0x1b, 0x74, 0x61, 0xf2, 0x8e, 0x67, 0x97, 0x2c,
-                0x6d, 0xbd
-            ]
-        );
     }
 }

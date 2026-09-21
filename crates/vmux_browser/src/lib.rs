@@ -251,7 +251,7 @@ fn cef_command_line_config() -> CommandLineConfig {
 
 #[cfg(target_os = "macos")]
 fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
-    Some(cef_os_crypt_keys)
+    Some(cef_os_crypt_key)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -260,12 +260,10 @@ fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
 }
 
 #[cfg(target_os = "macos")]
-fn cef_os_crypt_keys() -> Result<bevy_cef::CefOsCryptKeys, String> {
-    let keys = vmux_core::profile::safe_storage::SafeStorage::browser_keys()
+fn cef_os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
+    let key = vmux_core::profile::safe_storage::SafeStorage::browser_key()
         .map_err(|error| error.to_string())?;
-    let current = *keys.current.as_bytes();
-    let legacy = keys.legacy.map(|key| *key.as_bytes());
-    Ok(bevy_cef::CefOsCryptKeys::new(current, legacy))
+    Ok(bevy_cef::CefOsCryptKey::new(*key.as_bytes()))
 }
 
 fn theme_event(settings: &AppSettings) -> ThemeEvent {
