@@ -749,7 +749,7 @@ mod tests {
         ];
         for term in terms {
             let term = term.to_lowercase();
-            let needed = PathMask::from(&term);
+            let needed = PathMask::from(term.as_str());
             for path in &paths {
                 if FuzzyScore::score(path.folded(), &term).is_none() {
                     continue;

@@ -57,7 +57,7 @@ mod tests {
 
         let mut page = PageDom::mount(
             Reader,
-            Instance::from(|scope| scope.provide("the failure".to_string())),
+            Instance::from(|scope: PageScope<'_>| scope.provide("the failure".to_string())),
         );
         page.rebuild();
 
