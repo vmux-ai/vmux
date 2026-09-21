@@ -55,6 +55,8 @@ pub struct AppSettings {
     pub terminal: Option<TerminalSettings>,
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
     #[serde(default = "default_agent_settings")]
     pub agent: AgentSettings,
     #[serde(default)]
@@ -67,6 +69,14 @@ pub struct AppSettings {
     pub editor: EditorSettings,
     #[serde(default)]
     pub appearance: AppearanceSettings,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Preview,
 }
 
 impl AppSettings {
@@ -1030,6 +1040,8 @@ struct PartialAppSettings {
     #[serde(default)]
     auto_update: Option<bool>,
     #[serde(default)]
+    update_channel: Option<UpdateChannel>,
+    #[serde(default)]
     agent: Option<AgentSettings>,
     #[serde(default)]
     spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
@@ -1059,6 +1071,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     if let Some(auto_update) = partial.auto_update {
         settings.auto_update = auto_update;
+    }
+    if let Some(update_channel) = partial.update_channel {
+        settings.update_channel = update_channel;
     }
     if let Some(agent) = partial.agent {
         settings.agent = agent;
@@ -1271,6 +1286,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         parts.push(format!(
             "    auto_update: {},",
             section_ron(&settings.auto_update)?
+        ));
+    }
+    if differs("update_channel") {
+        parts.push(format!(
+            "    update_channel: {},",
+            section_ron(&settings.update_channel)?
         ));
     }
     if differs("agent") {
@@ -1752,6 +1773,7 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
+            update_channel: UpdateChannel::Stable,
             agent: crate::host::runtime::AgentSettings::default(),
             spaces: Default::default(),
             projects: Default::default(),
@@ -1950,6 +1972,7 @@ mod tests {
             original.shortcuts.chord_timeout_ms
         );
         assert_eq!(recovered.auto_update, original.auto_update);
+        assert_eq!(recovered.update_channel, original.update_channel);
     }
 
     #[test]
@@ -2027,6 +2050,25 @@ mod tests {
             .apply_update("auto_update", serde_json::json!(true))
             .unwrap();
         assert!(settings.auto_update);
+    }
+
+    #[test]
+    fn apply_settings_update_changes_release_channel() {
+        let mut settings = base_settings();
+        let ron = settings
+            .apply_update("update_channel", serde_json::json!("preview"))
+            .expect("apply ok");
+
+        assert_eq!(settings.update_channel, UpdateChannel::Preview);
+        let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
+        assert_eq!(reparsed.update_channel, UpdateChannel::Preview);
+    }
+
+    #[test]
+    fn settings_without_release_channel_default_to_stable() {
+        let settings = parse_settings("(auto_update: false)").expect("settings parse");
+
+        assert_eq!(settings.update_channel, UpdateChannel::Stable);
     }
 
     #[test]

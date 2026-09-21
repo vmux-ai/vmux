@@ -14,6 +14,10 @@ on:
         description: "Send the iOS build to App Store Connect. Off by default, and unavailable to the push trigger, because an upload cannot be withdrawn"
         type: boolean
         default: false
+      publish_preview:
+        description: "Publish a signed preview build from the selected ref"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -24,6 +28,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preview:
+    name: Publish Preview Build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_preview
+    permissions:
+      contents: write
+    uses: ./.github/workflows/nightly.yml
+    secrets: inherit
+
   detect-version:
     name: Detect Version Bump
     runs-on: ubuntu-latest

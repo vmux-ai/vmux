@@ -335,7 +335,7 @@ fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
                 id: "general".to_string(),
                 title: t("schema-general"),
                 description: None,
-                synthetic_keys: vec!["auto_update".to_string()],
+                synthetic_keys: vec!["update_channel".to_string(), "auto_update".to_string()],
                 root_path: String::new(),
             },
             SectionSpec {
@@ -403,6 +403,32 @@ fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
             },
         ],
         fields: vec![
+            field(
+                "",
+                FieldSpec {
+                    order: vec!["update_channel".into(), "auto_update".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "update_channel",
+                FieldSpec {
+                    label: Some(t("schema-update-channel")),
+                    hint: Some(t("schema-update-channel-detail")),
+                    widget: Some(WidgetKind::Select),
+                    options: vec![
+                        SelectOption {
+                            value: "stable".into(),
+                            label: t("schema-update-channel-stable"),
+                        },
+                        SelectOption {
+                            value: "preview".into(),
+                            label: t("schema-update-channel-preview"),
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ),
             field(
                 "appearance",
                 FieldSpec {
@@ -796,6 +822,22 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+
+    #[test]
+    fn schema_exposes_stable_and_preview_channels() {
+        let schema = build_settings_schema();
+        let channel = schema
+            .field("update_channel")
+            .expect("update channel field");
+        let options = channel
+            .options
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(channel.widget, Some(WidgetKind::Select));
+        assert_eq!(options, vec!["stable", "preview"]);
     }
 
     #[test]

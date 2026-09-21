@@ -409,6 +409,25 @@ fn local_package_only_builds_app_bundle() {
     assert!(package_script.contains("if [[ \"$PROFILE\" == \"local\" ]]"));
 }
 
+#[cfg(unix)]
+#[test]
+fn nightly_version_sorts_between_current_and_next_stable() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../scripts/nightly-version.sh");
+    let output = std::process::Command::new("bash")
+        .arg(script)
+        .args(["0.0.34", "20260921", "42", "1"])
+        .output()
+        .expect("run nightly version script");
+
+    assert!(output.status.success());
+    let value = String::from_utf8(output.stdout).expect("nightly version is utf-8");
+    let preview = semver::Version::parse(value.trim()).expect("nightly version is semver");
+    assert_eq!(preview.to_string(), "0.0.35-nightly.20260921.42.1");
+    assert!(preview > semver::Version::parse("0.0.34").unwrap());
+    assert!(preview < semver::Version::parse("0.0.35").unwrap());
+}
+
 #[test]
 fn cef_injection_uses_ci_cached_framework_path() {
     let inject_script = include_str!("../../../../scripts/inject-cef.sh");

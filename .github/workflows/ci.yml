@@ -214,6 +214,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'scripts/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/nightly.yml'
             website:
               - 'website/**'
             macos:
@@ -226,6 +227,7 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/nightly.yml'
               - '.github/workflows/release.yml'
               - '!crates/app/vmux_mobile/**'
               - '!packaging/ios/**'

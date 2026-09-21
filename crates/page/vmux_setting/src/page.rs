@@ -321,6 +321,7 @@ fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -
         && let Some(object) = visible_value.as_object_mut()
     {
         object.remove("auto_update");
+        object.remove("update_channel");
     }
 
     rsx! {

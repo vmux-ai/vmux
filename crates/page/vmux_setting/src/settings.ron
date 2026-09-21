@@ -91,6 +91,7 @@
         ],
     )),
     auto_update: true,
+    update_channel: stable,
     agent: (
         app_providers: [
             (provider: "stub", kind: "vibe", models: ["echo"]),
