@@ -51,6 +51,7 @@ vmux_setting = { path = "../vmux_setting" }
 vmux_simulator = { path = "../vmux_simulator" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
+vmux_tools = { path = "../../vmux_tools" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }

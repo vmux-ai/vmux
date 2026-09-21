@@ -113,6 +113,7 @@ vmux_space = { path = "../../page/vmux_space" }
 vmux_simulator = { path = "../../page/vmux_simulator" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }
+vmux_tools = { path = "../../vmux_tools" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 vmux_wire = { path = "../../vmux_wire" }
 

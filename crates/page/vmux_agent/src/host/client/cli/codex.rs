@@ -352,15 +352,15 @@ fn append_managed_mcp_args(args: &mut Vec<String>) {
 fn append_managed_mcp_server_args(
     args: &mut Vec<String>,
     name: &str,
-    server: vmux_core::profile::tools::McpServerManifest,
+    server: vmux_tools::McpServerManifest,
 ) {
-    if server.transport == vmux_core::profile::tools::McpTransport::Sse {
+    if server.transport == vmux_tools::McpTransport::Sse {
         return;
     }
     let prefix = format!("mcp_servers.{}", quote_toml(name));
     push_config_override(args, format!("{prefix}.enabled=true"));
     match server.transport {
-        vmux_core::profile::tools::McpTransport::Stdio => {
+        vmux_tools::McpTransport::Stdio => {
             if let Some(command) = server.command {
                 push_config_override(args, format!("{prefix}.command={}", quote_toml(&command)));
             }
@@ -377,7 +377,7 @@ fn append_managed_mcp_server_args(
                 push_config_override(args, format!("{prefix}.cwd={}", quote_toml(&cwd)));
             }
         }
-        vmux_core::profile::tools::McpTransport::Http => {
+        vmux_tools::McpTransport::Http => {
             if let Some(url) = server.url {
                 push_config_override(args, format!("{prefix}.url={}", quote_toml(&url)));
             }
@@ -406,7 +406,7 @@ fn append_managed_mcp_server_args(
                 );
             }
         }
-        vmux_core::profile::tools::McpTransport::Sse => unreachable!(),
+        vmux_tools::McpTransport::Sse => unreachable!(),
     }
 }
 
@@ -974,8 +974,8 @@ mod tests {
 
     #[test]
     fn managed_mcp_server_is_enabled_with_auth_environment() {
-        let server = vmux_core::profile::tools::McpServerManifest {
-            transport: vmux_core::profile::tools::McpTransport::Http,
+        let server = vmux_tools::McpServerManifest {
+            transport: vmux_tools::McpTransport::Http,
             command: None,
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),
@@ -1005,8 +1005,8 @@ mod tests {
 
     #[test]
     fn sse_managed_mcp_server_is_not_configured_for_codex() {
-        let server = vmux_core::profile::tools::McpServerManifest {
-            transport: vmux_core::profile::tools::McpTransport::Sse,
+        let server = vmux_tools::McpServerManifest {
+            transport: vmux_tools::McpTransport::Sse,
             command: None,
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),

@@ -4,12 +4,12 @@ use serde_json::{Map, Value};
 use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 #[cfg(not(test))]
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
-use vmux_core::profile::tools::{McpServerManifest, McpTransport};
 use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
+use vmux_tools::{McpServerManifest, McpTransport};
 
 #[cfg(not(test))]
 pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_core::profile::tools::load_manifest() {
+    match vmux_tools::load_manifest() {
         Ok(manifest) => manifest.mcp.servers,
         Err(error) => {
             bevy::log::warn!("managed MCP servers unavailable: {error}");

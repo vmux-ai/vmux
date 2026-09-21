@@ -16,7 +16,7 @@ use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
-use vmux_core::profile::tools::{McpServerManifest, McpTransport, load_manifest, write_manifest};
+use vmux_tools::{McpServerManifest, McpTransport, load_manifest, write_manifest};
 use vmux_wire::mcp::{
     MCP_SERVER_ACTION_RESULT_EVENT, MCP_SERVERS_EVENT, McpServerAction, McpServerActionRequest,
     McpServerActionResult, McpServerEntry, McpServerStatus, McpServers, McpServersRequest,
