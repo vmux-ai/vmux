@@ -589,10 +589,10 @@ workspace the way a person does.
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
 The daemon owns the sessions, so work keeps running even if the agent process exits.
 
-MCP tool identity and execution route live in one registry. `ToolKind` identifies the
-published operation; `ToolRoute` states whether it becomes an agent command, an agent query,
-or protocol-local work. Names, aliases, schemas, availability, and dispatch therefore cannot
-drift into separate lists.
+MCP tool identity and execution route live in one registry. Each handwritten feature owns its
+schema, typed arguments, validation, and command or query dispatcher; `ToolRoute` binds that
+dispatcher to its published name, aliases, and availability, or marks protocol-local work.
+The exact registry set is tested so publication and dispatch cannot drift into separate lists.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
