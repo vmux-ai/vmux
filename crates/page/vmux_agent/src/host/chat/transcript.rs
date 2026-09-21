@@ -9,7 +9,7 @@ use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_chat::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_INITIAL_ITEM_LIMIT, ChatHistoryPage, ChatHistoryRequest,
-    ChatSnapshot, QueuedPromptSnapshot,
+    ChatSnapshot, PendingApproval, QueuedPromptSnapshot,
 };
 use vmux_core::PageMetadata;
 use vmux_core::team::{Profile, User};
@@ -188,7 +188,6 @@ fn snapshot_of(
         running,
         CHAT_INITIAL_ITEM_LIMIT as usize,
     );
-    let messages_json = serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string());
     let error = match state {
         AgentRunState::Installing { pct, message } => match pct {
             Some(pct) => format!("{message} ({pct}%)"),
@@ -198,13 +197,17 @@ fn snapshot_of(
         _ => String::new(),
     };
     let status = state.status();
-    let (call_id, name, args_json) = match state {
+    let approval = match state {
         AgentRunState::AwaitingApproval {
             call_id,
             name,
             args,
-        } => (call_id.clone(), name.clone(), args.to_string()),
-        _ => (String::new(), String::new(), String::new()),
+        } => Some(PendingApproval {
+            call_id: call_id.clone(),
+            name: name.clone(),
+            args: args.clone().into(),
+        }),
+        _ => None,
     };
     let (agent_name, accent_color) = profile
         .map(|p| (p.name.clone(), p.avatar.color.clone()))
@@ -225,14 +228,12 @@ fn snapshot_of(
         .map(|m| m.icon.favicon_url().to_string())
         .unwrap_or_default();
     ChatSnapshot {
-        messages_json,
+        messages: page.items,
         messages_start: u32::try_from(page.start).unwrap_or(u32::MAX),
         messages_total: u32::try_from(page.total).unwrap_or(u32::MAX),
         status: status.to_string(),
         error,
-        approval_call_id: call_id,
-        approval_name: name,
-        approval_args_json: args_json,
+        approval,
         agent_name,
         conversation_title: conversation_title
             .map(|title| title.0.clone())
@@ -421,7 +422,7 @@ fn on_chat_history_request(
     commands.trigger(BinHostEmitEvent::from_event(
         webview,
         &ChatHistoryPage {
-            items_json: serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string()),
+            items: page.items,
             start: u32::try_from(page.start).unwrap_or(u32::MAX),
             end: u32::try_from(page.end).unwrap_or(u32::MAX),
             total: u32::try_from(page.total).unwrap_or(u32::MAX),
@@ -524,10 +525,11 @@ mod tests {
             None,
         );
 
-        assert_eq!(snapshot.approval_name, "vmux.run");
+        let approval = snapshot.approval.expect("pending approval");
+        assert_eq!(approval.name, "vmux.run");
         assert_eq!(
-            snapshot.approval_args_json,
-            r#"{"command":"echo hi","focus":true}"#
+            approval.args.to_serde().unwrap(),
+            serde_json::json!({"command": "echo hi", "focus": true})
         );
     }
 

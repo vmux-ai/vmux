@@ -5,6 +5,7 @@ pub use vmux_api::chat::{
     ChatKey, ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
     SlashCommandEntry, SlashCommands,
 };
+use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
@@ -48,22 +49,22 @@ impl QueuedPromptSnapshot {
     Clone,
     Debug,
     Default,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "chat", name = "snapshot", targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(namespace = "chat", name = "snapshot", version = 2, targets = ["sessions", "agent", "start"])]
 pub struct ChatSnapshot {
-    pub messages_json: String,
+    pub messages: Vec<ChatItem>,
     pub messages_start: u32,
     pub messages_total: u32,
     pub status: String,
     pub error: String,
-    pub approval_call_id: String,
-    pub approval_name: String,
-    pub approval_args_json: String,
+    pub approval: Option<PendingApproval>,
     pub queued: Vec<QueuedPromptSnapshot>,
     pub paused: bool,
     pub agent_name: String,
@@ -81,6 +82,23 @@ pub struct ChatSnapshot {
     pub handoff_message_count: u32,
     pub choice_question: String,
     pub choice_options: Vec<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PendingApproval {
+    pub call_id: String,
+    pub name: String,
+    pub args: JsonValue,
 }
 
 #[derive(
@@ -170,9 +188,9 @@ pub struct ChatHistoryRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "chat", name = "history_page", targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(namespace = "chat", name = "history_page", version = 2, targets = ["sessions", "agent", "start"])]
 pub struct ChatHistoryPage {
-    pub items_json: String,
+    pub items: Vec<ChatItem>,
     pub start: u32,
     pub end: u32,
     pub total: u32,
@@ -451,7 +469,7 @@ mod tests {
     #[test]
     fn chat_snapshot_rkyv_roundtrip() {
         let v = ChatSnapshot {
-            messages_json: "[]".to_string(),
+            messages: vec![ChatItem::user("hello")],
             messages_start: 12,
             messages_total: 60,
             status: "streaming".to_string(),
@@ -484,6 +502,7 @@ mod tests {
         assert_eq!(back.conversation_title, "Refine generated summaries");
         assert_eq!(back.messages_start, 12);
         assert_eq!(back.messages_total, 60);
+        assert_eq!(back.messages, vec![ChatItem::user("hello")]);
         assert_eq!(back.queued.len(), 2);
         assert_eq!(back.queued[0].id, 4);
         assert_eq!(back.queued[0].text, "a");
@@ -500,7 +519,7 @@ mod tests {
     #[test]
     fn chat_history_page_rkyv_roundtrip() {
         let value = ChatHistoryPage {
-            items_json: "[]".into(),
+            items: vec![ChatItem::user("older")],
             start: 4,
             end: 44,
             total: 92,
@@ -508,6 +527,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
         let back = rkyv::from_bytes::<ChatHistoryPage, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!((back.start, back.end, back.total), (4, 44, 92));
+        assert_eq!(back.items, vec![ChatItem::user("older")]);
     }
 
     #[test]

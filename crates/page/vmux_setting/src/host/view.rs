@@ -137,7 +137,9 @@ fn broadcast_settings_to_views(
     mut commands: Commands,
 ) {
     let payload = SettingsListEvent {
-        json: settings.to_json(),
+        value: serde_json::to_value(&*settings)
+            .unwrap_or(serde_json::Value::Null)
+            .into(),
     };
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
@@ -168,7 +170,7 @@ fn broadcast_schema_to_views(
     }
     let locale = Locale::requested(Some(&settings.appearance.locale));
     let payload = SettingsSchemaEvent {
-        json: serde_json::to_string(&build_settings_schema_for(&locale)).unwrap_or_default(),
+        schema: build_settings_schema_for(&locale),
     };
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
@@ -227,10 +229,10 @@ fn on_settings_request(
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
     let evt = &trigger.event().payload;
-    let value: serde_json::Value = match serde_json::from_str(&evt.value) {
+    let value = match evt.value.to_serde() {
         Ok(v) => v,
         Err(e) => {
-            bevy::log::warn!("settings: invalid JSON for path {}: {e}", evt.path);
+            bevy::log::warn!("settings: invalid value for path {}: {e}", evt.path);
             return;
         }
     };

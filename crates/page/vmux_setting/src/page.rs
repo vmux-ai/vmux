@@ -27,14 +27,11 @@ pub fn Page() -> Element {
     let mut search = use_signal(String::new);
 
     let _values = use_listener::<SettingsListEvent, _>(move |data| {
-        let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
-        snapshot.set(parsed);
+        snapshot.set(data.value.to_serde().unwrap_or(Value::Null));
     });
 
     let _schema = use_listener::<SettingsSchemaEvent, _>(move |data| {
-        if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
-            schema.set(parsed);
-        }
+        schema.set(data.schema);
     });
 
     let s = snapshot.read().clone();
@@ -186,7 +183,7 @@ fn text_matches(value: &str, query: &str) -> bool {
 fn emit_update(path: &str, value: Value) {
     let _ = send(&SettingsRequest {
         path: path.to_string(),
-        value: value.to_string(),
+        value: value.into(),
     });
 }
 

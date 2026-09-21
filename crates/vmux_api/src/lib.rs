@@ -8,6 +8,7 @@ pub mod command_bar;
 pub mod error;
 pub mod history;
 pub mod icon;
+pub mod json;
 pub mod layout;
 pub mod mcp;
 pub mod open_target;
