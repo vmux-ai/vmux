@@ -241,8 +241,8 @@ impl ToolsNavigateRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tool", name = "action_request", target = "tools")]
-pub struct ToolActionRequest {
+#[vmux_api::ui_event(namespace = "tool", name = "request", target = "tools")]
+pub struct ToolRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,
     pub id: String,
@@ -261,8 +261,8 @@ pub struct ToolActionRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "tool", name = "action_result", target = "tools")]
-pub struct ToolActionResult {
+#[vmux_api::host_event(namespace = "tool", name = "result", target = "tools")]
+pub struct ToolResult {
     pub provider: ToolProvider,
     pub action: ToolAction,
     pub id: String,

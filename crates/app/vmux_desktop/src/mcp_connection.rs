@@ -13,7 +13,7 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerAction, McpServerActionResult, McpServerEntry, McpServerRequest, McpServerStatus,
+    McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
     McpServers, McpServersRequest,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
@@ -130,7 +130,7 @@ impl McpConnections {
             }
             commands.trigger(BinHostEmitEvent::from_event(
                 task.target,
-                &McpServerActionResult {
+                &McpServerResult {
                     id: task.request.id.clone(),
                     action: task.request.action,
                     success,

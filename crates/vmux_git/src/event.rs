@@ -18,8 +18,8 @@ wire! {
     pub struct GitRepositoryRequest { pub path: String }
     #[vmux_api::ui_event(namespace = "git", name = "repository_picker_request", target = "git")]
     pub struct GitRepositoryPickerRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "app_action_request", target = "git")]
-    pub struct GitAppActionRequest { pub repo_root: String, pub action: GitAppAction }
+    #[vmux_api::ui_event(namespace = "git", name = "app_request", target = "git")]
+    pub struct GitAppRequest { pub repo_root: String, pub action: GitAppAction }
     #[vmux_api::ui_event(namespace = "git", name = "branch_log_request", target = "git")]
     pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
     #[vmux_api::ui_event(namespace = "git", name = "directory_request", target = "git")]

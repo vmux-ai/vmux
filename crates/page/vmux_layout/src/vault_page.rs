@@ -3,8 +3,7 @@
 use dioxus::prelude::*;
 use vmux_core::tools::ToolsSnapshot;
 use vmux_core::vault::{
-    VaultAction, VaultActionRequest, VaultActionResult, VaultAuthProgress, VaultRefreshRequest,
-    VaultSnapshot,
+    VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRequest, VaultResult, VaultSnapshot,
 };
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
@@ -56,7 +55,7 @@ pub fn Page() -> Element {
     let mut snapshot = use_signal(ToolsSnapshot::default);
     let mut loaded = use_signal(|| false);
     let mut pending = use_signal(|| None::<VaultAction>);
-    let mut notice = use_signal(|| None::<VaultActionResult>);
+    let mut notice = use_signal(|| None::<VaultResult>);
     let mut generated_recovery_key = use_signal(String::new);
     let mut recovery_key_confirmation = use_signal(String::new);
     let mut recovery_key_copied = use_signal(|| false);
@@ -108,7 +107,7 @@ pub fn Page() -> Element {
         snapshot.set(event);
         loaded.set(true);
     });
-    let _action_listener = use_listener::<VaultActionResult, _>(move |mut result| {
+    let _result_listener = use_listener::<VaultResult, _>(move |mut result| {
         if result.action == VaultAction::ConnectGithub {
             github_device_code.set(String::new());
             github_device_code_copied.set(false);
@@ -248,7 +247,7 @@ fn VaultPanel(
     cloud_root: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
-    notice: Signal<Option<VaultActionResult>>,
+    notice: Signal<Option<VaultResult>>,
     generated_recovery_key: Signal<String>,
     recovery_key_confirmation: Signal<String>,
     recovery_key_copied: Signal<bool>,
@@ -703,7 +702,7 @@ fn RecoveryCard(
     mut recovery_key_copied: Signal<bool>,
     mut recovery_key_input: Signal<String>,
     recovery_upload_pending: Signal<bool>,
-    mut notice: Signal<Option<VaultActionResult>>,
+    mut notice: Signal<Option<VaultResult>>,
 ) -> Element {
     let generated = generated_recovery_key();
     let confirmation = recovery_key_confirmation();
@@ -848,7 +847,7 @@ fn send_recovery_action(
     recovery_key: String,
 ) {
     pending.set(Some(action));
-    if send(&VaultActionRequest {
+    if send(&VaultRequest {
         action,
         repository: String::new(),
         private: true,
@@ -918,7 +917,7 @@ fn send_action(
     private: bool,
 ) {
     pending.set(Some(action));
-    let _ = send(&VaultActionRequest {
+    let _ = send(&VaultRequest {
         action,
         repository,
         private,
@@ -929,7 +928,7 @@ fn send_action(
 
 fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name: &str) {
     pending.set(Some(VaultAction::CreateCloudFolder));
-    let _ = send(&VaultActionRequest {
+    let _ = send(&VaultRequest {
         action: VaultAction::CreateCloudFolder,
         repository: root.to_string(),
         private: true,

@@ -15,12 +15,12 @@ use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tools::{
-    ToolAction, ToolActionRequest, ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest,
-    ToolProvider, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult,
+    ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_core::vault::{
-    VaultAction, VaultActionRequest, VaultActionResult, VaultAuthProgress, VaultRefreshRequest,
-    VaultRepository, VaultSnapshot,
+    VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultRequest,
+    VaultResult, VaultSnapshot,
 };
 use vmux_editor::lsp::package_path::PackageName;
 use vmux_layout::LayoutCef;
@@ -125,17 +125,17 @@ impl Plugin for ToolsPlugin {
         vmux_core::register_host_spawn(app, "tools");
         vmux_core::register_host_spawn(app, "vault");
         app.init_resource::<ToolsState>()
-            .init_resource::<ToolActionQueue>()
-            .init_resource::<VaultActionQueue>()
+            .init_resource::<ToolRequestQueue>()
+            .init_resource::<VaultRequestQueue>()
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
             .add_plugins(crate::mcp_connection::McpConnectionPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 ToolsRefreshRequest,
-                ToolActionRequest,
+                ToolRequest,
                 ToolOpenRequest,
                 ToolsNavigateRequest,
-                VaultActionRequest,
+                VaultRequest,
                 VaultRefreshRequest,
             )>::default())
             .add_observer(on_refresh_request)
@@ -228,17 +228,17 @@ struct ToolsScanTask {
 #[derive(Component)]
 struct ToolActionTask {
     target: Entity,
-    request: ToolActionRequest,
+    request: ToolRequest,
     task: Task<Result<String, String>>,
 }
 
 #[derive(Resource, Default)]
-struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
+struct ToolRequestQueue(VecDeque<(Entity, ToolRequest)>);
 
 #[derive(Component)]
 struct VaultActionTask {
     target: Entity,
-    request: VaultActionRequest,
+    request: VaultRequest,
     task: Task<Result<VaultActionOutput, String>>,
     progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
     canceled: Arc<AtomicBool>,
@@ -266,7 +266,7 @@ struct VaultAutoSync {
 }
 
 #[derive(Resource, Default)]
-struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
+struct VaultRequestQueue(VecDeque<(Entity, VaultRequest)>);
 
 #[derive(Resource)]
 struct VaultRecoveryState {
@@ -368,9 +368,9 @@ fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: R
 }
 
 fn on_action_request(
-    trigger: On<BinReceive<ToolActionRequest>>,
+    trigger: On<BinReceive<ToolRequest>>,
     mut state: ResMut<ToolsState>,
-    mut queue: ResMut<ToolActionQueue>,
+    mut queue: ResMut<ToolRequestQueue>,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
@@ -379,9 +379,9 @@ fn on_action_request(
 }
 
 fn on_vault_action_request(
-    trigger: On<BinReceive<VaultActionRequest>>,
+    trigger: On<BinReceive<VaultRequest>>,
     mut state: ResMut<ToolsState>,
-    mut queue: ResMut<VaultActionQueue>,
+    mut queue: ResMut<VaultRequestQueue>,
     tasks: Query<&VaultActionTask>,
 ) {
     let target = trigger.event().webview;
@@ -451,7 +451,7 @@ fn queue_vault_auto_sync(
     state: Res<ToolsState>,
     scans: Query<(), With<ToolsScanTask>>,
     tasks: Query<&VaultActionTask>,
-    mut queue: ResMut<VaultActionQueue>,
+    mut queue: ResMut<VaultRequestQueue>,
 ) {
     if !auto_sync.requested || state.dirty || !state.loaded || !scans.is_empty() {
         return;
@@ -478,7 +478,7 @@ fn queue_vault_auto_sync(
     }
     queue.0.push_back((
         Entity::PLACEHOLDER,
-        VaultActionRequest {
+        VaultRequest {
             action: VaultAction::Sync,
             repository: String::new(),
             private: true,
@@ -501,7 +501,7 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
 }
 
 fn start_tool_action(
-    mut queue: ResMut<ToolActionQueue>,
+    mut queue: ResMut<ToolRequestQueue>,
     tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
@@ -523,7 +523,7 @@ fn start_tool_action(
 }
 
 fn start_vault_action(
-    mut queue: ResMut<VaultActionQueue>,
+    mut queue: ResMut<VaultRequestQueue>,
     mut recovery: ResMut<VaultRecoveryState>,
     tasks: Query<(), With<VaultActionTask>>,
     tool_tasks: Query<(), With<ToolActionTask>>,
@@ -578,8 +578,8 @@ fn start_tools_scan(
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
-    queue: Res<ToolActionQueue>,
-    vault_queue: Res<VaultActionQueue>,
+    queue: Res<ToolRequestQueue>,
+    vault_queue: Res<VaultRequestQueue>,
     mut commands: Commands,
 ) {
     if !state.dirty
@@ -660,7 +660,7 @@ fn drain_tool_actions(
             Ok(message) => (true, message),
             Err(message) => (false, message),
         };
-        let event = ToolActionResult {
+        let event = ToolResult {
             provider: task.request.provider,
             action: task.request.action,
             id: task.request.id.clone(),
@@ -716,7 +716,7 @@ fn drain_vault_actions(
         if let Some(key) = generated_recovery_key {
             recovery.retain(key);
         }
-        let event = VaultActionResult {
+        let event = VaultResult {
             action: task.request.action,
             success,
             message,
@@ -1352,7 +1352,7 @@ fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
     }
 }
 
-fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
+fn perform_action(request: &ToolRequest) -> Result<String, String> {
     if request.action == ToolAction::Apply {
         return apply_manifest();
     }
@@ -1420,7 +1420,7 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
 }
 
 async fn perform_vault_action<F, C>(
-    request: &VaultActionRequest,
+    request: &VaultRequest,
     recovery: VaultRecovery,
     generated_recovery_key: Option<GeneratedRecoveryKey>,
     progress: F,
@@ -2000,7 +2000,7 @@ mod tests {
             let mut app = App::new();
             app.init_resource::<ToolsState>()
                 .init_resource::<VaultAutoSync>()
-                .init_resource::<VaultActionQueue>()
+                .init_resource::<VaultRequestQueue>()
                 .add_systems(Update, queue_vault_auto_sync);
             {
                 let mut state = app.world_mut().resource_mut::<ToolsState>();
@@ -2014,7 +2014,7 @@ mod tests {
 
             app.update();
 
-            app.world().resource::<VaultActionQueue>().0.len()
+            app.world().resource::<VaultRequestQueue>().0.len()
         }
 
         let connected = VaultSnapshot {
