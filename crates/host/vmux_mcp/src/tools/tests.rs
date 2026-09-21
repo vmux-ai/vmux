@@ -71,7 +71,7 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     let mut app = ToolsPlugin::app();
     for name in expected {
         match ToolCall::dispatch(
-            app.world_mut(),
+            &mut app,
             name,
             serde_json::json!({}),
             anchor,
@@ -105,7 +105,7 @@ fn aliases_resolve_to_the_same_tool_entity() {
         select
     );
     let execution = ToolCall::dispatch(
-        app.world_mut(),
+        &mut app,
         "vmux_read_file",
         serde_json::json!({}),
         None,

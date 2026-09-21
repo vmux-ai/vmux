@@ -1,6 +1,8 @@
-use super::{DispatchTarget, ToolCall, ToolManifest};
-use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::{Commands, On};
+use super::{
+    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
 use serde::Deserialize;
 use vmux_client::protocol::{
     AgentCommand, AgentPaneDirection, AgentQuery, PlacementMode, ProcessId,
@@ -10,17 +12,59 @@ pub(super) struct WorkspaceToolsPlugin;
 
 impl Plugin for WorkspaceToolsPlugin {
     fn build(&self, app: &mut App) {
-        let mut tools = ToolManifest::from_ron(include_str!("workspace.ron"));
-        tools.observe(app, "open_page", open_page);
-        tools.observe(app, "open_file", open_file);
-        tools.observe(app, "resume_in_acp", resume_in_acp);
-        tools.observe(app, "run", run);
-        tools.observe(app, "request_user_choice", request_user_choice);
-        tools.observe(app, "select_project", select_project);
-        tools.observe(app, "create_worktree", create_worktree);
-        tools.observe(app, "read_terminal", read_terminal);
-        tools.finish();
+        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Workspace))
+            .add_systems(
+                Update,
+                (
+                    open_page,
+                    open_file,
+                    resume_in_acp,
+                    run,
+                    request_user_choice,
+                    select_project,
+                    create_worktree,
+                    read_terminal,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
+}
+
+#[derive(Component)]
+struct OpenPage;
+
+#[derive(Component)]
+struct OpenFile;
+
+#[derive(Component)]
+struct ResumeInAcp;
+
+#[derive(Component)]
+struct Run;
+
+#[derive(Component)]
+struct RequestUserChoice;
+
+#[derive(Component)]
+struct SelectProject;
+
+#[derive(Component)]
+struct CreateWorktree;
+
+#[derive(Component)]
+struct ReadTerminal;
+
+fn register(world: &mut World) {
+    let mut tools = ToolManifest::from_ron(include_str!("workspace.ron"));
+    tools.system(world, "open_page", OpenPage);
+    tools.system(world, "open_file", OpenFile);
+    tools.system(world, "resume_in_acp", ResumeInAcp);
+    tools.system(world, "run", Run);
+    tools.system(world, "request_user_choice", RequestUserChoice);
+    tools.system(world, "select_project", SelectProject);
+    tools.system(world, "create_worktree", CreateWorktree);
+    tools.system(world, "read_terminal", ReadTerminal);
+    tools.finish();
 }
 
 #[derive(Deserialize)]
@@ -114,14 +158,16 @@ struct ReadTerminalArgs {
     terminal: Option<String>,
 }
 
-fn resume_in_acp(trigger: On<ToolCall>, mut commands: Commands) {
-    let result = trigger
-        .require_anchor("resume_in_acp")
-        .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
-    trigger.finish_dispatch(&mut commands, result);
+fn resume_in_acp(mut commands: Commands, calls: ToolCalls<ResumeInAcp>) {
+    for (request, call, _) in calls.iter() {
+        let result = call
+            .require_anchor("resume_in_acp")
+            .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
+        call.finish_dispatch(request, &mut commands, result);
+    }
 }
 
-fn open_page(trigger: On<ToolCall>, mut commands: Commands) {
+fn open_page(mut commands: Commands, calls: ToolCalls<OpenPage>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_page")?;
         let args: OpenPageArgs = call.parse("open_page")?;
@@ -137,10 +183,12 @@ fn open_page(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn open_file(trigger: On<ToolCall>, mut commands: Commands) {
+fn open_file(mut commands: Commands, calls: ToolCalls<OpenFile>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_file")?;
         let args: OpenFileArgs = call.parse("open_file")?;
@@ -161,10 +209,12 @@ fn open_file(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn run(trigger: On<ToolCall>, mut commands: Commands) {
+fn run(mut commands: Commands, calls: ToolCalls<Run>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("run")?;
         let placement_override = ["mode", "direction", "beside"].iter().any(|key| {
@@ -218,7 +268,9 @@ fn run(trigger: On<ToolCall>, mut commands: Commands) {
         Ok(DispatchTarget::Command(command))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
 struct ProcessTarget;
@@ -239,7 +291,7 @@ impl ProcessTarget {
     }
 }
 
-fn create_worktree(trigger: On<ToolCall>, mut commands: Commands) {
+fn create_worktree(mut commands: Commands, calls: ToolCalls<CreateWorktree>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("create_worktree")?;
         let args: CreateWorktreeArgs = call.parse("create_worktree")?;
@@ -260,7 +312,9 @@ fn create_worktree(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
 struct Trimmed;
@@ -272,7 +326,7 @@ impl Trimmed {
     }
 }
 
-fn request_user_choice(trigger: On<ToolCall>, mut commands: Commands) {
+fn request_user_choice(mut commands: Commands, calls: ToolCalls<RequestUserChoice>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("request_user_choice")?;
         let args: RequestUserChoiceArgs = call.parse("request_user_choice")?;
@@ -297,10 +351,12 @@ fn request_user_choice(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn select_project(trigger: On<ToolCall>, mut commands: Commands) {
+fn select_project(mut commands: Commands, calls: ToolCalls<SelectProject>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("select_project")?;
         let args: SelectProjectArgs = call.parse("select_project")?;
@@ -314,10 +370,12 @@ fn select_project(trigger: On<ToolCall>, mut commands: Commands) {
         ))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
 
-fn read_terminal(trigger: On<ToolCall>, mut commands: Commands) {
+fn read_terminal(mut commands: Commands, calls: ToolCalls<ReadTerminal>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: ReadTerminalArgs = call.parse("read_terminal")?;
         let process_id = args
@@ -330,5 +388,7 @@ fn read_terminal(trigger: On<ToolCall>, mut commands: Commands) {
         }))
     }
 
-    trigger.finish_dispatch(&mut commands, target(&trigger));
+    for (request, call, _) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, target(call));
+    }
 }
