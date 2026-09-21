@@ -81,7 +81,7 @@ impl<S: Route> Clone for Seat<S> {
 impl<S: Route> Seat<S> {
     fn taken(screen: &S) -> vmux_native::Instance {
         let seated = Self(screen.clone());
-        vmux_native::Instance::of(move |scope| scope.provide(seated))
+        vmux_native::Instance::from(move |scope: vmux_native::PageScope<'_>| scope.provide(seated))
     }
 }
 

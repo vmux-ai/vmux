@@ -170,7 +170,7 @@ fn open_native_pages(world: &mut World) {
             None => vmux_native::Instance::default(),
         };
         if current.is_some_and(|(current, window)| {
-            current.transparent == page.transparent && window == window_entity
+            current.is_transparent() == page.is_transparent() && window == window_entity
         }) {
             let remounted = {
                 let mut hosted = world.non_send_mut::<HostedPages>();
@@ -185,7 +185,7 @@ fn open_native_pages(world: &mut World) {
                     .entity_mut(entity)
                     .remove::<vmux_core::page::PageReady>();
             }
-            info!("native_page: navigated {entity:?} to {}", page.url);
+            info!("native_page: navigated {entity:?} to {}", page.url());
             continue;
         }
         if current.is_some() {
@@ -395,7 +395,7 @@ impl Placement {
                 >();
                 for (entity, meta, terminal) in pages.iter(world) {
                     let url = if terminal {
-                        super::TERMINAL_PAGE.url
+                        super::TERMINAL_PAGE.url()
                     } else {
                         &meta.url
                     };

@@ -118,10 +118,6 @@ impl PageHost for Routed {
         self.inner.select_element_text(element_id);
     }
 
-    fn clear_element_text(&self, element_id: &str) {
-        self.inner.clear_element_text(element_id);
-    }
-
     fn toggle_media(&self, element_id: &str) {
         self.inner.toggle_media(element_id);
     }

@@ -80,7 +80,7 @@ impl Root {
                 &**window,
                 wry::Rect::default(),
                 embedding(waker),
-                Instance::of(|_| {}),
+                Instance::from(|_: vmux_native::PageScope<'_>| {}),
             ))
         });
         match built {

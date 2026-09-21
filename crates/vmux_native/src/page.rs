@@ -28,6 +28,10 @@ impl NativePage {
         self.url
     }
 
+    pub fn is_transparent(&self) -> bool {
+        self.transparent
+    }
+
     pub fn background_or(&self, fallback: (u8, u8, u8, u8)) -> (u8, u8, u8, u8) {
         match self.background {
             Some(colour) => colour,
