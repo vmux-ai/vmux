@@ -263,10 +263,9 @@ fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
 fn cef_os_crypt_keys() -> Result<bevy_cef::CefOsCryptKeys, String> {
     let keys = vmux_core::profile::safe_storage::SafeStorage::browser_keys()
         .map_err(|error| error.to_string())?;
-    Ok(bevy_cef::CefOsCryptKeys {
-        current: keys.current.as_bytes().to_vec(),
-        legacy: keys.legacy.map(|key| key.as_bytes().to_vec()),
-    })
+    let current = *keys.current.as_bytes();
+    let legacy = keys.legacy.map(|key| *key.as_bytes());
+    Ok(bevy_cef::CefOsCryptKeys::new(current, legacy))
 }
 
 fn theme_event(settings: &AppSettings) -> ThemeEvent {

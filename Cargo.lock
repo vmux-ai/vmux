@@ -911,6 +911,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

@@ -42,10 +42,28 @@ pub mod prelude {
 
 pub struct RunOnMainThread;
 
-#[derive(Clone, Debug)]
 pub struct CefOsCryptKeys {
-    pub current: Vec<u8>,
-    pub legacy: Option<Vec<u8>>,
+    current: zeroize::Zeroizing<[u8; Self::KEY_LENGTH]>,
+    legacy: Option<zeroize::Zeroizing<[u8; Self::KEY_LENGTH]>>,
+}
+
+impl CefOsCryptKeys {
+    pub const KEY_LENGTH: usize = 16;
+
+    pub fn new(current: [u8; Self::KEY_LENGTH], legacy: Option<[u8; Self::KEY_LENGTH]>) -> Self {
+        Self {
+            current: zeroize::Zeroizing::new(current),
+            legacy: legacy.map(zeroize::Zeroizing::new),
+        }
+    }
+
+    pub(crate) fn current(&self) -> &[u8; Self::KEY_LENGTH] {
+        &self.current
+    }
+
+    pub(crate) fn legacy(&self) -> Option<&[u8; Self::KEY_LENGTH]> {
+        self.legacy.as_deref()
+    }
 }
 
 pub type CefOsCryptKeyProvider = fn() -> Result<CefOsCryptKeys, String>;
