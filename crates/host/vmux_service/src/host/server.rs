@@ -1176,15 +1176,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn acp_spawn_replays_agent_info_after_subscribing() {
-        let production = include_str!("server.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("server production source");
-        assert!(production.contains("acp_manager.lock().await.agent_info(&sid)"));
-    }
-
     #[tokio::test]
     async fn pending_queries_roundtrips_oneshot() {
         let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));

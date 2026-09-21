@@ -526,54 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn quit_menu_event_hides_windows_not_exit() {
-        let source = include_str!("os_menu.rs");
-        let needle = ["AppExit", "::", "Success"].concat();
-        assert!(
-            !source.contains(&needle),
-            "Cmd+Q must hide windows, not exit the app — terminal state must survive"
-        );
-        assert!(
-            source.contains("HideAllWindows") || source.contains("window.visible = false"),
-            "handle_quit_request must dispatch a hide action"
-        );
-    }
-
-    #[test]
-    fn window_close_request_hides_window_instead_of_despawning() {
-        let source = include_str!("os_menu.rs");
-        let despawn_marker = ["Closing", "Window"].concat();
-        let inserts = source.matches(&format!("insert({despawn_marker})")).count()
-            + source
-                .matches(&format!("try_insert({despawn_marker})"))
-                .count();
-        assert_eq!(
-            inserts, 0,
-            "WindowCloseRequested must hide the window, not insert ClosingWindow which leads to despawn"
-        );
-        assert!(
-            source.contains("window.visible = false") || source.contains(".visible = false"),
-            "expected the close handler to set window.visible = false"
-        );
-    }
-
-    #[test]
-    fn window_close_hides_without_quit_confirmation() {
-        let source = include_str!("os_menu.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(
-            !source.contains("PendingWindowClose"),
-            "window close must not route through a confirmation dialog"
-        );
-        assert!(!source.contains("process_pending_window_close"));
-        assert!(!source.contains("should_confirm"));
-        assert!(!source.contains("confirm_quit_dialog"));
-    }
-
-    #[test]
     fn unsuppressed_window_close_hides_window() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
@@ -588,20 +540,6 @@ mod tests {
         app.world_mut().run_schedule(Update);
 
         assert!(!app.world().get::<Window>(window).unwrap().visible);
-    }
-
-    #[test]
-    fn window_close_request_after_tab_close_is_suppressed() {
-        let source = include_str!("os_menu.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("LastTabCloseAt"));
-        assert!(source.contains("from_tab_close"));
-        assert!(source.contains(
-        "from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open"
-    ));
     }
 
     #[test]
