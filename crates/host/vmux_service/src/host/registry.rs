@@ -8,6 +8,31 @@ pub enum Backend {
     Launchctl,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegistrationStep {
+    CleanupLegacy,
+    UnregisterMainApp,
+    UnregisterEmbeddedAgent,
+    RegisterEmbeddedAgent,
+    KickstartEmbeddedAgent,
+    EnsureLaunchAgent,
+}
+
+impl Backend {
+    pub fn registration_steps(&self) -> &'static [RegistrationStep] {
+        match self {
+            Self::SmAppService { .. } => &[
+                RegistrationStep::CleanupLegacy,
+                RegistrationStep::UnregisterMainApp,
+                RegistrationStep::UnregisterEmbeddedAgent,
+                RegistrationStep::RegisterEmbeddedAgent,
+                RegistrationStep::KickstartEmbeddedAgent,
+            ],
+            Self::Launchctl => &[RegistrationStep::EnsureLaunchAgent],
+        }
+    }
+}
+
 pub fn choose_backend(exe: &Path) -> Backend {
     if let Some(root) = bundle::bundle_root_for(exe) {
         Backend::SmAppService { bundle_root: root }
@@ -67,45 +92,42 @@ impl From<crate::sm_app_service::SmError> for RegistrationError {
 }
 
 pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError> {
-    match choose_backend(exe) {
-        Backend::SmAppService { .. } => {
-            #[cfg(target_os = "macos")]
+    let backend = choose_backend(exe);
+    #[cfg(target_os = "macos")]
+    for step in backend.registration_steps() {
+        match step {
+            RegistrationStep::CleanupLegacy => match crate::cleanup::cleanup_legacy_registrations()
             {
-                match crate::cleanup::cleanup_legacy_registrations() {
-                    Ok(0) => {}
-                    Ok(n) => tracing::info!(removed = n, "removed legacy launchd plists"),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "legacy plist cleanup failed (continuing)")
-                    }
+                Ok(0) => {}
+                Ok(n) => tracing::info!(removed = n, "removed legacy launchd plists"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "legacy plist cleanup failed (continuing)")
                 }
+            },
+            RegistrationStep::UnregisterMainApp => {
                 if let Err(e) = crate::sm_app_service::unregister_main_app() {
                     tracing::debug!(error = %e, "unregister main app login item (ignored)");
                 }
+            }
+            RegistrationStep::UnregisterEmbeddedAgent => {
                 if let Err(e) =
                     crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
                 {
                     tracing::debug!(error = %e, "unregister embedded agent (ignored)");
                 }
+            }
+            RegistrationStep::RegisterEmbeddedAgent => {
                 crate::sm_app_service::register_agent(bundle::EMBEDDED_AGENT_PLIST)?;
+            }
+            RegistrationStep::KickstartEmbeddedAgent => {
                 crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)?;
-                Ok(())
             }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Ok(())
-            }
-        }
-        Backend::Launchctl => {
-            #[cfg(target_os = "macos")]
-            {
+            RegistrationStep::EnsureLaunchAgent => {
                 crate::LaunchAgent::for_profile(profile).ensure_running(exe)?;
-                Ok(())
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (profile, exe);
-                Ok(())
             }
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (profile, exe, backend);
+    Ok(())
 }

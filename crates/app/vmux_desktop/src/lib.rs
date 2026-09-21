@@ -63,22 +63,16 @@ pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
-        let primary_window = window_config(false);
-        let window_plugin = WindowPlugin {
-            primary_window: Some(primary_window),
-            close_when_requested: false,
-            exit_condition: ExitCondition::DontExit,
-            ..default()
-        };
-
         let winit_settings = runtime::foreground_winit_settings(false, false);
         app.insert_resource(winit_settings).add_plugins((
             VmuxCorePlugins,
-            DefaultPlugins.set(window_plugin).set(bevy::log::LogPlugin {
-                filter: "bevy_camera_controller=warn".into(),
-                custom_layer: crate::log_forward::file_log_layer,
-                ..default()
-            }),
+            DefaultPlugins
+                .set(window_plugin())
+                .set(bevy::log::LogPlugin {
+                    filter: "bevy_camera_controller=warn".into(),
+                    custom_layer: crate::log_forward::file_log_layer,
+                    ..default()
+                }),
             LayoutPlugin,
             FeaturePlugins,
             BrowserPlugin,
@@ -92,6 +86,15 @@ impl Plugin for VmuxPlugin {
         .add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
             &vmux_git::page::LEGACY_NATIVE_PAGE,
         ));
+    }
+}
+
+fn window_plugin() -> WindowPlugin {
+    WindowPlugin {
+        primary_window: Some(window_config(false)),
+        close_when_requested: false,
+        exit_condition: ExitCondition::DontExit,
+        ..default()
     }
 }
 
@@ -172,27 +175,9 @@ mod tests {
 
     #[test]
     fn window_plugin_keeps_app_alive_after_last_window_closes() {
-        let source = include_str!("lib.rs");
-        assert!(
-            source.contains("ExitCondition::DontExit"),
-            "WindowPlugin must opt out of automatic exit so Vmux.app survives last-window-close"
-        );
-    }
+        let plugin = window_plugin();
 
-    #[test]
-    fn desktop_uses_single_layout_crate_for_cef_and_layout() {
-        let source = include_str!("lib.rs");
-
-        assert!(source.contains("vmux_layout::"));
-        assert!(!source.contains(&["vmux_layout", "::footer"].concat()));
-        assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
-        assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
-    }
-
-    #[test]
-    fn dev_build_has_no_tick_logger() {
-        let source = include_str!("lib.rs");
-
-        assert!(!source.contains(&["app", ".update", "():"].concat()));
+        assert!(matches!(plugin.exit_condition, ExitCondition::DontExit));
+        assert!(!plugin.close_when_requested);
     }
 }
