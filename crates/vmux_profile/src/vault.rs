@@ -15,9 +15,7 @@ pub use connect::{
     RepositoryVisibility, VaultRepository, connect_folder, connect_github_with_progress,
     connect_remote, create_remote,
 };
-pub use recovery::{
-    RecoveryKeyCreation, create_recovery_key, generate_recovery_key, unlock_with_recovery_key,
-};
+pub use recovery::{GeneratedRecoveryKey, RecoveryKeyCreation, VaultRecovery};
 pub use status::{VaultStatus, status, status_with_repositories};
 pub use sync::{initialize, sync};
 

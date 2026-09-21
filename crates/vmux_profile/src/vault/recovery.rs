@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
 
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -39,122 +38,144 @@ pub struct RecoveryKeyCreation {
     pub pending_upload: bool,
 }
 
+pub struct GeneratedRecoveryKey(Zeroizing<[u8; KEY_LEN]>);
+
+#[derive(Clone)]
+pub struct VaultRecovery {
+    root: PathBuf,
+    repository: PathBuf,
+}
+
 impl hkdf::KeyType for RecoveryKeyLength {
     fn len(&self) -> usize {
         KEY_LEN
     }
 }
 
-pub(super) static PENDING_RECOVERY_KEY: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
+impl GeneratedRecoveryKey {
+    pub fn generate() -> Result<Self, String> {
+        let mut bytes = Zeroizing::new([0_u8; KEY_LEN]);
+        SystemRandom::new()
+            .fill(bytes.as_mut())
+            .map_err(|_| "failed to generate secure random data".to_string())?;
+        Ok(Self(bytes))
+    }
 
-pub(super) fn pending_recovery_key() -> std::sync::MutexGuard<'static, Option<Zeroizing<String>>> {
-    PENDING_RECOVERY_KEY.lock().unwrap_or_else(|poisoned| {
-        PENDING_RECOVERY_KEY.clear_poison();
-        poisoned.into_inner()
-    })
+    pub fn display(&self) -> Zeroizing<String> {
+        Zeroizing::new(format_recovery_key(self.0.as_ref()))
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
 }
 
-pub fn generate_recovery_key() -> Result<Zeroizing<String>, String> {
-    let mut bytes = Zeroizing::new(vec![0_u8; KEY_LEN]);
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .map_err(|_| "failed to generate secure random data".to_string())?;
-    let encoded = Zeroizing::new(hex(&bytes));
+impl VaultRecovery {
+    pub fn current() -> Self {
+        Self {
+            root: root_dir(),
+            repository: repository_dir(),
+        }
+    }
+
+    pub fn create(
+        &self,
+        recovery_key: GeneratedRecoveryKey,
+    ) -> Result<RecoveryKeyCreation, String> {
+        self.create_with(&SystemKeyStore, recovery_key.as_bytes())
+    }
+
+    pub fn unlock(&self, recovery_key: &str) -> Result<String, String> {
+        self.unlock_with(&SystemKeyStore, recovery_key)
+    }
+
+    #[cfg(test)]
+    pub(super) fn at(root: &Path, repository: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            repository: repository.to_path_buf(),
+        }
+    }
+
+    pub(super) fn create_with<K: KeyStore>(
+        &self,
+        keys: &K,
+        recovery_key: &[u8],
+    ) -> Result<RecoveryKeyCreation, String> {
+        if read_recovery_envelope(&self.repository)?.is_some() {
+            return Err("This Vault already has a Recovery Key".to_string());
+        }
+        let mut manifest = read_manifest(&self.repository)?;
+        let previous_manifest = manifest.clone();
+        let key = load_repository_key(&self.repository, keys, &manifest.vault_id)?;
+        validate_key(recovery_key)?;
+        let wrapping_key = derive_recovery_wrapping_key(recovery_key, &manifest.vault_id)?;
+        let envelope = RecoveryEnvelope {
+            version: FORMAT_VERSION,
+            wrapped_key: encrypt_bytes(&wrapping_key, &recovery_aad(&manifest.vault_id), &key)?,
+        };
+        let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
+            .map_err(|error| error.to_string())?;
+        let directory = self.repository.join(RECOVERY_DIR);
+        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        write_atomic(
+            &directory.join(RECOVERY_FILE),
+            format!("{source}\n").as_bytes(),
+        )?;
+        let finalization = (|| {
+            manifest.version = MANIFEST_VERSION;
+            write_manifest(&self.repository, &manifest)?;
+            validate_encrypted_worktree(&self.repository)?;
+            commit_changes(&self.repository, "Add Vault Recovery Key")
+        })();
+        if let Err(error) = finalization {
+            let _ = std::fs::remove_file(directory.join(RECOVERY_FILE));
+            let _ = std::fs::remove_dir(&directory);
+            let _ = write_manifest(&self.repository, &previous_manifest);
+            let _ = git(&self.repository, &["reset"]);
+            return Err(error);
+        }
+        let mut pending_upload = false;
+        if !git_optional(&self.repository, &["remote", "get-url", "origin"]).is_empty() {
+            pending_upload = current_branch(&self.repository)
+                .and_then(|branch| git(&self.repository, &["push", "-u", "origin", &branch]))
+                .is_err();
+        }
+        Ok(RecoveryKeyCreation { pending_upload })
+    }
+
+    pub(super) fn unlock_with<K: KeyStore>(
+        &self,
+        keys: &K,
+        recovery_key: &str,
+    ) -> Result<String, String> {
+        let recovery_key = parse_recovery_key(recovery_key)?;
+        let manifest = read_manifest(&self.repository)?;
+        let envelope = read_recovery_envelope(&self.repository)?
+            .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
+        let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
+        let key = Zeroizing::new(decrypt_bytes(
+            &wrapping_key,
+            &recovery_aad(&manifest.vault_id),
+            &envelope.wrapped_key,
+        )?);
+        validate_key(&key)?;
+        let (_, remote_files) = load_encrypted_snapshot(&self.repository, &key)?;
+        keys.store(&manifest.vault_id, &key)?;
+        reconcile_local(&self.root, &BTreeMap::new(), &remote_files)?;
+        write_local_state(&self.root, &self.repository)?;
+        Ok("Vault unlocked".to_string())
+    }
+}
+
+pub(super) fn format_recovery_key(key: &[u8]) -> String {
+    let encoded = hex(key);
     let groups = encoded
         .as_bytes()
         .chunks(4)
         .map(|group| std::str::from_utf8(group).unwrap_or_default())
         .collect::<Vec<_>>();
-    let key = Zeroizing::new(format!("vmux-{}", groups.join("-")));
-    *pending_recovery_key() = Some(key.clone());
-    Ok(key)
-}
-
-pub fn create_recovery_key() -> Result<RecoveryKeyCreation, String> {
-    let key = pending_recovery_key()
-        .take()
-        .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
-    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, &key)
-}
-
-pub fn unlock_with_recovery_key(recovery_key: &str) -> Result<String, String> {
-    unlock_with_recovery_key_paths(
-        &root_dir(),
-        &repository_dir(),
-        &SystemKeyStore,
-        recovery_key,
-    )
-}
-
-pub(super) fn create_recovery_key_paths<K: KeyStore>(
-    repository: &Path,
-    keys: &K,
-    recovery_key: &str,
-) -> Result<RecoveryKeyCreation, String> {
-    if read_recovery_envelope(repository)?.is_some() {
-        return Err("This Vault already has a Recovery Key".to_string());
-    }
-    let mut manifest = read_manifest(repository)?;
-    let previous_manifest = manifest.clone();
-    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
-    let recovery_key = parse_recovery_key(recovery_key)?;
-    let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
-    let envelope = RecoveryEnvelope {
-        version: FORMAT_VERSION,
-        wrapped_key: encrypt_bytes(&wrapping_key, &recovery_aad(&manifest.vault_id), &key)?,
-    };
-    let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
-        .map_err(|error| error.to_string())?;
-    let directory = repository.join(RECOVERY_DIR);
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    write_atomic(
-        &directory.join(RECOVERY_FILE),
-        format!("{source}\n").as_bytes(),
-    )?;
-    let finalization = (|| {
-        manifest.version = MANIFEST_VERSION;
-        write_manifest(repository, &manifest)?;
-        validate_encrypted_worktree(repository)?;
-        commit_changes(repository, "Add Vault Recovery Key")
-    })();
-    if let Err(error) = finalization {
-        let _ = std::fs::remove_file(directory.join(RECOVERY_FILE));
-        let _ = std::fs::remove_dir(&directory);
-        let _ = write_manifest(repository, &previous_manifest);
-        let _ = git(repository, &["reset"]);
-        return Err(error);
-    }
-    let mut pending_upload = false;
-    if !git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
-        pending_upload = current_branch(repository)
-            .and_then(|branch| git(repository, &["push", "-u", "origin", &branch]))
-            .is_err();
-    }
-    Ok(RecoveryKeyCreation { pending_upload })
-}
-
-pub(super) fn unlock_with_recovery_key_paths<K: KeyStore>(
-    root: &Path,
-    repository: &Path,
-    keys: &K,
-    recovery_key: &str,
-) -> Result<String, String> {
-    let recovery_key = parse_recovery_key(recovery_key)?;
-    let manifest = read_manifest(repository)?;
-    let envelope = read_recovery_envelope(repository)?
-        .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
-    let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
-    let key = Zeroizing::new(decrypt_bytes(
-        &wrapping_key,
-        &recovery_aad(&manifest.vault_id),
-        &envelope.wrapped_key,
-    )?);
-    validate_key(&key)?;
-    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
-    keys.store(&manifest.vault_id, &key)?;
-    reconcile_local(root, &BTreeMap::new(), &remote_files)?;
-    write_local_state(root, repository)?;
-    Ok("Vault unlocked".to_string())
+    format!("vmux-{}", groups.join("-"))
 }
 
 pub(super) fn read_recovery_envelope(
@@ -213,17 +234,6 @@ pub(super) fn recovery_aad(vault_id: &str) -> Vec<u8> {
     aad.extend_from_slice(RECOVERY_AAD_PREFIX);
     aad.extend_from_slice(vault_id.as_bytes());
     aad
-}
-
-#[cfg(test)]
-pub(super) fn format_recovery_key(key: &[u8]) -> String {
-    let encoded = hex(key);
-    let groups = encoded
-        .as_bytes()
-        .chunks(4)
-        .map(|group| std::str::from_utf8(group).unwrap())
-        .collect::<Vec<_>>();
-    format!("vmux-{}", groups.join("-"))
 }
 
 pub(super) fn parse_recovery_key(source: &str) -> Result<Zeroizing<Vec<u8>>, String> {

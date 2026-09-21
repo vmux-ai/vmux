@@ -106,31 +106,20 @@ fn agent_status_omits_an_unparseable_remote_url() {
 }
 
 #[test]
-fn a_recovery_key_is_committed_only_when_this_process_drew_it() {
-    pending_recovery_key().take();
+fn generated_recovery_keys_are_independent_and_parseable() {
+    let key = GeneratedRecoveryKey::generate().unwrap();
+    let displayed = key.display();
     assert!(
-        create_recovery_key()
-            .unwrap_err()
-            .contains("No Recovery Key"),
-        "committing without drawing one first must refuse, or a key from anywhere else could \
-             wrap the master key"
-    );
-
-    let key = generate_recovery_key().unwrap();
-    assert!(
-        parse_recovery_key(&key).is_ok(),
+        parse_recovery_key(&displayed).is_ok(),
         "the displayed form has to be the one the unlock path parses back"
     );
 
-    let again = generate_recovery_key().unwrap();
-    assert_ne!(*key, *again, "each draw must be independent");
-    assert_eq!(
-        pending_recovery_key().as_deref().map(|held| held.as_str()),
-        Some(again.as_str()),
-        "the held key is the newest draw, so an abandoned one cannot be committed later"
+    let again = GeneratedRecoveryKey::generate().unwrap();
+    assert_ne!(
+        *displayed,
+        *again.display(),
+        "each draw must be independent"
     );
-
-    pending_recovery_key().take();
 }
 
 struct FixedKeyStore {
@@ -375,10 +364,13 @@ fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
     let first_repository = prepare_repository(first.path());
     let original_keys = FixedKeyStore::new(43);
     initialize_paths(first.path(), &first_repository, &original_keys).unwrap();
-    let recovery_key = format_recovery_key(&[45; KEY_LEN]);
-    let recovery =
-        create_recovery_key_paths(&first_repository, &original_keys, &recovery_key).unwrap();
-    assert!(!recovery.pending_upload);
+    let recovery_key_bytes = [45; KEY_LEN];
+    let recovery_key = format_recovery_key(&recovery_key_bytes);
+    let recovery = VaultRecovery::at(first.path(), &first_repository);
+    let creation = recovery
+        .create_with(&original_keys, &recovery_key_bytes)
+        .unwrap();
+    assert!(!creation.pending_upload);
     assert_eq!(parse_recovery_key(&recovery_key).unwrap().len(), KEY_LEN);
     assert!(read_recovery_envelope(&first_repository).unwrap().is_some());
 
@@ -404,13 +396,8 @@ fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
     .unwrap();
     assert!(!second.path().join("knowledge/private.md").exists());
 
-    unlock_with_recovery_key_paths(
-        second.path(),
-        &second_repository,
-        &second_keys,
-        &recovery_key,
-    )
-    .unwrap();
+    let recovery = VaultRecovery::at(second.path(), &second_repository);
+    recovery.unlock_with(&second_keys, &recovery_key).unwrap();
     assert_eq!(
         std::fs::read_to_string(second.path().join("knowledge/private.md")).unwrap(),
         "# Private\n"
@@ -424,9 +411,7 @@ fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
         &[43; KEY_LEN]
     );
     assert!(
-        unlock_with_recovery_key_paths(
-            second.path(),
-            &second_repository,
+        recovery.unlock_with(
             &MemoryKeyStore::default(),
             "vmux-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000",
         )
@@ -457,8 +442,11 @@ fn recovery_key_creation_survives_remote_upload_failure() {
     )
     .unwrap();
 
-    let recovery_key = format_recovery_key(&[46; KEY_LEN]);
-    let recovery = create_recovery_key_paths(&repository, &keys, &recovery_key).unwrap();
+    let recovery_key_bytes = [46; KEY_LEN];
+    let recovery_key = format_recovery_key(&recovery_key_bytes);
+    let recovery = VaultRecovery::at(root.path(), &repository)
+        .create_with(&keys, &recovery_key_bytes)
+        .unwrap();
 
     assert!(recovery.pending_upload);
     assert_eq!(parse_recovery_key(&recovery_key).unwrap().len(), KEY_LEN);
