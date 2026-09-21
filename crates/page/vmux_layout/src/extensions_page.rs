@@ -21,8 +21,8 @@ struct Approval {
     permissions: Vec<String>,
 }
 
-impl Approval {
-    fn of(extension: &ExtRow) -> Self {
+impl From<&ExtRow> for Approval {
+    fn from(extension: &ExtRow) -> Self {
         let mut permissions = extension.required_permissions.clone();
         permissions.extend(extension.required_host_permissions.iter().cloned());
         let id = if permissions.is_empty() {
@@ -156,7 +156,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
     let toggle_id = item.id.clone();
     let toggle_enabled = item.enabled;
     let needs_approval = item.needs_approval;
-    let approval = Approval::of(&item);
+    let approval = Approval::from(&item);
     let name = item.name.clone();
     let remove_id = item.id.clone();
     let icon = item.icon.clone();

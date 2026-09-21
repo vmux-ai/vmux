@@ -2,8 +2,11 @@ use dioxus_html::*;
 
 pub(crate) struct MountedBacking(Box<dyn Fn() -> MountedData>);
 
-impl MountedBacking {
-    pub(crate) fn of(backing: impl RenderedElementBacking + Clone + 'static) -> Self {
+impl<T> From<T> for MountedBacking
+where
+    T: RenderedElementBacking + Clone + 'static,
+{
+    fn from(backing: T) -> Self {
         Self(Box::new(move || MountedData::new(backing.clone())))
     }
 }

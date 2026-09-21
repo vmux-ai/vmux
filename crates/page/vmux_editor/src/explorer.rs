@@ -154,7 +154,7 @@ impl SidebarView {
 struct SearchRowKey;
 
 impl SearchRowKey {
-    fn of(path: &str, hit: &ExplorerSearchMatch) -> String {
+    fn for_hit(path: &str, hit: &ExplorerSearchMatch) -> String {
         format!("{path}:{}:{}", hit.line, hit.col)
     }
 }
@@ -162,7 +162,7 @@ impl SearchRowKey {
 struct SearchFileName;
 
 impl SearchFileName {
-    fn of(path: &str) -> String {
+    fn from_path(path: &str) -> String {
         Path::new(path)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -173,7 +173,7 @@ impl SearchFileName {
 struct SearchFileDir;
 
 impl SearchFileDir {
-    fn of(root: &str, path: &str) -> String {
+    fn relative_parent(root: &str, path: &str) -> String {
         let relative = Path::new(path)
             .strip_prefix(root)
             .unwrap_or(Path::new(path));
@@ -187,7 +187,7 @@ impl SearchFileDir {
 struct SearchCount;
 
 impl SearchCount {
-    fn of(file: &ExplorerSearchFile) -> String {
+    fn for_file(file: &ExplorerSearchFile) -> String {
         let shown = file.matches.len();
         match file.capped {
             true => format!("{shown}+"),
@@ -203,8 +203,8 @@ struct SearchSummary {
     floor: bool,
 }
 
-impl SearchSummary {
-    fn of(results: &ExplorerSearchEvent) -> Self {
+impl From<&ExplorerSearchEvent> for SearchSummary {
+    fn from(results: &ExplorerSearchEvent) -> Self {
         let mut total = 0usize;
         let mut floor = results.capped;
         for file in &results.files {
@@ -219,7 +219,9 @@ impl SearchSummary {
             floor,
         }
     }
+}
 
+impl SearchSummary {
     fn text(&self) -> String {
         let id = match self.floor {
             true => "editor-search-summary-capped",
@@ -242,7 +244,7 @@ struct PreviewSpan {
 }
 
 impl PreviewSpan {
-    fn of(preview: &str, col: u32, end_col: u32) -> Self {
+    fn split(preview: &str, col: u32, end_col: u32) -> Self {
         let start = Self::char_at(preview, col);
         let end = Self::char_at(preview, end_col).max(start);
         let mut before = String::new();
@@ -340,7 +342,7 @@ impl SearchState {
 
     fn open(self, path: &str, hit: &ExplorerSearchMatch) {
         let mut opened = self.opened;
-        opened.set(SearchRowKey::of(path, hit));
+        opened.set(SearchRowKey::for_hit(path, hit));
         let _ = send(&ExplorerSearchOpen {
             path: path.to_string(),
             line: hit.line,
@@ -369,7 +371,7 @@ impl SearchState {
                 continue;
             }
             for hit in &file.matches {
-                keys.push(SearchRowKey::of(&file.path, hit));
+                keys.push(SearchRowKey::for_hit(&file.path, hit));
             }
         }
         keys
@@ -523,7 +525,7 @@ impl TreeRows {
     }
 
     fn create_parent(self, focus: &str, root: &str) -> String {
-        CreateTarget::of(self.rows.peek().as_slice(), focus, root)
+        CreateTarget::resolve(self.rows.peek().as_slice(), focus, root)
     }
 
     fn expand(self, path: &str) {
@@ -558,7 +560,7 @@ impl TreeRows {
 struct AncestorChain;
 
 impl AncestorChain {
-    fn of(depths: &[u16], top: usize) -> Vec<usize> {
+    fn from_depths(depths: &[u16], top: usize) -> Vec<usize> {
         let Some(&start) = depths.get(top) else {
             return Vec::new();
         };
@@ -584,7 +586,7 @@ impl AncestorChain {
 struct CreateTarget;
 
 impl CreateTarget {
-    fn of(rows: &[MotionRow], focus: &str, root: &str) -> String {
+    fn resolve(rows: &[MotionRow], focus: &str, root: &str) -> String {
         if focus.is_empty() {
             return root.to_string();
         }
@@ -607,7 +609,7 @@ impl CreateTarget {
 struct OutlineKey;
 
 impl OutlineKey {
-    fn of(row: &OutlineRow) -> String {
+    fn for_row(row: &OutlineRow) -> String {
         format!("{}-{}", row.line, row.name)
     }
 }
@@ -615,11 +617,11 @@ impl OutlineKey {
 struct CaretSymbol;
 
 impl CaretSymbol {
-    fn of(rows: &[OutlineRow], line: u32) -> String {
+    fn from_rows(rows: &[OutlineRow], line: u32) -> String {
         let mut innermost = String::new();
         for row in rows {
             if row.contains(line) {
-                innermost = OutlineKey::of(row);
+                innermost = OutlineKey::for_row(row);
             }
         }
         innermost
@@ -907,7 +909,7 @@ fn StickyOutline(rows: Vec<OutlineRow>, on_pick: EventHandler<u32>) -> Element {
     rsx! {
         StickyOverlay {
             for row in rows {
-                StickyOutlineRow { key: "{OutlineKey::of(&row)}", row, on_pick }
+                StickyOutlineRow { key: "{OutlineKey::for_row(&row)}", row, on_pick }
             }
         }
     }
@@ -959,7 +961,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let mut root = String::new();
     let mut files = Vec::new();
     if let Some(found) = search.results.read().as_ref() {
-        summary = Some(SearchSummary::of(found).text());
+        summary = Some(SearchSummary::from(found).text());
         root = found.root.clone();
         files = found.files.clone();
     }
@@ -1087,7 +1089,7 @@ fn SearchFileGroup(
 ) -> Element {
     let collapsed = search.is_collapsed(&file.path);
     let path_toggle = file.path.clone();
-    let directory = SearchFileDir::of(&root, &file.path);
+    let directory = SearchFileDir::relative_parent(&root, &file.path);
     let body = if collapsed {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-150 ease-out"
     } else {
@@ -1101,20 +1103,20 @@ fn SearchFileGroup(
                 onclick: move |_| search.toggle_group(&path_toggle),
                 Chevron { expanded: !collapsed, loading: false }
                 {rsx! { TypeIcon { path: file.path.clone(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
-                span { class: "shrink-0 truncate", {SearchFileName::of(&file.path)} }
+                span { class: "shrink-0 truncate", {SearchFileName::from_path(&file.path)} }
                 if !directory.is_empty() {
                     span { class: "min-w-0 truncate text-[10px] text-muted-foreground", "{directory}" }
                 }
                 span {
                     class: "ml-auto shrink-0 rounded-full bg-foreground/[0.12] px-1.5 text-[10px] tabular-nums text-muted-foreground",
-                    {SearchCount::of(&file)}
+                    {SearchCount::for_file(&file)}
                 }
             }
             div { class: "{body}",
                 div { class: "min-h-0 overflow-hidden",
                     for hit in file.matches.clone() {
                         SearchHitRow {
-                            key: "{SearchRowKey::of(&file.path, &hit)}",
+                            key: "{SearchRowKey::for_hit(&file.path, &hit)}",
                             path: file.path.clone(),
                             hit,
                             search,
@@ -1138,9 +1140,9 @@ fn SearchHitRow(
     opened: String,
     focused: String,
 ) -> Element {
-    let key = SearchRowKey::of(&path, &hit);
-    let accent = TreeRowAccent::of(key == opened, key == focused);
-    let span = PreviewSpan::of(&hit.preview, hit.col, hit.end_col);
+    let key = SearchRowKey::for_hit(&path, &hit);
+    let accent = TreeRowAccent::resolve(key == opened, key == focused);
+    let span = PreviewSpan::split(&hit.preview, hit.col, hit.end_col);
     let key_click = key.clone();
     let path_click = path.clone();
     let hit_click = hit.clone();
@@ -1390,7 +1392,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             depths.push(motion.row.depth);
         }
         let mut picked = Vec::new();
-        for index in AncestorChain::of(&depths, files_top()) {
+        for index in AncestorChain::from_depths(&depths, files_top()) {
             picked.push(current[index].row.clone());
         }
         picked
@@ -1402,14 +1404,14 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             depths.push(row.depth);
         }
         let mut picked = Vec::new();
-        for index in AncestorChain::of(&depths, outline_top()) {
+        for index in AncestorChain::from_depths(&depths, outline_top()) {
             picked.push(current[index].clone());
         }
         picked
     };
     let focused_path = tree_focus.key.cloned();
     let focused_symbol = outline_focus.key.cloned();
-    let caret_symbol = CaretSymbol::of(&outline.read(), caret_line);
+    let caret_symbol = CaretSymbol::from_rows(&outline.read(), caret_line);
     let tree_empty = rows.read().is_empty();
 
     rsx! {
@@ -1578,7 +1580,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                 let name_menu = row.name.clone();
                                 let is_dir = row.is_dir;
                                 let was_expanded = row.expanded;
-                                let accent = TreeRowAccent::of(
+                                let accent = TreeRowAccent::resolve(
                                     row.path == current_path(),
                                     row.path == focused_path,
                                 );
@@ -1691,9 +1693,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                         for s in outline() {
                             {
                                 let line = s.line;
-                                let key = OutlineKey::of(&s);
+                                let key = OutlineKey::for_row(&s);
                                 let key_step = key.clone();
-                                let accent = TreeRowAccent::of(
+                                let accent = TreeRowAccent::resolve(
                                     key == caret_symbol,
                                     key == focused_symbol,
                                 );
@@ -1721,7 +1723,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                             e.stop_propagation();
                                             let mut keys = Vec::new();
                                             for row in outline.peek().iter() {
-                                                keys.push(OutlineKey::of(row));
+                                                keys.push(OutlineKey::for_row(row));
                                             }
                                             outline_focus.step(&keys, forward);
                                         },
@@ -1938,15 +1940,18 @@ mod tests {
     #[test]
     fn a_new_entry_lands_in_the_selected_folder_or_the_selected_file_s_folder() {
         let rows = vec![MotionRow::dir("/r/src"), MotionRow::file("/r/src/lib.rs")];
-        assert_eq!(CreateTarget::of(&rows, "/r/src", "/r"), "/r/src");
-        assert_eq!(CreateTarget::of(&rows, "/r/src/lib.rs", "/r"), "/r/src");
+        assert_eq!(CreateTarget::resolve(&rows, "/r/src", "/r"), "/r/src");
+        assert_eq!(
+            CreateTarget::resolve(&rows, "/r/src/lib.rs", "/r"),
+            "/r/src"
+        );
     }
 
     #[test]
     fn a_new_entry_lands_in_the_root_without_a_live_selection() {
         let rows = vec![MotionRow::dir("/r/src")];
-        assert_eq!(CreateTarget::of(&rows, "", "/r"), "/r");
-        assert_eq!(CreateTarget::of(&rows, "/r/dropped", "/r"), "/r");
+        assert_eq!(CreateTarget::resolve(&rows, "", "/r"), "/r");
+        assert_eq!(CreateTarget::resolve(&rows, "/r/dropped", "/r"), "/r");
     }
 
     #[test]
@@ -1956,10 +1961,10 @@ mod tests {
             span("nested", 2, 6, 1),
             span("second", 20, 30, 0),
         ];
-        assert_eq!(CaretSymbol::of(&rows, 4), "2-nested");
-        assert_eq!(CaretSymbol::of(&rows, 7), "0-first");
-        assert_eq!(CaretSymbol::of(&rows, 12), "");
-        assert_eq!(CaretSymbol::of(&[], 3), "");
+        assert_eq!(CaretSymbol::from_rows(&rows, 4), "2-nested");
+        assert_eq!(CaretSymbol::from_rows(&rows, 7), "0-first");
+        assert_eq!(CaretSymbol::from_rows(&rows, 12), "");
+        assert_eq!(CaretSymbol::from_rows(&[], 3), "");
     }
 
     #[test]
@@ -1969,15 +1974,15 @@ mod tests {
             span("bounded", 4, 6, 1),
             span("later", 40, OutlineRow::OPEN_END, 0),
         ];
-        assert_eq!(CaretSymbol::of(&rows, 5), "4-bounded");
-        assert_eq!(CaretSymbol::of(&rows, 20), "0-open");
-        assert_eq!(CaretSymbol::of(&rows, 900), "40-later");
+        assert_eq!(CaretSymbol::from_rows(&rows, 5), "4-bounded");
+        assert_eq!(CaretSymbol::from_rows(&rows, 20), "0-open");
+        assert_eq!(CaretSymbol::from_rows(&rows, 900), "40-later");
     }
 
     struct HitFile;
 
     impl HitFile {
-        fn of(path: &str, lines: &[u32], capped: bool) -> ExplorerSearchFile {
+        fn build(path: &str, lines: &[u32], capped: bool) -> ExplorerSearchFile {
             let mut matches = Vec::new();
             for line in lines {
                 matches.push(ExplorerSearchMatch {
@@ -1997,7 +2002,7 @@ mod tests {
 
     #[test]
     fn the_highlight_lands_on_the_match_when_the_line_holds_astral_characters() {
-        let span = PreviewSpan::of("let \u{1F600} = \"needle\";", 10, 16);
+        let span = PreviewSpan::split("let \u{1F600} = \"needle\";", 10, 16);
 
         assert_eq!(span.before, "let \u{1F600} = \"");
         assert_eq!(span.hit, "needle");
@@ -2006,7 +2011,7 @@ mod tests {
 
     #[test]
     fn a_match_past_the_truncated_preview_highlights_nothing_and_loses_no_text() {
-        let span = PreviewSpan::of("short", 40, 46);
+        let span = PreviewSpan::split("short", 40, 46);
 
         assert_eq!(span.before, "short");
         assert!(span.hit.is_empty());
@@ -2019,13 +2024,13 @@ mod tests {
             root: "/r".to_string(),
             query: "needle".to_string(),
             files: vec![
-                HitFile::of("/r/a.rs", &[1, 2], false),
-                HitFile::of("/r/b.rs", &[7], false),
+                HitFile::build("/r/a.rs", &[1, 2], false),
+                HitFile::build("/r/b.rs", &[7], false),
             ],
             capped: false,
         };
         assert_eq!(
-            SearchSummary::of(&whole),
+            SearchSummary::from(&whole),
             SearchSummary {
                 total: 3,
                 files: 2,
@@ -2035,45 +2040,51 @@ mod tests {
 
         let mut per_file = whole.clone();
         per_file.files[1].capped = true;
-        assert!(SearchSummary::of(&per_file).floor);
+        assert!(SearchSummary::from(&per_file).floor);
 
         let mut swept = whole.clone();
         swept.capped = true;
-        assert!(SearchSummary::of(&swept).floor);
+        assert!(SearchSummary::from(&swept).floor);
     }
 
     #[test]
     fn a_group_shows_the_folder_under_the_root_and_nothing_for_a_root_level_file() {
-        assert_eq!(SearchFileDir::of("/r", "/r/src/host/lib.rs"), "src/host");
-        assert_eq!(SearchFileDir::of("/r", "/r/lib.rs"), "");
-        assert_eq!(SearchFileDir::of("/r", "/elsewhere/lib.rs"), "/elsewhere");
+        assert_eq!(
+            SearchFileDir::relative_parent("/r", "/r/src/host/lib.rs"),
+            "src/host"
+        );
+        assert_eq!(SearchFileDir::relative_parent("/r", "/r/lib.rs"), "");
+        assert_eq!(
+            SearchFileDir::relative_parent("/r", "/elsewhere/lib.rs"),
+            "/elsewhere"
+        );
     }
 
     #[test]
     fn chain_is_the_enclosing_folders_outermost_first() {
         let depths = [0, 1, 2, 3, 3, 1];
-        assert_eq!(AncestorChain::of(&depths, 4), vec![0, 1, 2]);
-        assert_eq!(AncestorChain::of(&depths, 5), vec![0]);
+        assert_eq!(AncestorChain::from_depths(&depths, 4), vec![0, 1, 2]);
+        assert_eq!(AncestorChain::from_depths(&depths, 5), vec![0]);
     }
 
     #[test]
     fn chain_skips_siblings_and_deeper_rows_above() {
         let depths = [0, 1, 2, 2, 1, 2];
-        assert_eq!(AncestorChain::of(&depths, 5), vec![0, 4]);
+        assert_eq!(AncestorChain::from_depths(&depths, 5), vec![0, 4]);
     }
 
     #[test]
     fn chain_is_empty_at_the_first_row_and_past_the_end() {
         let depths = [0, 1, 2];
-        assert!(AncestorChain::of(&depths, 0).is_empty());
-        assert!(AncestorChain::of(&depths, 3).is_empty());
-        assert!(AncestorChain::of(&[], 0).is_empty());
+        assert!(AncestorChain::from_depths(&depths, 0).is_empty());
+        assert!(AncestorChain::from_depths(&depths, 3).is_empty());
+        assert!(AncestorChain::from_depths(&[], 0).is_empty());
     }
 
     #[test]
     fn chain_keeps_the_outermost_levels_within_the_cap() {
         let depths: Vec<u16> = (0..12u16).collect();
-        let chain = AncestorChain::of(&depths, 11);
+        let chain = AncestorChain::from_depths(&depths, 11);
         assert_eq!(chain.len(), STICKY_DEPTH_MAX);
         assert_eq!(chain, vec![0, 1, 2, 3, 4]);
     }

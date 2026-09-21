@@ -1304,7 +1304,7 @@ impl EditCore {
 
     fn reshape(&mut self, to: crate::shape::BufferShape) -> bool {
         let source: String = self.buffer.rope.chars().collect();
-        let from = crate::shape::BufferShape::of(&self.buffer.rope).indent;
+        let from = crate::shape::BufferShape::detect(&self.buffer.rope).indent;
         let out = crate::shape::Reindent { from, to }.applied(&source);
         if out == source {
             return false;

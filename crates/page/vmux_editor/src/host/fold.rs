@@ -285,7 +285,7 @@ pub struct IndentGuides<'a> {
 }
 
 impl<'a> IndentGuides<'a> {
-    pub fn of(rope: &'a Rope, columns: u16) -> Self {
+    pub fn new(rope: &'a Rope, columns: u16) -> Self {
         Self {
             rope,
             columns: usize::from(columns).max(1),
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn a_guide_counts_indent_levels_and_carries_them_through_a_blank_line() {
         let rope = Rope::from_str("fn a() {\n    let x = 1;\n\n        deep();\n}\n");
-        let guides = IndentGuides::of(&rope, 4);
+        let guides = IndentGuides::new(&rope, 4);
 
         assert_eq!(guides.levels(0), 0);
         assert_eq!(guides.levels(1), 1);
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn trailing_blank_lines_have_no_guide_to_carry() {
         let rope = Rope::from_str("fn a() {\n    x;\n}\n\n\n");
-        let guides = IndentGuides::of(&rope, 4);
+        let guides = IndentGuides::new(&rope, 4);
 
         assert_eq!(guides.levels(3), 0);
         assert_eq!(guides.levels(4), 0);
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn a_guide_counts_one_level_per_detected_indent_not_per_four_columns() {
         let rope = Rope::from_str("a\n  b\n    c\n");
-        let two = IndentGuides::of(&rope, 2);
+        let two = IndentGuides::new(&rope, 2);
 
         assert_eq!(
             two.levels(1),
@@ -463,7 +463,7 @@ mod tests {
         );
         assert_eq!(two.levels(2), 2);
 
-        let eight = IndentGuides::of(&rope, 8);
+        let eight = IndentGuides::new(&rope, 8);
 
         assert_eq!(
             eight.levels(2),

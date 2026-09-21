@@ -46,7 +46,7 @@ impl DaemonBinary {
     }
 
     pub fn identity(&self) -> std::io::Result<DaemonIdentity> {
-        DaemonIdentity::of(&self.0)
+        DaemonIdentity::try_from(self.0.as_path())
     }
 
     pub fn record_identity(&self) -> std::io::Result<()> {
@@ -60,8 +60,10 @@ impl DaemonBinary {
 #[derive(Clone, Debug)]
 pub struct DaemonIdentity(String);
 
-impl DaemonIdentity {
-    pub fn of(path: &Path) -> std::io::Result<Self> {
+impl TryFrom<&Path> for DaemonIdentity {
+    type Error = std::io::Error;
+
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let path = std::fs::canonicalize(path)?;
         let metadata = std::fs::metadata(&path)?;
         let modified = metadata
@@ -75,7 +77,9 @@ impl DaemonIdentity {
             metadata.len()
         )))
     }
+}
 
+impl DaemonIdentity {
     pub fn recorded(text: &str) -> Self {
         Self(text.to_string())
     }
@@ -101,14 +105,14 @@ mod tests {
             let mut file = std::fs::File::create(&path).expect("create identity test file");
             file.write_all(b"old").expect("write old identity bytes");
         }
-        let old_identity = DaemonIdentity::of(&path).expect("old identity");
+        let old_identity = DaemonIdentity::try_from(path.as_path()).expect("old identity");
 
         std::thread::sleep(std::time::Duration::from_millis(2));
         {
             let mut file = std::fs::File::create(&path).expect("rewrite identity test file");
             file.write_all(b"newer").expect("write new identity bytes");
         }
-        let new_identity = DaemonIdentity::of(&path).expect("new identity");
+        let new_identity = DaemonIdentity::try_from(path.as_path()).expect("new identity");
         let _ = std::fs::remove_file(&path);
 
         assert!(!old_identity.matches(&new_identity));

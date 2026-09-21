@@ -104,7 +104,7 @@ pub fn FileActivityIcon(path: String, write: bool) -> Element {
 
 #[component]
 pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> Element {
-    let activity = ToolActivity::of(&name);
+    let activity = ToolActivity::classify(&name);
     if matches!(
         activity,
         ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
@@ -125,9 +125,9 @@ pub struct ToolPresentation {
 }
 
 impl ToolPresentation {
-    pub fn of(name: &str, args: &str) -> Self {
+    pub fn for_call(name: &str, args: &str) -> Self {
         let icon = ActivityIcon::for_tool(name, args);
-        let label = match ToolActivity::of(name) {
+        let label = match ToolActivity::classify(name) {
             ToolActivity::Guardian => translate("agent-tool-guardian-review"),
             ToolActivity::ReadFile if tool_args_read_skill(args) => "Read skill".into(),
             ToolActivity::ReadFile => translate("agent-tool-read-files"),
@@ -172,7 +172,7 @@ pub enum ToolActivity {
 }
 
 impl ToolActivity {
-    pub fn of(name: &str) -> Self {
+    pub fn classify(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         if ToolName(name).is_guardian() {
             ToolActivity::Guardian
@@ -315,7 +315,7 @@ impl ActivityIcon {
         if let Some(icon) = Self::for_language(name) {
             return icon;
         }
-        ToolActivity::of(name).icon()
+        ToolActivity::classify(name).icon()
     }
 
     pub fn for_language(value: &str) -> Option<Self> {
@@ -472,23 +472,47 @@ mod tests {
 
     #[test]
     fn tool_activity_classifies_timeline_icons() {
-        assert_eq!(ToolActivity::of("guardian_review"), ToolActivity::Guardian);
-        assert_eq!(ToolActivity::of("read_file"), ToolActivity::ReadFile);
-        assert_eq!(ToolActivity::of("apply_patch"), ToolActivity::WriteFile);
-        assert_eq!(ToolActivity::of("read_layout"), ToolActivity::Layout);
-        assert_eq!(ToolActivity::of("create_worktree"), ToolActivity::Worktree);
-        assert_eq!(ToolActivity::of("select_project"), ToolActivity::Worktree);
-        assert_eq!(ToolActivity::of("view_image"), ToolActivity::Image);
         assert_eq!(
-            ToolActivity::of("vmux_screenshot"),
+            ToolActivity::classify("guardian_review"),
+            ToolActivity::Guardian
+        );
+        assert_eq!(ToolActivity::classify("read_file"), ToolActivity::ReadFile);
+        assert_eq!(
+            ToolActivity::classify("apply_patch"),
+            ToolActivity::WriteFile
+        );
+        assert_eq!(ToolActivity::classify("read_layout"), ToolActivity::Layout);
+        assert_eq!(
+            ToolActivity::classify("create_worktree"),
+            ToolActivity::Worktree
+        );
+        assert_eq!(
+            ToolActivity::classify("select_project"),
+            ToolActivity::Worktree
+        );
+        assert_eq!(ToolActivity::classify("view_image"), ToolActivity::Image);
+        assert_eq!(
+            ToolActivity::classify("vmux_screenshot"),
             ToolActivity::Screenshot
         );
-        assert_eq!(ToolActivity::of("vmux_open_page"), ToolActivity::OpenPage);
-        assert_eq!(ToolActivity::of("vmux_open_file"), ToolActivity::ReadFile);
-        assert_eq!(ToolActivity::of("browser_navigate"), ToolActivity::Browser);
-        assert_eq!(ToolActivity::of("search_files"), ToolActivity::Search);
-        assert_eq!(ToolActivity::of("exec_command"), ToolActivity::Command);
-        assert_eq!(ToolActivity::of("custom_tool"), ToolActivity::Other);
+        assert_eq!(
+            ToolActivity::classify("vmux_open_page"),
+            ToolActivity::OpenPage
+        );
+        assert_eq!(
+            ToolActivity::classify("vmux_open_file"),
+            ToolActivity::ReadFile
+        );
+        assert_eq!(
+            ToolActivity::classify("browser_navigate"),
+            ToolActivity::Browser
+        );
+        assert_eq!(ToolActivity::classify("search_files"), ToolActivity::Search);
+        assert_eq!(
+            ToolActivity::classify("exec_command"),
+            ToolActivity::Command
+        );
+        assert_eq!(ToolActivity::classify("custom_tool"), ToolActivity::Other);
     }
 
     #[test]

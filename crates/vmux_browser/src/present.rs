@@ -525,7 +525,7 @@ pub(crate) fn sync_windowed_frames(
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
                 if queries.hierarchy.host_of(header) == Some(host_window) {
-                    WindowedFrameRect::of(rect)
+                    WindowedFrameRect::from_node(rect)
                 } else {
                     None
                 }
@@ -533,7 +533,7 @@ pub(crate) fn sync_windowed_frames(
         });
         let visible_pane_count =
             visible_pane_count_for_windowed_sync(tab, &queries.all_children, &queries.leaf_panes);
-        let Some(pane_frame) = WindowedFrameRect::of(computed) else {
+        let Some(pane_frame) = WindowedFrameRect::from_node(computed) else {
             continue;
         };
         let scale = computed.scale();
@@ -543,7 +543,7 @@ pub(crate) fn sync_windowed_frames(
             layout_is_hidden,
             visible_pane_count,
         );
-        if let Some(logical) = PaneFrame::of(frame, scale) {
+        if let Some(logical) = PaneFrame::from_windowed(frame, scale) {
             pane_frames.frames.insert(entity, logical);
         }
         let became_visible = !memory.visible_pages.contains(&entity);
@@ -683,7 +683,7 @@ pub(crate) struct PaneFrames {
 
 impl PaneFrames {
     #[cfg(target_os = "macos")]
-    pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
+    pub(crate) fn frame(&self, page: Entity) -> Option<PaneFrame> {
         self.frames.get(&page).copied()
     }
 
@@ -713,7 +713,7 @@ pub(crate) struct PaneFrame {
 }
 
 impl PaneFrame {
-    fn of(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
+    fn from_windowed(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
         if !scale.is_finite() || scale <= 0.0 {
             return None;
         }
@@ -728,7 +728,7 @@ impl PaneFrame {
 }
 
 impl WindowedFrameRect {
-    fn of(rect: &ComputedNode) -> Option<Self> {
+    fn from_node(rect: &ComputedNode) -> Option<Self> {
         if rect.is_empty() {
             return None;
         }
@@ -977,7 +977,7 @@ pub(crate) fn sync_windowed_command_bar(
         *was_open = false;
         return;
     };
-    let state = OverlayState::of(node.display, *visibility, has_keyboard_target, shown_inline);
+    let state = OverlayState::resolve(node.display, *visibility, has_keyboard_target, shown_inline);
     let open = state.is_shown();
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
@@ -2016,7 +2016,7 @@ mod tests {
 
     #[test]
     fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
-        let revealing = OverlayState::of(Display::Flex, Visibility::Hidden, true, false);
+        let revealing = OverlayState::resolve(Display::Flex, Visibility::Hidden, true, false);
 
         assert!(revealing.owns_input());
         assert!(!revealing.is_shown());

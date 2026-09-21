@@ -437,7 +437,7 @@ struct SpaceViewTemplate {
 }
 
 impl SpaceViewTemplate {
-    fn of(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
+    fn find(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
         spaces
             .iter()
             .filter(|(_, candidate, _, _, _, _, _)| candidate.0 == id)
@@ -697,7 +697,7 @@ fn on_space_command(
                 .iter()
                 .find(|(_, sid, _, _, parent)| sid.0 == id && parent.parent() == main);
             let Some((entity, _, is_active, _, _)) = local else {
-                let Some(template) = SpaceViewTemplate::of(&space_list, id) else {
+                let Some(template) = SpaceViewTemplate::find(&space_list, id) else {
                     return;
                 };
                 deactivate_spaces_in_main(&spaces, main, &mut commands);

@@ -329,7 +329,7 @@ impl KeyCombo {
         key_label(self.key)
     }
 
-    pub fn of(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
+    pub fn from_stroke(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
         if stroke.is_modifier_key() {
             return None;
         }

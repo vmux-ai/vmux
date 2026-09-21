@@ -42,17 +42,17 @@ pub struct Launcher(pub CommandBarOpenEvent);
 
 impl Launcher {
     fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
-        launcher.0 = Self::of(&roster);
+        launcher.0 = Self::snapshot(&roster);
     }
 
     fn emit(launcher: Res<Launcher>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(START_COMMAND_BAR_OPEN_EVENT, &launcher.0) else {
+        let Some(emit) = PageEmit::encode(START_COMMAND_BAR_OPEN_EVENT, &launcher.0) else {
             return;
         };
         emits.write(emit);
     }
 
-    fn of(roster: &Roster) -> CommandBarOpenEvent {
+    fn snapshot(roster: &Roster) -> CommandBarOpenEvent {
         let mut tabs = Vec::with_capacity(roster.sessions.len());
         for (index, session) in roster.sessions.iter().enumerate() {
             let cwd = vmux_ui::file_icon::FilePath(&session.cwd).name();

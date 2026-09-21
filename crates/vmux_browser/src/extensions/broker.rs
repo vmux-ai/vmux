@@ -895,7 +895,7 @@ fn dispatch_api_request(
         (request.namespace.as_str(), request.method.as_str()),
         ("tabs", "query" | "get")
     ) {
-        return match super::tabs::ChromeTabs::of(model).dispatch(&request, authorization) {
+        return match super::tabs::ChromeTabs::from(model).dispatch(&request, authorization) {
             Ok(result) => dispatched_response(BridgeServerMessage::Response(ApiResponse::success(
                 request.request_id,
                 result,

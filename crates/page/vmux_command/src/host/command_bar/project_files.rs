@@ -203,7 +203,7 @@ impl RootIndex {
 
     fn rewalk(&mut self) {
         let walked = self.root.clone();
-        self.walking = Some(IoTaskPool::get().spawn(async move { ProjectWalk::of(&walked) }));
+        self.walking = Some(IoTaskPool::get().spawn(async move { ProjectWalk::scan(&walked) }));
     }
 
     fn walking(&self) -> bool {
@@ -240,16 +240,16 @@ struct WalkedPath {
 
 impl WalkedPath {
     fn file(relative: String) -> Self {
-        Self::of(relative, false)
+        Self::new(relative, false)
     }
 
     fn directory(relative: String) -> Self {
-        Self::of(relative, true)
+        Self::new(relative, true)
     }
 
-    fn of(relative: String, is_dir: bool) -> Self {
+    fn new(relative: String, is_dir: bool) -> Self {
         let lowered = relative.to_lowercase();
-        let held = PathMask::of(&lowered);
+        let held = PathMask::from(lowered.as_str());
         let folded = if lowered == relative {
             None
         } else {
@@ -286,7 +286,7 @@ impl ProjectWalk {
         }
     }
 
-    fn of(root: &Path) -> Self {
+    fn scan(root: &Path) -> Self {
         let mut walked = Self::holding(MAX_INDEXED_PATHS);
         let walk = WalkBuilder::new(root)
             .hidden(true)
@@ -342,7 +342,7 @@ pub struct RankBias {
 }
 
 impl RankBias {
-    pub fn of(active: Option<&str>, recent: &[CommandBarRecentFile]) -> Self {
+    pub fn new(active: Option<&str>, recent: &[CommandBarRecentFile]) -> Self {
         let mut opened = Vec::with_capacity(recent.len());
         for file in recent {
             let Some(path) = file.url.strip_prefix("file://") else {
@@ -393,7 +393,7 @@ struct FuzzyRank;
 
 impl FuzzyRank {
     fn across(roots: &[(&Path, &[WalkedPath])], bias: &RankBias, query: &str) -> Ranked {
-        let wanted = FuzzyQuery::of(query);
+        let wanted = FuzzyQuery::parse(query);
         let mut best = TopMatches::holding(MAX_RESULTS);
         for favoured in [true, false] {
             for (root, paths) in roots {
@@ -481,7 +481,7 @@ impl<'a> TopMatches<'a> {
                     .join(&found.path.relative)
                     .to_string_lossy()
                     .into_owned(),
-                project: ProjectLabel::of(found.root),
+                project: ProjectLabel::from_root(found.root),
             });
         }
         Ranked { entries, total }
@@ -511,7 +511,7 @@ impl Match<'_> {
 struct ProjectLabel;
 
 impl ProjectLabel {
-    fn of(root: &Path) -> String {
+    fn from_root(root: &Path) -> String {
         let Some(name) = root.file_name() else {
             return root.to_string_lossy().into_owned();
         };
@@ -522,15 +522,17 @@ impl ProjectLabel {
 #[derive(Clone, Copy, Default)]
 struct PathMask(u64);
 
-impl PathMask {
-    fn of(folded: &str) -> Self {
+impl From<&str> for PathMask {
+    fn from(folded: &str) -> Self {
         let mut held = 0u64;
         for c in folded.chars() {
             held |= Self::bit(c);
         }
         Self(held)
     }
+}
 
+impl PathMask {
     fn bit(c: char) -> u64 {
         if c.is_ascii_lowercase() {
             return 1 << (c as u8 - b'a');
@@ -556,12 +558,12 @@ struct FuzzyQuery {
 }
 
 impl FuzzyQuery {
-    fn of(query: &str) -> Self {
+    fn parse(query: &str) -> Self {
         let mut terms = Vec::new();
         let mut needed = PathMask::default();
         for term in query.split_whitespace() {
             let term = term.to_lowercase();
-            needed = needed.with(PathMask::of(&term));
+            needed = needed.with(PathMask::from(term.as_str()));
             terms.push(term);
         }
         Self { terms, needed }
@@ -574,7 +576,7 @@ impl FuzzyQuery {
         let folded = path.folded();
         let mut total = 0;
         for term in &self.terms {
-            total += FuzzyScore::of(folded, term)?;
+            total += FuzzyScore::score(folded, term)?;
         }
         Some(total)
     }
@@ -583,7 +585,7 @@ impl FuzzyQuery {
 struct FuzzyScore;
 
 impl FuzzyScore {
-    fn of(lowered: &str, needle: &str) -> Option<i32> {
+    fn score(lowered: &str, needle: &str) -> Option<i32> {
         if needle.is_empty() {
             return Some(0);
         }
@@ -662,7 +664,7 @@ mod tests {
 
         fn indexed(&self) -> Vec<String> {
             let mut named = Vec::new();
-            for path in &ProjectWalk::of(self.dir.path()).paths {
+            for path in &ProjectWalk::scan(self.dir.path()).paths {
                 let suffix = if path.is_dir { "/" } else { "" };
                 named.push(format!("{}{suffix}", path.relative));
             }
@@ -747,9 +749,9 @@ mod tests {
         ];
         for term in terms {
             let term = term.to_lowercase();
-            let needed = PathMask::of(&term);
+            let needed = PathMask::from(&term);
             for path in &paths {
-                if FuzzyScore::of(path.folded(), &term).is_none() {
+                if FuzzyScore::score(path.folded(), &term).is_none() {
                     continue;
                 }
                 assert!(
@@ -824,7 +826,7 @@ mod tests {
 
     #[test]
     fn a_query_whose_letters_are_out_of_order_does_not_match() {
-        assert!(FuzzyScore::of("src/handler.rs", "rendlah").is_none());
+        assert!(FuzzyScore::score("src/handler.rs", "rendlah").is_none());
     }
 
     #[test]
@@ -897,7 +899,7 @@ mod tests {
                     title: String::new(),
                 });
             }
-            Self::of(None, &recent)
+            Self::new(None, &recent)
         }
     }
 
@@ -916,7 +918,7 @@ mod tests {
             "the shallow path wins on its own, so the lift is what this test measures"
         );
 
-        let lifted = FuzzyRank::listed(&roots, &RankBias::of(Some("/code/vmux"), &[]), "main.rs");
+        let lifted = FuzzyRank::listed(&roots, &RankBias::new(Some("/code/vmux"), &[]), "main.rs");
         assert_eq!(lifted[0].project, "vmux");
         assert_eq!(lifted[0].name, "client/crates/app/vmux_mobile/src/main.rs");
     }
@@ -930,7 +932,7 @@ mod tests {
                 (Path::new("/code/active"), active.as_slice()),
                 (Path::new("/code/other"), other.as_slice()),
             ],
-            &RankBias::of(Some("/code/active"), &[]),
+            &RankBias::new(Some("/code/active"), &[]),
             "handler",
         );
 

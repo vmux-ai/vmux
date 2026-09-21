@@ -110,7 +110,7 @@ impl CliAgentStrategy for CodexStrategy {
         args.push("-c".into());
         args.push(format!(
             "developer_instructions={}",
-            quote_toml(&vmux_core::knowledge::AgentPrompt::of(RUN_STEER_PROMPT).into_string())
+            quote_toml(&vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string())
         ));
         args.push("-c".into());
         args.push("features.hooks=true".into());
@@ -558,7 +558,7 @@ struct CodexSessionIndex {
 }
 
 impl CodexSessionIndex {
-    fn of(sessions_root: &Path) -> Self {
+    fn load(sessions_root: &Path) -> Self {
         use std::io::BufReader;
 
         let Some(codex_root) = sessions_root.parent() else {
@@ -659,7 +659,7 @@ fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
     use std::io::{BufRead, BufReader};
 
     let mut out = Vec::new();
-    let index = CodexSessionIndex::of(root);
+    let index = CodexSessionIndex::load(root);
     walk_jsonl(root, &mut |path: &Path| {
         let mtime = std::fs::metadata(path)
             .and_then(|m| m.modified())

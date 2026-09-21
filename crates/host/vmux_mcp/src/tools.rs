@@ -941,7 +941,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 pub struct ShellNote;
 
 impl ShellNote {
-    pub fn of(shell: &str) -> String {
+    pub fn for_shell(shell: &str) -> String {
         let base = shell
             .rsplit('/')
             .next()
@@ -999,7 +999,7 @@ pub fn tool_definitions_filtered(
     }
     if !acp_terminals {
         let mut run = run_definition();
-        run.description.push_str(&ShellNote::of(shell));
+        run.description.push_str(&ShellNote::for_shell(shell));
         defs.push(run);
     }
     defs.push(request_user_choice_definition());
@@ -1703,15 +1703,15 @@ mod tests {
 
     #[test]
     fn the_run_tool_teaches_the_shell_it_will_actually_use() {
-        let plain = super::ShellNote::of("/bin/zsh");
+        let plain = super::ShellNote::for_shell("/bin/zsh");
         assert_eq!(plain, " The shell is zsh.");
 
-        let nu = super::ShellNote::of("/opt/homebrew/bin/nu");
+        let nu = super::ShellNote::for_shell("/opt/homebrew/bin/nu");
         assert!(nu.contains("out+err>"), "{nu}");
         assert!(nu.contains("bash -c"), "{nu}");
 
-        assert_eq!(super::ShellNote::of(""), "");
-        assert_eq!(super::ShellNote::of("   "), "");
+        assert_eq!(super::ShellNote::for_shell(""), "");
+        assert_eq!(super::ShellNote::for_shell("   "), "");
     }
     use super::*;
     use vmux_client::protocol::{AgentCommand, AgentQuery, SimulatorAction, SimulatorButton};

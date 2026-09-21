@@ -19,7 +19,7 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn of(dark: bool) -> &'static Self {
+    pub fn for_scheme(dark: bool) -> &'static Self {
         if dark { &GITHUB_DARK } else { &GITHUB_LIGHT }
     }
 

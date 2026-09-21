@@ -105,7 +105,7 @@ fn handle_browser_commands(
             #[allow(clippy::single_match)]
             BrowserCommand::Open(open_cmd) => match open_cmd {
                 OpenCommand::InPlace { .. } => {
-                    let resolved = vmux_command::open::OpenUrl::of(
+                    let resolved = vmux_command::open::OpenUrl::from_command(
                         open_cmd,
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );

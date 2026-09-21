@@ -164,7 +164,7 @@ fn send_shortcuts(
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
     let context = contexts.get(webview).unwrap_or(KeyContext::NONE);
-    let payload = ShortcutsEvent::of(&keymap, context, &locale);
+    let payload = ShortcutsEvent::build(&keymap, context, &locale);
     commands.trigger(BinHostEmitEvent::from_rkyv(webview, EVENT, &payload));
 }
 
@@ -214,7 +214,7 @@ fn normalize_shortcut_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpen
 }
 
 impl ShortcutsEvent {
-    fn of(keymap: &Keymap, context: &KeyContext, locale: &Locale) -> Self {
+    fn build(keymap: &Keymap, context: &KeyContext, locale: &Locale) -> Self {
         let mut labels = HashMap::new();
         for (id, fallback) in AppCommand::shortcut_labels() {
             labels.insert(id, localized_command_name(locale.as_str(), id, fallback));
@@ -239,7 +239,7 @@ impl ShortcutsEvent {
                 .or_default()
                 .entry((name, binding.command.clone()))
                 .or_default();
-            let mut shortcut = ShortcutBinding::of(&binding.shortcut);
+            let mut shortcut = ShortcutBinding::from(&binding.shortcut);
             shortcut.resolves = view.resolves(&binding.shortcut, &binding.command);
             if let Some(context) = binding.when.as_ref() {
                 shortcut.contexts.push(context.to_string());
@@ -280,8 +280,8 @@ impl ShortcutsEvent {
     }
 }
 
-impl ShortcutBinding {
-    fn of(shortcut: &Shortcut) -> Self {
+impl From<&Shortcut> for ShortcutBinding {
+    fn from(shortcut: &Shortcut) -> Self {
         let strokes = match shortcut {
             Shortcut::Direct(combo) => vec![ShortcutStroke::from_key_combo(combo)],
             Shortcut::Chord(prefix, second) => {
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn event_lists_hidden_and_visible_shortcuts() {
-        let event = ShortcutsEvent::of(
+        let event = ShortcutsEvent::build(
             &Keymap::defaults(),
             KeyContext::NONE,
             &Locale::from("en-US"),
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn event_exposes_chords_as_individual_strokes() {
-        let event = ShortcutsEvent::of(
+        let event = ShortcutsEvent::build(
             &Keymap::defaults(),
             KeyContext::NONE,
             &Locale::from("en-US"),
@@ -385,7 +385,7 @@ mod tests {
             ],
         );
 
-        let event = ShortcutsEvent::of(&keymap, KeyContext::NONE, &Locale::from("en-US"));
+        let event = ShortcutsEvent::build(&keymap, KeyContext::NONE, &Locale::from("en-US"));
         let resolving = event
             .resolutions()
             .map(|(entry, _)| entry.id.as_str())

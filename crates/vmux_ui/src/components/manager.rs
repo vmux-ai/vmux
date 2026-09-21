@@ -282,7 +282,7 @@ pub fn ManagerSelect(
     let key_items = items.clone();
     let key_select = onselect;
     let onkeydown = move |event: KeyboardEvent| {
-        if let Some(direction) = MenuDirection::of(&event)
+        if let Some(direction) = MenuDirection::from_key(&event)
             && !key_items.is_empty()
         {
             event.prevent_default();

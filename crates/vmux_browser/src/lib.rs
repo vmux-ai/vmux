@@ -344,7 +344,7 @@ struct CefPointerHitRect {
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
-    fn of(row: CefPointerRegionRow<'_>) -> Self {
+    fn from_row(row: CefPointerRegionRow<'_>) -> Self {
         let (header, side_sheet, node, &rect, visibility, open) = row;
         let interactive = (header.is_some() || side_sheet.is_some())
             && open
@@ -364,7 +364,7 @@ fn cef_pointer_regions_contains(
     cef_regions: &CefPointerRegionQuery<'_, '_>,
 ) -> bool {
     for row in cef_regions.iter() {
-        if CefPointerHitRect::of(row).contains(cursor_pos) {
+        if CefPointerHitRect::from_row(row).contains(cursor_pos) {
             return true;
         }
     }
@@ -671,7 +671,7 @@ struct LayoutFixedOffsets {
 }
 
 impl LayoutFixedOffsets {
-    fn of(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
+    fn from_node(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
         if rect.is_empty() || window_width_px <= 0.0 {
             return None;
         }
@@ -1006,7 +1006,7 @@ mod tests {
             inverse_scale_factor: 0.5,
             ..default()
         };
-        let offsets = LayoutFixedOffsets::of(&computed, 1_600.0).expect("offsets");
+        let offsets = LayoutFixedOffsets::from_node(&computed, 1_600.0).expect("offsets");
 
         assert_eq!(offsets.left, 8.0);
         assert_eq!(offsets.top, 0.0);

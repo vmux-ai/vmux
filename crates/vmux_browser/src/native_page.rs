@@ -65,7 +65,7 @@ impl NativePagePlugin {
         let Some(value) = world.get::<C>(entity).cloned() else {
             return vmux_native::Instance::default();
         };
-        vmux_native::Instance::of(move |scope| scope.provide(value))
+        vmux_native::Instance::from(move |scope: vmux_native::PageScope<'_>| scope.provide(value))
     }
 }
 

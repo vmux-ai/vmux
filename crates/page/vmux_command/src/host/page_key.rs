@@ -37,7 +37,7 @@ impl ScopedKeys<'_, '_> {
     pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<AppCommand> {
         let keymap = self.keymap.as_ref()?;
         let context = self.contexts.get(page).ok()?;
-        let pressed = KeyCombo::of(stroke)?;
+        let pressed = KeyCombo::from_stroke(stroke)?;
         keymap.in_context(context).scoped(&pressed)
     }
 

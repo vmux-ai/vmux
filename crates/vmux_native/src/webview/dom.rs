@@ -161,7 +161,7 @@ impl Dom {
             .get(EventRequest::HEADER)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        let outcome = self.handle_event(payload, EventSelection::of(headers));
+        let outcome = self.handle_event(payload, EventSelection::from(headers));
         self.flush_to_page();
         let body = outcome.response_bytes();
         let response = wry::http::Response::builder()

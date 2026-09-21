@@ -7,7 +7,7 @@ pub enum MenuDirection {
 }
 
 impl MenuDirection {
-    pub fn of(key: &KeyboardData) -> Option<Self> {
+    pub fn from_key(key: &KeyboardData) -> Option<Self> {
         let modifiers = key.modifiers();
         if modifiers.meta() || modifiers.alt() || modifiers.shift() {
             return None;
@@ -52,7 +52,7 @@ mod tests {
     }
 
     impl Press {
-        fn of(code: Code, modifiers: Modifiers) -> KeyboardData {
+        fn event(code: Code, modifiers: Modifiers) -> KeyboardData {
             KeyboardData::new(Self { code, modifiers })
         }
     }
@@ -115,7 +115,7 @@ mod tests {
 
         for (code, modifiers, expected) in table {
             assert_eq!(
-                MenuDirection::of(&Press::of(code, modifiers)),
+                MenuDirection::from_key(&Press::event(code, modifiers)),
                 expected,
                 "{code:?} with {modifiers:?}"
             );

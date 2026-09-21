@@ -205,7 +205,7 @@ fn UsageChart(
     floor: f32,
     tone: UsageTone,
 ) -> Element {
-    let graph = Sparkline::of(&samples, floor);
+    let graph = Sparkline::plot(&samples, floor);
     let line_class = tone.line_class();
     let fill = tone.fill();
     rsx! {
@@ -240,7 +240,7 @@ struct Sparkline {
 }
 
 impl Sparkline {
-    fn of(samples: &[f32], floor: f32) -> Self {
+    fn plot(samples: &[f32], floor: f32) -> Self {
         let samples = if samples.is_empty() {
             vec![0.0, 0.0]
         } else if samples.len() == 1 {
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn sparkline_scales_against_a_floor() {
-        let graph = Sparkline::of(&[0.0, 50.0, 100.0], 100.0);
+        let graph = Sparkline::plot(&[0.0, 50.0, 100.0], 100.0);
 
         assert_eq!(graph.line, "0.00,39.00 50.00,20.50 100.00,2.00");
         assert!(graph.area.starts_with("0,40 "));

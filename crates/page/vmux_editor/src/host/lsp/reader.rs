@@ -52,7 +52,7 @@ impl Reader {
     }
 
     fn dispatch(&self, msg: Value) {
-        match Incoming::of(msg) {
+        match Incoming::parse(msg) {
             Incoming::Response { id, body } => self.resolve(id, body),
             Incoming::Request { id, method, params } => self.answer(id, &method, params),
             Incoming::Notification { method, params } => self.observe(&method, params),

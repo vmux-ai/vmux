@@ -386,7 +386,7 @@ fn on_chat_attach_paths(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_core::host::wake::Wake::of(proxy),
+        vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -409,7 +409,7 @@ fn on_chat_attachment_preview_request(
         CHAT_ATTACHMENT_PREVIEWS_EVENT,
         paths,
         true,
-        vmux_core::host::wake::Wake::of(proxy),
+        vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -429,7 +429,7 @@ fn on_chat_pick_files(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_core::host::wake::Wake::of(proxy),
+        vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -465,7 +465,7 @@ fn on_chat_paste_media(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         vec![path],
-        vmux_core::host::wake::Wake::of(proxy),
+        vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }

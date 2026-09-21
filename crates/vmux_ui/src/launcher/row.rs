@@ -133,7 +133,7 @@ pub fn ResultRow(
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
                             ResultItem::Resume { entry, .. } => {
-                                let preview = ResumePreview::of(&entry.title, &entry.latest);
+                                let preview = ResumePreview::after_title(&entry.title, &entry.latest);
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         span { class: "shrink-0 text-sm text-muted-foreground", "\u{21ba}" }
@@ -242,7 +242,7 @@ pub fn ResultRow(
                             },
                             ResultItem::File { path, is_dir, project, relative } => {
                                 let name = FilePath(path).name();
-                                let location = FileLocation::of(project, relative, path);
+                                let location = FileLocation::resolve(project, relative, path);
                                 rsx! {
                                     div { class: result_content_row_class(),
                                         if *is_dir {
@@ -356,7 +356,7 @@ pub fn ResultRow(
 struct ResumePreview;
 
 impl ResumePreview {
-    fn of<'a>(title: &str, latest: &'a str) -> Option<&'a str> {
+    fn after_title<'a>(title: &str, latest: &'a str) -> Option<&'a str> {
         let title = title.trim();
         let latest = latest.trim();
         if latest.is_empty() || latest == title {
@@ -515,7 +515,7 @@ impl SkeletonWidth {
 struct FileLocation;
 
 impl FileLocation {
-    fn of(project: &str, relative: &str, path: &str) -> String {
+    fn resolve(project: &str, relative: &str, path: &str) -> String {
         let shown = match project.is_empty() {
             true => path,
             false => relative,
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn resume_preview_removes_the_title_from_the_latest_message() {
         assert_eq!(
-            ResumePreview::of(
+            ResumePreview::after_title(
                 "Assess the request.",
                 "Assess the request. Treat tools carefully."
             ),
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn resume_preview_hides_an_exact_duplicate() {
         assert_eq!(
-            ResumePreview::of("Assess the request.", "Assess the request."),
+            ResumePreview::after_title("Assess the request.", "Assess the request."),
             None
         );
     }
@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn resume_preview_keeps_unrelated_latest_text() {
         assert_eq!(
-            ResumePreview::of("Fix the layout", "Tests are passing"),
+            ResumePreview::after_title("Fix the layout", "Tests are passing"),
             Some("Tests are passing")
         );
     }

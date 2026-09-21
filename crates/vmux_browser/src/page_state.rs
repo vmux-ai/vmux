@@ -118,7 +118,7 @@ fn push_layout_state_emit(
         if vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
             == Some(host_window)
         {
-            LayoutFixedOffsets::of(computed?, window_width_px)
+            LayoutFixedOffsets::from_node(computed?, window_width_px)
         } else {
             None
         }
@@ -165,7 +165,7 @@ struct AddressRoots<'a> {
 }
 
 impl AddressRoots<'_> {
-    fn of(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
+    fn resolve(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
         let Some(path) = vmux_core::file_url::FileUrl::parse(url).and_then(|url| url.path()) else {
             return match url.starts_with("vmux://") {
                 true => vmux_layout::event::AddressParts::internal(url),
@@ -257,7 +257,7 @@ fn push_stacks_host_emit(
             }
             let title = meta.title_with(osc).to_string();
             rows.push(StackRow {
-                address: roots.of(&meta.url, &title),
+                address: roots.resolve(&meta.url, &title),
                 title,
                 url: meta.url.clone(),
                 icon: meta.icon.clone(),

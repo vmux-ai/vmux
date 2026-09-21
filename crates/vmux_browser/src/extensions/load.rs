@@ -27,7 +27,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     if index_changed {
         idx.save(&root)?;
     }
-    ServiceWorkerCache::of(&vmux_core::profile::profile_dir()).reconcile(&prepared)?;
+    ServiceWorkerCache::from(vmux_core::profile::profile_dir().as_path()).reconcile(&prepared)?;
     let dirs = prepared
         .iter()
         .map(|item| item.dir.to_string_lossy())

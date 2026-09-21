@@ -77,7 +77,7 @@ pub enum KeyVerdict {
 }
 
 impl KeyVerdict {
-    pub fn of(
+    pub fn decide(
         claims: &KeyClaims,
         unclaimed: Unclaimed,
         stroke: &KeyStroke,
@@ -235,11 +235,11 @@ mod tests {
         let claims = claims(&[("KeyX", CTRL)]);
 
         assert_eq!(
-            KeyVerdict::of(&claims, Unclaimed::Types, &stroke("KeyX", CTRL), false),
+            KeyVerdict::decide(&claims, Unclaimed::Types, &stroke("KeyX", CTRL), false),
             KeyVerdict::Send
         );
         assert_eq!(
-            KeyVerdict::of(
+            KeyVerdict::decide(
                 &claims,
                 Unclaimed::Types,
                 &stroke("KeyX", KeyModifiers::default()),
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn a_forwarding_surface_sends_what_nobody_claimed() {
         assert_eq!(
-            KeyVerdict::of(
+            KeyVerdict::decide(
                 &claims(&[]),
                 Unclaimed::Forwards,
                 &stroke("KeyX", KeyModifiers::default()),
@@ -268,7 +268,7 @@ mod tests {
 
         for unclaimed in [Unclaimed::Types, Unclaimed::Forwards] {
             assert_eq!(
-                KeyVerdict::of(&claims, unclaimed, &stroke("KeyX", CTRL), true),
+                KeyVerdict::decide(&claims, unclaimed, &stroke("KeyX", CTRL), true),
                 KeyVerdict::Browser
             );
         }

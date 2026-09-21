@@ -182,7 +182,7 @@ pub fn Page() -> Element {
             return;
         }
         let PaneTreeEvent { panes } = pane_tree_state();
-        let Some(target) = ActiveStack::of(&panes) else {
+        let Some(target) = ActiveStack::find(&panes) else {
             return;
         };
         reveal.follow(target);
@@ -290,7 +290,7 @@ fn ExtensionPopupModal(
 ) -> Element {
     let current = popup();
     let state = ExtensionPopupState { popup };
-    let placement = ExtensionPopupPlacement::of(current.anchor);
+    let placement = ExtensionPopupPlacement::from(current.anchor);
     let size = if preferred_size.id == current.id {
         preferred_size
     } else {
@@ -354,14 +354,16 @@ struct ExtensionPopupPlacement {
     top: i32,
 }
 
-impl ExtensionPopupPlacement {
-    fn of(anchor: ExtensionPopupAnchor) -> Self {
+impl From<ExtensionPopupAnchor> for ExtensionPopupPlacement {
+    fn from(anchor: ExtensionPopupAnchor) -> Self {
         Self {
             right: anchor.right.max(48),
             top: anchor.bottom.max(40) + 14,
         }
     }
+}
 
+impl ExtensionPopupPlacement {
     fn style(self, size: &ExtensionPopupSizeEvent) -> String {
         format!(
             "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
@@ -450,7 +452,7 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
 struct ActiveStack;
 
 impl ActiveStack {
-    fn of(panes: &[PaneNode]) -> Option<(u64, u64)> {
+    fn find(panes: &[PaneNode]) -> Option<(u64, u64)> {
         let mut fallback = None;
         for pane in panes {
             for stack in &pane.stacks {
@@ -949,7 +951,7 @@ struct ActiveWorkspaceProject {
 }
 
 impl ActiveWorkspaceProject {
-    fn of(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
+    fn find(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
         let index = projects
             .iter()
             .position(|project| project.depth == 0 && project.is_active)?;
@@ -974,7 +976,7 @@ impl ActiveWorkspaceProject {
 }
 
 impl ActiveSessionInfo {
-    fn of(
+    fn resolve(
         page: Option<StackNode>,
         team: &[TeamMemberRow],
         projects: &[vmux_core::event::ProjectRow],
@@ -982,7 +984,7 @@ impl ActiveSessionInfo {
     ) -> Option<Self> {
         let page = page?;
         let agent = Self::agent_for(&page.url, team);
-        let project = ActiveWorkspaceProject::of(projects);
+        let project = ActiveWorkspaceProject::find(projects);
         Some(Self {
             page,
             agent,
@@ -1016,7 +1018,7 @@ fn ActiveSessionPanel(
     boundary: Option<crate::event::TabBoundary>,
     pane_id: u64,
 ) -> Element {
-    let Some(session) = ActiveSessionInfo::of(active_page, &team, &projects, boundary) else {
+    let Some(session) = ActiveSessionInfo::resolve(active_page, &team, &projects, boundary) else {
         return rsx! {};
     };
     let ActiveSessionInfo {
@@ -1998,7 +2000,7 @@ struct PinDragVisual {
 }
 
 impl PinDragVisual {
-    fn of(state: Option<&BookmarkDragState>, uuid: &str, index: usize) -> Self {
+    fn resolve(state: Option<&BookmarkDragState>, uuid: &str, index: usize) -> Self {
         let Some(state) = state.filter(|state| state.active) else {
             return Self::default();
         };
@@ -2255,7 +2257,7 @@ impl TabDragState {
 }
 
 impl TabDragVisual {
-    fn of(state: Option<&TabDragState>, tab_id: &str, index: usize) -> Self {
+    fn resolve(state: Option<&TabDragState>, tab_id: &str, index: usize) -> Self {
         let Some(state) = state.filter(|state| state.active) else {
             return Self::default();
         };
@@ -2441,7 +2443,7 @@ impl TabDrag {
 
     fn visual(self, tab_id: &str, index: usize) -> TabDragVisual {
         let state = (self.state)();
-        TabDragVisual::of(state.as_deref(), tab_id, index)
+        TabDragVisual::resolve(state.as_deref(), tab_id, index)
     }
 
     fn activate(&mut self, tab_id: String) {
@@ -3249,7 +3251,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
     };
     let leave_target = drop_target.clone();
     let targeted = bookmark_drop_targeted(drag_state, &drop_target);
-    let visual = PinDragVisual::of(drag_state().as_ref(), &row.uuid, index);
+    let visual = PinDragVisual::resolve(drag_state().as_ref(), &row.uuid, index);
     let drag_item = BookmarkDragItem::Pin {
         uuid: row.uuid.clone(),
         source_index: index,
@@ -4239,7 +4241,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let bookmark_metadata = metadata.clone();
     let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
-    let display_title = StackTitle::of(&stack);
+    let display_title = StackTitle::resolve(&stack);
     let close_title = translate("layout-close-stack");
 
     let title_class = if is_active {
@@ -4449,7 +4451,7 @@ impl StackCommand {
 struct StackTitle;
 
 impl StackTitle {
-    fn of(stack: &StackNode) -> String {
+    fn resolve(stack: &StackNode) -> String {
         let title = localized_stack_title(stack);
         if !title.trim().is_empty() {
             return title;

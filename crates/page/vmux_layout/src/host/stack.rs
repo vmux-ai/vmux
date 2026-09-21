@@ -176,7 +176,7 @@ impl StackCloser<'_, '_> {
                 .id();
             self.page_open_requests.write(PageOpenRequest {
                 target: PageOpenTarget::Stack(replacement),
-                url: vmux_core::EffectiveStartupUrl::of(self.startup_url.as_deref()),
+                url: vmux_core::EffectiveStartupUrl::resolve(self.startup_url.as_deref()),
                 request_id: None,
             });
             return;
@@ -469,7 +469,7 @@ fn handle_stack_commands(
                     continue;
                 };
                 let url = override_url.filter(|u| !u.is_empty()).unwrap_or_else(|| {
-                    vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref())
+                    vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
                 });
                 let stack = commands
                     .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
@@ -598,7 +598,7 @@ pub fn open_startup_url_if_no_stacks(
         .id();
     page_open_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
-        url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+        url: vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref()),
         request_id: None,
     });
 }

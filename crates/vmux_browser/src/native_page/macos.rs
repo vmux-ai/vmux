@@ -139,7 +139,7 @@ fn open_native_pages(world: &mut World) {
         .query_filtered::<Entity, With<PrimaryWindow>>()
         .single(world)
         .ok();
-    let embedder = match PageEmbedder::of(world) {
+    let embedder = match PageEmbedder::load(world) {
         Ok(embedder) => embedder,
         Err(reason) => {
             report_waiting(reason);
@@ -424,7 +424,7 @@ impl Placement {
                 })
             }
             Self::Pane | Self::Modal => {
-                let frame = frames.of(entity)?;
+                let frame = frames.frame(entity)?;
                 Some(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(frame.left, frame.top).into(),
                     size: wry::dpi::LogicalSize::new(frame.width, frame.height).into(),
@@ -443,7 +443,7 @@ struct PageEmbedder {
 }
 
 impl PageEmbedder {
-    fn of(world: &mut World) -> Result<Self, &'static str> {
+    fn load(world: &mut World) -> Result<Self, &'static str> {
         let Some(requester) = world.get_resource::<Requester>().cloned() else {
             return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
         };
@@ -458,7 +458,7 @@ impl PageEmbedder {
             bin_ipc: bin_ipc.0.clone(),
             metadata: metadata.clone(),
             requester,
-            waker: PageWaker::of(world.get_resource::<EventLoopProxyWrapper>()),
+            waker: PageWaker::from_proxy(world.get_resource::<EventLoopProxyWrapper>()),
         })
     }
 
@@ -488,7 +488,7 @@ impl PageEmbedder {
 struct PageWaker(Option<EventLoopProxy<WinitUserEvent>>);
 
 impl PageWaker {
-    fn of(proxy: Option<&EventLoopProxyWrapper>) -> Self {
+    fn from_proxy(proxy: Option<&EventLoopProxyWrapper>) -> Self {
         Self(proxy.map(|proxy| (*proxy).clone()))
     }
 }
@@ -579,7 +579,7 @@ struct PageAssets {
 
 impl vmux_native::Assets for PageAssets {
     fn fetch(&self, url: &str, reply: AssetReply) {
-        match SimulatorFrameRequest::of(url, &self.page_url.borrow()) {
+        match SimulatorFrameRequest::parse(url, &self.page_url.borrow()) {
             Ok(Some(request)) => {
                 self.simulator_frames.fetch(request, reply);
                 return;
@@ -702,7 +702,7 @@ impl SimulatorFrameJob {
 impl SimulatorFrameRequest {
     const PATH: &'static str = "/__simulator-frame";
 
-    fn of(request_url: &str, page_url: &str) -> Result<Option<Self>, &'static str> {
+    fn parse(request_url: &str, page_url: &str) -> Result<Option<Self>, &'static str> {
         let parsed = url::Url::parse(request_url).map_err(|_| "simulator frame URL is invalid")?;
         if parsed.path() != Self::PATH {
             return Ok(None);
@@ -764,12 +764,12 @@ impl SimulatorFrameRequest {
         socket
             .read_to_end(&mut response)
             .map_err(|error| format!("simulator frame response failed: {error}"))?;
-        SimulatorFrame::of(response, self.after)
+        SimulatorFrame::decode(response, self.after)
     }
 }
 
 impl SimulatorFrame {
-    fn of(response: Vec<u8>, after: u64) -> Result<Self, String> {
+    fn decode(response: Vec<u8>, after: u64) -> Result<Self, String> {
         let header_end = response
             .windows(4)
             .position(|bytes| bytes == b"\r\n\r\n")
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn simulator_page_accepts_its_frame_request() {
-        let request = SimulatorFrameRequest::of(
+        let request = SimulatorFrameRequest::parse(
             "vmux://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
             "vmux://simulator/",
         )
@@ -946,7 +946,7 @@ mod tests {
         let response =
             b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nX-Vmux-Generation: 42\r\n\r\nabc".to_vec();
 
-        let frame = SimulatorFrame::of(response, 41).unwrap();
+        let frame = SimulatorFrame::decode(response, 41).unwrap();
 
         assert_eq!(frame.generation, 42);
         assert_eq!(frame.bytes, b"abc");
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn other_pages_cannot_request_simulator_frames() {
-        let request = SimulatorFrameRequest::of(
+        let request = SimulatorFrameRequest::parse(
             "vmux://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
             "vmux://start/",
         );
@@ -974,7 +974,7 @@ mod tests {
             "https://simulator/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef",
         ] {
             assert!(
-                SimulatorFrameRequest::of(request_url, "vmux://simulator/").is_err(),
+                SimulatorFrameRequest::parse(request_url, "vmux://simulator/").is_err(),
                 "{request_url}"
             );
         }
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn normal_assets_are_not_simulator_frame_requests() {
         assert!(matches!(
-            SimulatorFrameRequest::of("vmux://simulator/assets/index.css", "vmux://simulator/"),
+            SimulatorFrameRequest::parse("vmux://simulator/assets/index.css", "vmux://simulator/"),
             Ok(None)
         ));
     }
@@ -991,7 +991,7 @@ mod tests {
     #[test]
     fn simulator_frame_requests_use_the_documents_same_origin_host() {
         assert!(
-            SimulatorFrameRequest::of(
+            SimulatorFrameRequest::parse(
                 "vmux://start/__simulator-frame?port=58352&capability=0123456789abcdef0123456789abcdef&after=42",
                 "vmux://simulator/",
             )

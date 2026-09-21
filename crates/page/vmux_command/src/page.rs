@@ -122,7 +122,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         });
 
     use_effect(move || {
-        picking.read_ahead(&vmux_ui::launcher::palette::ActiveProject::of(
+        picking.read_ahead(&vmux_ui::launcher::palette::ActiveProject::resolve(
             &state().prompt_context,
         ));
     });
@@ -183,7 +183,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let _ = send(&ResumeListRequest { offset: loaded });
     });
 
-    let rows = use_memo(move || PaletteRows::of(&state(), &feeds.draft(signals), surface));
+    let rows = use_memo(move || PaletteRows::build(&state(), &feeds.draft(signals), surface));
     let mut palette_keys = PaletteKeys {
         rows,
         signals,
@@ -215,7 +215,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let state_val = state();
-    let palette = std::rc::Rc::new(PaletteState::of(
+    let palette = std::rc::Rc::new(PaletteState::from_rows(
         &rows(),
         &state_val,
         &signals.draft(),
@@ -308,8 +308,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
     let start_prompt_attachments = media.composer_attachments();
     let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
-    let chips = ComposerChips::of(&composer, menu, picking);
-    let menus = ComposerMenuSet::of(&composer, signals, picking);
+    let chips = ComposerChips::build(&composer, menu, picking);
+    let menus = ComposerMenuSet::build(&composer, signals, picking);
     let start_composer_footer = rsx! {
         ComposerBar {
             menu,
@@ -360,14 +360,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if !ctrl
                 && palette.space_switch
                 && palette.query.trim().is_empty()
-                && let Some(digit) = TypedDigit::of(&e)
+                && let Some(digit) = TypedDigit::from_event(&e)
                 && let Some(index) = palette.space_digit(digit)
             {
                 e.prevent_default();
                 signals.highlight(index);
                 return;
             }
-            let direction = MenuDirection::of(&e);
+            let direction = MenuDirection::from_key(&e);
             let go_down = direction == Some(MenuDirection::Next);
             let go_up = direction == Some(MenuDirection::Previous);
 
@@ -417,7 +417,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
 
             let wanted = match recall.recalling(&palette.query) {
-                true => PromptHistoryDirection::of(direction),
+                true => PromptHistoryDirection::from_menu(direction),
                 false => {
                     let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
                     let entering = go_up && palette.selected == 0;
@@ -471,7 +471,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if !ctrl
                 && palette.space_switch
                 && palette.query.trim().is_empty()
-                && let Some(digit) = TypedDigit::of(&e)
+                && let Some(digit) = TypedDigit::from_event(&e)
                 && let Some(index) = palette.space_digit(digit)
             {
                 e.prevent_default();

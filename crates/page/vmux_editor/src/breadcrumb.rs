@@ -28,7 +28,7 @@ pub fn EditorBreadcrumbs(
         menus.receive(event);
     });
 
-    let trail = PathTrail::of(&display_path, &abs_path, leaf_is_dir);
+    let trail = PathTrail::build(&display_path, &abs_path, leaf_is_dir);
     if trail.is_empty() {
         return rsx! {};
     }
@@ -368,7 +368,7 @@ struct PathTrail {
 }
 
 impl PathTrail {
-    fn of(display: &str, abs: &str, leaf_is_dir: bool) -> Self {
+    fn build(display: &str, abs: &str, leaf_is_dir: bool) -> Self {
         let mut parts = Vec::new();
         for part in abs.split('/') {
             if !part.is_empty() {
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn trail_shows_the_project_relative_tail_with_absolute_targets() {
-        let trail = PathTrail::of("crates/page/x.rs", "/home/me/proj/crates/page/x.rs", false);
+        let trail = PathTrail::build("crates/page/x.rs", "/home/me/proj/crates/page/x.rs", false);
         assert_eq!(trail.labels(), vec!["crates", "page", "x.rs"]);
         assert!(trail.hidden.is_empty());
         assert_eq!(trail.shown[0].path, "/home/me/proj/crates");
@@ -536,14 +536,14 @@ mod tests {
 
     #[test]
     fn trail_drops_the_home_marker_and_keeps_real_directory_names() {
-        let trail = PathTrail::of("~/notes/todo.md", "/home/me/notes/todo.md", false);
+        let trail = PathTrail::build("~/notes/todo.md", "/home/me/notes/todo.md", false);
         assert_eq!(trail.labels(), vec!["notes", "todo.md"]);
         assert_eq!(trail.shown[0].path, "/home/me/notes");
     }
 
     #[test]
     fn trail_collapses_leading_segments_past_the_cap() {
-        let trail = PathTrail::of("a/b/c/d/e/f.rs", "/root/a/b/c/d/e/f.rs", false);
+        let trail = PathTrail::build("a/b/c/d/e/f.rs", "/root/a/b/c/d/e/f.rs", false);
         assert_eq!(trail.labels(), vec!["c", "d", "e", "f.rs"]);
         let mut hidden = Vec::new();
         for crumb in trail.hidden.iter() {
@@ -554,13 +554,13 @@ mod tests {
 
     #[test]
     fn trail_marks_every_segment_of_a_directory_target_as_a_directory() {
-        let trail = PathTrail::of("src/page", "/proj/src/page", true);
+        let trail = PathTrail::build("src/page", "/proj/src/page", true);
         assert!(trail.shown.iter().all(|crumb| crumb.is_dir));
     }
 
     #[test]
     fn trail_is_empty_without_an_absolute_path() {
-        assert!(PathTrail::of("", "", false).is_empty());
+        assert!(PathTrail::build("", "", false).is_empty());
     }
 
     #[test]

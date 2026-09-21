@@ -219,7 +219,7 @@ struct SpaceOfTab<'w, 's> {
 }
 
 impl SpaceOfTab<'_, '_> {
-    fn of(&self, tab: Entity) -> Option<String> {
+    fn find(&self, tab: Entity) -> Option<String> {
         vmux_layout::space::space_id_of(tab, &self.child_of, &self.spaces, &self.ids)
     }
 }
@@ -228,7 +228,7 @@ impl SpaceOfTab<'_, '_> {
 struct RepoRoots(std::collections::HashMap<String, Option<String>>);
 
 impl RepoRoots {
-    fn of(&mut self, dir: &str) -> Option<String> {
+    fn resolve(&mut self, dir: &str) -> Option<String> {
         if let Some(held) = self.0.get(dir) {
             return held.clone();
         }
@@ -238,7 +238,7 @@ impl RepoRoots {
     }
 
     fn read(dir: &str) -> Option<String> {
-        let root = vmux_git::worktree::LinkedRepoRoot::of(std::path::Path::new(dir))?;
+        let root = vmux_git::worktree::LinkedRepoRoot::find(std::path::Path::new(dir))?;
         let root = root.to_string_lossy().into_owned();
         (root != dir && !root.is_empty()).then_some(root)
     }
@@ -274,7 +274,7 @@ fn remember_space_project(
         if dir.is_empty() {
             continue;
         }
-        let Some(space_id) = space_of_tab.of(tab_entity) else {
+        let Some(space_id) = space_of_tab.find(tab_entity) else {
             continue;
         };
         let project = match worktree.as_ref() {
@@ -291,7 +291,7 @@ fn remember_space_project(
                     });
                 vmux_setting::SpaceProject::checked_out(&worktree.repo_root, checkout)
             }
-            _ => match roots.of(dir) {
+            _ => match roots.resolve(dir) {
                 Some(root) => vmux_setting::SpaceProject::checked_out(&root, dir),
                 None => vmux_setting::SpaceProject::at(dir),
             },

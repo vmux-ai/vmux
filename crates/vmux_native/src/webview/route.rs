@@ -27,7 +27,7 @@ impl PageRoutes {
     ) {
         let url = request.uri().to_string();
         let page = self.page.get();
-        let route = Route::of(&url);
+        let route = Route::from(url.as_str());
         if !route.is_served_by(&url, page) {
             responder.respond(
                 wry::http::Response::builder()
@@ -41,7 +41,7 @@ impl PageRoutes {
             Route::Events => self.dom.answer_event(&request, responder),
             Route::Edits => self.dom.serve_edits(&request, responder),
             Route::Document => responder.respond(page.shell()),
-            Route::Asset => self.assets.fetch(&url, AssetReply::of(responder)),
+            Route::Asset => self.assets.fetch(&url, AssetReply::from(responder)),
         }
     }
 }
@@ -76,21 +76,23 @@ impl Route {
         after_scheme.split('/').next().unwrap_or_default()
     }
 
-    fn of(url: &str) -> Self {
-        match Self::path_of(url) {
-            "__events" => Self::Events,
-            "__edits" => Self::Edits,
-            "" | "index.html" => Self::Document,
-            _ => Self::Asset,
-        }
-    }
-
     fn path_of(url: &str) -> &str {
         let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
         let path = after_scheme.split(['?', '#']).next().unwrap_or("");
         let after_host = path.split_once('/').map(|(_, rest)| rest).unwrap_or("");
 
         after_host.trim_end_matches('/')
+    }
+}
+
+impl From<&str> for Route {
+    fn from(url: &str) -> Self {
+        match Self::path_of(url) {
+            "__events" => Self::Events,
+            "__edits" => Self::Edits,
+            "" | "index.html" => Self::Document,
+            _ => Self::Asset,
+        }
     }
 }
 
@@ -106,7 +108,7 @@ mod tests {
             "vmux://layout/index.html",
         ] {
             assert!(
-                matches!(Route::of(url), Route::Document),
+                matches!(Route::from(url), Route::Document),
                 "{url} should ask for the document"
             );
         }
@@ -114,23 +116,32 @@ mod tests {
 
     #[test]
     fn the_hosts_own_routes_are_not_mistaken_for_assets() {
-        assert!(matches!(Route::of("vmux://layout/__events"), Route::Events));
-        assert!(matches!(Route::of("vmux://layout/__edits/"), Route::Edits));
+        assert!(matches!(
+            Route::from("vmux://layout/__events"),
+            Route::Events
+        ));
+        assert!(matches!(
+            Route::from("vmux://layout/__edits/"),
+            Route::Edits
+        ));
     }
 
     #[test]
     fn a_query_or_fragment_does_not_change_the_route() {
         assert!(matches!(
-            Route::of("vmux://layout/__events?v=2"),
+            Route::from("vmux://layout/__events?v=2"),
             Route::Events
         ));
-        assert!(matches!(Route::of("vmux://layout/?tab=1"), Route::Document));
+        assert!(matches!(
+            Route::from("vmux://layout/?tab=1"),
+            Route::Document
+        ));
     }
 
     #[test]
     fn anything_the_document_references_is_an_asset() {
         assert!(matches!(
-            Route::of("vmux://layout/assets/index.css"),
+            Route::from("vmux://layout/assets/index.css"),
             Route::Asset
         ));
     }

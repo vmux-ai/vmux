@@ -422,7 +422,7 @@ fn handle_agent_file_search(
         else {
             continue;
         };
-        let files = SearchGrouping::of(matches);
+        let files = SearchGrouping::group(matches);
         let Some(first) = files.first() else {
             continue;
         };
@@ -439,7 +439,7 @@ fn handle_agent_file_search(
 struct SearchGrouping;
 
 impl SearchGrouping {
-    fn of(matches: &[vmux_wire::protocol::FileSearchMatch]) -> Vec<ExplorerSearchFile> {
+    fn group(matches: &[vmux_wire::protocol::FileSearchMatch]) -> Vec<ExplorerSearchFile> {
         let mut files: Vec<ExplorerSearchFile> = Vec::new();
         for result in matches {
             let hit = ExplorerSearchMatch {

@@ -395,14 +395,14 @@ pub fn create_worktree_for_existing_branch_blocking(
         let info = worktree::WorktreeInfo {
             path: registration.path,
             branch: branch.to_string(),
-            base_ref: worktree::BaseRef::of(&checkout.root)
+            base_ref: worktree::BaseRef::resolve(&checkout.root)
                 .map(|base| base.branch().to_string())
                 .unwrap_or_default(),
             repo_root: checkout.root.clone(),
         };
         return activate_added_worktree(&base_dir, &checkout, relative_dir, &info);
     }
-    let base_ref = worktree::BaseRef::of(&checkout.root)
+    let base_ref = worktree::BaseRef::resolve(&checkout.root)
         .map(|base| base.branch().to_string())
         .unwrap_or_default();
     let checkout_dir = plan_existing_worktree_path(&checkout, managed_root, branch);

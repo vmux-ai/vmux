@@ -58,7 +58,7 @@ impl WindowDragRegion {
         published.contains(x_px, y_px)
     }
 
-    fn of(reported: WindowDragRegionEvent, header: ComputedNode) -> Option<Self> {
+    fn from_report(reported: WindowDragRegionEvent, header: ComputedNode) -> Option<Self> {
         if header.is_empty() || !reported.is_finite() {
             return None;
         }
@@ -126,7 +126,7 @@ fn publish_window_drag_region(
     pointer_capture_q: Query<(Entity, &HostWindow), (With<LayoutCef>, LayoutPointerCapture)>,
     mut last: Local<(Vec<WindowDragRegion>, Vec<WindowDragRegion>)>,
 ) {
-    let overlay_owns_input = OverlayState::of_any(&overlay_q).owns_input()
+    let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input()
         || pointer_capture_q
             .iter()
             .any(|(_, host)| Some(host.0) == focused_window.0);
@@ -144,7 +144,7 @@ fn publish_window_drag_region(
                 {
                     continue;
                 }
-                if let Some(region) = WindowDragRegion::of(reported.clone(), *viewport) {
+                if let Some(region) = WindowDragRegion::from_report(reported.clone(), *viewport) {
                     if reported.blocked {
                         regions.blocked.push(region);
                     } else {
@@ -193,7 +193,7 @@ mod tests {
             height: 40.0,
         };
 
-        let region = WindowDragRegion::of(reported, header).expect("region");
+        let region = WindowDragRegion::from_report(reported, header).expect("region");
 
         assert_eq!(region.left_px, 600.0);
         assert_eq!(region.top_px, 16.0);
@@ -208,7 +208,7 @@ mod tests {
     fn a_region_reaching_past_the_header_is_clipped_to_it() {
         let header = HeaderNode::at(Vec2::ZERO, Vec2::new(1000.0, 168.0), 0.5);
 
-        let region = WindowDragRegion::of(
+        let region = WindowDragRegion::from_report(
             WindowDragRegionEvent {
                 id: "trailing".to_string(),
                 removed: false,
@@ -231,7 +231,7 @@ mod tests {
         let header = HeaderNode::at(Vec2::ZERO, Vec2::new(200.0, 84.0), 1.0);
 
         assert_eq!(
-            WindowDragRegion::of(
+            WindowDragRegion::from_report(
                 WindowDragRegionEvent {
                     id: "trailing".to_string(),
                     removed: false,
@@ -246,7 +246,7 @@ mod tests {
             None
         );
         assert_eq!(
-            WindowDragRegion::of(
+            WindowDragRegion::from_report(
                 WindowDragRegionEvent {
                     id: "trailing".to_string(),
                     removed: false,

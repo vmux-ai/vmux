@@ -84,7 +84,7 @@ fn apply_status_picks(
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
-                let shape = BufferShape::of(&edit.core.buffer.rope);
+                let shape = BufferShape::detect(&edit.core.buffer.rope);
                 commands.trigger(BinReceive {
                     webview: entity,
                     payload: FileShapeSet {
@@ -100,7 +100,7 @@ fn apply_status_picks(
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
-                let shape = BufferShape::of(&edit.core.buffer.rope);
+                let shape = BufferShape::detect(&edit.core.buffer.rope);
                 let line_ending = match crlf {
                     true => FileLineEnding::Crlf,
                     false => FileLineEnding::Lf,

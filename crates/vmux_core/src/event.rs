@@ -2310,8 +2310,8 @@ pub struct FileStatusPickerOpen {
     pub picker: CommandBarPicker,
 }
 
-impl FileStatusPickerOpen {
-    pub const fn of(picker: CommandBarPicker) -> Self {
+impl From<CommandBarPicker> for FileStatusPickerOpen {
+    fn from(picker: CommandBarPicker) -> Self {
         Self { picker }
     }
 }

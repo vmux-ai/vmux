@@ -7,13 +7,15 @@ pub struct WorkspaceEditPlan {
     pub documents: Vec<PlannedDocument>,
 }
 
-impl WorkspaceEditPlan {
-    pub fn of(edit: &lsp_types::WorkspaceEdit) -> Result<Self, PlanRefusal> {
+impl TryFrom<&lsp_types::WorkspaceEdit> for WorkspaceEditPlan {
+    type Error = PlanRefusal;
+
+    fn try_from(edit: &lsp_types::WorkspaceEdit) -> Result<Self, Self::Error> {
         let mut documents = Vec::new();
         match &edit.document_changes {
             Some(lsp_types::DocumentChanges::Edits(edits)) => {
                 for doc in edits {
-                    documents.push(PlannedDocument::of(doc)?);
+                    documents.push(PlannedDocument::try_from(doc)?);
                 }
             }
             Some(lsp_types::DocumentChanges::Operations(ops)) => {
@@ -21,7 +23,7 @@ impl WorkspaceEditPlan {
                     let lsp_types::DocumentChangeOperation::Edit(doc) = op else {
                         return Err(PlanRefusal::ResourceOperation);
                     };
-                    documents.push(PlannedDocument::of(doc)?);
+                    documents.push(PlannedDocument::try_from(doc)?);
                 }
             }
             None => {
@@ -50,8 +52,10 @@ pub struct PlannedDocument {
     pub version: Option<i32>,
 }
 
-impl PlannedDocument {
-    fn of(doc: &lsp_types::TextDocumentEdit) -> Result<Self, PlanRefusal> {
+impl TryFrom<&lsp_types::TextDocumentEdit> for PlannedDocument {
+    type Error = PlanRefusal;
+
+    fn try_from(doc: &lsp_types::TextDocumentEdit) -> Result<Self, Self::Error> {
         let Some(path) = path_from_uri(doc.text_document.uri.as_str()) else {
             return Err(PlanRefusal::UnsupportedUri);
         };
@@ -124,7 +128,7 @@ mod tests {
 
     #[test]
     fn legacy_changes_map_is_understood() {
-        let plan = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {
+        let plan = WorkspaceEditPlan::try_from(&lsp_types::WorkspaceEdit {
             changes: Some(changes(vec![("/tmp/b.rs", "b"), ("/tmp/a.rs", "a")])),
             ..Default::default()
         })
@@ -139,7 +143,7 @@ mod tests {
 
     #[test]
     fn document_changes_carry_the_version() {
-        let plan = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {
+        let plan = WorkspaceEditPlan::try_from(&lsp_types::WorkspaceEdit {
             document_changes: Some(lsp_types::DocumentChanges::Edits(vec![document(
                 "/tmp/a.rs",
                 Some(4),
@@ -152,7 +156,7 @@ mod tests {
 
     #[test]
     fn document_changes_supersede_the_changes_map() {
-        let plan = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {
+        let plan = WorkspaceEditPlan::try_from(&lsp_types::WorkspaceEdit {
             changes: Some(changes(vec![("/tmp/legacy.rs", "legacy")])),
             document_changes: Some(lsp_types::DocumentChanges::Edits(vec![document(
                 "/tmp/modern.rs",
@@ -179,7 +183,7 @@ mod tests {
             lsp_types::DocumentChangeOperation::Edit(document("/tmp/a.rs", None)),
             rename,
         ];
-        let refusal = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {
+        let refusal = WorkspaceEditPlan::try_from(&lsp_types::WorkspaceEdit {
             document_changes: Some(lsp_types::DocumentChanges::Operations(ops)),
             ..Default::default()
         })
@@ -195,7 +199,7 @@ mod tests {
         });
         let mut doc = document("/tmp/a.rs", None);
         doc.edits = vec![annotated];
-        let plan = WorkspaceEditPlan::of(&lsp_types::WorkspaceEdit {
+        let plan = WorkspaceEditPlan::try_from(&lsp_types::WorkspaceEdit {
             document_changes: Some(lsp_types::DocumentChanges::Edits(vec![doc])),
             ..Default::default()
         })

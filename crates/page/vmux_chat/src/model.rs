@@ -47,7 +47,7 @@ impl Picker {
     }
 
     fn emit(picker: Res<Picker>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(MODEL_STATE_EVENT, &picker.0) else {
+        let Some(emit) = PageEmit::encode(MODEL_STATE_EVENT, &picker.0) else {
             return;
         };
         emits.write(emit);

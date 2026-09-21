@@ -7,7 +7,7 @@ pub struct PageEmit {
 }
 
 impl PageEmit {
-    pub fn of<T>(id: &'static str, payload: &T) -> Option<Self>
+    pub fn encode<T>(id: &'static str, payload: &T) -> Option<Self>
     where
         T: for<'a> rkyv::Serialize<
                 rkyv::api::high::HighSerializer<

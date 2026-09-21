@@ -76,7 +76,7 @@ struct AgentChatTarget {
 }
 
 impl AgentChatTarget {
-    fn of(url: &str) -> Option<Self> {
+    fn parse(url: &str) -> Option<Self> {
         match crate::AgentUrl::parse(url)? {
             crate::AgentUrl::Page {
                 provider, model, ..
@@ -262,7 +262,7 @@ fn prepare_agent_tab_worktrees(
         };
         if !preparing_by_stack.contains_key(&task.stack)
             && let Ok(transition) = transitions.get(task.stack)
-            && let Some(target) = AgentChatTarget::of(&task.url)
+            && let Some(target) = AgentChatTarget::parse(&task.url)
         {
             let view = target.open(task.stack, transition.webview, &mut commands);
             preparing_by_stack.insert(task.stack, view);

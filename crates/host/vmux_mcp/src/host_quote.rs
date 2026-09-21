@@ -12,7 +12,10 @@ impl HostQuote {
             ));
         }
         let eval = Self::eval_flag(named);
-        Ok(format!("{named} {eval} {}", Self::of(host_shell, script)))
+        Ok(format!(
+            "{named} {eval} {}",
+            Self::quote(host_shell, script)
+        ))
     }
 
     fn eval_flag(named: &str) -> &'static str {
@@ -25,7 +28,7 @@ impl HostQuote {
         }
     }
 
-    fn of(host_shell: &str, text: &str) -> String {
+    fn quote(host_shell: &str, text: &str) -> String {
         let base = host_shell
             .rsplit('/')
             .next()

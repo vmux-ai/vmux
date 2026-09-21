@@ -16,8 +16,8 @@ pub struct DecodedText {
 }
 
 impl DecodedText {
-    pub fn of(bytes: &[u8]) -> Option<Self> {
-        if let Some(encoding) = Bom::of(bytes) {
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if let Some(encoding) = Bom::detect(bytes) {
             return Some(Self::forced(bytes, encoding));
         }
         if BinarySniff::rejects(bytes) {
@@ -30,7 +30,7 @@ impl DecodedText {
                 encoding: FileEncoding::Utf8,
             });
         }
-        Some(Self::forced(bytes, Detected::of(bytes)))
+        Some(Self::forced(bytes, Detected::encoding(bytes)))
     }
 
     pub fn forced(bytes: &[u8], encoding: FileEncoding) -> Self {
@@ -70,8 +70,8 @@ impl Utf16Sniff {
         }
         let capped = bytes.len().min(UTF16_SNIFF_BYTES);
         let sample = &bytes[..capped - capped % 2];
-        let le = Self::of(sample, u16::from_le_bytes);
-        let be = Self::of(sample, u16::from_be_bytes);
+        let le = Self::read(sample, u16::from_le_bytes);
+        let be = Self::read(sample, u16::from_be_bytes);
         match (le.reads_as_text(), be.reads_as_text()) {
             (false, false) => None,
             (true, false) => Some(FileEncoding::Utf16Le),
@@ -83,7 +83,7 @@ impl Utf16Sniff {
         }
     }
 
-    fn of(sample: &[u8], unit: fn([u8; 2]) -> u16) -> Self {
+    fn read(sample: &[u8], unit: fn([u8; 2]) -> u16) -> Self {
         let mut units = Vec::with_capacity(sample.len() / 2);
         for pair in sample.chunks_exact(2) {
             units.push(unit([pair[0], pair[1]]));
@@ -139,7 +139,7 @@ impl Bom {
     const UTF16LE: [u8; 2] = [0xFF, 0xFE];
     const UTF16BE: [u8; 2] = [0xFE, 0xFF];
 
-    fn of(bytes: &[u8]) -> Option<FileEncoding> {
+    fn detect(bytes: &[u8]) -> Option<FileEncoding> {
         if bytes.starts_with(&Self::UTF8) {
             return Some(FileEncoding::Utf8Bom);
         }
@@ -173,7 +173,7 @@ impl Bom {
 struct Detected;
 
 impl Detected {
-    fn of(bytes: &[u8]) -> FileEncoding {
+    fn encoding(bytes: &[u8]) -> FileEncoding {
         let head = &bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)];
         let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
         detector.feed(head, head.len() == bytes.len());
@@ -342,7 +342,7 @@ mod tests {
     fn a_shift_jis_file_decodes_to_the_japanese_it_holds() {
         let bytes = Reencode::bytes("日本語のテキスト\n", FileEncoding::ShiftJis);
 
-        let out = DecodedText::of(&bytes).expect("shift_jis is text");
+        let out = DecodedText::decode(&bytes).expect("shift_jis is text");
 
         assert_eq!(out.text, "日本語のテキスト\n");
         assert_eq!(out.encoding, FileEncoding::ShiftJis);
@@ -355,7 +355,7 @@ mod tests {
             FileEncoding::EucJp,
         );
 
-        let out = DecodedText::of(&bytes).expect("euc-jp is text");
+        let out = DecodedText::decode(&bytes).expect("euc-jp is text");
 
         assert_eq!(out.encoding, FileEncoding::EucJp);
         assert!(out.text.starts_with("吾輩は猫である"), "got {}", out.text);
@@ -370,7 +370,7 @@ mod tests {
         ] {
             let bytes = Reencode::bytes("héllo\n", encoding);
 
-            let out = DecodedText::of(&bytes).expect("a bom marks text");
+            let out = DecodedText::decode(&bytes).expect("a bom marks text");
 
             assert_eq!(out.encoding, encoding, "{}", encoding.label());
             assert_eq!(out.text, "héllo\n", "{}", encoding.label());
@@ -382,14 +382,14 @@ mod tests {
         let bytes = Reencode::bytes("x", FileEncoding::Utf8Bom);
 
         assert_eq!(bytes, [0xEF, 0xBB, 0xBF, b'x']);
-        assert_eq!(DecodedText::of(&bytes).unwrap().text, "x");
+        assert_eq!(DecodedText::decode(&bytes).unwrap().text, "x");
     }
 
     #[test]
     fn a_binary_file_is_refused_rather_than_assigned_an_encoding() {
         let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x08";
 
-        assert!(DecodedText::of(png).is_none());
+        assert!(DecodedText::decode(png).is_none());
     }
 
     #[test]
@@ -412,7 +412,7 @@ mod tests {
                     "{text:?} must be one the guard would have refused"
                 );
 
-                let out = DecodedText::of(&bytes).expect("bom-less utf-16 is text");
+                let out = DecodedText::decode(&bytes).expect("bom-less utf-16 is text");
 
                 assert_eq!(out.encoding, encoding, "{text:?} as {}", encoding.label());
                 assert_eq!(out.text, text, "{text:?} as {}", encoding.label());
@@ -442,7 +442,7 @@ mod tests {
         ];
 
         for (name, bytes) in cases {
-            assert!(DecodedText::of(bytes).is_none(), "{name} is not text");
+            assert!(DecodedText::decode(bytes).is_none(), "{name} is not text");
         }
     }
 
@@ -450,7 +450,7 @@ mod tests {
     fn utf8_text_carrying_a_nul_is_refused_rather_than_forced_into_utf16() {
         let bytes = b"log line\x00\x00\x00 more text\n";
 
-        assert!(DecodedText::of(bytes).is_none());
+        assert!(DecodedText::decode(bytes).is_none());
     }
 
     #[test]
@@ -468,7 +468,7 @@ mod tests {
             };
             let bytes = Reencode::bytes(text, encoding);
 
-            let out = DecodedText::of(&bytes).expect("legacy text stays text");
+            let out = DecodedText::decode(&bytes).expect("legacy text stays text");
 
             assert_eq!(out.encoding, encoding, "{}", encoding.label());
             assert_eq!(out.text, text, "{}", encoding.label());
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn plain_ascii_is_utf8_rather_than_whatever_the_detector_prefers() {
-        let out = DecodedText::of(b"fn main() {}\n").expect("ascii is text");
+        let out = DecodedText::decode(b"fn main() {}\n").expect("ascii is text");
 
         assert_eq!(out.encoding, FileEncoding::Utf8);
         assert_eq!(out.text, "fn main() {}\n");
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn utf8_japanese_without_a_bom_is_not_mistaken_for_a_legacy_encoding() {
-        let out = DecodedText::of("日本語のテキスト\n".as_bytes()).expect("utf-8 is text");
+        let out = DecodedText::decode("日本語のテキスト\n".as_bytes()).expect("utf-8 is text");
 
         assert_eq!(out.encoding, FileEncoding::Utf8);
         assert_eq!(out.text, "日本語のテキスト\n");
@@ -562,7 +562,7 @@ mod tests {
         for encoding in [FileEncoding::Utf16Le, FileEncoding::Utf16Be] {
             let bytes = Reencode::bytes("go 🚀\n", encoding);
 
-            assert_eq!(DecodedText::of(&bytes).unwrap().text, "go 🚀\n");
+            assert_eq!(DecodedText::decode(&bytes).unwrap().text, "go 🚀\n");
         }
     }
 }

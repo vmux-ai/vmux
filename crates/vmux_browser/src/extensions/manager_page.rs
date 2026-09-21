@@ -99,7 +99,7 @@ pub(crate) struct ExtensionPopupBounds {
 }
 
 impl ExtensionPopupBounds {
-    fn of(request: &ExtensionPopupBoundsRequest) -> Option<Self> {
+    fn from_request(request: &ExtensionPopupBoundsRequest) -> Option<Self> {
         if !request.left.is_finite()
             || !request.top.is_finite()
             || !request.width.is_finite()
@@ -390,7 +390,7 @@ fn on_popup_bounds_request(
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
 ) {
-    let Some(bounds) = ExtensionPopupBounds::of(&trigger.event().payload) else {
+    let Some(bounds) = ExtensionPopupBounds::from_request(&trigger.event().payload) else {
         return;
     };
     for (entity, popup) in &popups {

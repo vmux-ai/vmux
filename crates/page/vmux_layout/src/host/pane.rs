@@ -556,7 +556,7 @@ struct PaneStartupContext<'w> {
 
 impl PaneStartupContext<'_> {
     fn url(&self) -> String {
-        vmux_core::EffectiveStartupUrl::of(self.effective.as_deref())
+        vmux_core::EffectiveStartupUrl::resolve(self.effective.as_deref())
     }
 }
 
@@ -1911,7 +1911,7 @@ fn handle_open_in_pane(
             effective_startup_url.as_ref().map(|s| s.0.as_str()),
         );
         let resolved = if resolved.is_empty() {
-            vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref())
+            vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
         } else {
             resolved
         };

@@ -17,7 +17,7 @@ pub fn Page() -> Element {
     let mut state = use_signal(|| Rc::new(ShortcutCatalog::default()));
     let mut probe = use_signal(ShortcutProbe::default);
     let _listener = use_listener::<ShortcutsEvent, _>(EVENT, move |event| {
-        state.set(Rc::new(ShortcutCatalog::of(event)));
+        state.set(Rc::new(ShortcutCatalog::from(event)));
     });
     let _pressed = use_listener::<ShortcutPressedEvent, _>(PRESSED_EVENT, move |event| {
         record_stroke(probe, state, event.stroke, event.pressed_at_ms);
@@ -165,11 +165,13 @@ struct FilteredShortcutGroup {
     entry_indices: Vec<usize>,
 }
 
-impl ShortcutCatalog {
-    fn of(shortcuts: ShortcutsEvent) -> Self {
+impl From<ShortcutsEvent> for ShortcutCatalog {
+    fn from(shortcuts: ShortcutsEvent) -> Self {
         Self { shortcuts }
     }
+}
 
+impl ShortcutCatalog {
     fn filtered(&self, probe: &ShortcutProbe) -> Vec<FilteredShortcutGroup> {
         let mut filtered = Vec::new();
         for (group_index, group) in self.shortcuts.groups.iter().enumerate() {

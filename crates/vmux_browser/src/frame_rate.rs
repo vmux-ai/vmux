@@ -178,7 +178,7 @@ fn refresh_active_windowed_hover(
     >,
     mut state: Local<WindowedHoverRefreshState>,
 ) {
-    if OverlayState::of_any(&overlay_q).owns_input() {
+    if OverlayState::from_query(&overlay_q).owns_input() {
         *state = WindowedHoverRefreshState::default();
         return;
     }

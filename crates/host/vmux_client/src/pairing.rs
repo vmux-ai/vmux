@@ -74,7 +74,7 @@ impl Relay {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, PersistedRelay::of(self).contents())?;
+        std::fs::write(&path, PersistedRelay::from(self).contents())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -131,14 +131,16 @@ pub struct PersistedRelay {
     relay: Relay,
 }
 
-impl PersistedRelay {
-    const TRANSPORT: &'static str = "quic";
-
-    pub fn of(relay: &Relay) -> Self {
+impl From<&Relay> for PersistedRelay {
+    fn from(relay: &Relay) -> Self {
         Self {
             relay: Relay::new(relay.url().trim().trim_end_matches('/')),
         }
     }
+}
+
+impl PersistedRelay {
+    const TRANSPORT: &'static str = "quic";
 
     pub fn parse(contents: &str) -> Option<Self> {
         let (transport, url) = contents.trim().split_once(char::is_whitespace)?;
@@ -308,7 +310,7 @@ mod tests {
     #[test]
     fn what_this_build_writes_reads_back_as_the_same_relay() {
         let relay = Relay::new("  https://relay.example.com:9443/  ");
-        let contents = PersistedRelay::of(&relay).contents();
+        let contents = PersistedRelay::from(&relay).contents();
 
         assert_eq!(
             PersistedRelay::parse(&contents).map(PersistedRelay::relay),

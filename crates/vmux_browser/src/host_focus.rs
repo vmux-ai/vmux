@@ -44,7 +44,7 @@ fn publish_native_page_owns_escape(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
 ) {
-    let overlay_owns_input = OverlayState::of_any(&overlay_q).owns_input();
+    let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input();
     crate::set_native_page_owns_escape(page_owns_escape(
         !terminal_focus_q.is_empty(),
         overlay_owns_input,
@@ -94,7 +94,7 @@ pub(crate) fn compute_host_focus_intent(
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
         |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
-            OverlayState::of(
+            OverlayState::resolve(
                 node.display,
                 visibility.copied().unwrap_or_default(),
                 keyboard_target,

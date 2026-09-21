@@ -21,7 +21,7 @@ pub struct PromptComposerAttachment {
 }
 
 impl PromptComposerAttachment {
-    pub fn of(
+    pub fn from_attachment(
         attachment: &ChatAttachment,
         previews: &HashMap<String, ChatAttachment>,
         remove_index: Option<usize>,
@@ -50,7 +50,7 @@ impl PromptComposerAttachment {
     ) -> Vec<Self> {
         let mut listed = Vec::with_capacity(attachments.len());
         for (index, attachment) in attachments.iter().enumerate() {
-            listed.push(Self::of(attachment, previews, Some(index)));
+            listed.push(Self::from_attachment(attachment, previews, Some(index)));
         }
         listed
     }
@@ -61,7 +61,7 @@ impl PromptComposerAttachment {
     ) -> Vec<Self> {
         let mut listed = Vec::with_capacity(attachments.len());
         for attachment in attachments {
-            listed.push(Self::of(attachment, previews, None));
+            listed.push(Self::from_attachment(attachment, previews, None));
         }
         listed
     }
