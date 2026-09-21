@@ -214,11 +214,9 @@ impl AcpShared {
 
     pub fn snapshot_message(&self) -> ServiceMessage {
         let projector = self.projector.lock().unwrap();
-        let messages_json =
-            serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
         ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
-            messages_json,
+            messages: projector.messages().to_vec(),
         })
     }
 
@@ -467,13 +465,11 @@ impl AcpShared {
         if !loaded {
             *projector = AcpProjector::new();
         }
-        let messages_json =
-            serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
         self.history_replay_updates.store(0, Ordering::SeqCst);
         self.history_replay.store(false, Ordering::SeqCst);
         self.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
-            messages_json,
+            messages: projector.messages().to_vec(),
         }));
     }
 
@@ -548,11 +544,9 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
         }
         let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
         if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
-            let messages_json =
-                serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
             shared.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: shared.sid.clone(),
-                messages_json,
+                messages: projector.messages().to_vec(),
             }));
         }
         return;
@@ -1009,13 +1003,13 @@ pub async fn run(
                 *perm_shared.approval.lock().unwrap() = Some(RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
-                    args_json: args_json.clone(),
+                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 });
                 perm_shared.emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
                     name,
-                    args_json,
+                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 }));
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
                 *perm_shared.approval.lock().unwrap() = None;
@@ -2757,12 +2751,11 @@ mod tests {
                 TextContent::new("hello"),
             ))),
         );
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("first progressive snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 1);
         for _ in 0..300 {
             project_session_update(
@@ -2779,12 +2772,11 @@ mod tests {
         assert!(snapshots.len() < 64);
         shared.finish_history_replay(true);
 
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("final snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 2);
         assert!(matches!(
             &messages[1],
@@ -2816,23 +2808,21 @@ mod tests {
             ))),
         );
 
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("progressive snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 1);
 
         shared.finish_history_replay(false);
 
         assert!(shared.projector.lock().unwrap().messages().is_empty());
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("clearing snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert!(messages.is_empty());
         assert!(matches!(
             stream_rx.try_recv(),
@@ -3326,7 +3316,7 @@ mod tests {
         *shared.approval.lock().unwrap() = Some(RemoteApproval {
             call_id: "call-1".into(),
             name: "run".into(),
-            args_json: "{}".into(),
+            args: vmux_api::json::JsonValue::Object(Vec::new()),
         });
 
         assert!(shared.resolve_approval("call-1"));

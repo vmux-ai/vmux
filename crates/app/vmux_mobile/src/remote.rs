@@ -216,19 +216,17 @@ pub(crate) fn remote_event_from_shared(
         Shared::AgentAwaitingApproval {
             call_id,
             name,
-            args_json,
+            args,
             ..
         } => Some(RemoteEvent::Approval {
             approval: Some(RemoteApproval {
                 call_id,
                 name,
-                args_json,
+                args,
             }),
         }),
         Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
-        Shared::AgentMessagesSnapshot { sid, messages_json } => {
-            let messages: Vec<vmux_api::room::Message> =
-                serde_json::from_str(&messages_json).ok()?;
+        Shared::AgentMessagesSnapshot { sid, messages } => {
             let room_id = vmux_api::room::RoomId::for_session(&sid);
             let events = vmux_api::room::RoomEvent::from_messages(&sid, 0, &messages);
             Some(RemoteEvent::Snapshot {

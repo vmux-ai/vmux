@@ -182,7 +182,7 @@ impl Snapshot {
             .map(|pending| PendingApproval {
                 call_id: pending.call_id.clone(),
                 name: pending.name.clone(),
-                args: vmux_api::json::JsonValue::parse_or_string(&pending.args_json),
+                args: pending.args.clone(),
             });
         let error = match &conversation.status {
             RemoteStatus::Errored(message) => message.clone(),
