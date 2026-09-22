@@ -528,7 +528,7 @@ mod tests {
         let approval = snapshot.approval.expect("pending approval");
         assert_eq!(approval.name, "vmux.run");
         assert_eq!(
-            approval.args.to_serde().unwrap(),
+            serde_json::Value::try_from(&approval.args).unwrap(),
             serde_json::json!({"command": "echo hi", "focus": true})
         );
     }

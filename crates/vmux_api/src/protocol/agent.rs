@@ -1,5 +1,5 @@
 use super::SharedAgentCommand;
-use crate::ProcessId;
+use crate::{ProcessId, json::JsonValue};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
@@ -140,7 +140,7 @@ pub enum AgentCommand {
     AppCommand {
         id: String,
         #[rkyv(attr(allow(dead_code)))]
-        args_json: String,
+        args: JsonValue,
     },
     NewTerminalTab {
         cwd: String,
@@ -172,7 +172,7 @@ pub enum AgentCommand {
     },
     UpdateSettings {
         path: String,
-        value_json: String,
+        value: JsonValue,
     },
     UpdateLayout {
         layout: crate::protocol::layout::LayoutSnapshot,

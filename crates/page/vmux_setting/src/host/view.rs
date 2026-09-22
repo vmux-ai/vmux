@@ -229,7 +229,7 @@ fn on_settings_request(
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
     let evt = &trigger.event().payload;
-    let value = match evt.value.to_serde() {
+    let value = match serde_json::Value::try_from(&evt.value) {
         Ok(v) => v,
         Err(e) => {
             bevy::log::warn!("settings: invalid value for path {}: {e}", evt.path);

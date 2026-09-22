@@ -168,12 +168,9 @@ pub(crate) fn agent_may_dispatch_app_command(command: &AppCommand) -> bool {
     }
 }
 
-fn command_arguments(input: &str) -> Result<serde_json::Value, String> {
-    if input.trim().is_empty() {
-        return Ok(serde_json::json!({}));
-    }
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|error| format!("invalid JSON arguments: {error}"))?;
+fn command_arguments(input: &vmux_api::json::JsonValue) -> Result<serde_json::Value, String> {
+    let value = serde_json::Value::try_from(input)
+        .map_err(|error| format!("invalid JSON arguments: {error}"))?;
     if !value.is_object() {
         return Err("command arguments must be a JSON object".to_string());
     }
@@ -217,7 +214,7 @@ pub(super) fn handle_agent_tool_calls(
     service: Option<Res<ServiceClient>>,
 ) {
     for req in reader.read() {
-        let args = match command_arguments(&req.args_json) {
+        let args = match command_arguments(&req.args) {
             Ok(args) => args,
             Err(message) => {
                 if let Some(service) = service.as_ref() {
@@ -339,8 +336,8 @@ pub(super) fn handle_agent_commands(
             ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::FileSearch { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
-            ServiceAgentCommand::AppCommand { id, args_json } => {
-                let args = match command_arguments(args_json) {
+            ServiceAgentCommand::AppCommand { id, args } => {
+                let args = match command_arguments(args) {
                     Ok(args) => args,
                     Err(message) => {
                         if let Some(service) = service.as_ref() {
@@ -536,8 +533,8 @@ pub(super) fn handle_agent_commands(
                     .write(RenameProfileRequest { name: name.clone() });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::UpdateSettings { path, value_json } => {
-                match serde_json::from_str::<serde_json::Value>(value_json) {
+            ServiceAgentCommand::UpdateSettings { path, value } => {
+                match serde_json::Value::try_from(value) {
                     Ok(value) => {
                         let mut updated = (*sp.settings).clone();
                         match updated.apply_update(path, value) {
@@ -764,12 +761,12 @@ mod tests {
 
         let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
         agent_value["allow_run_placement_override"] = serde_json::json!(true);
-        for (path, value_json) in [
+        for (path, value) in [
             (
                 "agent.allow_run_placement_override",
-                serde_json::json!(true).to_string(),
+                vmux_api::json::JsonValue::Bool(true),
             ),
-            ("agent", agent_value.to_string()),
+            ("agent", vmux_api::json::JsonValue::from(agent_value)),
         ] {
             app.world_mut()
                 .resource_mut::<Messages<AgentCommandRequest>>()
@@ -781,7 +778,7 @@ mod tests {
                     },
                     command: ServiceAgentCommand::UpdateSettings {
                         path: path.to_string(),
-                        value_json,
+                        value,
                     },
                 });
             app.update();
@@ -801,7 +798,7 @@ mod tests {
                 origin: CommandOrigin::User,
                 command: ServiceAgentCommand::UpdateSettings {
                     path: "agent.allow_run_placement_override".to_string(),
-                    value_json: serde_json::json!(true).to_string(),
+                    value: vmux_api::json::JsonValue::Bool(true),
                 },
             });
         app.update();
@@ -945,13 +942,15 @@ mod tests {
     }
 
     #[test]
-    fn command_arguments_reject_malformed_and_non_object_json() {
-        assert!(command_arguments("{").is_err());
-        assert!(command_arguments("null").is_err());
-        assert!(command_arguments("[]").is_err());
-        assert_eq!(command_arguments("").unwrap(), serde_json::json!({}));
+    fn command_arguments_reject_non_object_json() {
+        assert!(command_arguments(&vmux_api::json::JsonValue::Null).is_err());
+        assert!(command_arguments(&vmux_api::json::JsonValue::Array(Vec::new())).is_err());
+        assert!(command_arguments(&vmux_api::json::JsonValue::Number("x".to_string())).is_err());
         assert_eq!(
-            command_arguments(r#"{"url":"https://example.com"}"#).unwrap(),
+            command_arguments(&vmux_api::json::JsonValue::from(serde_json::json!({
+                "url": "https://example.com"
+            })))
+            .unwrap(),
             serde_json::json!({ "url": "https://example.com" })
         );
     }

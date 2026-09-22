@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, broadcast, oneshot};
 use crate::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommand,
     AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, BROWSER_NAVIGATE_TIMEOUT,
-    ProcessId, ServiceMessage,
+    JsonValue, ProcessId, ServiceMessage,
 };
 
 pub type PendingCommands = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<AgentCommandResult>>>>;
@@ -122,7 +122,7 @@ impl AgentBroker {
         request_id: AgentRequestId,
         sid: String,
         name: String,
-        args_json: String,
+        args: JsonValue,
     ) -> Result<(String, bool), String> {
         if self.agent_tx.receiver_count() == 0 {
             return Err(NO_SUBSCRIBER.to_string());
@@ -136,7 +136,7 @@ impl AgentBroker {
                 request_id,
                 sid,
                 name,
-                args_json,
+                args,
             })
             .is_err()
         {

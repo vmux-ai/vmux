@@ -25,8 +25,7 @@ impl ApprovalDetail {
         }
         let value = match value {
             vmux_api::json::JsonValue::String(value) => value.clone(),
-            other => other
-                .to_serde()
+            other => serde_json::Value::try_from(other)
                 .and_then(|value| serde_json::to_string_pretty(&value))
                 .unwrap_or_default(),
         };

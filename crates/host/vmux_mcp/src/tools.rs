@@ -11,7 +11,7 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use vmux_client::protocol::{AgentCommand, AgentQuery, ProcessId};
+use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
 
 pub use param::McpParamTool;
 
@@ -451,14 +451,13 @@ impl GeneratedTools {
             if vmux_command_mcp::accepts_id(&call.name) {
                 return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
                     id: call.name.clone(),
-                    args_json: String::new(),
+                    args: JsonValue::Object(Vec::new()),
                 }));
             }
             if vmux_command_mcp::accepts_call(&call.name, call.arguments.clone()) {
-                let args_json = serde_json::to_string(&call.arguments).unwrap_or_default();
                 return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
                     id: call.name.clone(),
-                    args_json,
+                    args: JsonValue::from(call.arguments.clone()),
                 }));
             }
             Err(format!("unknown tool: {}", call.name))

@@ -31,26 +31,30 @@ impl JsonValue {
     pub fn parse_or_string(value: &str) -> Self {
         Self::parse(value).unwrap_or_else(|_| Self::String(value.to_string()))
     }
+}
 
-    pub fn to_serde(&self) -> Result<serde_json::Value, serde_json::Error> {
-        match self {
-            Self::Null => Ok(serde_json::Value::Null),
-            Self::Bool(value) => Ok(serde_json::Value::Bool(*value)),
-            Self::Number(value) => serde_json::from_str(value),
-            Self::String(value) => Ok(serde_json::Value::String(value.clone())),
-            Self::Array(values) => {
+impl TryFrom<&JsonValue> for serde_json::Value {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &JsonValue) -> Result<Self, Self::Error> {
+        match value {
+            JsonValue::Null => Ok(Self::Null),
+            JsonValue::Bool(value) => Ok(Self::Bool(*value)),
+            JsonValue::Number(value) => serde_json::from_str(value),
+            JsonValue::String(value) => Ok(Self::String(value.clone())),
+            JsonValue::Array(values) => {
                 let mut converted = Vec::with_capacity(values.len());
                 for value in values {
-                    converted.push(value.to_serde()?);
+                    converted.push(Self::try_from(value)?);
                 }
-                Ok(serde_json::Value::Array(converted))
+                Ok(Self::Array(converted))
             }
-            Self::Object(fields) => {
+            JsonValue::Object(fields) => {
                 let mut converted = serde_json::Map::new();
                 for (name, value) in fields {
-                    converted.insert(name.clone(), value.to_serde()?);
+                    converted.insert(name.clone(), Self::try_from(value)?);
                 }
-                Ok(serde_json::Value::Object(converted))
+                Ok(Self::Object(converted))
             }
         }
     }
@@ -87,7 +91,7 @@ mod tests {
             "object": {"nested": 7}
         });
         let wire = JsonValue::from(value.clone());
-        assert_eq!(wire.to_serde().unwrap(), value);
+        assert_eq!(serde_json::Value::try_from(&wire).unwrap(), value);
     }
 
     #[test]
