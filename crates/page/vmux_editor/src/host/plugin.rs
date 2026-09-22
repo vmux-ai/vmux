@@ -18,10 +18,11 @@ use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::history::EditorHistoryPlugin;
+use crate::host::note::{EditorNotePlugin, NoteRevealLine, NoteSent};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 use crate::media::{EditorMediaPlugin, FileMedia};
-use crate::navigation::{EditorNavigationPlugin, NoteRevealLine};
+use crate::navigation::EditorNavigationPlugin;
 use crate::page_model::DisplayCells;
 use crate::wrap::WrapView;
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
@@ -41,6 +42,7 @@ impl Plugin for EditorPlugin {
             EditorFileLifecyclePlugin,
             EditorPresentationPlugin,
             EditorMediaPlugin,
+            EditorNotePlugin,
             EditorEditingPlugin,
             EditorNavigationPlugin,
             EditorHistoryPlugin,
@@ -142,13 +144,6 @@ impl Plugin for EditorPresentationPlugin {
                     rehighlight_on_color_scheme,
                     apply_lsp_folds,
                     persist_folds,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    mark_notes_on_knowledge_change,
-                    send_note.after(mark_notes_on_knowledge_change),
                 ),
             )
             .add_observer(on_file_resize)
@@ -541,6 +536,14 @@ impl EditState {
         }
     }
 
+    pub(crate) fn parsed_note(&self) -> Option<crate::markdown::ParsedNote> {
+        self.parsed_note.clone()
+    }
+
+    pub(crate) fn cursor_line(&self) -> u32 {
+        self.core.cursor_pos().line
+    }
+
     fn refresh_parsed_note(&mut self) {
         self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
@@ -849,7 +852,7 @@ struct ExplorerChrome {
 struct ExplorerChromeSynced(bool);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-struct SharedFileViewMode(FileViewMode);
+pub(crate) struct SharedFileViewMode(pub(crate) FileViewMode);
 
 impl Default for SharedFileViewMode {
     fn default() -> Self {
@@ -891,9 +894,6 @@ struct FileViewModeSent;
 
 #[derive(Component)]
 struct FileKeymapSent;
-
-#[derive(Component)]
-struct NoteSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
@@ -944,11 +944,6 @@ type ReadySentKeymap = (
     With<FileView>,
     With<FileKeymapSent>,
     With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentNote = (
-    Without<NoteSent>,
-    With<vmux_core::page::PageReady>,
-    With<FileInitialMetaSent>,
 );
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
@@ -1524,88 +1519,6 @@ fn apply_file_view_mode_requests(
 ) {
     if let Some(request) = reader.read().last() {
         mode.0 = request.0;
-    }
-}
-
-fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
-    blocks
-        .iter()
-        .position(|block| block.start_line <= line && line < block.end_line)
-        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
-        .or_else(|| (!blocks.is_empty()).then_some(0))
-        .map(|index| index as u32)
-}
-
-fn send_note(
-    mode: Res<SharedFileViewMode>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    q: Query<(Entity, &FileView, &EditState, Option<&NoteRevealLine>), ReadyUnsentNote>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    if mode.0 != FileViewMode::Note {
-        return;
-    }
-    for (entity, file, edit, reveal) in &q {
-        if !crate::markdown::is_markdown_path(&file.path) {
-            commands.entity(entity).insert(NoteSent);
-            continue;
-        }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let Some(mut note) = edit.parsed_note.clone() else {
-            commands.entity(entity).insert(NoteSent);
-            continue;
-        };
-        let references = index
-            .as_deref()
-            .filter(|index| index.loaded() && file.path.starts_with(index.root()))
-            .map(|index| {
-                index.resolve_blocks(&file.path, &mut note.blocks);
-                let mut references = index.backlinks(&file.path);
-                references.extend(index.unlinked_mentions(&file.path, 32));
-                references
-                    .into_iter()
-                    .map(|reference| vmux_core::knowledge::KnowledgeReference {
-                        title: reference.title,
-                        path: reference.path.to_string_lossy().into_owned(),
-                        line: reference.line,
-                        preview: reference.preview,
-                        unlinked: reference.unlinked,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let active = active_note_block(&note.blocks, edit.core.cursor_pos().line);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileNoteEvent {
-                title: note.title,
-                properties: note.properties,
-                blocks: note.blocks,
-                active,
-                references,
-                reveal_line: reveal.map(|line| line.0),
-            },
-        ));
-        commands
-            .entity(entity)
-            .insert(NoteSent)
-            .remove::<NoteRevealLine>();
-    }
-}
-
-fn mark_notes_on_knowledge_change(
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    q: Query<Entity, With<FileView>>,
-    mut commands: Commands,
-) {
-    if index.is_none_or(|index| !index.is_changed()) {
-        return;
-    }
-    for entity in &q {
-        commands.entity(entity).remove::<NoteSent>();
     }
 }
 

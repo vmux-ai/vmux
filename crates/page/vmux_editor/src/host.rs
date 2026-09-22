@@ -17,6 +17,7 @@ pub(crate) mod explorer_fs;
 pub(crate) mod history;
 pub(crate) mod media;
 pub(crate) mod navigation;
+pub(crate) mod note;
 pub(crate) mod preview;
 pub(crate) mod search;
 pub(crate) mod wrap;

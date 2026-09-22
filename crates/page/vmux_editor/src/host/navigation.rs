@@ -5,6 +5,7 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
+use crate::host::note::NoteRevealLine;
 use crate::host::plugin::{FileView, FileViewport};
 
 pub(crate) struct EditorNavigationPlugin;
@@ -15,9 +16,6 @@ impl Plugin for EditorNavigationPlugin {
             .add_observer(on_knowledge_link_open);
     }
 }
-
-#[derive(Component, Clone, Copy)]
-pub(crate) struct NoteRevealLine(pub(crate) u32);
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
