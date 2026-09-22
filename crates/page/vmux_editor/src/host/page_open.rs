@@ -208,7 +208,7 @@ mod tests {
     use vmux_core::event::FileOpenEvent;
 
     use super::super::explorer::ExplorerState;
-    use super::super::explorer_tabs::ExplorerTabsPlugin;
+    use super::super::explorer::ExplorerTabsPlugin;
     use super::super::file_lifecycle::FileDir;
     use crate::navigation::EditorNavigationPlugin;
 

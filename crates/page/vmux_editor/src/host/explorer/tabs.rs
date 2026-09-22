@@ -5,11 +5,11 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
-use super::explorer::ExplorerState;
-use super::plugin::{EditState, FileView, ParkedEdits};
-use super::viewport::FileViewport;
+use super::ExplorerState;
+use crate::host::plugin::{EditState, FileView, ParkedEdits};
+use crate::host::viewport::FileViewport;
 
-pub(super) struct ExplorerTabsPlugin;
+pub(in crate::host) struct ExplorerTabsPlugin;
 
 impl Plugin for ExplorerTabsPlugin {
     fn build(&self, app: &mut App) {
@@ -20,7 +20,7 @@ impl Plugin for ExplorerTabsPlugin {
 }
 
 #[derive(Component)]
-pub(super) struct OpenEditorsDirty;
+pub(in crate::host) struct OpenEditorsDirty;
 
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type NavigableFileView = (

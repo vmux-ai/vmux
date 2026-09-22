@@ -5,12 +5,12 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
-use super::explorer::ExplorerState;
-use super::explorer_tabs::OpenEditorsDirty;
-use super::explorer_tree::{ExplorerTreeDirty, ExplorerTrees};
-use super::plugin::FileView;
+use super::ExplorerState;
+use super::tabs::OpenEditorsDirty;
+use super::tree::{ExplorerTreeDirty, ExplorerTrees};
+use crate::host::plugin::FileView;
 
-pub(super) struct ExplorerMutationPlugin;
+pub(in crate::host) struct ExplorerMutationPlugin;
 
 impl Plugin for ExplorerMutationPlugin {
     fn build(&self, app: &mut App) {
@@ -67,7 +67,7 @@ fn run_explorer_mutation(
             name,
             is_dir,
         } => {
-            let changed_path = crate::explorer_fs::create_entry(&root, &parent, &name, is_dir)?;
+            let changed_path = super::fs::create_entry(&root, &parent, &name, is_dir)?;
             Ok(ExplorerMutationOutcome {
                 changed_path,
                 refresh_dir: parent,
@@ -96,7 +96,7 @@ fn run_explorer_mutation(
                     .map_err(|error| error.to_string())
             })
             .transpose()?;
-            let (changed_path, was_dir) = crate::explorer_fs::rename_entry(&root, &path, &name)?;
+            let (changed_path, was_dir) = super::fs::rename_entry(&root, &path, &name)?;
             if let Some(plan) = rename_plan {
                 plan.apply().map_err(|error| error.to_string())?;
             }
@@ -109,7 +109,7 @@ fn run_explorer_mutation(
             })
         }
         ExplorerMutation::Delete { path } => {
-            let (refresh_dir, was_dir) = crate::explorer_fs::delete_entry(&root, &path)?;
+            let (refresh_dir, was_dir) = super::fs::delete_entry(&root, &path)?;
             Ok(ExplorerMutationOutcome {
                 changed_path: path.clone(),
                 refresh_dir,

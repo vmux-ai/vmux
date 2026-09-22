@@ -7,12 +7,26 @@ use vmux_core::event::{
     ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh, ExplorerTreeToggle,
 };
 
-use super::explorer_mutation::ExplorerMutationPlugin;
-use super::explorer_outline::ExplorerOutlinePlugin;
-use super::explorer_panel::ExplorerPanelPlugin;
-use super::explorer_search::ExplorerSearchPlugin;
-use super::explorer_tabs::ExplorerTabsPlugin;
-use super::explorer_tree::ExplorerTreePlugin;
+mod fs;
+mod mutation;
+mod outline;
+mod panel;
+mod search;
+mod tabs;
+mod tree;
+
+pub(super) use mutation::ExplorerMutationPlugin;
+pub(super) use outline::{ExplorerOutlinePlugin, OutlineDirty};
+pub use panel::StackExplorerVisibility;
+#[cfg(test)]
+pub(super) use panel::{ExplorerPanelDefaults, StackExplorerRevision};
+pub(super) use panel::{ExplorerPanelPlugin, ExplorerPanelSent};
+pub(super) use search::ExplorerSearchPlugin;
+pub use search::GlobalSearchRequest;
+pub(super) use tabs::{ExplorerTabsPlugin, OpenEditorsDirty};
+#[cfg(test)]
+pub(super) use tree::{ExplorerTree, IDLE_TREE_CAPACITY};
+pub(super) use tree::{ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees};
 
 pub(super) struct EditorExplorerPlugin;
 

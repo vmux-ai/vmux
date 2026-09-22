@@ -8,10 +8,8 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
-use super::explorer_outline::OutlineDirty;
-use super::explorer_panel::ExplorerPanelSent;
-use super::explorer_tabs::OpenEditorsDirty;
-use super::explorer_tree::{ExplorerTreeDirty, ExplorerTrees};
+use super::explorer::OutlineDirty;
+use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use super::note::NoteSent;
 use super::plugin::{EditState, EditorKeymap, FileView, ParkedEdits, settings_mappings};
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
