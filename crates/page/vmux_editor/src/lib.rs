@@ -12,8 +12,6 @@ pub mod page;
 pub mod page_key;
 
 #[cfg(ui)]
-mod columns;
-#[cfg(ui)]
 mod note;
 
 #[cfg(host)]

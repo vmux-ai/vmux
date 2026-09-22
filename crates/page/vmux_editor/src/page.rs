@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod directory;
 mod editor;
 mod menu;
 mod note;
@@ -10,6 +11,10 @@ mod toolbar;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use directory::{
+    DirColumns, DirWindow, Preview, VIDEO_HOST_ID, apply_dir, clear_preview, image_data_url,
+    open_path, parent_of, request_preview, visible_entries,
+};
 use editor::{EditorLines, StickyScope};
 use menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
 use note::{
@@ -23,13 +28,12 @@ use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
 
 use crate::breadcrumb::EditorBreadcrumbs;
-use crate::columns::{DirColumns, DirWindow};
 use crate::explorer::{EditorTabCommand, SidebarView};
 use crate::page_key::{Completions, FilePage, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, centered_scroll_top,
-    clamp_selection, dir_select_index, editor_drag_started, gutter_width, image_mime,
-    note_cursor_activation, severity_color_class, span_style,
+    clamp_selection, editor_drag_started, gutter_width, note_cursor_activation,
+    severity_color_class, span_style,
 };
 use dioxus::html::geometry::ElementPoint;
 use dioxus::html::input_data::MouseButton;
@@ -41,7 +45,6 @@ use vmux_git::event::GitChangedEvent;
 use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::diff::DiffTone;
-use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -49,7 +52,6 @@ use vmux_ui::ime::{ImeGuard, use_ime_guard};
 use vmux_ui::media::MediaElement;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
-use vmux_ui::util::cn;
 
 #[component]
 pub fn Page() -> Element {
@@ -1906,7 +1908,6 @@ const MEASURE_WIDE_ID: &str = "file-measure-wide";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
-const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 const RENAME_NOTICE_MS: u32 = 2400;
@@ -1981,53 +1982,6 @@ pub enum Mode {
     Media(MediaKind),
 }
 
-#[derive(Clone, PartialEq)]
-pub(crate) enum Preview {
-    None,
-    Dir(Vec<FileDirEntry>),
-    Text(Vec<FileLine>),
-    Image(String),
-    Video {
-        url: String,
-        path: String,
-        native: bool,
-    },
-    Info {
-        size: u64,
-        modified: String,
-        kind: String,
-    },
-    Error(String),
-}
-
-fn image_data_url(bytes: &[u8], path: &str) -> String {
-    use base64::Engine;
-
-    let mime = image_mime(path).unwrap_or("application/octet-stream");
-
-    format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
-}
-
-fn clear_preview(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
-    preview.set(Preview::None);
-    thumbs.set(HashMap::new());
-}
-
-pub(crate) fn request_preview(path: String) {
-    let _ = send(&FilePreviewRequest { path, thumb: false });
-}
-
-fn request_thumb(path: String) {
-    let _ = send(&FilePreviewRequest { path, thumb: true });
-}
-
-pub(crate) fn open_path(path: String) {
-    let _ = send(&FileOpenEvent { path });
-}
-
 #[derive(Clone, Copy)]
 struct GitRefresh {
     generation: Signal<u32>,
@@ -2059,43 +2013,6 @@ impl GitRefresh {
     }
 }
 
-pub(crate) fn parent_of(path: &str) -> String {
-    match path.trim_end_matches('/').rsplit_once('/') {
-        Some(("", _)) => "/".to_string(),
-        Some((prefix, _)) => prefix.to_string(),
-        None => path.to_string(),
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KB", b / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-pub(crate) const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
-
-pub(crate) fn row_class(selected: bool) -> String {
-    let base =
-        "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
-    let state = if selected {
-        "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
-    } else {
-        "text-foreground/75 hover:bg-foreground/[0.05]"
-    };
-    cn([base, state])
-}
-
 fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
     diff_tone(marker).sign()
 }
@@ -2114,134 +2031,6 @@ pub(super) fn diff_tone(marker: EditorDiffMarker) -> DiffTone {
         EditorDiffMarker::Modified => DiffTone::Modified,
         EditorDiffMarker::Deleted => DiffTone::Deleted,
         EditorDiffMarker::Staged => DiffTone::Staged,
-    }
-}
-
-pub(crate) fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
-    if show_hidden {
-        all.to_vec()
-    } else {
-        all.iter()
-            .filter(|e| !e.name.starts_with('.'))
-            .cloned()
-            .collect()
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn apply_dir(
-    mut dir_entries: Signal<Vec<FileDirEntry>>,
-    mut parent_entries: Signal<Vec<FileDirEntry>>,
-    mut path: Signal<String>,
-    mut selected: Signal<usize>,
-    mut preview: Signal<Preview>,
-    mut thumbs: Signal<HashMap<String, String>>,
-    show_hidden: bool,
-    entries: Vec<FileDirEntry>,
-    parent: Vec<FileDirEntry>,
-    new_path: String,
-    select_path: Option<String>,
-) {
-    thumbs.set(HashMap::new());
-    preview.set(Preview::None);
-    parent_entries.set(parent);
-    path.set(new_path);
-    let vis = visible_entries(&entries, show_hidden);
-    let sel_idx = select_path
-        .as_deref()
-        .map(|p| dir_select_index(&vis, p))
-        .unwrap_or(0);
-    selected.set(sel_idx);
-    if let Some(sel) = vis.get(sel_idx) {
-        request_preview(sel.path.clone());
-    }
-    for e in &vis {
-        if !e.is_dir && image_mime(&e.path).is_some() {
-            request_thumb(e.path.clone());
-        }
-    }
-    dir_entries.set(entries);
-}
-
-#[component]
-pub(crate) fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
-    let entry = &entry;
-    let thumb = thumb.as_ref();
-    if let Some(url) = thumb {
-        return rsx! {
-            img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
-        };
-    }
-    rsx! { TypeIcon { path: entry.path.to_string(), is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" } }
-}
-
-#[component]
-pub(crate) fn PreviewPane(preview: Preview) -> Element {
-    let preview = &preview;
-    match preview {
-        Preview::None | Preview::Dir(_) => rsx! {
-            div { class: "text-xs text-muted-foreground opacity-60", "" }
-        },
-        Preview::Image(url) => rsx! {
-            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20" }
-        },
-        Preview::Video { url, path, native } => {
-            if *native {
-                let path = path.clone();
-                rsx! {
-                    div {
-                        key: "{path}",
-                        id: VIDEO_HOST_ID,
-                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-primary/20",
-                    }
-                }
-            } else {
-                rsx! {
-                    video {
-                        id: "preview-video",
-                        src: "{url}",
-                        controls: true,
-                        autoplay: false,
-                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_color-mix(in_oklab,var(--primary)_40%,transparent)] ring-1 ring-primary/20",
-                    }
-                }
-            }
-        }
-        Preview::Text(lines) => rsx! {
-            div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
-                for line in lines.iter() {
-                    div { key: "{line.line_no}", class: "whitespace-pre",
-                        for (i, s) in line.spans.iter().enumerate() {
-                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
-                        }
-                    }
-                }
-            }
-        },
-        Preview::Info {
-            size,
-            modified,
-            kind,
-        } => rsx! {
-            div { class: "space-y-1 text-center text-xs text-muted-foreground",
-                div {
-                    class: "uppercase tracking-wide text-foreground/80",
-                    {match kind.as_str() {
-                        "image (too large to preview)" => translate("editor-preview-large-image"),
-                        "binary" => translate("editor-preview-binary"),
-                        "file" => translate("editor-preview-file"),
-                        _ => kind.clone(),
-                    }}
-                }
-                div { "{format_size(*size)}" }
-                if !modified.is_empty() {
-                    div { class: "opacity-70", "{modified}" }
-                }
-            }
-        },
-        Preview::Error(m) => rsx! {
-            div { class: "text-xs text-ansi-1", "{m}" }
-        },
     }
 }
 
