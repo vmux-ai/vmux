@@ -4,7 +4,8 @@ use ropey::Rope;
 use vmux_core::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
 
 use crate::edit::EditCommand;
-use crate::host::editing::{EditRequest, EditState};
+use crate::host::edit_state::EditState;
+use crate::host::editing::EditRequest;
 
 pub(super) struct EditorShapePlugin;
 

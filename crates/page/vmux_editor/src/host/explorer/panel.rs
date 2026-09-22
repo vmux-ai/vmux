@@ -4,7 +4,7 @@ use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPane
 
 use super::ExplorerState;
 use super::tree::{ExplorerTrees, emit_explorer_focus, reveal_current_in_tree};
-use crate::host::editing::FileView;
+use crate::host::edit_state::FileView;
 
 pub(in crate::host) struct ExplorerPanelPlugin;
 

@@ -1,17 +1,20 @@
-use std::collections::HashMap;
 #[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_command::ScopedKeys;
-use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
 
-use crate::edit::highlight_cache::HighlightCache;
-use crate::edit::{EditCommand, EditCore, Motion, Selection};
+#[cfg(test)]
+use crate::edit::EditCore;
+use crate::edit::{EditCommand, Motion, Selection};
+use crate::host::edit_state::EditState;
+#[cfg(test)]
+use crate::host::edit_state::FileView;
 #[cfg(test)]
 use crate::host::explorer::{
     ExplorerPanelDefaults, ExplorerTabsPlugin, StackExplorerRevision, StackExplorerVisibility,
@@ -23,20 +26,13 @@ use crate::host::explorer::{
     ExplorerTree, ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees, IDLE_TREE_CAPACITY,
 };
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
-#[cfg(test)]
-use crate::host::file_lifecycle::EditorFileLifecyclePlugin;
-#[cfg(test)]
-use crate::host::file_lifecycle::LoadFailure;
-use crate::host::file_lifecycle::{FileBuffer, FileDir, FileLoadTask, SelfWrites, canon};
+use crate::host::file_lifecycle::{SelfWrites, canon};
+use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::language::{EditorLanguageRequest, LspEditDirty, WikiCompletionRequest};
-#[cfg(test)]
-use crate::host::navigation::EditorNavigationPlugin;
 use crate::host::note::NoteSent;
-use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
+use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty};
-use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
-use crate::media::FileMedia;
-use crate::wrap::WrapView;
+use crate::keymap::{KeyInput, Mods};
 use vmux_core::scroll::clamp_top_line;
 
 pub(super) struct EditorEditingPlugin;
@@ -71,250 +67,6 @@ impl Plugin for EditExecutionPlugin {
             .add_observer(apply_edit_request);
     }
 }
-
-#[derive(Component, Clone, Debug)]
-pub struct FileView {
-    pub path: PathBuf,
-}
-
-impl FileView {
-    pub(super) fn in_stack(
-        stack: Entity,
-        children_q: &Query<&Children>,
-        views: &Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    ) -> Option<Entity> {
-        let Ok(children) = children_q.get(stack) else {
-            return None;
-        };
-        children.iter().find(|&child| views.contains(child))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn navigate(
-        &mut self,
-        entity: Entity,
-        path: PathBuf,
-        top_line: u32,
-        viewport: &mut FileViewport,
-        metadata: &mut PageMetadata,
-        manager: &mut crate::lsp::manager::LspManager,
-        commands: &mut Commands,
-    ) {
-        let previous = std::mem::replace(&mut self.path, path);
-        manager.close(&previous);
-        metadata.title = self
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.path.to_string_lossy().to_string());
-        metadata.url = self.url();
-        viewport.top_row = top_line;
-        commands.queue(move |world: &mut World| {
-            let Ok(mut entity) = world.get_entity_mut(entity) else {
-                return;
-            };
-            ParkedEdits::park(&mut entity, previous);
-        });
-        commands
-            .entity(entity)
-            .remove::<FileDir>()
-            .remove::<FileBuffer>()
-            .remove::<FileMedia>()
-            .remove::<FileLoadTask>()
-            .remove::<EditorKeymap>()
-            .remove::<NoteSent>()
-            .remove::<LspEditDirty>()
-            .remove::<FileInitialMetaSent>()
-            .remove::<crate::lsp::manager::LspOpened>()
-            .remove::<crate::lsp::manager::LintRan>();
-    }
-
-    pub(super) fn url(&self) -> String {
-        url::Url::from_file_path(&self.path)
-            .map(|url| url.to_string())
-            .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()))
-    }
-
-    pub(crate) fn display_path(&self) -> String {
-        if let Ok(cwd) = std::env::current_dir()
-            && let Ok(relative) = self.path.strip_prefix(&cwd)
-        {
-            return relative.to_string_lossy().to_string();
-        }
-        if let Some(home) = std::env::home_dir()
-            && let Ok(relative) = self.path.strip_prefix(&home)
-        {
-            return format!("~/{}", relative.to_string_lossy());
-        }
-        self.path.to_string_lossy().to_string()
-    }
-
-    pub(crate) fn raw_media_url(&self) -> String {
-        let mut url = self.url();
-        url.push_str("?vmux-raw=1");
-        url
-    }
-}
-
-#[derive(Component)]
-pub struct EditState {
-    pub core: EditCore,
-    pub hl: HighlightCache,
-    pub folds: crate::fold::FoldState,
-    indent_width: u16,
-    parsed_note: Option<crate::markdown::ParsedNote>,
-    wrap_generation: u64,
-    wrap_cache: Option<CachedWrapView>,
-}
-
-impl EditState {
-    pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
-        let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
-            .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
-        let indent_width = crate::shape::BufferShape::detect(&core.buffer.rope)
-            .indent
-            .width;
-        Self {
-            core,
-            hl,
-            folds,
-            indent_width,
-            parsed_note,
-            wrap_generation: 0,
-            wrap_cache: None,
-        }
-    }
-
-    pub(crate) fn parsed_note(&self) -> Option<crate::markdown::ParsedNote> {
-        self.parsed_note.clone()
-    }
-
-    pub(crate) fn cursor_line(&self) -> u32 {
-        self.core.cursor_pos().line
-    }
-
-    pub(crate) fn indent_width(&self) -> u16 {
-        self.indent_width
-    }
-
-    pub(crate) fn wrapped_view<'a>(&'a mut self, viewport: &FileViewport) -> &'a WrapView {
-        let stale = self.wrap_cache.as_ref().is_none_or(|cache| {
-            cache.generation != self.wrap_generation
-                || cache.mode != viewport.word_wrap
-                || cache.viewport_columns != viewport.wrap_columns
-                || cache.word_wrap_column != viewport.word_wrap_column
-        });
-        if stale {
-            let total = self.core.buffer.len_lines() as u32;
-            let folds = self.folds.view(total);
-            self.wrap_cache = Some(CachedWrapView {
-                generation: self.wrap_generation,
-                mode: viewport.word_wrap,
-                viewport_columns: viewport.wrap_columns,
-                word_wrap_column: viewport.word_wrap_column,
-                view: WrapView::new(
-                    &self.core.buffer.rope,
-                    &folds,
-                    viewport.word_wrap,
-                    viewport.wrap_columns,
-                    viewport.word_wrap_column,
-                ),
-            });
-        }
-        &self.wrap_cache.as_ref().expect("wrap cache").view
-    }
-
-    pub(crate) fn sync_fold_view(&mut self) {
-        let total = self.core.buffer.len_lines() as u32;
-        self.core.fold_view = self.folds.view(total);
-        self.wrap_generation = self.wrap_generation.wrapping_add(1);
-    }
-
-    pub(super) fn set_shape(&mut self, shape: crate::shape::BufferShape) {
-        self.indent_width = shape.indent.width;
-    }
-
-    fn refresh_parsed_note(&mut self) {
-        self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
-            .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
-    }
-}
-
-#[derive(Component, Default)]
-pub(super) struct ParkedEdits {
-    by_path: HashMap<PathBuf, ParkedEdit>,
-    recent: Vec<PathBuf>,
-}
-
-pub(super) struct ParkedEdit {
-    pub(super) edit: EditState,
-    pub(super) diff: vmux_git::GitDiffSource,
-    modified: Option<std::time::SystemTime>,
-}
-
-impl ParkedEdits {
-    const CAPACITY: usize = 8;
-
-    fn park(entity: &mut EntityWorldMut, path: PathBuf) {
-        if !entity.contains::<EditState>() || !entity.contains::<vmux_git::GitDiffSource>() {
-            return;
-        }
-        let Some(edit) = entity.take::<EditState>() else {
-            return;
-        };
-        let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
-            return;
-        };
-        let parked = ParkedEdit {
-            edit,
-            diff,
-            modified: Self::modified_at(&path),
-        };
-        let mut edits = entity.take::<ParkedEdits>().unwrap_or_default();
-        edits.insert(path, parked);
-        entity.insert(edits);
-    }
-
-    fn insert(&mut self, path: PathBuf, edit: ParkedEdit) {
-        self.recent.retain(|p| p != &path);
-        self.recent.push(path.clone());
-        self.by_path.insert(path, edit);
-        while self.recent.len() > Self::CAPACITY {
-            let evicted = self.recent.remove(0);
-            self.by_path.remove(&evicted);
-        }
-    }
-
-    pub(super) fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
-        let parked = self.by_path.remove(path)?;
-        self.recent.retain(|p| p != path);
-        if parked.edit.core.dirty || parked.modified == Self::modified_at(path) {
-            return Some(parked);
-        }
-        None
-    }
-
-    pub(super) fn is_dirty(&self, path: &Path) -> bool {
-        self.by_path
-            .get(path)
-            .is_some_and(|parked| parked.edit.core.dirty)
-    }
-
-    fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
-        std::fs::metadata(path).ok()?.modified().ok()
-    }
-}
-
-struct CachedWrapView {
-    generation: u64,
-    mode: vmux_core::editor::WordWrap,
-    viewport_columns: u16,
-    word_wrap_column: u16,
-    view: WrapView,
-}
-
-#[derive(Component)]
-pub struct EditorKeymap(pub Box<dyn Keymap>);
 
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
@@ -416,42 +168,6 @@ impl EditRequest {
     }
 }
 
-#[derive(PartialEq, Eq)]
-pub(super) struct KeymapConfig {
-    kind: vmux_core::KeymapKind,
-    maps: Vec<vmux_core::editor::KeyMapping>,
-    leader: String,
-}
-
-impl KeymapConfig {
-    pub(super) fn resolve(settings: Option<&vmux_setting::AppSettings>) -> Self {
-        let Some(settings) = settings else {
-            return Self {
-                kind: vmux_core::KeymapKind::default(),
-                maps: Vec::new(),
-                leader: " ".to_string(),
-            };
-        };
-        Self {
-            kind: settings.editor.keymap,
-            maps: settings.editor.mappings.clone(),
-            leader: settings.editor.leader.clone(),
-        }
-    }
-
-    pub(super) fn keymap(&self) -> EditorKeymap {
-        EditorKeymap(self.kind.make(&self.maps, &self.leader))
-    }
-
-    pub(super) fn initial_mode(&self) -> vmux_core::EditMode {
-        self.kind.initial_mode()
-    }
-
-    pub(super) fn kind(&self) -> vmux_core::KeymapKind {
-        self.kind
-    }
-}
-
 fn reapply_keymap_on_change(
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut last: Local<Option<KeymapConfig>>,
@@ -469,7 +185,9 @@ fn reapply_keymap_on_change(
         return;
     }
     let first = last.is_none();
-    let kind_changed = last.as_ref().is_none_or(|prev| prev.kind != next.kind);
+    let kind_changed = last
+        .as_ref()
+        .is_none_or(|previous| previous.kind() != next.kind());
     *last = Some(next);
     if first {
         return;
@@ -761,7 +479,7 @@ fn apply_edit_request(
     }
     if text_changed {
         edit.refresh_parsed_note();
-        let markdown = edit.parsed_note.is_some();
+        let markdown = edit.is_note();
         let mut entity_commands = commands.entity(entity);
         entity_commands
             .insert(LspEditDirty)
@@ -800,10 +518,10 @@ fn on_file_key(
     let mut request =
         EditRequest::new(entity, keymap.0.handle(&input)).accelerated_navigation(evt.repeat);
     if view_mode.0 == FileViewMode::Note
-        && let Some(note) = edit.parsed_note.as_ref()
+        && let Some(blocks) = edit.note_blocks()
     {
         let line = edit.core.cursor_pos().line;
-        request = request.remapped_for_note(&note.blocks, line);
+        request = request.remapped_for_note(blocks, line);
     }
     if request.is_empty() {
         return;
@@ -1790,320 +1508,5 @@ mod explorer_tests {
             vec![b, c],
             "opening a file from the directory navigator replaces that navigator tab"
         );
-    }
-}
-
-#[cfg(test)]
-mod parked_edit_tests {
-    use super::*;
-
-    struct Session {
-        app: App,
-        entity: Entity,
-        dir: tempfile::TempDir,
-    }
-
-    impl Session {
-        fn open(first: &str) -> Self {
-            let dir = tempfile::tempdir().unwrap();
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_plugins(EditorNavigationPlugin)
-                .init_resource::<ExplorerTrees>()
-                .add_plugins(EditorFileLifecyclePlugin)
-                .add_plugins((EditExecutionPlugin, crate::encoding::EditorEncodingPlugin))
-                .init_resource::<BinIpcEventRawBuffer>();
-            app.world_mut().insert_non_send(Browsers::default());
-            app.world_mut().insert_non_send(ClipboardHandle(None));
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
-            let entity = app
-                .world_mut()
-                .spawn((
-                    FileView {
-                        path: dir.path().join(first),
-                    },
-                    FileViewport {
-                        top_row: 0,
-                        rows: 0,
-                        wrap_columns: 0,
-                        word_wrap: vmux_core::editor::WordWrap::default(),
-                        word_wrap_column: 80,
-                    },
-                    PageMetadata::default(),
-                ))
-                .id();
-            Self { app, entity, dir }
-        }
-
-        fn write(&self, name: &str, text: &str) {
-            std::fs::write(self.dir.path().join(name), text).unwrap();
-        }
-
-        fn write_bytes(&self, name: &str, bytes: &[u8]) {
-            std::fs::write(self.dir.path().join(name), bytes).unwrap();
-        }
-
-        fn bytes(&self, name: &str) -> Vec<u8> {
-            std::fs::read(self.dir.path().join(name)).unwrap()
-        }
-
-        fn encoding(&self) -> FileEncoding {
-            self.app
-                .world()
-                .get::<EditState>(self.entity)
-                .expect("a loaded buffer")
-                .core
-                .buffer
-                .encoding
-        }
-
-        fn failure(&self) -> Option<LoadFailure> {
-            let buf = self.app.world().get::<FileBuffer>(self.entity)?;
-            let (reason, _) = LoadFailure::parse(&buf.language)?;
-            Some(reason)
-        }
-
-        fn encoding_action(&mut self, encoding: FileEncoding, action: FileEncodingAction) {
-            self.app.world_mut().trigger(BinReceive {
-                webview: self.entity,
-                payload: FileEncodingSet { encoding, action },
-            });
-            self.settle();
-        }
-
-        fn navigate_to(&mut self, name: &str) {
-            let path = self.dir.path().join(name).to_string_lossy().into_owned();
-            self.app.world_mut().trigger(BinReceive {
-                webview: self.entity,
-                payload: FileOpenEvent { path },
-            });
-            self.settle();
-        }
-
-        fn settle(&mut self) {
-            FileLoadTask::settle(&mut self.app, self.entity);
-        }
-
-        fn type_into_buffer(&mut self, text: &str) {
-            let mut edit = self
-                .app
-                .world_mut()
-                .get_mut::<EditState>(self.entity)
-                .expect("a loaded buffer");
-            edit.core.apply(EditCommand::InsertText(text.to_string()));
-        }
-
-        fn text(&self) -> String {
-            self.app
-                .world()
-                .get::<EditState>(self.entity)
-                .unwrap()
-                .core
-                .buffer
-                .text()
-        }
-
-        fn undo(&mut self) {
-            self.app
-                .world_mut()
-                .get_mut::<EditState>(self.entity)
-                .unwrap()
-                .core
-                .apply(EditCommand::Undo);
-        }
-    }
-
-    const SHIFT_JIS_SAMPLE: [u8; 17] = [
-        0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA, 0x82, 0xCC, 0x83, 0x65, 0x83, 0x4C, 0x83, 0x58, 0x83,
-        0x67, 0x0A,
-    ];
-
-    #[test]
-    fn a_shift_jis_file_opens_and_saves_back_as_shift_jis() {
-        let mut s = Session::open("main.txt");
-        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.settle();
-
-        assert_eq!(s.text(), "日本語のテキスト\n", "decoded on load");
-        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
-
-        s.type_into_buffer("EDIT");
-        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
-
-        let mut expected = b"EDIT".to_vec();
-        expected.extend_from_slice(&SHIFT_JIS_SAMPLE);
-        assert_eq!(
-            s.bytes("main.txt"),
-            expected,
-            "the file is still shift_jis, not transcoded to utf-8"
-        );
-    }
-
-    #[test]
-    fn saving_a_character_the_encoding_cannot_hold_leaves_the_file_untouched() {
-        let mut s = Session::open("main.txt");
-        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.settle();
-
-        s.type_into_buffer("€");
-        s.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
-
-        assert_eq!(
-            s.bytes("main.txt"),
-            SHIFT_JIS_SAMPLE,
-            "a lossy save is refused rather than written with substitutions"
-        );
-    }
-
-    #[test]
-    fn reopening_with_an_encoding_redecodes_the_same_bytes() {
-        let mut s = Session::open("main.txt");
-        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.settle();
-        assert_eq!(s.encoding(), FileEncoding::ShiftJis);
-
-        s.encoding_action(FileEncoding::EucJp, FileEncodingAction::Reopen);
-
-        assert_eq!(s.encoding(), FileEncoding::EucJp);
-        assert_ne!(
-            s.text(),
-            "日本語のテキスト\n",
-            "the override is honoured over what detection chose"
-        );
-    }
-
-    #[test]
-    fn a_file_that_would_not_decode_can_be_reopened_from_the_failure_itself() {
-        let mut s = Session::open("main.log");
-        s.write_bytes("main.log", b"caf\xe9\x00\x00 log\x00");
-        s.settle();
-
-        assert_eq!(s.failure(), Some(LoadFailure::Undecodable));
-        assert!(
-            s.app.world().get::<EditState>(s.entity).is_none(),
-            "no buffer is loaded, so the footer chooser has nothing to hang off"
-        );
-
-        s.encoding_action(FileEncoding::Iso8859_1, FileEncodingAction::Reopen);
-
-        assert_eq!(s.failure(), None, "the failure is cleared, not repeated");
-        assert_eq!(s.encoding(), FileEncoding::Iso8859_1);
-        assert_eq!(s.text(), "café\u{0}\u{0} log\u{0}");
-    }
-
-    #[test]
-    fn a_failure_no_encoding_can_rescue_is_not_offered_one() {
-        let mut s = Session::open("gone.log");
-        s.settle();
-
-        assert_eq!(s.failure(), Some(LoadFailure::Fatal));
-    }
-
-    #[test]
-    fn an_encoding_chosen_for_one_file_does_not_follow_the_pane_to_the_next() {
-        let mut s = Session::open("main.txt");
-        s.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
-        s.write("plain.txt", "ascii\n");
-        s.settle();
-
-        s.encoding_action(FileEncoding::Utf16Le, FileEncodingAction::Reopen);
-        assert_eq!(s.encoding(), FileEncoding::Utf16Le);
-
-        s.navigate_to("plain.txt");
-
-        assert_eq!(s.encoding(), FileEncoding::Utf8);
-        assert_eq!(s.text(), "ascii\n");
-    }
-
-    #[test]
-    fn returning_to_a_file_keeps_its_undo_history() {
-        let mut s = Session::open("main.rs");
-        s.write("main.rs", "one\n");
-        s.write("lib.rs", "two\n");
-        s.settle();
-        assert_eq!(s.text(), "one\n");
-
-        s.type_into_buffer("EDIT");
-        assert_eq!(s.text(), "EDITone\n");
-
-        s.navigate_to("lib.rs");
-        assert_eq!(s.text(), "two\n");
-
-        s.navigate_to("main.rs");
-        assert_eq!(
-            s.text(),
-            "EDITone\n",
-            "unsaved edit survives the round trip"
-        );
-        s.undo();
-        assert_eq!(s.text(), "one\n", "and so does the undo tree behind it");
-    }
-
-    #[test]
-    fn a_file_changed_while_parked_is_reloaded() {
-        let mut s = Session::open("main.rs");
-        s.write("main.rs", "before\n");
-        s.write("lib.rs", "other\n");
-        s.settle();
-        assert_eq!(s.text(), "before\n");
-
-        s.navigate_to("lib.rs");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        s.write("main.rs", "changed on disk\n");
-        s.navigate_to("main.rs");
-
-        assert_eq!(s.text(), "changed on disk\n");
-    }
-
-    #[test]
-    fn unsaved_edits_survive_a_file_changing_while_parked() {
-        let mut s = Session::open("main.rs");
-        s.write("main.rs", "before\n");
-        s.write("lib.rs", "other\n");
-        s.settle();
-
-        s.type_into_buffer("MINE");
-        s.navigate_to("lib.rs");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        s.write("main.rs", "theirs\n");
-        s.navigate_to("main.rs");
-
-        assert_eq!(s.text(), "MINEbefore\n");
-    }
-
-    #[test]
-    fn only_the_most_recent_files_are_held() {
-        let mut edits = ParkedEdits::default();
-        for i in 0..ParkedEdits::CAPACITY + 3 {
-            let path = PathBuf::from(format!("/tmp/{i}.rs"));
-            let core = EditCore::new(
-                path.clone(),
-                "Rust".into(),
-                "x\n",
-                crate::edit::EditMode::Normal,
-            );
-            edits.insert(
-                path,
-                ParkedEdit {
-                    edit: EditState::new(
-                        core,
-                        HighlightCache::new(Path::new("/tmp/a.rs")),
-                        crate::fold::FoldState::default(),
-                    ),
-                    diff: vmux_git::GitDiffSource {
-                        content: String::new(),
-                        dirty: false,
-                    },
-                    modified: None,
-                },
-            );
-        }
-        assert_eq!(edits.by_path.len(), ParkedEdits::CAPACITY);
-        assert!(edits.by_path.contains_key(Path::new("/tmp/10.rs")));
-        assert!(!edits.by_path.contains_key(Path::new("/tmp/0.rs")));
     }
 }

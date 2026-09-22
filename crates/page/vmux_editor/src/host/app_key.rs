@@ -10,7 +10,7 @@ use vmux_core::event::{
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 
-use crate::host::editing::{EditState, FileView};
+use crate::host::edit_state::{EditState, FileView};
 use crate::host::shape::BufferShape;
 
 pub(crate) struct FileKeyPlugin;
