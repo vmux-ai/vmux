@@ -39,10 +39,10 @@ use crate::host::viewport::{
     EditorCursor, EditorViewportPlugin, EditorWindow, FileViewport, FoldsDirty,
 };
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
-use crate::lsp::workspace_edit::WorkspaceEditPlan;
 use crate::media::{EditorMediaPlugin, FileMedia};
 use crate::navigation::EditorNavigationPlugin;
 use crate::page_model::DisplayCells;
+use crate::workspace_edit::EditorWorkspaceEditPlugin;
 use crate::wrap::WrapView;
 use vmux_core::scroll::clamp_top_line;
 
@@ -59,6 +59,7 @@ impl Plugin for EditorPlugin {
             crate::search::ProjectSearchPlugin,
             EditorPageOpenPlugin,
             EditorFileLifecyclePlugin,
+            EditorWorkspaceEditPlugin,
             EditorStatusPlugin,
             EditorViewportPlugin,
             EditorMediaPlugin,
@@ -110,11 +111,6 @@ impl Plugin for EditorEditingPlugin {
                     reapply_keymap_on_change,
                     run_submitted_ex_lines,
                 ),
-            )
-            .add_systems(
-                Update,
-                apply_lsp_workspace_edit
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             )
             .add_observer(on_file_find_request)
             .add_observer(on_file_definition_request)
@@ -385,7 +381,7 @@ impl EditorKeymap {
 #[derive(Component)]
 struct LspEditDirty;
 
-struct ClipboardHandle(Option<arboard::Clipboard>);
+pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
 type EncodingTarget = (
     &'static FileView,
@@ -658,7 +654,7 @@ fn emit_wiki_completions(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_commands(
+pub(super) fn run_commands(
     entity: Entity,
     cmds: Vec<EditCommand>,
     edit: &mut EditState,
@@ -1204,185 +1200,6 @@ fn on_file_property_edit(
         &browsers,
         &mut commands,
     );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn apply_lsp_workspace_edit(
-    requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
-    mut views: Query<(
-        Entity,
-        &FileView,
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
-    mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
-    mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
-    mut commands: Commands,
-) {
-    for (request, awaiting) in &requests {
-        let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => apply_planned_documents(
-                plan,
-                &mut views,
-                &mut clipboard,
-                &mut self_writes,
-                &mut manager,
-                &browsers,
-                &mut commands,
-            ),
-            Err(refusal) => Some(refusal.to_string()),
-        };
-        replies.write(crate::lsp::server_request::ServerReply {
-            request,
-            result: match &refusal {
-                None => serde_json::json!({ "applied": true }),
-                Some(reason) => {
-                    serde_json::json!({ "applied": false, "failureReason": reason })
-                }
-            },
-        });
-    }
-
-    for rename in renames.read() {
-        let refusal = match &rename.result {
-            Err(reason) => Some(reason.clone()),
-            Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
-                Ok(plan) => apply_planned_documents(
-                    plan,
-                    &mut views,
-                    &mut clipboard,
-                    &mut self_writes,
-                    &mut manager,
-                    &browsers,
-                    &mut commands,
-                ),
-                Err(refusal) => Some(refusal.to_string()),
-            },
-        };
-        let Some(reason) = refusal else {
-            continue;
-        };
-        if browsers.can_emit_to(&rename.entity) {
-            commands.trigger(BinHostEmitEvent::from_event(
-                rename.entity,
-                &vmux_core::event::FileEditFailedEvent { reason },
-            ));
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn apply_planned_documents(
-    plan: WorkspaceEditPlan,
-    views: &mut Query<(
-        Entity,
-        &FileView,
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    clipboard: &mut ClipboardHandle,
-    self_writes: &mut SelfWrites,
-    manager: &mut crate::lsp::manager::LspManager,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) -> Option<String> {
-    for document in plan.documents {
-        let wanted = canon(document.path.as_path());
-        if let (Some(expected), Some(actual)) = (
-            document.version,
-            manager.document_version(document.path.as_path()),
-        ) && expected != actual
-        {
-            return Some(format!(
-                "{} changed since the edit was computed",
-                document.path.as_path().display()
-            ));
-        }
-
-        let open: Vec<Entity> = views
-            .iter()
-            .filter(|(_, view, ..)| canon(&view.path) == wanted)
-            .map(|(entity, ..)| entity)
-            .collect();
-
-        if open.is_empty() {
-            if let Err(reason) = edit_closed_file(&document, self_writes) {
-                return Some(reason);
-            }
-            continue;
-        }
-
-        let mut texts = open
-            .iter()
-            .filter_map(|entity| views.get(*entity).ok())
-            .map(|(_, _, edit, ..)| edit.core.buffer.text());
-        let first = texts.next().unwrap_or_default();
-        if texts.any(|text| text != first) {
-            return Some(format!(
-                "{} is open more than once with different contents",
-                document.path.as_path().display()
-            ));
-        }
-
-        for entity in open {
-            let Ok((_, _, mut edit, keymap, mut vp, mut diff_source)) = views.get_mut(entity)
-            else {
-                continue;
-            };
-            let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
-                Ok(updated) => updated,
-                Err(e) => return Some(format!("{}: {e}", document.path.as_path().display())),
-            };
-            run_commands(
-                entity,
-                vec![EditCommand::ReplaceText(updated)],
-                &mut edit,
-                &mut diff_source,
-                keymap.0.as_ref(),
-                &mut vp,
-                clipboard,
-                self_writes,
-                manager,
-                browsers,
-                commands,
-            );
-        }
-    }
-    None
-}
-
-fn edit_closed_file(
-    document: &crate::lsp::workspace_edit::PlannedDocument,
-    self_writes: &mut SelfWrites,
-) -> Result<(), String> {
-    let Ok(text) = std::fs::read_to_string(document.path.as_path()) else {
-        return Err(format!(
-            "{} could not be read",
-            document.path.as_path().display()
-        ));
-    };
-    let buffer = crate::edit::buffer::TextBuffer::from_text(
-        document.path.as_path().to_path_buf(),
-        String::new(),
-        &text,
-    );
-    let updated = match buffer.with_lsp_edits(&document.edits) {
-        Ok(updated) => updated,
-        Err(e) => return Err(format!("{}: {e}", document.path.as_path().display())),
-    };
-    self_writes
-        .0
-        .insert(canon(document.path.as_path()), std::time::Instant::now());
-    vmux_path::AtomicFile::write(document.path.as_path(), updated.as_bytes())
-        .map_err(|e| format!("{}: {e}", document.path.as_path().display()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2044,6 +1861,14 @@ mod edit_flow_tests {
         assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 5, Some(12)));
         assert!(PendingGoto::from_url("file:///a/b.rs").is_none());
         assert!(PendingGoto::from_url("file:///a/b.rs#x").is_none());
+    }
+
+    #[test]
+    fn rename_prefill_is_the_identifier_around_the_caret() {
+        assert_eq!(word_at_col("let some_name = 1;", 8), "some_name");
+        assert_eq!(word_at_col("let some_name = 1;", 4), "some_name");
+        assert_eq!(word_at_col("let some_name = 1;", 13), "some_name");
+        assert_eq!(word_at_col("let some_name = 1;", 14), "");
     }
 
     #[test]
@@ -3187,279 +3012,6 @@ mod parked_edit_tests {
         assert_eq!(edits.by_path.len(), ParkedEdits::CAPACITY);
         assert!(edits.by_path.contains_key(Path::new("/tmp/10.rs")));
         assert!(!edits.by_path.contains_key(Path::new("/tmp/0.rs")));
-    }
-}
-
-#[cfg(test)]
-mod workspace_edit_tests {
-    use super::*;
-
-    struct ApplyEdit {
-        app: App,
-        views: Vec<Entity>,
-        sent: std::sync::mpsc::Receiver<serde_json::Value>,
-    }
-
-    impl ApplyEdit {
-        const BEFORE: &'static str = "one two three\n";
-
-        fn renamed(path: &Path, panes: usize) -> Self {
-            let (mut app, views) = Self::bare(path, panes);
-            app.world_mut()
-                .write_message(crate::lsp::manager::LspRequestedEdit {
-                    entity: views[0],
-                    root: path.parent().unwrap_or(path).to_path_buf(),
-                    result: Ok(Self::renaming(path)),
-                });
-            let (_outgoing, sent) = std::sync::mpsc::channel();
-            Self { app, views, sent }
-        }
-
-        fn with_edit(path: &Path, panes: usize) -> Self {
-            let (app, views) = Self::bare(path, panes);
-            let (outgoing, sent) = std::sync::mpsc::channel();
-            let events = app
-                .world()
-                .resource::<crate::lsp::server_request::ServerEvents>()
-                .sender();
-            events
-                .send(crate::lsp::server_request::ServerEvent::ApplyEdit {
-                    reply: crate::lsp::server_request::ReplyHandle::new(
-                        crate::lsp::wire::RequestId::Number(1000),
-                        outgoing,
-                    ),
-                    root: path.parent().unwrap_or(path).to_path_buf(),
-                    params: lsp_types::ApplyWorkspaceEditParams {
-                        label: None,
-                        edit: Self::renaming(path),
-                    },
-                })
-                .unwrap();
-            Self { app, views, sent }
-        }
-
-        fn bare(path: &Path, panes: usize) -> (App, Vec<Entity>) {
-            let mut app = App::new();
-            app.add_plugins((
-                MinimalPlugins,
-                crate::lsp::server_request::ServerRequestPlugin,
-            ))
-            .add_message::<crate::lsp::manager::LspRequestedEdit>()
-            .add_systems(
-                Update,
-                apply_lsp_workspace_edit
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
-            );
-            app.world_mut().insert_non_send(ClipboardHandle(None));
-            app.world_mut().insert_non_send(SelfWrites::default());
-            app.world_mut().insert_non_send(Browsers::default());
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
-
-            let mut views = Vec::new();
-            for _ in 0..panes {
-                let core = EditCore::new(
-                    path.to_path_buf(),
-                    "Rust".into(),
-                    Self::BEFORE,
-                    crate::edit::EditMode::Normal,
-                );
-                views.push(
-                    app.world_mut()
-                        .spawn((
-                            FileView {
-                                path: path.to_path_buf(),
-                            },
-                            EditState::new(
-                                core,
-                                HighlightCache::new(path),
-                                crate::fold::FoldState::default(),
-                            ),
-                            EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
-                            FileViewport {
-                                top_row: 0,
-                                rows: 0,
-                                wrap_columns: 0,
-                                word_wrap: vmux_core::editor::WordWrap::default(),
-                                word_wrap_column: 80,
-                            },
-                            vmux_git::GitDiffSource {
-                                content: Self::BEFORE.to_string(),
-                                dirty: false,
-                            },
-                        ))
-                        .id(),
-                );
-            }
-
-            (app, views)
-        }
-
-        #[allow(clippy::mutable_key_type)]
-        fn renaming(path: &Path) -> lsp_types::WorkspaceEdit {
-            let edit = |start: u32, end: u32, text: &str| lsp_types::TextEdit {
-                range: lsp_types::Range {
-                    start: lsp_types::Position {
-                        line: 0,
-                        character: start,
-                    },
-                    end: lsp_types::Position {
-                        line: 0,
-                        character: end,
-                    },
-                },
-                new_text: text.to_string(),
-            };
-            let uri: lsp_types::Uri = format!("file://{}", path.display()).parse().unwrap();
-            let mut changes = std::collections::HashMap::new();
-            changes.insert(uri, vec![edit(8, 13, "3"), edit(0, 3, "1")]);
-            lsp_types::WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }
-        }
-
-        fn text(&self, entity: Entity) -> String {
-            self.app
-                .world()
-                .get::<EditState>(entity)
-                .unwrap()
-                .core
-                .buffer
-                .text()
-        }
-
-        fn undo(&mut self, entity: Entity) {
-            self.app
-                .world_mut()
-                .get_mut::<EditState>(entity)
-                .unwrap()
-                .core
-                .apply(EditCommand::Undo);
-        }
-    }
-
-    #[test]
-    fn the_rename_prefill_is_the_whole_identifier_around_the_caret() {
-        assert_eq!(word_at_col("let some_name = 1;", 8), "some_name");
-        assert_eq!(word_at_col("let some_name = 1;", 4), "some_name");
-        assert_eq!(word_at_col("let some_name = 1;", 13), "some_name");
-        assert_eq!(
-            word_at_col("let some_name = 1;", 14),
-            "",
-            "a caret on whitespace has nothing to rename"
-        );
-    }
-
-    #[test]
-    fn a_rename_reply_edits_the_panes_the_way_an_apply_edit_request_does() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("main.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::renamed(&path, 2);
-        h.app.update();
-
-        for view in h.views.clone() {
-            assert_eq!(h.text(view), "1 two 3\n");
-        }
-    }
-
-    #[test]
-    fn apply_edit_reaches_every_pane_showing_the_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("main.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::with_edit(&path, 2);
-        h.app.update();
-
-        for view in h.views.clone() {
-            assert_eq!(h.text(view), "1 two 3\n");
-            assert!(
-                h.app.world().get::<EditState>(view).unwrap().core.dirty,
-                "an applied edit leaves the buffer dirty for the user to save"
-            );
-        }
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            ApplyEdit::BEFORE,
-            "an open document is edited in the buffer, not written behind the user"
-        );
-    }
-
-    #[test]
-    fn the_whole_edit_undoes_in_one_step() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("main.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::with_edit(&path, 1);
-        h.app.update();
-        let view = h.views[0];
-        assert_eq!(h.text(view), "1 two 3\n");
-
-        h.undo(view);
-        assert_eq!(h.text(view), ApplyEdit::BEFORE);
-    }
-
-    #[test]
-    fn panes_that_have_drifted_apart_are_refused_rather_than_corrupted() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("main.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::with_edit(&path, 2);
-        let second = h.views[1];
-        h.app
-            .world_mut()
-            .get_mut::<EditState>(second)
-            .unwrap()
-            .core
-            .apply(EditCommand::InsertText("MINE ".to_string()));
-        h.app.update();
-
-        assert_eq!(h.text(h.views[0]), ApplyEdit::BEFORE, "left untouched");
-        assert_eq!(h.text(second), "MINE one two three\n", "left untouched");
-
-        let reply = h.sent.try_recv().expect("the server must be answered");
-        assert_eq!(reply["result"]["applied"], false);
-        assert!(
-            reply["result"]["failureReason"]
-                .as_str()
-                .is_some_and(|r| r.contains("different contents")),
-            "the server is told why: {reply}"
-        );
-    }
-
-    #[test]
-    fn the_server_is_told_the_edit_applied() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("main.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::with_edit(&path, 1);
-        h.app.update();
-
-        let reply = h.sent.try_recv().expect("the server must be answered");
-        assert_eq!(reply["id"], 1000);
-        assert_eq!(reply["result"]["applied"], true);
-    }
-
-    #[test]
-    fn a_document_no_pane_shows_is_edited_on_disk() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("closed.rs");
-        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
-
-        let mut h = ApplyEdit::with_edit(&path, 0);
-        h.app.update();
-
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 two 3\n");
-        assert_eq!(h.sent.try_recv().unwrap()["result"]["applied"], true);
     }
 }
 
