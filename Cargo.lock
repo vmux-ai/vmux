@@ -10213,6 +10213,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_app"
+version = "0.0.34"
+dependencies = [
+ "bevy_app",
+ "vmux_agent",
+ "vmux_browser",
+ "vmux_chat",
+ "vmux_command",
+ "vmux_core",
+ "vmux_editor",
+ "vmux_flex",
+ "vmux_git",
+ "vmux_history",
+ "vmux_knowledge",
+ "vmux_layout",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_shortcut",
+ "vmux_simulator",
+ "vmux_space",
+ "vmux_start",
+ "vmux_team",
+ "vmux_terminal",
+]
+
+[[package]]
 name = "vmux_browser"
 version = "0.0.34"
 dependencies = [
@@ -10437,6 +10463,7 @@ dependencies = [
  "uuid",
  "vmux_agent",
  "vmux_api",
+ "vmux_app",
  "vmux_browser",
  "vmux_clipboard",
  "vmux_command",
@@ -10669,6 +10696,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vmux_api",
+ "vmux_app",
  "vmux_chat",
  "vmux_remote",
  "vmux_service",

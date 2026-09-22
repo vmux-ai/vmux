@@ -5,7 +5,6 @@ mod lifecycle;
 mod logs;
 mod page_host;
 mod pairing;
-mod plugins;
 mod qr_scanner;
 mod quic;
 mod remote;
@@ -15,7 +14,6 @@ mod transition;
 
 use crate::logs::Logs;
 use crate::pairing::{Credentials, PairCard};
-use crate::plugins::PagePlugins;
 use crate::remote::{Api, ApiError};
 use crate::runtime::World;
 use crate::session::{AuthState, use_session};
@@ -60,7 +58,7 @@ fn main() {
     Logs::start();
 
     World::new(|app| {
-        app.add_plugins(PagePlugins);
+        app.add_plugins(vmux_app::VmuxPlugin::builder().mobile().build());
     })
     .install();
     lifecycle::install();

@@ -56,8 +56,7 @@ use bevy::window::{
     WindowPosition, WindowResolution,
 };
 
-use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
-use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
+use crate::{persistence::PersistencePlugin, plugins::DesktopPlugins};
 
 pub struct VmuxPlugin;
 
@@ -65,7 +64,6 @@ impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
         let winit_settings = runtime::foreground_winit_settings(false, false);
         app.insert_resource(winit_settings).add_plugins((
-            VmuxCorePlugins,
             DefaultPlugins
                 .set(window_plugin())
                 .set(bevy::log::LogPlugin {
@@ -73,9 +71,8 @@ impl Plugin for VmuxPlugin {
                     custom_layer: crate::log_forward::file_log_layer,
                     ..default()
                 }),
-            LayoutPlugin,
-            FeaturePlugins,
-            BrowserPlugin,
+            PersistencePlugin,
+            vmux_app::VmuxPlugin::builder().desktop().build(),
             DesktopPlugins,
         ));
 
