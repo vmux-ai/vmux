@@ -5,7 +5,8 @@ use encoding_rs::Encoding;
 use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingEvent, FileEncodingSet};
 
 use crate::edit::EditCommand;
-use crate::host::editing::{EditRequest, EditState, FileView};
+use crate::host::edit_state::{EditState, FileView};
+use crate::host::editing::EditRequest;
 use crate::host::file_lifecycle::{FileBuffer, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
 

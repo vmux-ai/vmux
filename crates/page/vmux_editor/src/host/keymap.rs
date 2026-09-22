@@ -1,3 +1,5 @@
+use bevy::prelude::Component;
+
 pub mod mapping;
 pub mod vim;
 pub mod vscode;
@@ -74,5 +76,44 @@ impl KeymapKindExt for KeymapKind {
             KeymapKind::Vscode => EditMode::Insert,
             KeymapKind::Vim => EditMode::Normal,
         }
+    }
+}
+
+#[derive(Component)]
+pub struct EditorKeymap(pub Box<dyn Keymap>);
+
+#[derive(PartialEq, Eq)]
+pub(super) struct KeymapConfig {
+    kind: vmux_core::KeymapKind,
+    maps: Vec<vmux_core::editor::KeyMapping>,
+    leader: String,
+}
+
+impl KeymapConfig {
+    pub(super) fn resolve(settings: Option<&vmux_setting::AppSettings>) -> Self {
+        let Some(settings) = settings else {
+            return Self {
+                kind: vmux_core::KeymapKind::default(),
+                maps: Vec::new(),
+                leader: " ".to_string(),
+            };
+        };
+        Self {
+            kind: settings.editor.keymap,
+            maps: settings.editor.mappings.clone(),
+            leader: settings.editor.leader.clone(),
+        }
+    }
+
+    pub(super) fn keymap(&self) -> EditorKeymap {
+        EditorKeymap(self.kind.make(&self.maps, &self.leader))
+    }
+
+    pub(super) fn initial_mode(&self) -> vmux_core::EditMode {
+        self.kind.initial_mode()
+    }
+
+    pub(super) fn kind(&self) -> vmux_core::KeymapKind {
+        self.kind
     }
 }

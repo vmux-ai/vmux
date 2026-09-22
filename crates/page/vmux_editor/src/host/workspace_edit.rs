@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
-use super::editing::{EditRequest, EditState, FileView};
+use super::edit_state::{EditState, FileView};
+use super::editing::EditRequest;
 use super::file_lifecycle::{SelfWrites, canon};
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
@@ -170,7 +171,8 @@ mod tests {
     use super::*;
     use crate::edit::highlight_cache::HighlightCache;
     use crate::edit::{EditCore, EditMode};
-    use crate::host::editing::{ClipboardHandle, EditorKeymap};
+    use crate::host::editing::ClipboardHandle;
+    use crate::host::keymap::EditorKeymap;
     use crate::host::viewport::FileViewport;
     use crate::keymap::KeymapKindExt;
 
