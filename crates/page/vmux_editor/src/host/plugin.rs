@@ -18,6 +18,7 @@ use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::history::EditorHistoryPlugin;
 use crate::host::explorer_mutation::ExplorerMutationPlugin;
+use crate::host::explorer_outline::{ExplorerOutlinePlugin, OutlineDirty};
 #[cfg(test)]
 use crate::host::explorer_panel::StackExplorerRevision;
 use crate::host::explorer_panel::{
@@ -186,6 +187,7 @@ impl Plugin for EditorExplorerPlugin {
                 ExplorerTreePlugin,
                 ExplorerPanelPlugin,
                 ExplorerMutationPlugin,
+                ExplorerOutlinePlugin,
                 ExplorerTabsPlugin,
             ))
             .add_plugins(BinEventEmitterPlugin::<(
@@ -203,8 +205,6 @@ impl Plugin for EditorExplorerPlugin {
             .add_systems(
                 Update,
                 (
-                    emit_outline_markdown,
-                    clear_outline_on_file_change,
                     apply_global_search_requests,
                     emit_global_search.after(apply_global_search_requests),
                 ),
@@ -653,9 +653,6 @@ impl ExplorerState {
     }
 }
 
-#[derive(Component)]
-struct OutlineDirty;
-
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
@@ -701,7 +698,6 @@ type EncodingTarget = (
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
 );
-type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
 type GlobalSearchDirtyReady = (
     With<GlobalSearchState>,
     With<GlobalSearchDirty>,
@@ -2836,39 +2832,6 @@ fn flush_lsp_changes(
             manager.document_symbol(entity, &fv.path);
         }
         commands.entity(entity).remove::<LspEditDirty>();
-    }
-}
-
-fn emit_outline_markdown(
-    q: Query<(Entity, &EditState), OutlineDirtyReady>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, edit) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let items = crate::explorer_model::markdown_outline(&edit.core.buffer.text());
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &OutlineEvent { items },
-        ));
-        commands.entity(entity).remove::<OutlineDirty>();
-    }
-}
-
-fn clear_outline_on_file_change(
-    q: Query<Entity, (With<FileView>, Changed<FileView>)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for entity in &q {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_event(
-                entity,
-                &OutlineEvent { items: Vec::new() },
-            ));
-        }
     }
 }
 
