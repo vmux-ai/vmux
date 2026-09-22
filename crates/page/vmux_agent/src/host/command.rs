@@ -817,11 +817,11 @@ mod tests {
             MinimalPlugins,
             vmux_command::CommandPlugin,
             AgentSessionPlugin,
+            vmux_terminal::TerminalRequestPlugin,
         ))
         .add_message::<vmux_setting::SettingsWriteRequest>()
         .add_message::<vmux_space::SpaceRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
-        .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings());
 

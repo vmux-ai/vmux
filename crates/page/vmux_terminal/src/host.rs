@@ -3,6 +3,7 @@ pub mod contract;
 pub mod launch;
 pub mod pid;
 pub mod plugin;
+pub(crate) mod process_index;
 pub mod processes_monitor;
 pub mod shell_env;
 pub mod shell_input;
