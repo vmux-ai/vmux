@@ -10,7 +10,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
 #[cfg(test)]
-use vmux_core::page_open::{PageOpenHandled, PageOpenTask};
+use vmux_core::page_open::PageOpenTask;
 
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
@@ -1500,6 +1500,11 @@ pub(super) struct PendingGoto {
 }
 
 impl PendingGoto {
+    #[cfg(test)]
+    pub(super) fn line(&self) -> u32 {
+        self.line
+    }
+
     pub(super) fn from_url(url: &str) -> Option<Self> {
         let body = url.split_once('#')?.1.strip_prefix('L')?;
         let (line, selection) = match body.split_once(':') {
@@ -2875,242 +2880,6 @@ mod fold_window_tests {
         assert!(visible.contains(&0));
         assert!(!visible.contains(&1) && !visible.contains(&2));
         assert!(visible.contains(&3));
-    }
-}
-
-#[cfg(test)]
-mod page_open_tests {
-    use super::*;
-    use vmux_core::PageOpenId;
-
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            EditorNavigationPlugin,
-            ExplorerTabsPlugin,
-            EditorPageOpenPlugin,
-        ))
-        .insert_resource(crate::lsp::manager::LspManager::new(
-            crate::lsp::LspOutbox::default(),
-            crate::lsp::server_request::ServerEvents::default().sender(),
-        ));
-        app
-    }
-
-    struct EditorStack {
-        app: App,
-        stack: Entity,
-    }
-
-    impl EditorStack {
-        fn empty() -> Self {
-            let mut app = app();
-            let stack = app.world_mut().spawn_empty().id();
-            Self { app, stack }
-        }
-
-        fn showing(url: &str) -> Self {
-            let mut stack = Self::empty();
-            stack.open(url);
-            stack
-        }
-
-        fn open(&mut self, url: &str) {
-            let stack = self.stack;
-            self.app.world_mut().spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: url.to_string(),
-                request_id: None,
-            });
-            self.app.update();
-            self.app.update();
-        }
-
-        fn pages(&mut self) -> Vec<Entity> {
-            let stack = self.stack;
-            let mut q = self
-                .app
-                .world_mut()
-                .query::<(Entity, &ChildOf, &FileView)>();
-            let mut found = Vec::new();
-            for (entity, child_of, _) in q.iter(self.app.world()) {
-                if child_of.0 == stack {
-                    found.push(entity);
-                }
-            }
-            found
-        }
-
-        fn page(&mut self) -> Entity {
-            let pages = self.pages();
-            assert_eq!(pages.len(), 1);
-            pages[0]
-        }
-
-        fn path(&self, page: Entity) -> PathBuf {
-            self.app.world().get::<FileView>(page).unwrap().path.clone()
-        }
-
-        fn goto_line(&self, page: Entity) -> Option<u32> {
-            let goto = self.app.world().get::<PendingGoto>(page)?;
-            Some(goto.line)
-        }
-
-        fn open_editors(&self, page: Entity) -> Vec<PathBuf> {
-            self.app
-                .world()
-                .get::<ExplorerState>(page)
-                .unwrap()
-                .open_editors
-                .clone()
-        }
-
-        fn url(&self, page: Entity) -> String {
-            self.app
-                .world()
-                .get::<PageMetadata>(page)
-                .unwrap()
-                .url
-                .clone()
-        }
-
-        fn select(&mut self, page: Entity, path: &Path) {
-            self.app.world_mut().trigger(BinReceive {
-                webview: page,
-                payload: FileOpenEvent {
-                    path: path.to_string_lossy().into_owned(),
-                },
-            });
-            self.app.update();
-        }
-    }
-
-    #[test]
-    fn file_open_records_history_visit() {
-        use bevy::ecs::message::Messages;
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: "file:///etc/hostname#L3".to_string(),
-            request_id: None,
-        });
-        app.update();
-        let msgs = app
-            .world()
-            .resource::<Messages<vmux_core::event::RecordVisitRequest>>();
-        let mut cursor = msgs.get_cursor();
-        let recorded: Vec<_> = cursor.read(msgs).collect();
-        assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].url, "file:///etc/hostname");
-        assert_eq!(recorded[0].title, "hostname");
-    }
-
-    #[test]
-    fn claims_files_url_and_attaches_fileview() {
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "file:///etc/hostname".to_string(),
-                request_id: None,
-            })
-            .id();
-        app.update();
-        assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let mut q = app.world_mut().query::<(&ChildOf, &FileView)>();
-        let found: Vec<_> = q
-            .iter(app.world())
-            .filter(|(c, _)| c.0 == stack)
-            .map(|(_, fv)| fv.path.clone())
-            .collect();
-        assert_eq!(found, vec![PathBuf::from("/etc/hostname")]);
-    }
-
-    #[test]
-    fn ignores_non_files_url() {
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "vmux://terminal/".to_string(),
-                request_id: None,
-            })
-            .id();
-        app.update();
-        assert!(app.world().get::<PageOpenHandled>(task).is_none());
-    }
-
-    #[test]
-    fn opening_another_file_navigates_the_editor_already_in_the_stack() {
-        let mut stack = EditorStack::showing("file:///etc/hostname");
-        let page = stack.page();
-        stack.open("file:///etc/hosts#L12");
-        assert_eq!(stack.pages(), vec![page]);
-        assert_eq!(stack.path(page), PathBuf::from("/etc/hosts"));
-        assert_eq!(stack.goto_line(page), Some(11));
-        assert_eq!(
-            stack.open_editors(page),
-            vec![PathBuf::from("/etc/hostname"), PathBuf::from("/etc/hosts")]
-        );
-    }
-
-    #[test]
-    fn knowledge_page_redirects_to_its_directory() {
-        let mut stack = EditorStack::showing(vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
-        let page = stack.page();
-
-        assert_eq!(
-            vmux_core::file_url::FileUrl::parse(&stack.url(page)).and_then(|url| url.path()),
-            Some(vmux_core::knowledge::KnowledgeVault::user().into_root())
-        );
-    }
-
-    #[test]
-    fn selecting_a_note_updates_the_file_url() {
-        let mut stack = EditorStack::showing(vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
-        let page = stack.page();
-
-        stack.select(page, Path::new("/tmp/note.md"));
-
-        assert_eq!(stack.url(page), "file:///tmp/note.md");
-    }
-
-    #[test]
-    fn reopening_the_file_already_shown_keeps_the_page_loaded_and_adds_no_tab() {
-        let mut stack = EditorStack::showing("file:///etc/hostname");
-        let page = stack.page();
-        stack.app.world_mut().entity_mut(page).insert(FileDir {
-            entries: Vec::new(),
-        });
-        stack.open("file:///etc/hostname#L7");
-        assert_eq!(stack.pages(), vec![page]);
-        assert!(stack.app.world().get::<FileDir>(page).is_some());
-        assert_eq!(stack.goto_line(page), Some(6));
-        assert_eq!(
-            stack.open_editors(page),
-            vec![PathBuf::from("/etc/hostname")]
-        );
-    }
-
-    #[test]
-    fn a_stack_holding_no_editor_page_gets_a_fresh_one() {
-        let mut stack = EditorStack::empty();
-        let target = stack.stack;
-        let occupant = stack.app.world_mut().spawn(ChildOf(target)).id();
-        stack.open("file:///etc/hostname");
-        assert!(stack.app.world().get_entity(occupant).is_err());
-        let page = stack.page();
-        assert_eq!(stack.path(page), PathBuf::from("/etc/hostname"));
     }
 }
 
