@@ -18,11 +18,13 @@ use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::history::EditorHistoryPlugin;
 #[cfg(test)]
-use crate::host::explorer_tree::{ExplorerTree, IDLE_TREE_CAPACITY};
-use crate::host::explorer_tree::{
-    ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees, emit_explorer_focus,
-    reveal_current_in_tree,
+use crate::host::explorer_panel::StackExplorerRevision;
+use crate::host::explorer_panel::{
+    ExplorerPanelDefaults, ExplorerPanelPlugin, ExplorerPanelSent, StackExplorerVisibility,
 };
+#[cfg(test)]
+use crate::host::explorer_tree::{ExplorerTree, IDLE_TREE_CAPACITY};
+use crate::host::explorer_tree::{ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees};
 use crate::host::note::{EditorNotePlugin, NoteSent};
 use crate::host::status::{
     EditorStatusPlugin, FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent,
@@ -178,51 +180,41 @@ struct EditorExplorerPlugin;
 
 impl Plugin for EditorExplorerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ExplorerPanelDefaults {
-            default_visible: false,
-            width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
-        })
-        .register_type::<StackExplorerVisibility>()
-        .init_resource::<ExplorerPanelDefaultsLoaded>()
-        .init_resource::<PendingGlobalSearch>()
-        .add_plugins(ExplorerTreePlugin)
-        .add_plugins(BinEventEmitterPlugin::<(
-            ExplorerTreeToggle,
-            ExplorerTreePrefetch,
-            ExplorerTreeRefresh,
-            ExplorerRevealCurrent,
-            ExplorerCreate,
-            ExplorerRename,
-            ExplorerDelete,
-            ExplorerCloseEditor,
-            ExplorerPanelSetVisible,
-            ExplorerPanelWidth,
-            ExplorerGoto,
-            ExplorerSearchOpen,
-        )>::default())
-        .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default())
-        .add_systems(Update, drain_explorer_mutations)
-        .add_systems(
-            Update,
-            (
-                load_explorer_panel_defaults,
-                emit_explorer_panel,
-                sync_open_editors,
-                emit_open_editors,
-                emit_outline_markdown,
-                clear_outline_on_file_change,
-                apply_global_search_requests,
-                emit_global_search.after(apply_global_search_requests),
-            ),
-        )
-        .add_observer(on_explorer_create)
-        .add_observer(on_explorer_rename)
-        .add_observer(on_explorer_delete)
-        .add_observer(on_explorer_panel_set_visible)
-        .add_observer(on_explorer_panel_width)
-        .add_observer(on_explorer_close_editor)
-        .add_observer(on_explorer_goto)
-        .add_observer(on_explorer_search_open);
+        app.init_resource::<PendingGlobalSearch>()
+            .add_plugins((ExplorerTreePlugin, ExplorerPanelPlugin))
+            .add_plugins(BinEventEmitterPlugin::<(
+                ExplorerTreeToggle,
+                ExplorerTreePrefetch,
+                ExplorerTreeRefresh,
+                ExplorerRevealCurrent,
+                ExplorerCreate,
+                ExplorerRename,
+                ExplorerDelete,
+                ExplorerCloseEditor,
+                ExplorerPanelSetVisible,
+                ExplorerPanelWidth,
+                ExplorerGoto,
+                ExplorerSearchOpen,
+            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default())
+            .add_systems(Update, drain_explorer_mutations)
+            .add_systems(
+                Update,
+                (
+                    sync_open_editors,
+                    emit_open_editors,
+                    emit_outline_markdown,
+                    clear_outline_on_file_change,
+                    apply_global_search_requests,
+                    emit_global_search.after(apply_global_search_requests),
+                ),
+            )
+            .add_observer(on_explorer_create)
+            .add_observer(on_explorer_rename)
+            .add_observer(on_explorer_delete)
+            .add_observer(on_explorer_close_editor)
+            .add_observer(on_explorer_goto)
+            .add_observer(on_explorer_search_open);
     }
 }
 
@@ -702,31 +694,6 @@ struct OpenEditorsDirty;
 #[derive(Component)]
 struct OutlineDirty;
 
-#[derive(Component)]
-struct ExplorerPanelSent;
-
-#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_editor::plugin"]
-pub struct StackExplorerVisibility {
-    pub visible: bool,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct StackExplorerRevision {
-    client_id: u64,
-    request_id: u64,
-}
-
-#[derive(Resource, Clone, Copy)]
-pub(super) struct ExplorerPanelDefaults {
-    pub(super) default_visible: bool,
-    pub(super) width: u32,
-}
-
-#[derive(Resource, Default)]
-struct ExplorerPanelDefaultsLoaded(bool);
-
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
@@ -777,11 +744,6 @@ type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
 type GlobalSearchDirtyReady = (
     With<GlobalSearchState>,
     With<GlobalSearchDirty>,
-    With<vmux_core::page::PageReady>,
-);
-type PanelUnsentReady = (
-    With<FileView>,
-    Without<ExplorerPanelSent>,
     With<vmux_core::page::PageReady>,
 );
 type NavigableFileView = (
@@ -3196,171 +3158,6 @@ fn drain_explorer_mutations(
     }
 }
 
-fn load_explorer_panel_defaults(
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    mut panel: ResMut<ExplorerPanelDefaults>,
-    mut loaded: ResMut<ExplorerPanelDefaultsLoaded>,
-    views: Query<Entity, With<FileView>>,
-    mut commands: Commands,
-) {
-    if loaded.0 {
-        return;
-    }
-    let Some(settings) = settings else {
-        return;
-    };
-    panel.default_visible = settings.editor.explorer.visible();
-    panel.width = settings.editor.explorer.width();
-    loaded.0 = true;
-    for entity in &views {
-        commands.entity(entity).remove::<ExplorerPanelSent>();
-    }
-}
-
-fn explorer_scope(entity: Entity, child_of: &Query<&ChildOf>) -> Entity {
-    child_of.get(entity).map(ChildOf::parent).unwrap_or(entity)
-}
-
-fn emit_explorer_panel(
-    views: Query<(Entity, Option<&ChildOf>), PanelUnsentReady>,
-    visibility: Query<&StackExplorerVisibility>,
-    revisions: Query<&StackExplorerRevision>,
-    panel: Res<ExplorerPanelDefaults>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, child_of) in &views {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let scope = child_of.map(ChildOf::parent).unwrap_or(entity);
-        let visible = visibility
-            .get(scope)
-            .map(|state| state.visible)
-            .unwrap_or(panel.default_visible);
-        let revision = revisions.get(scope).copied().unwrap_or_default();
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &ExplorerPanelEvent {
-                visible,
-                width: panel.width,
-                client_id: revision.client_id,
-                request_id: revision.request_id,
-            },
-        ));
-        commands.entity(entity).insert(ExplorerPanelSent);
-    }
-}
-
-fn persist_explorer_width(
-    width: u32,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
-) {
-    let Some(mut settings) = settings else {
-        return;
-    };
-    settings.editor.explorer.width = Some(width);
-    if let Some(mut saves) = saves {
-        saves.write(vmux_setting::SettingsSaveRequest);
-    }
-}
-
-fn mark_explorer_panel_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Commands) {
-    for entity in views {
-        commands.entity(entity).remove::<ExplorerPanelSent>();
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct StackExplorerPanel<'w, 's> {
-    visibility: Query<'w, 's, &'static mut StackExplorerVisibility>,
-    revisions: Query<'w, 's, &'static mut StackExplorerRevision>,
-}
-
-impl StackExplorerPanel<'_, '_> {
-    fn apply(
-        &mut self,
-        scope: Entity,
-        visibility: StackExplorerVisibility,
-        revision: StackExplorerRevision,
-        commands: &mut Commands,
-    ) {
-        if let Ok(mut state) = self.visibility.get_mut(scope) {
-            *state = visibility;
-        } else {
-            commands.entity(scope).insert(visibility);
-        }
-        if let Ok(mut state) = self.revisions.get_mut(scope) {
-            *state = revision;
-        } else {
-            commands.entity(scope).insert(revision);
-        }
-    }
-}
-
-fn on_explorer_panel_set_visible(
-    trigger: On<BinReceive<ExplorerPanelSetVisible>>,
-    child_of: Query<&ChildOf>,
-    mut panel: StackExplorerPanel,
-    mut editors: Query<(Entity, &FileView, &mut ExplorerState, Option<&ChildOf>)>,
-    mut trees: ResMut<ExplorerTrees>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let scope = explorer_scope(entity, &child_of);
-    let next_visibility = StackExplorerVisibility {
-        visible: trigger.event().payload.visible,
-    };
-    let next_revision = StackExplorerRevision {
-        client_id: trigger.event().payload.client_id,
-        request_id: trigger.event().payload.request_id,
-    };
-    panel.apply(scope, next_visibility, next_revision, &mut commands);
-    for (view, _, _, parent) in &mut editors {
-        let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
-        if view_scope != scope {
-            continue;
-        }
-        if view == entity {
-            commands.entity(view).insert(ExplorerPanelSent);
-        } else {
-            commands.entity(view).remove::<ExplorerPanelSent>();
-        }
-    }
-    if next_visibility.visible
-        && let Ok((_, fv, mut st, _)) = editors.get_mut(entity)
-    {
-        reveal_current_in_tree(entity, &fv.path, &mut st, &mut trees, &mut commands);
-        if let Some(browsers) = browsers {
-            emit_explorer_focus(
-                entity,
-                &fv.path,
-                ExplorerReveal::Followed,
-                &browsers,
-                &mut commands,
-            );
-        }
-    }
-}
-
-fn on_explorer_panel_width(
-    trigger: On<BinReceive<ExplorerPanelWidth>>,
-    mut panel: ResMut<ExplorerPanelDefaults>,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
-    views: Query<Entity, With<FileView>>,
-    mut commands: Commands,
-) {
-    panel.width = trigger.event().payload.px.clamp(
-        vmux_setting::EXPLORER_MIN_WIDTH,
-        vmux_setting::EXPLORER_MAX_WIDTH,
-    );
-    persist_explorer_width(panel.width, settings, saves);
-    mark_explorer_panel_unsent(&views, &mut commands);
-}
-
 fn sync_open_editors(
     mut q: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
     mut commands: Commands,
@@ -4320,13 +4117,12 @@ mod explorer_tests {
     #[test]
     fn showing_the_panel_reveals_without_taking_the_caret() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
             .init_resource::<ExplorerTrees>()
             .insert_resource(ExplorerPanelDefaults {
                 default_visible: false,
                 width: 240,
-            })
-            .add_observer(on_explorer_panel_set_visible);
+            });
         let stack = app
             .world_mut()
             .spawn(StackExplorerVisibility { visible: false })
@@ -4363,9 +4159,8 @@ mod explorer_tests {
     #[test]
     fn panel_visibility_is_shared_only_within_stack() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<ExplorerTrees>()
-            .add_observer(on_explorer_panel_set_visible);
+        app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
+            .init_resource::<ExplorerTrees>();
         let first_stack = app
             .world_mut()
             .spawn(StackExplorerVisibility { visible: true })
@@ -4519,7 +4314,7 @@ mod explorer_tests {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
         let mut app = ExplorerApp::hidden();
-        app.add_observer(on_explorer_panel_set_visible);
+        app.add_plugins(ExplorerPanelPlugin);
         let stack = app
             .world_mut()
             .spawn(StackExplorerVisibility { visible: false })
@@ -4555,12 +4350,11 @@ mod explorer_tests {
     #[test]
     fn panel_width_clamps() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
             .insert_resource(ExplorerPanelDefaults {
                 default_visible: true,
                 width: 240,
-            })
-            .add_observer(on_explorer_panel_width);
+            });
         let e = app
             .world_mut()
             .spawn(FileView {
