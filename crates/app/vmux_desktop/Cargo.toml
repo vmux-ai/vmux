@@ -95,6 +95,7 @@ tray-icon = { version = "0.24", optional = true }
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
+vmux_app = { path = "../../vmux_app", features = ["desktop"] }
 vmux_browser = { path = "../../vmux_browser" }
 vmux_shortcut = { path = "../../page/vmux_shortcut" }
 vmux_clipboard = { path = "../../vmux_clipboard" }

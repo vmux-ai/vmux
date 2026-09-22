@@ -165,6 +165,26 @@ contents that composes lifecycle, interaction, presentation, and persistence plu
 system stays private beside the plugin that schedules it, so ordering and run conditions
 cannot be bypassed by another module.
 
+`vmux_app` is the platform-neutral composition boundary. Applications select a profile and
+override feature availability through one builder; individual feature plugins remain usable
+without the facade.
+
+```rust
+app.add_plugins(
+    VmuxPlugin::builder()
+        .desktop()
+        .git(false)
+        .simulator(false)
+        .build(),
+);
+```
+
+Cargo features decide which integrations are compiled. Builder options decide which compiled
+plugins are installed. Desktop and mobile are official consumers of this same API; platform
+windows, menus, persistence, notifications, and device lifecycle remain adapter plugins in the
+application crates. Third-party features integrate by publishing a plugin that owns its pages,
+commands, tools, contracts, systems, and platform capabilities.
+
 Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
 does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
 deterministic internal state change is a `Mutation`. Something that occurred is named in
@@ -663,7 +683,8 @@ crates/
 │   ├── vmux_start
 │   ├── vmux_team
 │   └── vmux_terminal
-├── vmux_browser            composes pages into the desktop shell
+├── vmux_app                platform-neutral application plugin facade
+├── vmux_browser            composes pages into the workspace shell
 ├── vmux_clipboard
 ├── vmux_core
 ├── vmux_flex
@@ -679,8 +700,9 @@ crates/
 ```
 
 Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
-which sits above `page/` and below `app/` — a `page/` crate must never depend on it, and
-nothing but `app/vmux_desktop` may.
+which sits above `page/` and below `vmux_app` — a `page/` crate must never depend on it, and
+only the framework facade may compose it. Application crates consume `vmux_app` and add their
+platform adapters.
 
 Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
 `host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
