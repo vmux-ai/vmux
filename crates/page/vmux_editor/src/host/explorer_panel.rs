@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 
+use super::explorer::ExplorerState;
 use super::explorer_tree::{ExplorerTrees, emit_explorer_focus, reveal_current_in_tree};
-use super::plugin::{ExplorerState, FileView};
+use super::plugin::FileView;
 
 pub(super) struct ExplorerPanelPlugin;
 

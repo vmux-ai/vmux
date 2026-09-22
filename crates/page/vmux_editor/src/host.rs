@@ -13,6 +13,7 @@ pub mod shape;
 
 pub(crate) mod app_key;
 pub(crate) mod dir;
+pub(crate) mod explorer;
 pub(crate) mod explorer_fs;
 pub(crate) mod explorer_mutation;
 pub(crate) mod explorer_outline;
