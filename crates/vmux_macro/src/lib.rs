@@ -2,6 +2,7 @@ mod app_plugin;
 mod bin_event;
 mod expand;
 mod named_fields;
+mod payload;
 mod string_id;
 mod variant_names;
 
@@ -13,6 +14,15 @@ use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
 pub fn app_plugin(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match app_plugin::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn payload(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match payload::expand(args.into(), input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
