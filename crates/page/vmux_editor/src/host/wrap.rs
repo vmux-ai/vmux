@@ -31,7 +31,7 @@ impl WrapView {
                 .chars()
                 .filter(|character| *character != '\n' && *character != '\r')
                 .collect::<String>();
-            let width = DisplayCells::width_of(&text);
+            let width = DisplayCells::from(text.as_str()).width();
             let rows = if columns == 0 {
                 1
             } else {

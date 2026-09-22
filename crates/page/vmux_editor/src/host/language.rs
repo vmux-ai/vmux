@@ -116,7 +116,7 @@ impl EditState {
     fn lsp_position_at_cell(&self, line: u32, cell: u32) -> LspPosition {
         let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
         let line_text = self.line_text(line);
-        let char_col = DisplayCells::char_at(&line_text, cell);
+        let char_col = DisplayCells::from(line_text.as_str()).char_at(cell);
         LspPosition::from_char_col(line, line_text, char_col)
     }
 

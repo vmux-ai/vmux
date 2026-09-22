@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::host::dir::parent_listing;
-use crate::host::editing::{EditState, EditorKeymap, FileView};
+use crate::host::editing::{EditState, EditorKeymap, FileView, KeymapConfig};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
 use crate::host::note::{NoteRevealLine, NoteSent};
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
@@ -236,7 +236,7 @@ fn send_file_keymap(
     mut commands: Commands,
 ) {
     let event = FileKeymapEvent {
-        keymap: EditorKeymap::configured_kind(&settings),
+        keymap: KeymapConfig::resolve(settings.as_deref()).kind(),
     };
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
