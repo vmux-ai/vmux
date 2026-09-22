@@ -10,9 +10,10 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 
+use super::viewport::{column_in_line, gutter_px};
 use super::{
-    HOVER_DELAY_MS, column_in_line, diff_marker_row_class, diff_marker_sign,
-    diff_marker_text_class, focus_file_input, gutter_px,
+    HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
+    focus_file_input,
 };
 use crate::page_model::{
     CellMetrics, ColumnRuler, line_severity, severity_color_class, span_style, squiggle_style,
