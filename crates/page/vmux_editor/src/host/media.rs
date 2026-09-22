@@ -8,8 +8,9 @@ use vmux_core::event::{
     PreviewKind,
 };
 
-use crate::host::plugin::{EditorFileLoadedSet, FileDir, FileInitialMetaSent, FileView};
+use crate::host::plugin::{EditorFileLoadedSet, FileDir, FileView};
 use crate::host::preview;
+use crate::host::status::FileInitialMetaSent;
 
 pub(crate) struct EditorMediaPlugin;
 

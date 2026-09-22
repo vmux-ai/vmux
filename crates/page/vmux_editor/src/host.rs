@@ -20,6 +20,7 @@ pub(crate) mod navigation;
 pub(crate) mod note;
 pub(crate) mod preview;
 pub(crate) mod search;
+pub(crate) mod status;
 pub(crate) mod wrap;
 
 mod plugin;
@@ -27,6 +28,6 @@ mod plugin;
 pub use contract::EditorContractPlugin;
 pub use lsp::LspPlugin;
 pub use plugin::{
-    EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, StackExplorerVisibility,
-    restore_file_view_bundle,
+    EditorPlugin, FileView, GlobalSearchRequest, StackExplorerVisibility, restore_file_view_bundle,
 };
+pub use status::FileViewModeRequest;

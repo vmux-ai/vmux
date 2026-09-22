@@ -18,7 +18,11 @@ use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::history::EditorHistoryPlugin;
-use crate::host::note::{EditorNotePlugin, NoteRevealLine, NoteSent};
+use crate::host::note::{EditorNotePlugin, NoteSent};
+use crate::host::status::{
+    EditorStatusPlugin, FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent,
+    SharedFileViewMode,
+};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 use crate::media::{EditorMediaPlugin, FileMedia};
@@ -40,6 +44,7 @@ impl Plugin for EditorPlugin {
             crate::app_key::FileKeyPlugin,
             crate::search::ProjectSearchPlugin,
             EditorFileLifecyclePlugin,
+            EditorStatusPlugin,
             EditorPresentationPlugin,
             EditorMediaPlugin,
             EditorNotePlugin,
@@ -120,26 +125,15 @@ struct EditorPresentationPlugin;
 impl Plugin for EditorPresentationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
-            .init_resource::<SharedFileViewMode>()
-            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
-                FileViewModeSet,
-                FileKeymapSet,
                 FileShapeSet,
                 FileEncodingSet,
             )>::default())
             .add_systems(
                 Update,
                 (
-                    send_initial_meta.after(apply_loaded_file_buffers),
-                    send_initial_text_meta.after(apply_loaded_file_buffers),
-                    send_initial_dir.after(apply_loaded_file_buffers),
-                    (resend_file_theme_on_change, send_file_theme).chain(),
-                    apply_file_view_mode_requests.before(send_file_view_mode),
-                    send_file_view_mode,
-                    send_file_keymap,
                     sync_editor_wrap_settings.after(apply_loaded_file_buffers),
                     rehighlight_on_color_scheme,
                     apply_lsp_folds,
@@ -149,8 +143,6 @@ impl Plugin for EditorPresentationPlugin {
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
             .add_observer(on_file_fold_toggle)
-            .add_observer(on_file_view_mode_set)
-            .add_observer(on_file_keymap_set)
             .add_observer(on_file_shape_set)
             .add_observer(on_file_encoding_set);
     }
@@ -313,6 +305,20 @@ impl FileView {
             .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()))
     }
 
+    pub(crate) fn display_path(&self) -> String {
+        if let Ok(cwd) = std::env::current_dir()
+            && let Ok(relative) = self.path.strip_prefix(&cwd)
+        {
+            return relative.to_string_lossy().to_string();
+        }
+        if let Some(home) = std::env::home_dir()
+            && let Ok(relative) = self.path.strip_prefix(&home)
+        {
+            return format!("~/{}", relative.to_string_lossy());
+        }
+        self.path.to_string_lossy().to_string()
+    }
+
     pub(crate) fn raw_media_url(&self) -> String {
         let mut url = self.url();
         url.push_str("?vmux-raw=1");
@@ -330,6 +336,11 @@ impl FileBuffer {
         Self {
             language: format!("{}{message}", reason.marker()),
         }
+    }
+
+    pub(crate) fn load_error(&self) -> Option<(bool, &str)> {
+        LoadFailure::parse(&self.language)
+            .map(|(reason, message)| (reason == LoadFailure::Undecodable, message))
     }
 }
 
@@ -629,6 +640,17 @@ struct FoldsDirty;
 #[derive(Component)]
 pub struct EditorKeymap(pub Box<dyn Keymap>);
 
+impl EditorKeymap {
+    pub(crate) fn configured_kind(
+        settings: &Option<Res<vmux_setting::AppSettings>>,
+    ) -> vmux_core::KeymapKind {
+        settings
+            .as_ref()
+            .map(|settings| settings.editor.keymap)
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Component)]
 struct LspEditDirty;
 
@@ -636,12 +658,6 @@ struct ClipboardHandle(Option<arboard::Clipboard>);
 
 #[derive(Default)]
 struct SelfWrites(std::collections::HashMap<PathBuf, std::time::Instant>);
-
-#[derive(Component)]
-pub struct FileInitialMetaSent;
-
-#[derive(Component)]
-pub struct FileThemeSent;
 
 #[derive(Component, Default)]
 pub(crate) struct ExplorerState {
@@ -851,18 +867,6 @@ struct ExplorerChrome {
 #[derive(Resource, Default)]
 struct ExplorerChromeSynced(bool);
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SharedFileViewMode(pub(crate) FileViewMode);
-
-impl Default for SharedFileViewMode {
-    fn default() -> Self {
-        Self(FileViewMode::Note)
-    }
-}
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FileViewModeRequest(pub FileViewMode);
-
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
@@ -889,12 +893,6 @@ struct PendingGlobalSearchRequest {
 const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
 const STICKY_SCROLL_DEPTH: usize = 5;
 
-#[derive(Component)]
-struct FileViewModeSent;
-
-#[derive(Component)]
-struct FileKeymapSent;
-
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -915,35 +913,6 @@ type EncodingTarget = (
     Option<&'static EditorKeymap>,
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
-);
-type ReadyUnsentMeta = (
-    Without<FileInitialMetaSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentTheme = (
-    With<FileView>,
-    Without<FileThemeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentViewMode = (
-    With<FileView>,
-    Without<FileViewModeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadySentViewMode = (
-    With<FileView>,
-    With<FileViewModeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentKeymap = (
-    With<FileView>,
-    Without<FileKeymapSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadySentKeymap = (
-    With<FileView>,
-    With<FileKeymapSent>,
-    With<vmux_core::page::PageReady>,
 );
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
@@ -1143,13 +1112,6 @@ fn settings_mappings(
         .unwrap_or_else(|| (Vec::new(), " ".to_string()))
 }
 
-fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_core::KeymapKind {
-    settings
-        .as_ref()
-        .map(|s| s.editor.keymap)
-        .unwrap_or_default()
-}
-
 fn load_file_buffers(
     mut q: Query<UnloadedFile, UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -1158,7 +1120,7 @@ fn load_file_buffers(
 ) {
     for (entity, fv, mut parked, forced) in &mut q {
         let forced = forced.and_then(|f| f.for_path(&fv.path));
-        let kind = settings_keymap(&settings);
+        let kind = EditorKeymap::configured_kind(&settings);
         let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
         if forced.is_none()
@@ -1235,7 +1197,7 @@ fn apply_loaded_file_buffers(
                 }
             }
             FileLoad::Text { decoded, heavy } => {
-                let kind = settings_keymap(&settings);
+                let kind = EditorKeymap::configured_kind(&settings);
                 let (maps, leader) = settings_mappings(&settings);
                 let markdown = crate::markdown::is_markdown_path(&view.path);
                 let crate::encoding::DecodedText { text, encoding } = decoded;
@@ -1298,7 +1260,7 @@ fn reapply_keymap_on_change(
 ) {
     let (maps, leader) = settings_mappings(&settings);
     let next = KeymapConfig {
-        kind: settings_keymap(&settings),
+        kind: EditorKeymap::configured_kind(&settings),
         maps,
         leader,
     };
@@ -1330,219 +1292,6 @@ fn reapply_keymap_on_change(
                 &mut commands,
             );
         }
-    }
-}
-
-fn display_path(path: &std::path::Path) -> String {
-    if let Ok(cwd) = std::env::current_dir()
-        && let Ok(rel) = path.strip_prefix(&cwd)
-    {
-        return rel.to_string_lossy().to_string();
-    }
-    if let Some(home) = std::env::home_dir()
-        && let Ok(rel) = path.strip_prefix(&home)
-    {
-        return format!("~/{}", rel.to_string_lossy());
-    }
-    path.to_string_lossy().to_string()
-}
-
-fn send_initial_meta(
-    q: Query<(Entity, &FileBuffer), ReadyUnsentMeta>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, buf) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        if let Some((reason, message)) = LoadFailure::parse(&buf.language) {
-            commands.trigger(BinHostEmitEvent::from_event(
-                entity,
-                &FileErrorEvent {
-                    message: message.to_string(),
-                    undecodable: reason == LoadFailure::Undecodable,
-                },
-            ));
-        }
-        commands.entity(entity).insert(FileInitialMetaSent);
-    }
-}
-
-fn send_initial_text_meta(
-    mut q: Query<
-        (
-            Entity,
-            &FileView,
-            &mut EditState,
-            &EditorKeymap,
-            &FileViewport,
-        ),
-        ReadyUnsentMeta,
-    >,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, fv, mut edit, keymap, vp) in &mut q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileMetaEvent {
-                path: display_path(&fv.path),
-                abs_path: fv.path.to_string_lossy().into_owned(),
-                language: edit.core.buffer.language.clone(),
-                total_lines: edit.core.buffer.len_lines() as u32,
-                indent: shape.indent,
-                line_ending: shape.line_ending,
-                encoding: edit.core.buffer.encoding,
-            },
-        ));
-        if vp.rows > 0 {
-            emit_window(entity, &mut edit, vp, &browsers, &mut commands);
-        }
-        emit_cursor(
-            entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            vp,
-            &browsers,
-            &mut commands,
-        );
-        commands.entity(entity).insert(FileInitialMetaSent);
-    }
-}
-
-fn resend_file_theme_on_change(
-    q: Query<Entity, With<FileThemeSent>>,
-    settings: Res<vmux_setting::AppSettings>,
-    mut commands: Commands,
-) {
-    if !settings.is_changed() || settings.is_added() {
-        return;
-    }
-    for entity in &q {
-        commands.entity(entity).remove::<FileThemeSent>();
-    }
-}
-
-fn send_file_theme(
-    q: Query<Entity, ReadyUnsentTheme>,
-    settings: Res<vmux_setting::AppSettings>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for entity in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let (font_family, font_size, line_height) = settings
-            .terminal
-            .as_ref()
-            .map(|t| {
-                let th = t.resolve_theme(&t.default_theme);
-                (th.font_family.clone(), th.font_size, th.line_height)
-            })
-            .unwrap_or_else(|| (String::new(), 0.0, 0.0));
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileThemeEvent {
-                font_family,
-                font_size,
-                line_height,
-            },
-        ));
-        commands.entity(entity).insert(FileThemeSent);
-    }
-}
-
-fn send_file_view_mode(
-    mode: Res<SharedFileViewMode>,
-    pending: Query<Entity, ReadyUnsentViewMode>,
-    sent: Query<Entity, ReadySentViewMode>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let event = FileViewModeEvent { mode: mode.0 };
-    for entity in &pending {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
-        commands.entity(entity).insert(FileViewModeSent);
-    }
-    if mode.is_changed() {
-        for entity in &sent {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
-        }
-    }
-}
-
-fn send_file_keymap(
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    pending: Query<Entity, ReadyUnsentKeymap>,
-    sent: Query<Entity, ReadySentKeymap>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let event = FileKeymapEvent {
-        keymap: settings_keymap(&settings),
-    };
-    for entity in &pending {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
-        commands.entity(entity).insert(FileKeymapSent);
-    }
-    if settings
-        .as_ref()
-        .is_some_and(|settings| settings.is_changed())
-    {
-        for entity in &sent {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
-        }
-    }
-}
-
-fn apply_file_view_mode_requests(
-    mut reader: MessageReader<FileViewModeRequest>,
-    mut mode: ResMut<SharedFileViewMode>,
-) {
-    if let Some(request) = reader.read().last() {
-        mode.0 = request.0;
-    }
-}
-
-fn send_initial_dir(
-    q: Query<(Entity, &FileView, &FileDir), ReadyUnsentMeta>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, fv, dir) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let (parent_path, parent_entries) = parent_listing(&fv.path);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileDirEvent {
-                path: display_path(&fv.path),
-                abs_path: fv.path.to_string_lossy().into_owned(),
-                entries: dir.entries.clone(),
-                parent_path,
-                parent_entries,
-            },
-        ));
-        commands.entity(entity).insert(FileInitialMetaSent);
     }
 }
 
@@ -1583,7 +1332,7 @@ pub(crate) fn repaint_window(
     emit_window(entity, edit, vp, browsers, commands);
 }
 
-fn emit_window(
+pub(crate) fn emit_window(
     entity: Entity,
     edit: &mut EditState,
     vp: &FileViewport,
@@ -1689,7 +1438,7 @@ impl HighlightedLines {
     }
 }
 
-fn emit_cursor(
+pub(crate) fn emit_cursor(
     entity: Entity,
     edit: &mut EditState,
     keymap: &dyn Keymap,
@@ -1923,58 +1672,6 @@ fn reset_file_sent_markers_on_page_ready(
         .insert(OpenEditorsDirty);
     if crate::explorer_model::is_markdown(&fv.path) {
         commands.entity(entity).insert(OutlineDirty);
-    }
-}
-
-fn on_file_view_mode_set(
-    trigger: On<BinReceive<FileViewModeSet>>,
-    views: Query<(), With<FileView>>,
-    files: Query<(&FileView, Option<&EditState>)>,
-    mut mode: ResMut<SharedFileViewMode>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    if views.contains(entity) {
-        mode.0 = trigger.event().payload.mode;
-        if mode.0 == FileViewMode::Note
-            && files
-                .get(entity)
-                .is_ok_and(|(file, _)| crate::markdown::is_markdown_path(&file.path))
-        {
-            let reveal_line = files
-                .get(entity)
-                .ok()
-                .and_then(|(_, edit)| edit.map(|edit| edit.core.cursor_pos().line));
-            let mut entity_commands = commands.entity(entity);
-            entity_commands.remove::<NoteSent>();
-            if let Some(line) = reveal_line {
-                entity_commands.insert(NoteRevealLine(line));
-            }
-        }
-    }
-}
-
-fn on_file_keymap_set(
-    trigger: On<BinReceive<FileKeymapSet>>,
-    views: Query<(), With<FileView>>,
-    mut settings: ResMut<vmux_setting::AppSettings>,
-    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
-) {
-    if !views.contains(trigger.event().webview) {
-        return;
-    }
-    let keymap = trigger.event().payload.keymap;
-    if settings.editor.keymap == keymap {
-        return;
-    }
-    match settings.apply_update(
-        "editor.keymap",
-        serde_json::to_value(keymap).unwrap_or_default(),
-    ) {
-        Ok(ron_bytes) => {
-            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
-        }
-        Err(error) => bevy::log::warn!("editor: keymap update rejected: {error}"),
     }
 }
 
@@ -2376,7 +2073,7 @@ fn reload_changed_files(
                 commands.trigger(BinHostEmitEvent::from_event(
                     entity,
                     &FileDirEvent {
-                        path: display_path(&fv.path),
+                        path: fv.display_path(),
                         abs_path: fv.path.to_string_lossy().into_owned(),
                         entries,
                         parent_path,
@@ -2417,7 +2114,7 @@ fn reload_changed_files(
                 commands.trigger(BinHostEmitEvent::from_event(
                     entity,
                     &FileExternalChange {
-                        path: display_path(&fv.path),
+                        path: fv.display_path(),
                     },
                 ));
             }
@@ -4952,81 +4649,6 @@ mod edit_flow_tests {
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
 
     #[test]
-    fn file_view_mode_is_shared_across_editors() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SharedFileViewMode>()
-            .add_observer(on_file_view_mode_set);
-        let first = app
-            .world_mut()
-            .spawn(FileView {
-                path: PathBuf::from("/a.rs"),
-            })
-            .id();
-        let second = app
-            .world_mut()
-            .spawn(FileView {
-                path: PathBuf::from("/b.rs"),
-            })
-            .id();
-
-        app.world_mut().trigger(BinReceive {
-            webview: first,
-            payload: FileViewModeSet {
-                mode: FileViewMode::Diff,
-            },
-        });
-
-        assert_eq!(
-            app.world().resource::<SharedFileViewMode>().0,
-            FileViewMode::Diff
-        );
-        assert!(app.world().get::<FileView>(second).is_some());
-    }
-
-    #[test]
-    fn switching_to_note_reveals_the_current_cursor_line() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SharedFileViewMode>()
-            .add_observer(on_file_view_mode_set);
-        app.world_mut().resource_mut::<SharedFileViewMode>().0 = FileViewMode::Editor;
-
-        let path = PathBuf::from("/note.md");
-        let mut core = EditCore::new(
-            path.clone(),
-            "Markdown".into(),
-            "one\ntwo\nthree\n",
-            crate::edit::EditMode::Normal,
-        );
-        core.apply(EditCommand::Move(Motion::GotoLine(2)));
-        let entity = app
-            .world_mut()
-            .spawn((
-                FileView { path: path.clone() },
-                EditState::new(
-                    core,
-                    HighlightCache::new(&path),
-                    crate::fold::FoldState::default(),
-                ),
-            ))
-            .id();
-
-        app.world_mut().trigger(BinReceive {
-            webview: entity,
-            payload: FileViewModeSet {
-                mode: FileViewMode::Note,
-            },
-        });
-        app.update();
-
-        assert_eq!(
-            app.world().get::<NoteRevealLine>(entity).map(|line| line.0),
-            Some(2)
-        );
-    }
-
-    #[test]
     fn missing_file_view_loads_when_file_is_created() {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("created-after-open");
@@ -5099,51 +4721,6 @@ mod edit_flow_tests {
                 .text(),
             "created\n"
         );
-    }
-
-    #[test]
-    fn file_view_mode_request_updates_shared_mode() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SharedFileViewMode>()
-            .add_message::<FileViewModeRequest>()
-            .add_systems(Update, apply_file_view_mode_requests);
-
-        app.world_mut()
-            .resource_mut::<Messages<FileViewModeRequest>>()
-            .write(FileViewModeRequest(FileViewMode::Diff));
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<SharedFileViewMode>().0,
-            FileViewMode::Diff
-        );
-    }
-
-    #[test]
-    fn non_editor_cannot_change_file_view_mode() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SharedFileViewMode>()
-            .add_observer(on_file_view_mode_set);
-        let other = app.world_mut().spawn_empty().id();
-
-        app.world_mut().trigger(BinReceive {
-            webview: other,
-            payload: FileViewModeSet {
-                mode: FileViewMode::Diff,
-            },
-        });
-
-        assert_eq!(
-            app.world().resource::<SharedFileViewMode>().0,
-            FileViewMode::Note
-        );
-    }
-
-    #[test]
-    fn file_view_mode_defaults_to_note() {
-        assert_eq!(SharedFileViewMode::default().0, FileViewMode::Note);
     }
 
     #[test]
