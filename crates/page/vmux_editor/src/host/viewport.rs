@@ -552,6 +552,8 @@ fn apply_lsp_folds(
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use ropey::Rope;
+
     use super::*;
     use crate::host::edit::highlight_cache::HighlightCache;
     use crate::host::edit::{EditCommand, EditCore};
@@ -662,6 +664,20 @@ mod tests {
                 && std::iter::zip(&patch.lines, &patch.layouts)
                     .all(|(line, layout)| line.line_no == layout.line_no)
         }
+    }
+
+    #[test]
+    fn collapsed_region_is_hidden_from_the_window() {
+        let rope = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
+        let mut folds = crate::host::fold::FoldState::default();
+        folds.set_regions(crate::host::fold::indent_regions(&rope));
+        folds.close(0);
+        let view = folds.view(rope.len_lines() as u32);
+        let visible = view.lines_for_window(0, view.visible_count());
+
+        assert!(visible.contains(&0));
+        assert!(!visible.contains(&1) && !visible.contains(&2));
+        assert!(visible.contains(&3));
     }
 
     #[test]
