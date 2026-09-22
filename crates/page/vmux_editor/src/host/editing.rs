@@ -71,6 +71,7 @@ impl Plugin for EditorEditingPlugin {
             )>::default())
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
+            .add_observer(on_wiki_completion_request)
             .add_observer(on_file_pointer)
             .add_observer(on_file_hover_request)
             .add_systems(
@@ -369,6 +370,9 @@ pub(super) struct EditRequest {
     commands: Vec<EditCommand>,
 }
 
+#[derive(Event)]
+struct WikiCompletionRequest(Entity);
+
 impl EditRequest {
     pub(super) fn new(entity: Entity, commands: Vec<EditCommand>) -> Self {
         Self { entity, commands }
@@ -544,39 +548,11 @@ fn apply_edit_request(
     mut commands: Commands,
 ) {
     let request = trigger.event();
-    let Ok((mut edit, keymap, mut viewport, mut diff_source)) = views.get_mut(request.entity)
-    else {
+    let entity = request.entity;
+    let cmds = request.commands.clone();
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = views.get_mut(entity) else {
         return;
     };
-    run_commands(
-        request.entity,
-        request.commands.clone(),
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut viewport,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_commands(
-    entity: Entity,
-    cmds: Vec<EditCommand>,
-    edit: &mut EditState,
-    diff_source: &mut vmux_git::GitDiffSource,
-    keymap: &dyn Keymap,
-    vp: &mut FileViewport,
-    clipboard: &mut ClipboardHandle,
-    self_writes: &mut SelfWrites,
-    manager: &mut crate::lsp::manager::LspManager,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) -> bool {
     let top_before = vp.top_row;
     let mut text_changed = false;
     let mut cursor_stale = false;
@@ -584,12 +560,12 @@ fn run_commands(
     let mut fold_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
-            let visible = vp.visible_rows(edit);
+            let visible = vp.visible_rows(&mut edit);
             let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
             let target = clamp_top_line(target, visible, vp.rows);
-            vp.scroll_to(target, entity, browsers, commands);
+            vp.scroll_to(target, entity, &browsers, &mut commands);
             edit.core.top_row = vp.top_row;
-            if vp.follow_scrolled_cursor(edit) {
+            if vp.follow_scrolled_cursor(&mut edit) {
                 cursor_stale = true;
             }
             continue;
@@ -605,7 +581,7 @@ fn run_commands(
                 crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
                 crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
             };
-            vp.scroll_to(target, entity, browsers, commands);
+            vp.scroll_to(target, entity, &browsers, &mut commands);
             edit.core.top_row = vp.top_row;
             continue;
         }
@@ -659,19 +635,19 @@ fn run_commands(
                 continue;
             }
             EditCommand::GotoDefinition => {
-                let (line, utf16, _, _) = caret_lsp(edit);
+                let (line, utf16, _, _) = caret_lsp(&edit);
                 let path = edit.core.buffer.path.clone();
                 manager.definition(entity, &path, line, utf16);
                 continue;
             }
             EditCommand::FindReferences => {
-                let (line, utf16, _, _) = caret_lsp(edit);
+                let (line, utf16, _, _) = caret_lsp(&edit);
                 let path = edit.core.buffer.path.clone();
                 manager.references(entity, &path, line, utf16);
                 continue;
             }
             EditCommand::BeginRename => {
-                let (line, _, ccol, lt) = caret_lsp(edit);
+                let (line, _, ccol, lt) = caret_lsp(&edit);
                 let current = word_at_col(&lt, ccol);
                 if current.is_empty() || !browsers.can_emit_to(&entity) {
                     continue;
@@ -709,7 +685,7 @@ fn run_commands(
                 continue;
             }
             EditCommand::TriggerCompletion => {
-                let (line, utf16, ccol, lt) = caret_lsp(edit);
+                let (line, utf16, ccol, lt) = caret_lsp(&edit);
                 let replace_from = word_start_col(&lt, ccol);
                 let path = edit.core.buffer.path.clone();
                 manager.completion(entity, &path, line, utf16, replace_from);
@@ -823,16 +799,23 @@ fn run_commands(
             fold_changed = true;
         }
     }
-    if let Some(top) = vp.autoscroll(edit) {
-        vp.scroll_to(top, entity, browsers, commands);
+    if let Some(top) = vp.autoscroll(&mut edit) {
+        vp.scroll_to(top, entity, &browsers, &mut commands);
         edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;
     if text_changed || fold_changed || vpc.left_render_band(top_before) {
-        EditorWindow::emit(entity, edit, &vpc, browsers, commands);
+        EditorWindow::emit(entity, &mut edit, &vpc, &browsers, &mut commands);
     }
     if text_changed || cursor_stale || fold_changed {
-        EditorCursor::emit(entity, edit, keymap, &vpc, browsers, commands);
+        EditorCursor::emit(
+            entity,
+            &mut edit,
+            keymap.0.as_ref(),
+            &vpc,
+            &browsers,
+            &mut commands,
+        );
     }
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
@@ -861,24 +844,13 @@ fn run_commands(
             entity_commands.remove::<NoteSent>().insert(OutlineDirty);
         }
     }
-    text_changed
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_file_key(
     trigger: On<BinReceive<KeyStroke>>,
-    mut q: Query<(
-        &mut EditState,
-        &mut EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
+    mut q: Query<(&EditState, &mut EditorKeymap)>,
     app_keys: ScopedKeys,
     view_mode: Res<SharedFileViewMode>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -886,7 +858,7 @@ fn on_file_key(
     if app_keys.answered(entity, evt) {
         return;
     }
-    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok((edit, mut keymap)) = q.get_mut(entity) else {
         return;
     };
     let input = KeyInput {
@@ -909,19 +881,7 @@ fn on_file_key(
         let line = edit.core.cursor_pos().line;
         cmds = remap_note_vertical_commands(cmds, &note.blocks, line);
     }
-    run_commands(
-        entity,
-        cmds,
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(EditRequest::new(entity, cmds));
 }
 
 fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<EditCommand> {
@@ -1005,20 +965,9 @@ fn remap_note_vertical_commands(
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
-    mut q: Query<(
-        &mut EditState,
-        &mut EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    browsers: NonSend<Browsers>,
+    mut q: Query<(&EditState, &mut EditorKeymap)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -1026,7 +975,7 @@ fn on_file_text_input(
     if text.is_empty() {
         return;
     }
-    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok((_, mut keymap)) = q.get_mut(entity) else {
         return;
     };
     if !keymap.0.mode().accepts_text() {
@@ -1038,41 +987,34 @@ fn on_file_text_input(
     } else {
         EditCommand::InsertText(text)
     };
-    run_commands(
-        entity,
-        vec![command],
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
-    if let Some(index) = index.as_deref() {
-        emit_wiki_completions(entity, &edit, index, &browsers, &mut commands);
-    }
+    commands.trigger(EditRequest::new(entity, vec![command]));
+    commands.trigger(WikiCompletionRequest(entity));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn on_file_property_edit(
-    trigger: On<BinReceive<FilePropertyEdit>>,
-    mut q: Query<(
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+fn on_wiki_completion_request(
+    trigger: On<WikiCompletionRequest>,
+    views: Query<&EditState>,
+    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
+    let Some(index) = index.as_deref() else {
+        return;
+    };
+    let entity = trigger.event().0;
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    emit_wiki_completions(entity, edit, index, &browsers, &mut commands);
+}
+
+fn on_file_property_edit(
+    trigger: On<BinReceive<FilePropertyEdit>>,
+    q: Query<&EditState>,
+    mut commands: Commands,
+) {
     let entity = trigger.event().webview;
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok(edit) = q.get(entity) else {
         return;
     };
     if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
@@ -1097,35 +1039,16 @@ fn on_file_property_edit(
     if updated == text {
         return;
     }
-    run_commands(
+    commands.trigger(EditRequest::new(
         entity,
         vec![EditCommand::ReplaceText(updated)],
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
+    ));
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_submitted_ex_lines(
     mut submitted: MessageReader<vmux_command::host::ExLineSubmitted>,
     children: Query<&Children>,
-    mut q: Query<(
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
+    q: Query<(), (With<EditState>, With<EditorKeymap>)>,
     mut commands: Commands,
 ) {
     for message in submitted.read() {
@@ -1142,22 +1065,7 @@ fn run_submitted_ex_lines(
         let Some(entity) = kids.iter().find(|child| q.contains(*child)) else {
             continue;
         };
-        let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
-            continue;
-        };
-        run_commands(
-            entity,
-            cmds,
-            &mut edit,
-            &mut diff_source,
-            keymap.0.as_ref(),
-            &mut vp,
-            &mut clipboard,
-            &mut self_writes,
-            &mut manager,
-            &browsers,
-            &mut commands,
-        );
+        commands.trigger(EditRequest::new(entity, cmds));
     }
 }
 
@@ -1242,17 +1150,9 @@ fn on_file_definition_request(
     manager.definition(entity, &path, line, utf16);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_file_editor_action(
     trigger: On<BinReceive<FileEditorAction>>,
-    mut q: Query<(
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
+    q: Query<&EditState>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
     mut app_commands: MessageWriter<vmux_command::host::command::AppCommand>,
@@ -1261,10 +1161,10 @@ fn on_file_editor_action(
 ) {
     let entity = trigger.event().webview;
     let action = trigger.event().payload;
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, ccol, lt) = caret_lsp(&edit);
+    let (line, utf16, ccol, lt) = caret_lsp(edit);
     let path = edit.core.buffer.path.clone();
 
     let cmds = match action.action {
@@ -1334,19 +1234,7 @@ fn on_file_editor_action(
         EditorAction::Paste => vec![EditCommand::Paste],
         EditorAction::ChangeAllOccurrences => vec![EditCommand::SelectAllOccurrences],
     };
-    run_commands(
-        entity,
-        cmds,
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(EditRequest::new(entity, cmds));
 }
 
 fn on_file_code_action_pick(
@@ -1449,21 +1337,12 @@ fn on_file_goto_request(
 
 fn on_file_completion_commit(
     trigger: On<BinReceive<FileCompletionCommit>>,
-    mut q: Query<(
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
+    mut q: Query<&mut EditState>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload.clone();
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok(mut edit) = q.get_mut(entity) else {
         return;
     };
     let start = edit
@@ -1473,19 +1352,10 @@ fn on_file_completion_commit(
     let head = edit.core.primary().head;
     let (a, b) = (start.min(head), start.max(head));
     edit.core.selections = vec![Selection { anchor: a, head: b }];
-    run_commands(
+    commands.trigger(EditRequest::new(
         entity,
         vec![EditCommand::InsertText(req.text)],
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
+    ));
 }
 
 fn on_file_pointer(
