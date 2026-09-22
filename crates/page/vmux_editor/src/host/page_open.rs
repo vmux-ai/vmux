@@ -25,11 +25,6 @@ impl Plugin for EditorPageOpenPlugin {
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-type NavigableFileView = (
-    &'static mut FileView,
-    &'static mut FileViewport,
-    &'static mut PageMetadata,
-);
 
 fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = if url.starts_with("vmux://") {
@@ -88,7 +83,7 @@ pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
 fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
-    mut views: Query<NavigableFileView>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     effective_startup_dir: Option<Res<vmux_layout::settings::EffectiveStartupDir>>,
     mut commands: Commands,

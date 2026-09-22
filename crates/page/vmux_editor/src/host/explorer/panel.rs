@@ -115,26 +115,23 @@ fn mark_explorer_panel_unsent(views: &Query<Entity, With<FileView>>, commands: &
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct StackExplorerPanel<'w, 's> {
-    visibility: Query<'w, 's, &'static mut StackExplorerVisibility>,
-    revisions: Query<'w, 's, &'static mut StackExplorerRevision>,
-}
+struct StackExplorerPanel;
 
-impl StackExplorerPanel<'_, '_> {
+impl StackExplorerPanel {
     fn apply(
-        &mut self,
         scope: Entity,
         visibility: StackExplorerVisibility,
         revision: StackExplorerRevision,
+        visibilities: &mut Query<&mut StackExplorerVisibility>,
+        revisions: &mut Query<&mut StackExplorerRevision>,
         commands: &mut Commands,
     ) {
-        if let Ok(mut state) = self.visibility.get_mut(scope) {
+        if let Ok(mut state) = visibilities.get_mut(scope) {
             *state = visibility;
         } else {
             commands.entity(scope).insert(visibility);
         }
-        if let Ok(mut state) = self.revisions.get_mut(scope) {
+        if let Ok(mut state) = revisions.get_mut(scope) {
             *state = revision;
         } else {
             commands.entity(scope).insert(revision);
@@ -142,10 +139,12 @@ impl StackExplorerPanel<'_, '_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_explorer_panel_set_visible(
     trigger: On<BinReceive<ExplorerPanelSetVisible>>,
     child_of: Query<&ChildOf>,
-    mut panel: StackExplorerPanel,
+    mut visibility: Query<&mut StackExplorerVisibility>,
+    mut revisions: Query<&mut StackExplorerRevision>,
     mut editors: Query<(Entity, &FileView, &mut ExplorerState, Option<&ChildOf>)>,
     mut trees: ResMut<ExplorerTrees>,
     browsers: Option<NonSend<Browsers>>,
@@ -160,7 +159,14 @@ fn on_explorer_panel_set_visible(
         client_id: trigger.event().payload.client_id,
         request_id: trigger.event().payload.request_id,
     };
-    panel.apply(scope, next_visibility, next_revision, &mut commands);
+    StackExplorerPanel::apply(
+        scope,
+        next_visibility,
+        next_revision,
+        &mut visibility,
+        &mut revisions,
+        &mut commands,
+    );
     for (view, _, _, parent) in &mut editors {
         let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
         if view_scope != scope {

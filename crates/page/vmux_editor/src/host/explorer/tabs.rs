@@ -18,18 +18,6 @@ impl Plugin for ExplorerTabsPlugin {
 }
 
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
-type NavigableFileView = (
-    &'static mut FileView,
-    &'static mut FileViewport,
-    &'static mut PageMetadata,
-);
-type OpenEditorsView = (
-    Entity,
-    &'static FileView,
-    &'static ExplorerState,
-    Option<&'static Editor>,
-    Option<&'static ParkedEdits>,
-);
 
 fn sync_open_editors(
     mut query: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
@@ -48,8 +36,18 @@ fn sync_open_editors(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn emit_open_editors(
-    query: Query<OpenEditorsView, OpenEditorsDirtyReady>,
+    query: Query<
+        (
+            Entity,
+            &FileView,
+            &ExplorerState,
+            Option<&Editor>,
+            Option<&ParkedEdits>,
+        ),
+        OpenEditorsDirtyReady,
+    >,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -94,23 +92,22 @@ impl OpenEditorPath {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct EditorPageClose<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    stacks: Query<'w, 's, (), With<vmux_layout::stack::Stack>>,
-    closing: MessageWriter<'w, vmux_layout::CloseStackRequest>,
-}
+struct EditorPageClose;
 
-impl EditorPageClose<'_, '_> {
-    fn holding(&mut self, webview: Entity) {
+impl EditorPageClose {
+    fn holding(
+        webview: Entity,
+        child_of: &Query<&ChildOf>,
+        stacks: &Query<(), With<vmux_layout::stack::Stack>>,
+        closing: &mut MessageWriter<vmux_layout::CloseStackRequest>,
+    ) {
         let mut current = webview;
         for _ in 0..8 {
-            if self.stacks.contains(current) {
-                self.closing
-                    .write(vmux_layout::CloseStackRequest::by_user(current));
+            if stacks.contains(current) {
+                closing.write(vmux_layout::CloseStackRequest::by_user(current));
                 return;
             }
-            let Ok(parent) = self.child_of.get(current) else {
+            let Ok(parent) = child_of.get(current) else {
                 return;
             };
             current = parent.parent();
@@ -118,11 +115,14 @@ impl EditorPageClose<'_, '_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_explorer_close_editor(
     trigger: On<BinReceive<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,
-    mut views: Query<NavigableFileView>,
-    mut page: EditorPageClose,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    child_of: Query<&ChildOf>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    mut closing: MessageWriter<vmux_layout::CloseStackRequest>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -134,7 +134,7 @@ fn on_explorer_close_editor(
     let next = state.close_editor(&path);
     commands.entity(entity).insert(OpenEditorsDirty);
     let Some(next) = next else {
-        page.holding(entity);
+        EditorPageClose::holding(entity, &child_of, &stacks, &mut closing);
         return;
     };
     let Ok((mut file_view, mut viewport, mut metadata)) = views.get_mut(entity) else {

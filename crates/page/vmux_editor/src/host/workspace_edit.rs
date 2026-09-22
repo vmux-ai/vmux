@@ -20,12 +20,10 @@ impl Plugin for EditorWorkspaceEditPlugin {
     }
 }
 
-type EditableFileViews = (Entity, &'static FileView, &'static Editor);
-
 #[allow(clippy::too_many_arguments)]
 fn apply_lsp_workspace_edit(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
-    views: Query<EditableFileViews>,
+    views: Query<(Entity, &FileView, &Editor)>,
     mut self_writes: NonSendMut<SelfWrites>,
     manager: Res<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
@@ -76,7 +74,7 @@ fn apply_lsp_workspace_edit(
 #[allow(clippy::too_many_arguments)]
 fn apply_planned_documents(
     plan: WorkspaceEditPlan,
-    views: &Query<EditableFileViews>,
+    views: &Query<(Entity, &FileView, &Editor)>,
     self_writes: &mut SelfWrites,
     manager: &crate::lsp::manager::LspManager,
     commands: &mut Commands,
