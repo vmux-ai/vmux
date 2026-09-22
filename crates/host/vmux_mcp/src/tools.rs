@@ -11,6 +11,7 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::marker::PhantomData;
 use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
 
 pub use param::McpParamTool;
@@ -62,6 +63,90 @@ impl ToolsPlugin {
         app.add_plugins(Self);
         app.update();
         app
+    }
+}
+
+pub trait McpToolHandler:
+    Component + serde::de::DeserializeOwned + Serialize + Send + Sync + 'static
+{
+    fn dispatch(&self, request: McpToolRequest<'_>) -> Result<DispatchTarget, String>;
+}
+
+#[derive(Clone, Copy)]
+pub struct McpToolRequest<'a> {
+    call: &'a ToolCall,
+}
+
+impl McpToolRequest<'_> {
+    pub fn name(&self) -> &str {
+        &self.call.name
+    }
+
+    pub fn arguments(&self) -> &Value {
+        &self.call.arguments
+    }
+
+    pub fn anchor(&self) -> Option<ProcessId> {
+        self.call.anchor
+    }
+
+    pub fn host_shell(&self) -> &str {
+        &self.call.host_shell
+    }
+
+    pub fn parse<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        serde_json::from_value(self.call.arguments.clone())
+            .map_err(|error| format!("{}: invalid arguments: {error}", self.call.name))
+    }
+
+    pub fn require_anchor(&self) -> Result<ProcessId, String> {
+        self.call.anchor.ok_or_else(|| {
+            format!(
+                "{} requires an agent anchor (not available to this client)",
+                self.call.name
+            )
+        })
+    }
+}
+
+pub struct McpToolPlugin<T> {
+    manifest: &'static str,
+    marker: PhantomData<fn() -> T>,
+}
+
+impl<T> McpToolPlugin<T> {
+    pub const fn new(manifest: &'static str) -> Self {
+        Self {
+            manifest,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T: McpToolHandler> Plugin for McpToolPlugin<T> {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ToolsPlugin>() {
+            app.add_plugins(ToolsPlugin);
+        }
+        let manifest = self.manifest;
+        app.add_systems(
+            Startup,
+            (move |mut tools: ToolSpawner| {
+                tools.spawn_manifest(ToolManifest::<T>::from_ron(manifest));
+            })
+            .after(ToolRegistrationSet::Bookmark),
+        )
+        .add_systems(Update, dispatch_mcp_tools::<T>.in_set(ToolDispatchSet));
+    }
+}
+
+fn dispatch_mcp_tools<T: McpToolHandler>(mut commands: Commands, calls: ToolCalls<T>) {
+    for (request, call, tool) in calls.iter() {
+        call.finish_dispatch(
+            request,
+            &mut commands,
+            tool.dispatch(McpToolRequest { call }),
+        );
     }
 }
 

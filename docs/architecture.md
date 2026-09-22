@@ -185,6 +185,11 @@ windows, menus, persistence, notifications, and device lifecycle remain adapter 
 application crates. Third-party features integrate by publishing a plugin that owns its pages,
 commands, tools, contracts, systems, and platform capabilities.
 
+`vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
+plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
+MCP binary composes tool plugins through `McpServer::builder().plugin(...)`; tool handlers own
+their typed manifest variant and return a typed command or query dispatch target.
+
 Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
 does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
 deterministic internal state change is a `Mutation`. Something that occurred is named in
