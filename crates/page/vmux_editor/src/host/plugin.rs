@@ -20,10 +20,11 @@ use crate::history::EditorHistoryPlugin;
 use crate::host::explorer_mutation::ExplorerMutationPlugin;
 use crate::host::explorer_outline::{ExplorerOutlinePlugin, OutlineDirty};
 #[cfg(test)]
-use crate::host::explorer_panel::StackExplorerRevision;
 use crate::host::explorer_panel::{
-    ExplorerPanelDefaults, ExplorerPanelPlugin, ExplorerPanelSent, StackExplorerVisibility,
+    ExplorerPanelDefaults, StackExplorerRevision, StackExplorerVisibility,
 };
+use crate::host::explorer_panel::{ExplorerPanelPlugin, ExplorerPanelSent};
+use crate::host::explorer_search::ExplorerSearchPlugin;
 use crate::host::explorer_tabs::{ExplorerTabsPlugin, OpenEditorsDirty};
 #[cfg(test)]
 use crate::host::explorer_tree::{ExplorerTree, IDLE_TREE_CAPACITY};
@@ -182,35 +183,24 @@ struct EditorExplorerPlugin;
 
 impl Plugin for EditorExplorerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingGlobalSearch>()
-            .add_plugins((
-                ExplorerTreePlugin,
-                ExplorerPanelPlugin,
-                ExplorerMutationPlugin,
-                ExplorerOutlinePlugin,
-                ExplorerTabsPlugin,
-            ))
-            .add_plugins(BinEventEmitterPlugin::<(
-                ExplorerTreeToggle,
-                ExplorerTreePrefetch,
-                ExplorerTreeRefresh,
-                ExplorerRevealCurrent,
-                ExplorerCloseEditor,
-                ExplorerPanelSetVisible,
-                ExplorerPanelWidth,
-                ExplorerGoto,
-                ExplorerSearchOpen,
-            )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default())
-            .add_systems(
-                Update,
-                (
-                    apply_global_search_requests,
-                    emit_global_search.after(apply_global_search_requests),
-                ),
-            )
-            .add_observer(on_explorer_goto)
-            .add_observer(on_explorer_search_open);
+        app.add_plugins((
+            ExplorerTreePlugin,
+            ExplorerPanelPlugin,
+            ExplorerMutationPlugin,
+            ExplorerOutlinePlugin,
+            ExplorerSearchPlugin,
+            ExplorerTabsPlugin,
+        ))
+        .add_plugins(BinEventEmitterPlugin::<(
+            ExplorerTreeToggle,
+            ExplorerTreePrefetch,
+            ExplorerTreeRefresh,
+            ExplorerRevealCurrent,
+            ExplorerCloseEditor,
+            ExplorerPanelSetVisible,
+            ExplorerPanelWidth,
+        )>::default())
+        .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default());
     }
 }
 
@@ -653,30 +643,6 @@ impl ExplorerState {
     }
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
-pub struct GlobalSearchRequest {
-    pub target_path: PathBuf,
-    pub root: String,
-    pub query: String,
-    pub files: Vec<ExplorerSearchFile>,
-    pub capped: bool,
-}
-
-#[derive(Component, Clone)]
-struct GlobalSearchState(ExplorerSearchEvent);
-
-#[derive(Component)]
-struct GlobalSearchDirty;
-
-#[derive(Resource, Default)]
-struct PendingGlobalSearch(Vec<PendingGlobalSearchRequest>);
-
-struct PendingGlobalSearchRequest {
-    request: GlobalSearchRequest,
-    retries_left: u8,
-}
-
-const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -697,11 +663,6 @@ type EncodingTarget = (
     Option<&'static EditorKeymap>,
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
-);
-type GlobalSearchDirtyReady = (
-    With<GlobalSearchState>,
-    With<GlobalSearchDirty>,
-    With<vmux_core::page::PageReady>,
 );
 type NavigableFileView = (
     &'static mut FileView,
@@ -2325,10 +2286,20 @@ fn on_file_hover_request(
 }
 
 #[derive(Component)]
-struct PendingGoto {
+pub(super) struct PendingGoto {
     line: u32,
     utf16_col: u32,
     select_end_col: Option<u32>,
+}
+
+impl PendingGoto {
+    pub(super) fn selection(line: u32, utf16_col: u32, select_end_col: u32) -> Self {
+        Self {
+            line,
+            utf16_col,
+            select_end_col: Some(select_end_col),
+        }
+    }
 }
 
 fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
@@ -2833,124 +2804,6 @@ fn flush_lsp_changes(
         }
         commands.entity(entity).remove::<LspEditDirty>();
     }
-}
-
-fn on_explorer_goto(
-    trigger: On<BinReceive<ExplorerGoto>>,
-    views: Query<&FileView>,
-    mut goto_w: MessageWriter<crate::lsp::manager::LspGoto>,
-) {
-    let entity = trigger.event().webview;
-    let Ok(fv) = views.get(entity) else {
-        return;
-    };
-    goto_w.write(crate::lsp::manager::LspGoto {
-        entity,
-        path: fv.path.clone(),
-        line: trigger.event().payload.line,
-        utf16_col: 0,
-    });
-}
-
-fn apply_global_search_requests(
-    mut reader: MessageReader<GlobalSearchRequest>,
-    views: Query<(Entity, &FileView, Option<&ChildOf>)>,
-    visibility: Query<&StackExplorerVisibility>,
-    mut pending: ResMut<PendingGlobalSearch>,
-    panel: Res<ExplorerPanelDefaults>,
-    mut commands: Commands,
-) {
-    pending.0.extend(
-        reader
-            .read()
-            .cloned()
-            .map(|request| PendingGlobalSearchRequest {
-                request,
-                retries_left: GLOBAL_SEARCH_RETRY_LIMIT,
-            }),
-    );
-    let mut remaining = Vec::new();
-    for mut pending_request in pending.0.drain(..) {
-        let request = &pending_request.request;
-        let Some((entity, _, parent)) = views
-            .iter()
-            .find(|(_, view, _)| view.path == request.target_path)
-        else {
-            pending_request.retries_left = pending_request.retries_left.saturating_sub(1);
-            if pending_request.retries_left > 0 {
-                remaining.push(pending_request);
-            }
-            continue;
-        };
-        let scope = parent.map(ChildOf::parent).unwrap_or(entity);
-        let explorer_visible = visibility
-            .get(scope)
-            .map(|state| state.visible)
-            .unwrap_or(panel.default_visible);
-        if !explorer_visible {
-            commands
-                .entity(scope)
-                .insert(StackExplorerVisibility { visible: true });
-            for (view, _, parent) in &views {
-                let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
-                if view_scope == scope {
-                    commands.entity(view).remove::<ExplorerPanelSent>();
-                }
-            }
-        }
-        let request = pending_request.request;
-        commands.entity(entity).insert((
-            GlobalSearchState(ExplorerSearchEvent {
-                root: request.root,
-                query: request.query,
-                files: request.files,
-                capped: request.capped,
-            }),
-            GlobalSearchDirty,
-        ));
-    }
-    pending.0 = remaining;
-}
-
-fn emit_global_search(
-    q: Query<(Entity, &GlobalSearchState), GlobalSearchDirtyReady>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, search) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &search.0));
-        commands.entity(entity).remove::<GlobalSearchDirty>();
-    }
-}
-
-fn on_explorer_search_open(
-    trigger: On<BinReceive<ExplorerSearchOpen>>,
-    mut views: Query<NavigableFileView>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
-        return;
-    };
-    view.navigate(
-        entity,
-        PathBuf::from(&request.path),
-        request.line.saturating_sub(1),
-        &mut viewport,
-        &mut metadata,
-        &mut manager,
-        &mut commands,
-    );
-    commands.entity(entity).insert(PendingGoto {
-        line: request.line.saturating_sub(1),
-        utf16_col: request.col,
-        select_end_col: Some(request.end_col),
-    });
 }
 
 pub const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -3765,71 +3618,6 @@ mod explorer_tests {
     }
 
     #[test]
-    fn global_search_opens_only_the_target_stack_explorer() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(ExplorerPanelDefaults {
-                default_visible: false,
-                width: 240,
-            })
-            .init_resource::<PendingGlobalSearch>()
-            .add_message::<GlobalSearchRequest>()
-            .add_systems(Update, apply_global_search_requests);
-        let first_stack = app
-            .world_mut()
-            .spawn(StackExplorerVisibility { visible: false })
-            .id();
-        let second_stack = app
-            .world_mut()
-            .spawn(StackExplorerVisibility { visible: false })
-            .id();
-        let target = PathBuf::from("/project/a.rs");
-        let first = app
-            .world_mut()
-            .spawn((
-                FileView {
-                    path: target.clone(),
-                },
-                ChildOf(first_stack),
-            ))
-            .id();
-        let second = app
-            .world_mut()
-            .spawn((
-                FileView {
-                    path: PathBuf::from("/project/b.rs"),
-                },
-                ChildOf(second_stack),
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<Messages<GlobalSearchRequest>>()
-            .write(GlobalSearchRequest {
-                target_path: target,
-                root: "/project".to_string(),
-                query: "needle".to_string(),
-                files: Vec::new(),
-                capped: false,
-            });
-        app.update();
-
-        assert!(
-            app.world()
-                .get::<StackExplorerVisibility>(first_stack)
-                .unwrap()
-                .visible
-        );
-        assert!(
-            !app.world()
-                .get::<StackExplorerVisibility>(second_stack)
-                .unwrap()
-                .visible
-        );
-        assert!(app.world().get::<GlobalSearchState>(first).is_some());
-        assert!(app.world().get::<GlobalSearchState>(second).is_none());
-    }
-
-    #[test]
     fn panel_open_reveals_current_file() {
         let tmp = git_repo();
         let file = tmp.path().join("src").join("lib.rs");
@@ -3936,34 +3724,6 @@ mod explorer_tests {
             vec![b, c],
             "opening a file from the directory navigator replaces that navigator tab"
         );
-    }
-
-    #[test]
-    fn explorer_goto_writes_lsp_goto_message() {
-        use crate::lsp::manager::LspGoto;
-        use bevy::ecs::message::Messages;
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<LspGoto>()
-            .add_observer(on_explorer_goto);
-        let e = app
-            .world_mut()
-            .spawn(FileView {
-                path: PathBuf::from("/x.rs"),
-            })
-            .id();
-        app.world_mut().trigger(BinReceive {
-            webview: e,
-            payload: ExplorerGoto {
-                path: "/x.rs".to_string(),
-                line: 12,
-            },
-        });
-        let mut msgs = app.world_mut().resource_mut::<Messages<LspGoto>>();
-        let got: Vec<_> = msgs.drain().collect();
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].line, 12);
-        assert_eq!(got[0].path, PathBuf::from("/x.rs"));
     }
 }
 
