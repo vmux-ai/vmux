@@ -947,7 +947,7 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::viewport::{EditorWindow, FileViewport};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
@@ -971,7 +971,7 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 }
 
 fn lsp_open_documents(
-    q: Query<(Entity, &FileView, &EditState), Without<LspOpened>>,
+    q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
     mut manager: ResMut<LspManager>,
     mut commands: Commands,
@@ -1181,7 +1181,7 @@ pub struct LspSemantic {
 
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut views: Query<(&mut EditState, &FileView, &FileViewport)>,
+    mut views: Query<(&mut Editor, &FileView, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1285,7 +1285,7 @@ fn emit_diagnostics_system(
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
     mut state: ResMut<DiagState>,
-    views: Query<(Entity, &FileView, &EditState)>,
+    views: Query<(Entity, &FileView, &Editor)>,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -1346,7 +1346,7 @@ fn request_code_actions(
 pub struct LintRan;
 
 fn lint_on_open(
-    q: Query<(Entity, &FileView, &EditState), Without<LintRan>>,
+    q: Query<(Entity, &FileView, &Editor), Without<LintRan>>,
     outbox: Res<LintOutbox>,
     mut commands: Commands,
 ) {
@@ -1577,14 +1577,14 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_map_through_editstate() {
+    fn diagnostics_map_through_editor() {
         use crate::edit::highlight_cache::HighlightCache;
         use crate::edit::{EditCore, EditMode};
-        use crate::host::editor::{EditState, FileView};
+        use crate::host::editor::{Editor, FileView};
         use crate::lsp::LspOutbox;
         use std::path::PathBuf;
 
-        let path = PathBuf::from("/tmp/vmux_lsp_editstate.rs");
+        let path = PathBuf::from("/tmp/vmux_lsp_editor.rs");
         let mut app = App::new();
         let outbox = LspOutbox::default();
         app.add_plugins(MinimalPlugins)
@@ -1601,7 +1601,7 @@ mod tests {
         let hl = HighlightCache::new(&path);
         app.world_mut().spawn((
             FileView { path: path.clone() },
-            EditState::new(core, hl, crate::fold::FoldState::default()),
+            Editor::new(core, hl, crate::fold::FoldState::default()),
         ));
 
         let diag = lsp_types::Diagnostic {
@@ -1625,7 +1625,7 @@ mod tests {
         let mapped = state
             .lsp
             .get(&canon(&path))
-            .expect("diagnostics mapped for EditState entity");
+            .expect("diagnostics mapped for Editor entity");
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0].line, 1);
         assert_eq!(mapped[0].start_col, 4);

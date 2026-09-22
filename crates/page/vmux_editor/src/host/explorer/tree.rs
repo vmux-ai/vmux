@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -9,41 +9,27 @@ use vmux_core::event::*;
 use crate::dir::{list_dir, project_root};
 use crate::explorer_model::flatten_tree;
 
-use super::ExplorerState;
-use super::panel::{ExplorerPanelDefaults, StackExplorerVisibility};
+use super::panel::StackExplorerVisibility;
+use super::{
+    ExplorerPanelDefaults, ExplorerState, ExplorerTree, ExplorerTreeDirty, ExplorerTrees,
+    IDLE_TREE_CAPACITY,
+};
 use crate::host::editor::FileView;
-
-#[derive(Default)]
-pub(in crate::host) struct ExplorerTree {
-    pub(in crate::host) expanded: HashSet<PathBuf>,
-    pub(in crate::host) loading: HashSet<PathBuf>,
-    pub(in crate::host) children: HashMap<PathBuf, Vec<FileDirEntry>>,
-    used: u64,
-}
 
 impl ExplorerTree {
     fn rows(&self, root: &Path) -> Vec<TreeRow> {
         flatten_tree(root, &self.expanded, &self.loading, &self.children)
     }
 
-    pub(in crate::host) fn evict_subtree(&mut self, path: &Path) {
+    pub(super) fn evict_subtree(&mut self, path: &Path) {
         self.expanded.retain(|entry| !entry.starts_with(path));
         self.loading.retain(|entry| !entry.starts_with(path));
         self.children.retain(|entry, _| !entry.starts_with(path));
     }
 }
 
-pub(in crate::host) const IDLE_TREE_CAPACITY: usize = 4;
-
-#[derive(Resource, Default)]
-pub(in crate::host) struct ExplorerTrees {
-    pub(in crate::host) by_root: HashMap<PathBuf, ExplorerTree>,
-    dirty: HashSet<PathBuf>,
-    clock: u64,
-}
-
 impl ExplorerTrees {
-    pub(in crate::host) fn at(&mut self, root: &Path) -> &mut ExplorerTree {
+    pub(super) fn at(&mut self, root: &Path) -> &mut ExplorerTree {
         self.clock += 1;
         let used = self.clock;
         let tree = self.by_root.entry(root.to_path_buf()).or_default();
@@ -51,7 +37,7 @@ impl ExplorerTrees {
         tree
     }
 
-    pub(in crate::host) fn prune(&mut self, live: &HashSet<PathBuf>) {
+    pub(super) fn prune(&mut self, live: &HashSet<PathBuf>) {
         let mut idle = Vec::new();
         for (root, tree) in &self.by_root {
             if live.contains(root) {
@@ -83,15 +69,7 @@ impl ExplorerTrees {
             .is_some_and(|tree| tree.loading.contains(path))
     }
 
-    pub(in crate::host) fn roots(&self) -> Vec<PathBuf> {
-        self.by_root.keys().cloned().collect()
-    }
-
-    pub(in crate::host) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
-        self.by_root.values().flat_map(|tree| tree.expanded.iter())
-    }
-
-    pub(in crate::host) fn touch(&mut self, root: &Path) {
+    pub(super) fn touch(&mut self, root: &Path) {
         self.dirty.insert(root.to_path_buf());
     }
 
@@ -103,7 +81,7 @@ impl ExplorerTrees {
         std::mem::take(&mut self.dirty)
     }
 
-    pub(in crate::host) fn start_dir_load(
+    pub(super) fn start_dir_load(
         &mut self,
         root: &Path,
         path: PathBuf,
@@ -134,12 +112,9 @@ struct ExplorerDirLoadTask {
     task: Task<(PathBuf, Vec<FileDirEntry>)>,
 }
 
-#[derive(Component)]
-pub(in crate::host) struct ExplorerTreeDirty;
-
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 
-pub(in crate::host) struct ExplorerTreePlugin;
+pub(super) struct ExplorerTreePlugin;
 
 impl Plugin for ExplorerTreePlugin {
     fn build(&self, app: &mut App) {
@@ -164,7 +139,7 @@ impl Plugin for ExplorerTreePlugin {
     }
 }
 
-pub(in crate::host) fn reveal_current_in_tree(
+pub(super) fn reveal_current_in_tree(
     entity: Entity,
     current: &Path,
     state: &mut ExplorerState,
@@ -204,7 +179,7 @@ pub(in crate::host) fn reveal_current_in_tree(
     }
 }
 
-pub(in crate::host) fn emit_explorer_focus(
+pub(super) fn emit_explorer_focus(
     entity: Entity,
     current: &Path,
     reveal: ExplorerReveal,

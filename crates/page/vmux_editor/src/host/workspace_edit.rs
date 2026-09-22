@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
 use super::editing::EditRequest;
-use super::editor::{EditState, FileView};
+use super::editor::{Editor, FileView};
 use super::file_lifecycle::{SelfWrites, canon};
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
@@ -20,7 +20,7 @@ impl Plugin for EditorWorkspaceEditPlugin {
     }
 }
 
-type EditableFileViews = (Entity, &'static FileView, &'static EditState);
+type EditableFileViews = (Entity, &'static FileView, &'static Editor);
 
 #[allow(clippy::too_many_arguments)]
 fn apply_lsp_workspace_edit(
@@ -251,7 +251,7 @@ mod tests {
                             FileView {
                                 path: path.to_path_buf(),
                             },
-                            EditState::new(
+                            Editor::new(
                                 core,
                                 HighlightCache::new(path),
                                 crate::fold::FoldState::default(),
@@ -303,7 +303,7 @@ mod tests {
         fn text(&self, entity: Entity) -> String {
             self.app
                 .world()
-                .get::<EditState>(entity)
+                .get::<Editor>(entity)
                 .unwrap()
                 .core
                 .buffer
@@ -313,7 +313,7 @@ mod tests {
         fn undo(&mut self, entity: Entity) {
             self.app
                 .world_mut()
-                .get_mut::<EditState>(entity)
+                .get_mut::<Editor>(entity)
                 .unwrap()
                 .core
                 .apply(EditCommand::Undo);
@@ -346,7 +346,7 @@ mod tests {
         for view in edit.views.clone() {
             assert_eq!(edit.text(view), "1 two 3\n");
             assert!(
-                edit.app.world().get::<EditState>(view).unwrap().core.dirty,
+                edit.app.world().get::<Editor>(view).unwrap().core.dirty,
                 "an applied edit leaves the buffer dirty for the user to save"
             );
         }
@@ -382,7 +382,7 @@ mod tests {
         let second = edit.views[1];
         edit.app
             .world_mut()
-            .get_mut::<EditState>(second)
+            .get_mut::<Editor>(second)
             .unwrap()
             .core
             .apply(EditCommand::InsertText("MINE ".to_string()));

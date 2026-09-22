@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{FileNoteEvent, FileViewMode, NoteBlock};
 
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 
 pub(crate) struct EditorNotePlugin;
@@ -43,7 +43,7 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
 fn send_note(
     mode: Res<SharedFileViewMode>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    notes: Query<(Entity, &FileView, &EditState, Option<&NoteRevealLine>), ReadyNote>,
+    notes: Query<(Entity, &FileView, &Editor, Option<&NoteRevealLine>), ReadyNote>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

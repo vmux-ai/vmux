@@ -10,7 +10,7 @@ use vmux_core::event::{
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::shape::BufferShape;
 
 pub(crate) struct FileKeyPlugin;
@@ -55,7 +55,7 @@ fn apply_status_picks(
     mut picked: MessageReader<FileStatusPicked>,
     children: Query<&Children>,
     editors: Query<(), With<FileView>>,
-    shapes: Query<&EditState>,
+    shapes: Query<&Editor>,
     mut commands: Commands,
 ) {
     for message in picked.read() {

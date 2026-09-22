@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -5,6 +6,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::{
     ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelWidth,
     ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh, ExplorerTreeToggle,
+    FileDirEntry,
 };
 
 mod fs;
@@ -18,18 +20,79 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
-pub(super) use mutation::ExplorerMutationPlugin;
-pub(super) use outline::{ExplorerOutlinePlugin, OutlineDirty};
+use mutation::ExplorerMutationPlugin;
+use outline::ExplorerOutlinePlugin;
+use panel::ExplorerPanelPlugin;
 pub use panel::StackExplorerVisibility;
-#[cfg(test)]
-pub(super) use panel::{ExplorerPanelDefaults, StackExplorerRevision};
-pub(super) use panel::{ExplorerPanelPlugin, ExplorerPanelSent};
-pub(super) use search::ExplorerSearchPlugin;
+use search::ExplorerSearchPlugin;
 pub use search::GlobalSearchRequest;
-pub(super) use tabs::{ExplorerTabsPlugin, OpenEditorsDirty};
-#[cfg(test)]
-pub(super) use tree::{ExplorerTree, IDLE_TREE_CAPACITY};
-pub(super) use tree::{ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees};
+use tree::ExplorerTreePlugin;
+
+#[derive(Component)]
+pub(super) struct OutlineDirty;
+
+#[derive(Component)]
+pub(super) struct ExplorerPanelSent;
+
+#[derive(Component)]
+pub(super) struct OpenEditorsDirty;
+
+#[derive(Component)]
+pub(super) struct ExplorerTreeDirty;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct StackExplorerRevision {
+    client_id: u64,
+    request_id: u64,
+}
+
+#[derive(Resource, Clone, Copy)]
+struct ExplorerPanelDefaults {
+    default_visible: bool,
+    width: u32,
+}
+
+#[derive(Default)]
+struct ExplorerTree {
+    expanded: HashSet<PathBuf>,
+    loading: HashSet<PathBuf>,
+    children: HashMap<PathBuf, Vec<FileDirEntry>>,
+    used: u64,
+}
+
+const IDLE_TREE_CAPACITY: usize = 4;
+
+#[derive(Resource, Default)]
+pub(super) struct ExplorerTrees {
+    by_root: HashMap<PathBuf, ExplorerTree>,
+    dirty: HashSet<PathBuf>,
+    clock: u64,
+}
+
+impl ExplorerTrees {
+    pub(super) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
+        self.by_root.values().flat_map(|tree| tree.expanded.iter())
+    }
+
+    pub(super) fn refresh_changed(
+        &mut self,
+        changed_dirs: &HashSet<PathBuf>,
+        commands: &mut Commands,
+    ) {
+        let roots: Vec<PathBuf> = self.by_root.keys().cloned().collect();
+        for root in roots {
+            let cached: Vec<PathBuf> = self.by_root[&root].children.keys().cloned().collect();
+            for dir in cached {
+                let canonical = vmux_path::PathIdentity::resolve(&dir).into_path_buf();
+                if changed_dirs.contains(&canonical) {
+                    self.start_dir_load(&root, dir, commands, true);
+                }
+            }
+        }
+    }
+}
+
+pub(super) struct ExplorerTabsPlugin;
 
 pub(super) struct EditorExplorerPlugin;
 
@@ -57,15 +120,20 @@ impl Plugin for EditorExplorerPlugin {
 }
 
 #[derive(Component, Default)]
-pub(crate) struct ExplorerState {
-    pub root: PathBuf,
-    pub open_editors: Vec<PathBuf>,
-    pub focus_path: Option<PathBuf>,
-    pub(super) active_editor: Option<PathBuf>,
-    pub(super) active_editor_is_dir: bool,
+pub(super) struct ExplorerState {
+    root: PathBuf,
+    open_editors: Vec<PathBuf>,
+    focus_path: Option<PathBuf>,
+    active_editor: Option<PathBuf>,
+    active_editor_is_dir: bool,
 }
 
 impl ExplorerState {
+    #[cfg(test)]
+    pub(super) fn open_editors(&self) -> &[PathBuf] {
+        &self.open_editors
+    }
+
     pub(super) fn allows(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
     }

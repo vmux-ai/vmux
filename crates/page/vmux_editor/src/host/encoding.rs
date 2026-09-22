@@ -6,7 +6,7 @@ use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingEvent, File
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{FileBuffer, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
 
@@ -19,7 +19,7 @@ impl Plugin for EditorEncodingPlugin {
     }
 }
 
-type EncodingTarget = (&'static FileView, Option<&'static mut EditState>);
+type EncodingTarget = (&'static FileView, Option<&'static mut Editor>);
 
 #[allow(clippy::too_many_arguments)]
 fn on_file_encoding_set(
@@ -41,7 +41,7 @@ fn on_file_encoding_set(
                 path: view.path.clone(),
                 encoding: wanted.encoding,
             })
-            .remove::<EditState>()
+            .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileInitialMetaSent>()

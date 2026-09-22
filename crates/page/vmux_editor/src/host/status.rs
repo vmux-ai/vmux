@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::host::dir::parent_listing;
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::note::{NoteRevealLine, NoteSent};
@@ -113,13 +113,7 @@ fn send_initial_meta(
 
 fn send_initial_text_meta(
     mut files: Query<
-        (
-            Entity,
-            &FileView,
-            &mut EditState,
-            &EditorKeymap,
-            &FileViewport,
-        ),
+        (Entity, &FileView, &mut Editor, &EditorKeymap, &FileViewport),
         ReadyUnsentMeta,
     >,
     browsers: NonSend<Browsers>,
@@ -294,7 +288,7 @@ fn send_initial_dir(
 
 fn on_file_view_mode_set(
     trigger: On<BinReceive<FileViewModeSet>>,
-    files: Query<(&FileView, Option<&EditState>)>,
+    files: Query<(&FileView, Option<&Editor>)>,
     mut mode: ResMut<SharedFileViewMode>,
     mut commands: Commands,
 ) {
@@ -306,7 +300,7 @@ fn on_file_view_mode_set(
     if mode.0 != FileViewMode::Note || !crate::markdown::is_markdown_path(&file.path) {
         return;
     }
-    let reveal_line = edit.map(EditState::cursor_line);
+    let reveal_line = edit.map(Editor::cursor_line);
     let mut entity_commands = commands.entity(entity);
     entity_commands.remove::<NoteSent>();
     if let Some(line) = reveal_line {
@@ -399,7 +393,7 @@ mod tests {
             .world_mut()
             .spawn((
                 FileView { path: path.clone() },
-                EditState::new(
+                Editor::new(
                     core,
                     HighlightCache::new(&path),
                     crate::host::fold::FoldState::default(),
