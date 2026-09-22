@@ -20,9 +20,9 @@ use crate::explorer_model::flatten_tree;
 use crate::history::EditorHistoryPlugin;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
+use crate::media::{EditorMediaPlugin, FileMedia};
 use crate::navigation::{EditorNavigationPlugin, NoteRevealLine};
 use crate::page_model::DisplayCells;
-use crate::preview;
 use crate::wrap::WrapView;
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 use vmux_flex::prelude::*;
@@ -40,6 +40,7 @@ impl Plugin for EditorPlugin {
             crate::search::ProjectSearchPlugin,
             EditorFileLifecyclePlugin,
             EditorPresentationPlugin,
+            EditorMediaPlugin,
             EditorEditingPlugin,
             EditorNavigationPlugin,
             EditorHistoryPlugin,
@@ -49,6 +50,9 @@ impl Plugin for EditorPlugin {
 }
 
 struct EditorFileLifecyclePlugin;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct EditorFileLoadedSet;
 
 impl Plugin for EditorFileLifecyclePlugin {
     fn build(&self, app: &mut App) {
@@ -91,7 +95,7 @@ impl Plugin for EditorFileLifecyclePlugin {
                         drain_file_changes,
                         reload_changed_files,
                         load_file_buffers,
-                        apply_loaded_file_buffers,
+                        apply_loaded_file_buffers.in_set(EditorFileLoadedSet),
                     )
                         .chain(),
                     flush_lsp_changes,
@@ -119,9 +123,6 @@ impl Plugin for EditorPresentationPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
-                FilePreviewRequest,
-                FileOpenExternalRequest,
-                FileVideoRect,
                 FileViewModeSet,
                 FileKeymapSet,
                 FileShapeSet,
@@ -133,18 +134,12 @@ impl Plugin for EditorPresentationPlugin {
                     send_initial_meta.after(apply_loaded_file_buffers),
                     send_initial_text_meta.after(apply_loaded_file_buffers),
                     send_initial_dir.after(apply_loaded_file_buffers),
-                    sync_media_allowlist.after(apply_loaded_file_buffers),
-                    send_initial_media
-                        .after(apply_loaded_file_buffers)
-                        .after(sync_media_allowlist),
-                    (detach_video_overlays, attach_video_overlays).chain(),
                     (resend_file_theme_on_change, send_file_theme).chain(),
                     apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
                     send_file_keymap,
                     sync_editor_wrap_settings.after(apply_loaded_file_buffers),
                     rehighlight_on_color_scheme,
-                    drain_thumb_tasks,
                     apply_lsp_folds,
                     persist_folds,
                 ),
@@ -158,9 +153,6 @@ impl Plugin for EditorPresentationPlugin {
             )
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
-            .add_observer(on_file_preview_request)
-            .add_observer(on_file_open_external)
-            .add_observer(on_file_video_rect)
             .add_observer(on_file_fold_toggle)
             .add_observer(on_file_view_mode_set)
             .add_observer(on_file_keymap_set)
@@ -325,6 +317,12 @@ impl FileView {
             .map(|url| url.to_string())
             .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()))
     }
+
+    pub(crate) fn raw_media_url(&self) -> String {
+        let mut url = self.url();
+        url.push_str("?vmux-raw=1");
+        url
+    }
 }
 
 #[derive(Component, Clone, Debug)]
@@ -403,12 +401,6 @@ impl FileViewport {
 #[derive(Component, Clone, Debug)]
 pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
-}
-
-#[derive(Component, Clone, Debug)]
-pub struct FileMedia {
-    pub kind: vmux_core::media::MediaKind,
-    pub mime: String,
 }
 
 #[derive(Component)]
@@ -518,12 +510,6 @@ impl FileLoad {
             heavy: size > crate::highlight::HIGHLIGHT_MAX_BYTES,
         }
     }
-}
-
-#[derive(Component)]
-struct ThumbTask {
-    webview: Entity,
-    task: Task<(String, Result<Vec<u8>, String>)>,
 }
 
 #[derive(Component)]
@@ -2334,186 +2320,6 @@ fn apply_lsp_folds(
     }
 }
 
-fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
-    let mut paths: std::collections::HashSet<std::path::PathBuf> =
-        media.iter().map(|fv| fv.path.clone()).collect();
-    for dir in &dirs {
-        for entry in &dir.entries {
-            paths.insert(std::path::PathBuf::from(&entry.path));
-        }
-    }
-    set_media_allowlist(paths);
-}
-
-fn raw_media_url(path: &std::path::Path) -> String {
-    let mut url = url::Url::from_file_path(path)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
-    url.push_str("?vmux-raw=1");
-    url
-}
-
-fn send_initial_media(
-    q: Query<(Entity, &FileView, &FileMedia), ReadyUnsentMeta>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, fv, media) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileMediaEvent {
-                kind: media.kind,
-                mime: media.mime.clone(),
-                url: raw_media_url(&fv.path),
-                abs_path: fv.path.to_string_lossy().into_owned(),
-            },
-        ));
-        commands.entity(entity).insert(FileInitialMetaSent);
-    }
-}
-
-fn needs_native_video(path: &Path) -> bool {
-    vmux_core::media::is_proprietary_video(&path.to_string_lossy())
-}
-
-fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: NonSend<Browsers>) {
-    for (entity, fv, media) in &q {
-        if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
-            continue;
-        }
-        if !browsers.has_browser(entity) {
-            continue;
-        }
-        browsers.attach_media_overlay(&entity, &fv.path.to_string_lossy());
-    }
-}
-
-fn on_file_video_rect(
-    trigger: On<BinReceive<FileVideoRect>>,
-    file_views: Query<(), With<FileView>>,
-    browsers: NonSend<Browsers>,
-) {
-    let entity = trigger.event().webview;
-    if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
-        return;
-    }
-    let r = &trigger.event().payload;
-    if !vmux_core::media::is_proprietary_video(&r.path) || r.w <= 0.0 || r.h <= 0.0 {
-        return;
-    }
-    browsers.set_media_overlay(&entity, &r.path, (r.x, r.y, r.w, r.h));
-}
-
-fn detach_video_overlays(
-    mut removed_media: RemovedComponents<FileMedia>,
-    mut removed_dir: RemovedComponents<FileDir>,
-    browsers: NonSend<Browsers>,
-) {
-    for entity in removed_media.read().chain(removed_dir.read()) {
-        browsers.detach_media_overlay(&entity);
-    }
-}
-
-fn on_file_preview_request(
-    trigger: On<BinReceive<FilePreviewRequest>>,
-    file_views: Query<(), With<FileView>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    if file_views.get(entity).is_err() {
-        return;
-    }
-    let req = trigger.event().payload.clone();
-    let path = PathBuf::from(&req.path);
-    if !needs_native_video(&path) {
-        browsers.detach_media_overlay(&entity);
-    }
-    if req.thumb && preview::is_image_path(&path) {
-        let within_cap = std::fs::metadata(&path)
-            .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
-            .unwrap_or(false);
-        if !within_cap {
-            return;
-        }
-        let pool = IoTaskPool::get();
-        let p = req.path.clone();
-        let task = pool.spawn(async move {
-            let r = std::fs::read(&p)
-                .map_err(|e| e.to_string())
-                .and_then(|b| preview::downscale_to_png(&b, preview::THUMB_MAX_EDGE));
-            (p, r)
-        });
-        commands.spawn(ThumbTask {
-            webview: entity,
-            task,
-        });
-        return;
-    }
-    if !browsers.can_emit_to(&entity) {
-        return;
-    }
-    let kind = preview::build_preview_sync(&path);
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &FilePreviewEvent {
-            path: req.path,
-            thumb: false,
-            kind,
-        },
-    ));
-}
-
-fn drain_thumb_tasks(
-    mut q: Query<(Entity, &mut ThumbTask)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (task_entity, mut t) in &mut q {
-        if let Some((path, result)) = future::block_on(future::poll_once(&mut t.task)) {
-            let webview = t.webview;
-            commands.entity(task_entity).despawn();
-            if let Ok(bytes) = result
-                && browsers.can_emit_to(&webview)
-            {
-                commands.trigger(BinHostEmitEvent::from_event(
-                    webview,
-                    &FilePreviewEvent {
-                        path,
-                        thumb: true,
-                        kind: PreviewKind::Image {
-                            mime: "image/png".to_string(),
-                            bytes,
-                        },
-                    },
-                ));
-            }
-        }
-    }
-}
-
-fn on_file_open_external(
-    trigger: On<BinReceive<FileOpenExternalRequest>>,
-    views: Query<&FileView, With<FileMedia>>,
-) {
-    let entity = trigger.event().webview;
-    let Ok(fv) = views.get(entity) else {
-        return;
-    };
-    let req_path = PathBuf::from(&trigger.event().payload.path);
-    if fv.path != req_path {
-        return;
-    }
-    #[cfg(target_os = "macos")]
-    let program = "open";
-    #[cfg(not(target_os = "macos"))]
-    let program = "xdg-open";
-    let _ = std::process::Command::new(program).arg(&req_path).spawn();
-}
-
 #[derive(Component)]
 struct FileReloadRequested;
 
@@ -2677,7 +2483,7 @@ fn reload_changed_files(
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis())
                     .unwrap_or(0);
-                let url = format!("{}&v={nonce}", raw_media_url(&fv.path));
+                let url = format!("{}&v={nonce}", fv.raw_media_url());
                 commands.trigger(BinHostEmitEvent::from_event(
                     entity,
                     &FileMediaEvent {

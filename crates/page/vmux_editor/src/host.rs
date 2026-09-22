@@ -15,6 +15,7 @@ pub(crate) mod app_key;
 pub(crate) mod dir;
 pub(crate) mod explorer_fs;
 pub(crate) mod history;
+pub(crate) mod media;
 pub(crate) mod navigation;
 pub(crate) mod preview;
 pub(crate) mod search;
