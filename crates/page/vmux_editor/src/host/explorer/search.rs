@@ -5,11 +5,11 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
 
-use super::explorer_panel::{ExplorerPanelDefaults, ExplorerPanelSent, StackExplorerVisibility};
-use super::plugin::{FileView, PendingGoto};
-use super::viewport::FileViewport;
+use super::panel::{ExplorerPanelDefaults, ExplorerPanelSent, StackExplorerVisibility};
+use crate::host::plugin::{FileView, PendingGoto};
+use crate::host::viewport::FileViewport;
 
-pub(super) struct ExplorerSearchPlugin;
+pub(in crate::host) struct ExplorerSearchPlugin;
 
 impl Plugin for ExplorerSearchPlugin {
     fn build(&self, app: &mut App) {

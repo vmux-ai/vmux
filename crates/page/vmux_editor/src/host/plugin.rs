@@ -17,23 +17,16 @@ use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::history::EditorHistoryPlugin;
 use crate::host::explorer::EditorExplorerPlugin;
 #[cfg(test)]
-use crate::host::explorer::ExplorerState;
-use crate::host::explorer_outline::OutlineDirty;
-#[cfg(test)]
-use crate::host::explorer_panel::ExplorerPanelPlugin;
-#[cfg(test)]
-use crate::host::explorer_panel::ExplorerPanelSent;
-#[cfg(test)]
-use crate::host::explorer_panel::{
-    ExplorerPanelDefaults, StackExplorerRevision, StackExplorerVisibility,
+use crate::host::explorer::{
+    ExplorerPanelDefaults, ExplorerTabsPlugin, StackExplorerRevision, StackExplorerVisibility,
 };
 #[cfg(test)]
-use crate::host::explorer_tabs::ExplorerTabsPlugin;
-use crate::host::explorer_tabs::OpenEditorsDirty;
+use crate::host::explorer::{ExplorerPanelPlugin, ExplorerPanelSent, ExplorerState};
 #[cfg(test)]
-use crate::host::explorer_tree::{
+use crate::host::explorer::{
     ExplorerTree, ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees, IDLE_TREE_CAPACITY,
 };
+use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 #[cfg(test)]
 use crate::host::file_lifecycle::LoadFailure;
 use crate::host::file_lifecycle::{

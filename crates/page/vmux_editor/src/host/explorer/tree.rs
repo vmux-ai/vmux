@@ -9,15 +9,15 @@ use vmux_core::event::*;
 use crate::dir::{list_dir, project_root};
 use crate::explorer_model::flatten_tree;
 
-use super::explorer::ExplorerState;
-use super::explorer_panel::{ExplorerPanelDefaults, StackExplorerVisibility};
-use super::plugin::FileView;
+use super::ExplorerState;
+use super::panel::{ExplorerPanelDefaults, StackExplorerVisibility};
+use crate::host::plugin::FileView;
 
 #[derive(Default)]
-pub(super) struct ExplorerTree {
-    pub(super) expanded: HashSet<PathBuf>,
-    pub(super) loading: HashSet<PathBuf>,
-    pub(super) children: HashMap<PathBuf, Vec<FileDirEntry>>,
+pub(in crate::host) struct ExplorerTree {
+    pub(in crate::host) expanded: HashSet<PathBuf>,
+    pub(in crate::host) loading: HashSet<PathBuf>,
+    pub(in crate::host) children: HashMap<PathBuf, Vec<FileDirEntry>>,
     used: u64,
 }
 
@@ -26,24 +26,24 @@ impl ExplorerTree {
         flatten_tree(root, &self.expanded, &self.loading, &self.children)
     }
 
-    pub(super) fn evict_subtree(&mut self, path: &Path) {
+    pub(in crate::host) fn evict_subtree(&mut self, path: &Path) {
         self.expanded.retain(|entry| !entry.starts_with(path));
         self.loading.retain(|entry| !entry.starts_with(path));
         self.children.retain(|entry, _| !entry.starts_with(path));
     }
 }
 
-pub(super) const IDLE_TREE_CAPACITY: usize = 4;
+pub(in crate::host) const IDLE_TREE_CAPACITY: usize = 4;
 
 #[derive(Resource, Default)]
-pub(super) struct ExplorerTrees {
-    pub(super) by_root: HashMap<PathBuf, ExplorerTree>,
+pub(in crate::host) struct ExplorerTrees {
+    pub(in crate::host) by_root: HashMap<PathBuf, ExplorerTree>,
     dirty: HashSet<PathBuf>,
     clock: u64,
 }
 
 impl ExplorerTrees {
-    pub(super) fn at(&mut self, root: &Path) -> &mut ExplorerTree {
+    pub(in crate::host) fn at(&mut self, root: &Path) -> &mut ExplorerTree {
         self.clock += 1;
         let used = self.clock;
         let tree = self.by_root.entry(root.to_path_buf()).or_default();
@@ -51,7 +51,7 @@ impl ExplorerTrees {
         tree
     }
 
-    pub(super) fn prune(&mut self, live: &HashSet<PathBuf>) {
+    pub(in crate::host) fn prune(&mut self, live: &HashSet<PathBuf>) {
         let mut idle = Vec::new();
         for (root, tree) in &self.by_root {
             if live.contains(root) {
@@ -83,15 +83,15 @@ impl ExplorerTrees {
             .is_some_and(|tree| tree.loading.contains(path))
     }
 
-    pub(super) fn roots(&self) -> Vec<PathBuf> {
+    pub(in crate::host) fn roots(&self) -> Vec<PathBuf> {
         self.by_root.keys().cloned().collect()
     }
 
-    pub(super) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
+    pub(in crate::host) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
         self.by_root.values().flat_map(|tree| tree.expanded.iter())
     }
 
-    pub(super) fn touch(&mut self, root: &Path) {
+    pub(in crate::host) fn touch(&mut self, root: &Path) {
         self.dirty.insert(root.to_path_buf());
     }
 
@@ -103,7 +103,7 @@ impl ExplorerTrees {
         std::mem::take(&mut self.dirty)
     }
 
-    pub(super) fn start_dir_load(
+    pub(in crate::host) fn start_dir_load(
         &mut self,
         root: &Path,
         path: PathBuf,
@@ -135,11 +135,11 @@ struct ExplorerDirLoadTask {
 }
 
 #[derive(Component)]
-pub(super) struct ExplorerTreeDirty;
+pub(in crate::host) struct ExplorerTreeDirty;
 
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 
-pub(super) struct ExplorerTreePlugin;
+pub(in crate::host) struct ExplorerTreePlugin;
 
 impl Plugin for ExplorerTreePlugin {
     fn build(&self, app: &mut App) {
@@ -164,7 +164,7 @@ impl Plugin for ExplorerTreePlugin {
     }
 }
 
-pub(super) fn reveal_current_in_tree(
+pub(in crate::host) fn reveal_current_in_tree(
     entity: Entity,
     current: &Path,
     state: &mut ExplorerState,
@@ -204,7 +204,7 @@ pub(super) fn reveal_current_in_tree(
     }
 }
 
-pub(super) fn emit_explorer_focus(
+pub(in crate::host) fn emit_explorer_focus(
     entity: Entity,
     current: &Path,
     reveal: ExplorerReveal,
