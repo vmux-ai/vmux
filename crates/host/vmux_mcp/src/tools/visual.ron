@@ -1,6 +1,6 @@
 [
     (
-        name: "screenshot",
+        kind: screenshot,
         description: r#"Capture the vmux window as a PNG and return it inline so you can SEE the current UI (use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or stack:<id> from read_layout) to crop to just that region. The full-resolution image is saved under the active vmux profile's recording directory and a downscaled copy is returned inline. macOS only; the first call may prompt for Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then call again."#,
         input_schema: {
             "type": "object",
@@ -14,7 +14,7 @@
         },
     ),
     (
-        name: "simulator_screenshot",
+        kind: simulator_screenshot,
         description: "Capture the attached iOS Simulator screen and return it inline. Use the returned pixel dimensions and image coordinates with simulator_tap and simulator_swipe.",
         input_schema: {
             "type": "object",
@@ -23,7 +23,7 @@
         },
     ),
     (
-        name: "simulator_tap",
+        kind: simulator_tap,
         description: "Tap the attached iOS Simulator at x,y pixel coordinates from simulator_screenshot.",
         input_schema: {
             "type": "object",
@@ -36,7 +36,7 @@
         },
     ),
     (
-        name: "simulator_swipe",
+        kind: simulator_swipe,
         description: "Swipe the attached iOS Simulator between pixel coordinates from simulator_screenshot. duration_ms defaults to 300.",
         input_schema: {
             "type": "object",
@@ -52,7 +52,7 @@
         },
     ),
     (
-        name: "simulator_type",
+        kind: simulator_type,
         description: "Type text into the focused control in the attached iOS Simulator.",
         input_schema: {
             "type": "object",
@@ -64,7 +64,7 @@
         },
     ),
     (
-        name: "simulator_key",
+        kind: simulator_key,
         description: "Press one HID keycode in the attached iOS Simulator. Common codes: Enter 40, Backspace 42, Tab 43, Space 44.",
         input_schema: {
             "type": "object",
@@ -76,7 +76,7 @@
         },
     ),
     (
-        name: "simulator_button",
+        kind: simulator_button,
         description: "Press a hardware button on the attached iOS Simulator.",
         input_schema: {
             "type": "object",
@@ -88,7 +88,7 @@
         },
     ),
     (
-        name: "browser_snapshot",
+        kind: browser_snapshot,
         description: r#"Read the current page's DOM as a compact semantic snapshot. Returns JSON with the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, `value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a specific page; defaults to the focused page."#,
         input_schema: {
             "type": "object",
@@ -102,7 +102,7 @@
         },
     ),
     (
-        name: "browser_scroll",
+        kind: browser_scroll,
         description: r#"Scroll the visible browser page so the user can watch, then return the post-scroll snapshot (same shape as browser_snapshot, including viewport + inViewport flags). Pass exactly one of `to` ("top" or "bottom") or `delta` (pixels; positive = down, e.g. one screen is about the snapshot's viewport.height). Pass `target` = pane:<id> or stack:<id> to pick a page; defaults to the focused page. Prefer scrolling to read long pages instead of assuming off-screen content."#,
         input_schema: {
             "type": "object",
@@ -126,7 +126,7 @@
         },
     ),
     (
-        name: "record_start",
+        kind: record_start,
         description: r#"Start recording the vmux window to an mp4 video (optionally also a GIF). Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call record_stop. Record in ONE live take: start, perform the few actions you want to show, then stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the live interaction in a single pass. Auto-stops after `max_secs` (default 600) as a safety cap. Only one recording at a time. macOS only; the first call may prompt for Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then call again."#,
         input_schema: {
             "type": "object",
@@ -148,7 +148,7 @@
         },
     ),
     (
-        name: "record_stop",
+        kind: record_stop,
         description: r#"Stop the active recording and write the file(s). Returns the mp4 path, duration, and size (plus the GIF path if one was requested). By default saves to the active vmux profile's recording directory; pass `dir` (absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, name=<feature> to drop a demo straight into the repo."#,
         input_schema: {
             "type": "object",

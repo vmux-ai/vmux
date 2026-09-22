@@ -1,8 +1,10 @@
 use super::{
     DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 pub(super) struct StateToolsPlugin;
@@ -17,29 +19,22 @@ impl Plugin for StateToolsPlugin {
     }
 }
 
-#[derive(Component)]
-struct ReadLayout;
-
-#[derive(Component)]
-struct UpdateLayout;
-
-#[derive(Component)]
-struct GetSettings;
-
-#[derive(Component)]
-struct ListSpaces;
-
-fn register(world: &mut World) {
-    let mut tools = ToolManifest::from_ron(include_str!("state.ron"));
-    tools.system(world, "read_layout", ReadLayout);
-    tools.system(world, "update_layout", UpdateLayout);
-    tools.system(world, "get_settings", GetSettings);
-    tools.system(world, "list_spaces", ListSpaces);
-    tools.finish();
+#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum StateTool {
+    ReadLayout,
+    UpdateLayout,
+    GetSettings,
+    ListSpaces,
 }
 
-fn read_layout(mut commands: Commands, calls: ToolCalls<ReadLayout>) {
-    for (request, call, _) in calls.iter() {
+fn register(mut tools: ToolSpawner) {
+    let manifest = ToolManifest::<StateTool>::from_ron(include_str!("state.ron"));
+    tools.spawn_manifest(manifest);
+}
+
+fn read_layout(mut commands: Commands, calls: ToolCalls<StateTool>) {
+    for (request, call, _) in calls.matching(StateTool::ReadLayout) {
         call.finish_dispatch(
             request,
             &mut commands,
@@ -50,7 +45,7 @@ fn read_layout(mut commands: Commands, calls: ToolCalls<ReadLayout>) {
     }
 }
 
-fn update_layout(mut commands: Commands, calls: ToolCalls<UpdateLayout>) {
+fn update_layout(mut commands: Commands, calls: ToolCalls<StateTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let layout = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("update_layout: invalid layout payload: {error}"))?;
@@ -59,13 +54,13 @@ fn update_layout(mut commands: Commands, calls: ToolCalls<UpdateLayout>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(StateTool::UpdateLayout) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn get_settings(mut commands: Commands, calls: ToolCalls<GetSettings>) {
-    for (request, call, _) in calls.iter() {
+fn get_settings(mut commands: Commands, calls: ToolCalls<StateTool>) {
+    for (request, call, _) in calls.matching(StateTool::GetSettings) {
         call.finish_dispatch(
             request,
             &mut commands,
@@ -74,8 +69,8 @@ fn get_settings(mut commands: Commands, calls: ToolCalls<GetSettings>) {
     }
 }
 
-fn list_spaces(mut commands: Commands, calls: ToolCalls<ListSpaces>) {
-    for (request, call, _) in calls.iter() {
+fn list_spaces(mut commands: Commands, calls: ToolCalls<StateTool>) {
+    for (request, call, _) in calls.matching(StateTool::ListSpaces) {
         call.finish_dispatch(
             request,
             &mut commands,
