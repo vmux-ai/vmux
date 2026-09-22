@@ -173,12 +173,12 @@ struct EditorExplorerPlugin;
 
 impl Plugin for EditorExplorerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ExplorerChrome {
+        app.insert_resource(ExplorerPanelDefaults {
             default_visible: false,
             width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
         })
         .register_type::<StackExplorerVisibility>()
-        .init_resource::<ExplorerChromeSynced>()
+        .init_resource::<ExplorerPanelDefaultsLoaded>()
         .init_resource::<PendingGlobalSearch>()
         .add_plugins(ExplorerTreePlugin)
         .add_plugins(BinEventEmitterPlugin::<(
@@ -201,8 +201,8 @@ impl Plugin for EditorExplorerPlugin {
             Update,
             (
                 emit_explorer_tree.after(mark_explorer_tree_dirty),
-                sync_explorer_chrome,
-                emit_explorer_chrome,
+                load_explorer_panel_defaults,
+                emit_explorer_panel,
                 sync_open_editors,
                 emit_open_editors,
                 emit_outline_markdown,
@@ -823,7 +823,7 @@ struct OpenEditorsDirty;
 struct OutlineDirty;
 
 #[derive(Component)]
-struct ExplorerChromeSent;
+struct ExplorerPanelSent;
 
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[reflect(Component)]
@@ -839,13 +839,13 @@ struct StackExplorerRevision {
 }
 
 #[derive(Resource, Clone, Copy)]
-struct ExplorerChrome {
+struct ExplorerPanelDefaults {
     default_visible: bool,
     width: u32,
 }
 
 #[derive(Resource, Default)]
-struct ExplorerChromeSynced(bool);
+struct ExplorerPanelDefaultsLoaded(bool);
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct GlobalSearchRequest {
@@ -900,9 +900,9 @@ type GlobalSearchDirtyReady = (
     With<GlobalSearchDirty>,
     With<vmux_core::page::PageReady>,
 );
-type ChromeUnsentReady = (
+type PanelUnsentReady = (
     With<FileView>,
-    Without<ExplorerChromeSent>,
+    Without<ExplorerPanelSent>,
     With<vmux_core::page::PageReady>,
 );
 type NavigableFileView = (
@@ -1291,7 +1291,7 @@ fn reset_file_sent_markers_on_page_ready(
         .remove::<NoteSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
         .remove::<crate::lsp::manager::DiagSent>()
-        .remove::<ExplorerChromeSent>()
+        .remove::<ExplorerPanelSent>()
         .insert(ExplorerTreeDirty)
         .insert(OpenEditorsDirty);
     if crate::explorer_model::is_markdown(&fv.path) {
@@ -3216,7 +3216,7 @@ fn reveal_on_file_change(
     mut views: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
     child_of: Query<&ChildOf>,
     visibility: Query<&StackExplorerVisibility>,
-    chrome: Res<ExplorerChrome>,
+    panel: Res<ExplorerPanelDefaults>,
     mut trees: ResMut<ExplorerTrees>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
@@ -3227,7 +3227,7 @@ fn reveal_on_file_change(
         let visible = visibility
             .get(scope)
             .map(|state| state.visible)
-            .unwrap_or(chrome.default_visible);
+            .unwrap_or(panel.default_visible);
         if !visible {
             continue;
         }
@@ -3656,24 +3656,24 @@ fn drain_explorer_mutations(
     }
 }
 
-fn sync_explorer_chrome(
+fn load_explorer_panel_defaults(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut chrome: ResMut<ExplorerChrome>,
-    mut synced: ResMut<ExplorerChromeSynced>,
+    mut panel: ResMut<ExplorerPanelDefaults>,
+    mut loaded: ResMut<ExplorerPanelDefaultsLoaded>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    if synced.0 {
+    if loaded.0 {
         return;
     }
     let Some(settings) = settings else {
         return;
     };
-    chrome.default_visible = settings.editor.explorer.visible();
-    chrome.width = settings.editor.explorer.width();
-    synced.0 = true;
-    for e in &views {
-        commands.entity(e).remove::<ExplorerChromeSent>();
+    panel.default_visible = settings.editor.explorer.visible();
+    panel.width = settings.editor.explorer.width();
+    loaded.0 = true;
+    for entity in &views {
+        commands.entity(entity).remove::<ExplorerPanelSent>();
     }
 }
 
@@ -3681,15 +3681,15 @@ fn explorer_scope(entity: Entity, child_of: &Query<&ChildOf>) -> Entity {
     child_of.get(entity).map(ChildOf::parent).unwrap_or(entity)
 }
 
-fn emit_explorer_chrome(
-    q: Query<(Entity, Option<&ChildOf>), ChromeUnsentReady>,
+fn emit_explorer_panel(
+    views: Query<(Entity, Option<&ChildOf>), PanelUnsentReady>,
     visibility: Query<&StackExplorerVisibility>,
     revisions: Query<&StackExplorerRevision>,
-    chrome: Res<ExplorerChrome>,
+    panel: Res<ExplorerPanelDefaults>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, child_of) in &q {
+    for (entity, child_of) in &views {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
@@ -3697,22 +3697,22 @@ fn emit_explorer_chrome(
         let visible = visibility
             .get(scope)
             .map(|state| state.visible)
-            .unwrap_or(chrome.default_visible);
+            .unwrap_or(panel.default_visible);
         let revision = revisions.get(scope).copied().unwrap_or_default();
         commands.trigger(BinHostEmitEvent::from_event(
             entity,
-            &ExplorerChromeEvent {
+            &ExplorerPanelEvent {
                 visible,
-                width: chrome.width,
+                width: panel.width,
                 client_id: revision.client_id,
                 request_id: revision.request_id,
             },
         ));
-        commands.entity(entity).insert(ExplorerChromeSent);
+        commands.entity(entity).insert(ExplorerPanelSent);
     }
 }
 
-fn persist_chrome_width(
+fn persist_explorer_width(
     width: u32,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
@@ -3726,9 +3726,9 @@ fn persist_chrome_width(
     }
 }
 
-fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Commands) {
-    for e in views {
-        commands.entity(e).remove::<ExplorerChromeSent>();
+fn mark_explorer_panel_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Commands) {
+    for entity in views {
+        commands.entity(entity).remove::<ExplorerPanelSent>();
     }
 }
 
@@ -3784,9 +3784,9 @@ fn on_explorer_panel_set_visible(
             continue;
         }
         if view == entity {
-            commands.entity(view).insert(ExplorerChromeSent);
+            commands.entity(view).insert(ExplorerPanelSent);
         } else {
-            commands.entity(view).remove::<ExplorerChromeSent>();
+            commands.entity(view).remove::<ExplorerPanelSent>();
         }
     }
     if next_visibility.visible
@@ -3807,18 +3807,18 @@ fn on_explorer_panel_set_visible(
 
 fn on_explorer_panel_width(
     trigger: On<BinReceive<ExplorerPanelWidth>>,
-    mut chrome: ResMut<ExplorerChrome>,
+    mut panel: ResMut<ExplorerPanelDefaults>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    chrome.width = trigger.event().payload.px.clamp(
+    panel.width = trigger.event().payload.px.clamp(
         vmux_setting::EXPLORER_MIN_WIDTH,
         vmux_setting::EXPLORER_MAX_WIDTH,
     );
-    persist_chrome_width(chrome.width, settings, saves);
-    mark_chrome_unsent(&views, &mut commands);
+    persist_explorer_width(panel.width, settings, saves);
+    mark_explorer_panel_unsent(&views, &mut commands);
 }
 
 fn sync_open_editors(
@@ -4000,7 +4000,7 @@ fn apply_global_search_requests(
     views: Query<(Entity, &FileView, Option<&ChildOf>)>,
     visibility: Query<&StackExplorerVisibility>,
     mut pending: ResMut<PendingGlobalSearch>,
-    chrome: Res<ExplorerChrome>,
+    panel: Res<ExplorerPanelDefaults>,
     mut commands: Commands,
 ) {
     pending.0.extend(
@@ -4029,7 +4029,7 @@ fn apply_global_search_requests(
         let explorer_visible = visibility
             .get(scope)
             .map(|state| state.visible)
-            .unwrap_or(chrome.default_visible);
+            .unwrap_or(panel.default_visible);
         if !explorer_visible {
             commands
                 .entity(scope)
@@ -4037,7 +4037,7 @@ fn apply_global_search_requests(
             for (view, _, parent) in &views {
                 let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
                 if view_scope == scope {
-                    commands.entity(view).remove::<ExplorerChromeSent>();
+                    commands.entity(view).remove::<ExplorerPanelSent>();
                 }
             }
         }
@@ -4346,7 +4346,7 @@ mod explorer_tests {
         fn with(default_visible: bool) -> App {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, ExplorerTreePlugin))
-                .insert_resource(ExplorerChrome {
+                .insert_resource(ExplorerPanelDefaults {
                     default_visible,
                     width: 240,
                 });
@@ -4782,7 +4782,7 @@ mod explorer_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<ExplorerTrees>()
-            .insert_resource(ExplorerChrome {
+            .insert_resource(ExplorerPanelDefaults {
                 default_visible: false,
                 width: 240,
             })
@@ -4841,7 +4841,7 @@ mod explorer_tests {
                     path: PathBuf::from("/a.rs"),
                 },
                 ExplorerState::default(),
-                ExplorerChromeSent,
+                ExplorerPanelSent,
                 ChildOf(first_stack),
             ))
             .id();
@@ -4852,7 +4852,7 @@ mod explorer_tests {
                     path: PathBuf::from("/b.rs"),
                 },
                 ExplorerState::default(),
-                ExplorerChromeSent,
+                ExplorerPanelSent,
                 ChildOf(first_stack),
             ))
             .id();
@@ -4863,7 +4863,7 @@ mod explorer_tests {
                     path: PathBuf::from("/c.rs"),
                 },
                 ExplorerState::default(),
-                ExplorerChromeSent,
+                ExplorerPanelSent,
                 ChildOf(second_stack),
             ))
             .id();
@@ -4888,9 +4888,9 @@ mod explorer_tests {
                 .unwrap()
                 .visible
         );
-        assert!(app.world().get::<ExplorerChromeSent>(first).is_some());
-        assert!(app.world().get::<ExplorerChromeSent>(peer).is_none());
-        assert!(app.world().get::<ExplorerChromeSent>(other).is_some());
+        assert!(app.world().get::<ExplorerPanelSent>(first).is_some());
+        assert!(app.world().get::<ExplorerPanelSent>(peer).is_none());
+        assert!(app.world().get::<ExplorerPanelSent>(other).is_some());
 
         app.world_mut().trigger(BinReceive {
             webview: first,
@@ -4913,7 +4913,7 @@ mod explorer_tests {
     fn global_search_opens_only_the_target_stack_explorer() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(ExplorerChrome {
+            .insert_resource(ExplorerPanelDefaults {
                 default_visible: false,
                 width: 240,
             })
@@ -5016,7 +5016,7 @@ mod explorer_tests {
     fn panel_width_clamps() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(ExplorerChrome {
+            .insert_resource(ExplorerPanelDefaults {
                 default_visible: true,
                 width: 240,
             })
@@ -5031,7 +5031,7 @@ mod explorer_tests {
             webview: e,
             payload: ExplorerPanelWidth { px: 9000 },
         });
-        assert_eq!(app.world().resource::<ExplorerChrome>().width, 600);
+        assert_eq!(app.world().resource::<ExplorerPanelDefaults>().width, 600);
     }
 
     #[test]

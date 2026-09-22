@@ -408,7 +408,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         let event_type = ev.r#type();
         let mut titlebar_gesture = None;
         let capture_window_gesture = match event_type {
-            NSEventType::LeftMouseDown if !event_window_wears_the_window_chrome(ev) => {
+            NSEventType::LeftMouseDown if !event_belongs_to_main_window_frame(ev) => {
                 titlebar_clicks
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -475,7 +475,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
         );
-        let event_belongs_to_main_window = event_window_wears_the_window_chrome(ev);
+        let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
         let button_event = matches!(
             event_type,
             NSEventType::LeftMouseDown
@@ -645,7 +645,7 @@ fn event_window_is_key(event: &objc2_app_kit::NSEvent) -> bool {
     event.window(mtm).is_some_and(|window| window.isKeyWindow())
 }
 
-fn event_window_wears_the_window_chrome(event: &objc2_app_kit::NSEvent) -> bool {
+fn event_belongs_to_main_window_frame(event: &objc2_app_kit::NSEvent) -> bool {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
