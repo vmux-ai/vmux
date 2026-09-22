@@ -17,8 +17,10 @@ pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::tools::ToolsPlugin)
-            .init_resource::<NextRequestSequence>()
+        if !app.is_plugin_added::<crate::tools::ToolsPlugin>() {
+            app.add_plugins(crate::tools::ToolsPlugin);
+        }
+        app.init_resource::<NextRequestSequence>()
             .configure_sets(
                 Update,
                 (
@@ -54,6 +56,21 @@ pub struct McpServer {
     app: App,
 }
 
+pub struct McpServerBuilder {
+    app: App,
+}
+
+impl McpServerBuilder {
+    pub fn plugin(mut self, plugin: impl Plugin) -> Self {
+        self.app.add_plugins(plugin);
+        self
+    }
+
+    pub fn build(self) -> McpServer {
+        McpServer { app: self.app }
+    }
+}
+
 impl McpServer {
     pub fn new(
         anchor: Option<vmux_client::protocol::ProcessId>,
@@ -62,6 +79,16 @@ impl McpServer {
         run_block_timeout: Duration,
         shell: String,
     ) -> Self {
+        Self::builder(anchor, acp_session, acp_terminals, run_block_timeout, shell).build()
+    }
+
+    pub fn builder(
+        anchor: Option<vmux_client::protocol::ProcessId>,
+        acp_session: bool,
+        acp_terminals: bool,
+        run_block_timeout: Duration,
+        shell: String,
+    ) -> McpServerBuilder {
         let mut app = App::new();
         app.insert_resource(McpConfig {
             anchor,
@@ -71,7 +98,7 @@ impl McpServer {
             shell,
         })
         .add_plugins(McpPlugin);
-        Self { app }
+        McpServerBuilder { app }
     }
 
     pub async fn handle(&mut self, message: Value) -> Option<Value> {

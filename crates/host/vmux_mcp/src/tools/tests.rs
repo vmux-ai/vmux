@@ -4,6 +4,79 @@ use vmux_client::protocol::{
     SimulatorButton,
 };
 
+#[derive(Component, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ExtensionTool {
+    Echo,
+}
+
+#[derive(Deserialize)]
+struct EchoArgs {
+    text: String,
+}
+
+impl McpToolHandler for ExtensionTool {
+    fn dispatch(&self, request: McpToolRequest<'_>) -> Result<DispatchTarget, String> {
+        let EchoArgs { text } = request.parse()?;
+        Ok(DispatchTarget::Command(AgentCommand::Notify {
+            title: Some("Extension".to_string()),
+            body: Some(text),
+        }))
+    }
+}
+
+const EXTENSION_TOOLS: &str = r#"
+[
+    (
+        kind: echo,
+        description: "Echo through an extension tool",
+        input_schema: {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+                "text": {"type": "string"},
+            },
+            "additionalProperties": false,
+        },
+    ),
+]
+"#;
+
+#[test]
+fn extension_plugin_registers_and_dispatches_its_manifest() {
+    let mut app = App::new();
+    app.add_plugins(McpToolPlugin::<ExtensionTool>::new(EXTENSION_TOOLS));
+    app.update();
+
+    let definitions = ToolDefinition::all(app.world_mut(), false, false, "");
+    assert!(
+        definitions
+            .iter()
+            .any(|definition| definition.name == "echo")
+    );
+
+    let execution = ToolCall::dispatch(
+        &mut app,
+        "echo",
+        serde_json::json!({"text": "hello"}),
+        None,
+        "",
+        false,
+        false,
+    )
+    .unwrap();
+    assert!(matches!(
+        execution,
+        ToolExecution::Dispatch {
+            target: DispatchTarget::Command(AgentCommand::Notify {
+                title: Some(title),
+                body: Some(body),
+            }),
+            ..
+        } if title == "Extension" && body == "hello"
+    ));
+}
+
 #[test]
 fn the_run_tool_teaches_the_shell_it_will_actually_use() {
     let plain = super::ShellNote::for_shell("/bin/zsh");
