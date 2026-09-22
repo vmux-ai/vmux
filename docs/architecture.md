@@ -293,7 +293,7 @@ better part of a second on roughly one press in five, worst on the chip whose to
 carries a whole worktree path, because that offers the longest range to snapshot. The
 press was delivered, the thread then stopped, and mousedown, mouseup and click all arrived
 together when it came back — which is why it reads as a dropped click rather than a slow
-one. No page here wants force-click inside its own chrome.
+one. No page here wants force-click inside its own UI.
 
 **Content pages are still CEF.** `Browser::new` is the leaf that carries them — windowed,
 natively focused — so scrolling an `https://` page costs what Chrome costs. CEF also still
@@ -318,7 +318,7 @@ and permission prompts. An event carries coordinates relative to *its* window, s
 a click on one of those against the shell's drag region silently reads a point tens of
 pixels down as a titlebar hit and swallows it into `performWindowDragWithEvent` — an
 autofill suggestion that highlights on hover and does nothing when clicked. Only the window
-that actually wears the chrome may be measured against it.
+that actually owns the window controls may be measured against it.
 
 Dioxus is React-shaped either way — `rsx!` markup, signals and hooks — styled with Tailwind
 and shadcn tokens. The content you open is full Chromium; any React or Vue app renders

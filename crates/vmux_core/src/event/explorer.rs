@@ -183,8 +183,8 @@ pub struct OutlineEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "explorer", name = "chrome", target = "files")]
-pub struct ExplorerChromeEvent {
+#[vmux_api::host_event(namespace = "explorer", name = "panel", target = "files")]
+pub struct ExplorerPanelEvent {
     pub visible: bool,
     pub width: u32,
     pub client_id: u64,

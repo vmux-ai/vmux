@@ -13,7 +13,7 @@ use crate::page_model::{
     centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started, gutter_width,
     heading_class, image_mime, line_severity, note_cursor_activation, note_inline_nodes,
     note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
-    should_apply_explorer_chrome, span_style, squiggle_style,
+    should_apply_explorer_panel, span_style, squiggle_style,
 };
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::html::input_data::MouseButton;
@@ -197,17 +197,17 @@ pub fn Page() -> Element {
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
 
-    let _chrome = use_listener::<ExplorerChromeEvent, _>(move |c| {
-        if should_apply_explorer_chrome(
+    let _panel = use_listener::<ExplorerPanelEvent, _>(move |event| {
+        if should_apply_explorer_panel(
             explorer_client_id(),
             explorer_request_id(),
-            c.client_id,
-            c.request_id,
+            event.client_id,
+            event.request_id,
         ) {
-            explorer_preferred_visible.set(c.visible);
+            explorer_preferred_visible.set(event.visible);
         }
-        if explorer_width() != c.width {
-            explorer_width.set(c.width);
+        if explorer_width() != event.width {
+            explorer_width.set(event.width);
         }
         explorer.sync();
     });

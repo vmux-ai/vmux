@@ -314,7 +314,7 @@ pub enum PkgAction {
     None,
 }
 
-pub fn should_apply_explorer_chrome(
+pub fn should_apply_explorer_panel(
     local_client_id: u64,
     latest_request_id: u64,
     event_client_id: u64,
@@ -961,10 +961,10 @@ mod tests {
 
     #[test]
     fn rapid_explorer_toggle_ignores_stale_echoes() {
-        assert!(!should_apply_explorer_chrome(7, 3, 7, 1));
-        assert!(!should_apply_explorer_chrome(7, 3, 7, 2));
-        assert!(should_apply_explorer_chrome(7, 3, 7, 3));
-        assert!(should_apply_explorer_chrome(7, 3, 9, 1));
+        assert!(!should_apply_explorer_panel(7, 3, 7, 1));
+        assert!(!should_apply_explorer_panel(7, 3, 7, 2));
+        assert!(should_apply_explorer_panel(7, 3, 7, 3));
+        assert!(should_apply_explorer_panel(7, 3, 9, 1));
     }
 
     #[test]

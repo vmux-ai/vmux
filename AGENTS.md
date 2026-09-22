@@ -67,6 +67,7 @@ Combinators are fine where they stay small and local — `map_err` to convert an
 ## Rules
 
 - Never show literal loading copy such as "Loading..." or "Loading data..." in product UI. Use a skeleton for structured content or matrix rain for a full-surface transition.
+- Reserve `Chrome` for Google Chrome or Chromium compatibility code. Never use `chrome` to mean application UI, window controls, a panel, a toolbar, a shell, or presentation state.
 - When constructing a Bevy entity, first compose it from existing shared components such as `Name`, ID components, `Active`, `Order`, and timestamps. Add a feature-specific marker component when the entity needs a distinct role. Do not introduce a new aggregate component or row struct that duplicates fields already represented by common components.
 - Route every new user-facing UI string through Fluent (`vmux_ui::i18n`). Add the message to `en-US.ftl` and every bundled locale with identical IDs and variables. Do not ship untranslated English literals or rely on English fallback for bundled locales. Dynamic external content and raw diagnostic output are exempt.
 - No comments in Rust sources. Not `//`, not `///`, not `//!`. Names and types carry what the code does; `docs/architecture.md` carries why the system is shaped the way it is. A *why* worth writing down goes there, where a reader finds it without opening a file and where one paragraph serves the ten call sites that would each have grown their own. This does not apply to `patches/`, which is vendored third-party code we re-apply on every version bump.
