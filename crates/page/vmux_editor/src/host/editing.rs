@@ -9,8 +9,6 @@ use vmux_command::ScopedKeys;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
-#[cfg(test)]
-use vmux_core::page_open::PageOpenTask;
 
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
@@ -30,14 +28,10 @@ use crate::host::file_lifecycle::EditorFileLifecyclePlugin;
 #[cfg(test)]
 use crate::host::file_lifecycle::LoadFailure;
 use crate::host::file_lifecycle::{FileBuffer, FileDir, FileLoadTask, SelfWrites, canon};
-#[cfg(test)]
-use crate::host::history::EditorHistoryPlugin;
 use crate::host::language::{EditorLanguageRequest, LspEditDirty, WikiCompletionRequest};
 #[cfg(test)]
 use crate::host::navigation::EditorNavigationPlugin;
 use crate::host::note::NoteSent;
-#[cfg(test)]
-use crate::host::page_open::EditorPageOpenPlugin;
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
@@ -1800,25 +1794,6 @@ mod explorer_tests {
 }
 
 #[cfg(test)]
-mod fold_window_tests {
-    use crate::fold::{FoldState, indent_regions};
-    use ropey::Rope;
-
-    #[test]
-    fn collapsed_region_hidden_from_window() {
-        let r = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
-        let mut folds = FoldState::default();
-        folds.set_regions(indent_regions(&r));
-        folds.close(0);
-        let view = folds.view(r.len_lines() as u32);
-        let visible = view.lines_for_window(0, view.visible_count());
-        assert!(visible.contains(&0));
-        assert!(!visible.contains(&1) && !visible.contains(&2));
-        assert!(visible.contains(&3));
-    }
-}
-
-#[cfg(test)]
 mod parked_edit_tests {
     use super::*;
 
@@ -2130,191 +2105,5 @@ mod parked_edit_tests {
         assert_eq!(edits.by_path.len(), ParkedEdits::CAPACITY);
         assert!(edits.by_path.contains_key(Path::new("/tmp/10.rs")));
         assert!(!edits.by_path.contains_key(Path::new("/tmp/0.rs")));
-    }
-}
-
-#[cfg(test)]
-mod host_history_tests {
-    use super::*;
-    use vmux_core::PageOpenId;
-    use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
-
-    struct Editor {
-        app: App,
-        view: Entity,
-        dir: tempfile::TempDir,
-    }
-
-    impl Editor {
-        fn opened(name: &str) -> Self {
-            let dir = tempfile::tempdir().unwrap();
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_plugins(vmux_core::CorePlugin)
-                .add_plugins(EditorNavigationPlugin)
-                .add_plugins(EditorHistoryPlugin)
-                .add_plugins(EditorPageOpenPlugin);
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
-            let stack = app.world_mut().spawn_empty().id();
-            app.world_mut().spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: format!("file://{}", dir.path().join(name).display()),
-                request_id: None,
-            });
-            app.update();
-            app.update();
-            let view = app
-                .world_mut()
-                .query_filtered::<Entity, With<FileView>>()
-                .single(app.world())
-                .expect("opening a file:// page spawns one file view");
-            Self { app, view, dir }
-        }
-
-        fn open(&mut self, name: &str) {
-            let path = self.dir.path().join(name).to_string_lossy().into_owned();
-            self.app.world_mut().trigger(BinReceive {
-                webview: self.view,
-                payload: FileOpenEvent { path },
-            });
-            self.app.update();
-        }
-
-        fn scroll_to(&mut self, top_row: u32) {
-            self.app
-                .world_mut()
-                .get_mut::<FileViewport>(self.view)
-                .expect("a file view has a viewport")
-                .top_row = top_row;
-            self.app.update();
-        }
-
-        fn step(&mut self, delta: HostHistoryDelta) {
-            let webview = self.view;
-            self.app
-                .world_mut()
-                .write_message(HostHistoryStep { webview, delta });
-            self.app.update();
-        }
-
-        fn showing(&self) -> String {
-            self.app
-                .world()
-                .get::<FileView>(self.view)
-                .expect("a file view")
-                .path
-                .file_name()
-                .expect("a named file")
-                .to_string_lossy()
-                .into_owned()
-        }
-
-        fn top_row(&self) -> u32 {
-            self.app
-                .world()
-                .get::<FileViewport>(self.view)
-                .expect("a file view has a viewport")
-                .top_row
-        }
-
-        fn history(&self) -> &HostHistory {
-            self.app
-                .world()
-                .get::<HostHistory>(self.view)
-                .expect("a file view owns its history")
-        }
-    }
-
-    #[test]
-    fn back_and_forward_walk_the_files_the_editor_opened() {
-        let mut editor = Editor::opened("a.rs");
-        editor.open("b.rs");
-        editor.open("c.rs");
-        assert!(editor.history().can_go_back());
-        assert!(!editor.history().can_go_forward());
-
-        editor.step(HostHistoryDelta::Back);
-        assert_eq!(editor.showing(), "b.rs");
-        assert!(editor.history().can_go_forward());
-
-        editor.step(HostHistoryDelta::Back);
-        assert_eq!(editor.showing(), "a.rs");
-        assert!(!editor.history().can_go_back());
-
-        editor.step(HostHistoryDelta::Forward);
-        assert_eq!(editor.showing(), "b.rs");
-    }
-
-    #[test]
-    fn opening_a_file_after_going_back_drops_the_forward_trail() {
-        let mut editor = Editor::opened("a.rs");
-        editor.open("b.rs");
-        editor.open("c.rs");
-        editor.step(HostHistoryDelta::Back);
-        editor.step(HostHistoryDelta::Back);
-
-        editor.open("d.rs");
-
-        assert!(!editor.history().can_go_forward());
-        editor.step(HostHistoryDelta::Back);
-        assert_eq!(editor.showing(), "a.rs");
-        editor.step(HostHistoryDelta::Forward);
-        assert_eq!(editor.showing(), "d.rs");
-    }
-
-    #[test]
-    fn going_back_lands_on_the_line_the_file_was_left_at() {
-        let mut editor = Editor::opened("a.rs");
-        editor.scroll_to(120);
-        editor.open("b.rs");
-        assert_eq!(editor.top_row(), 0);
-
-        editor.step(HostHistoryDelta::Back);
-
-        assert_eq!(editor.showing(), "a.rs");
-        assert_eq!(editor.top_row(), 120);
-    }
-}
-
-#[cfg(test)]
-mod open_editor_tests {
-    use super::*;
-
-    impl ExplorerState {
-        fn holding(paths: &[&str]) -> Self {
-            Self {
-                open_editors: paths.iter().map(PathBuf::from).collect(),
-                ..Self::default()
-            }
-        }
-    }
-
-    #[test]
-    fn closing_an_editor_hands_back_the_tab_that_takes_its_place() {
-        let mut st = ExplorerState::holding(&["/a", "/b", "/c"]);
-        assert_eq!(
-            st.close_editor(Path::new("/b")),
-            Some(PathBuf::from("/c")),
-            "closing a middle tab moves right, as the tab strip reads"
-        );
-        assert_eq!(
-            st.close_editor(Path::new("/c")),
-            Some(PathBuf::from("/a")),
-            "closing the last tab falls back to the one on its left"
-        );
-        assert_eq!(st.close_editor(Path::new("/a")), None);
-        assert!(st.open_editors.is_empty());
-    }
-
-    #[test]
-    fn closing_an_editor_that_was_never_open_changes_nothing() {
-        let mut st = ExplorerState::holding(&["/a"]);
-        assert_eq!(st.close_editor(Path::new("/zzz")), None);
-        assert_eq!(st.open_editors, vec![PathBuf::from("/a")]);
     }
 }

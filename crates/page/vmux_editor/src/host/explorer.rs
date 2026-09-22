@@ -74,3 +74,41 @@ impl ExplorerState {
         self.open_editors.get(neighbour).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl ExplorerState {
+        fn holding(paths: &[&str]) -> Self {
+            Self {
+                open_editors: paths.iter().map(PathBuf::from).collect(),
+                ..Self::default()
+            }
+        }
+    }
+
+    #[test]
+    fn closing_an_editor_hands_back_the_tab_that_takes_its_place() {
+        let mut state = ExplorerState::holding(&["/a", "/b", "/c"]);
+        assert_eq!(
+            state.close_editor(Path::new("/b")),
+            Some(PathBuf::from("/c")),
+            "closing a middle tab moves right, as the tab strip reads"
+        );
+        assert_eq!(
+            state.close_editor(Path::new("/c")),
+            Some(PathBuf::from("/a")),
+            "closing the last tab falls back to the one on its left"
+        );
+        assert_eq!(state.close_editor(Path::new("/a")), None);
+        assert!(state.open_editors.is_empty());
+    }
+
+    #[test]
+    fn closing_an_editor_that_was_never_open_changes_nothing() {
+        let mut state = ExplorerState::holding(&["/a"]);
+        assert_eq!(state.close_editor(Path::new("/zzz")), None);
+        assert_eq!(state.open_editors, vec![PathBuf::from("/a")]);
+    }
+}
