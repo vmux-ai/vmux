@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+mod completion;
 pub mod handler;
 pub mod key;
 pub mod panel;
@@ -15,6 +16,7 @@ pub struct CommandBarPlugin;
 impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            completion::CommandBarCompletionPlugin,
             handler::CommandBarInputPlugin,
             key::CommandBarKeyPlugin,
             panel::CommandBarPanelPlugin,

@@ -10,18 +10,17 @@ use vmux_core::launcher::{
 };
 
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::project_files::{ProjectCompletions, RankBias};
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
     CommandBarPanelCloseEvent, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest,
-    CommandBarSizeEvent, OpenId, PathCompleteRequest, PathEntry, SearchEngine, SearchEngineSetting,
+    CommandBarSizeEvent, OpenId, SearchEngine, SearchEngineSetting,
 };
 use crate::open::OpenCommand;
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
-    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
+    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
 };
 use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -59,24 +58,14 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 CommandBarRequest,
-                PathCompleteRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
             )>::default())
             .add_observer(on_command_bar_request)
-            .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
             .add_observer(on_command_bar_rendered)
             .add_observer(on_command_bar_size)
-            .init_resource::<crate::command_bar::project_files::ProjectIndex>()
-            .add_systems(
-                Update,
-                (
-                    warm_project_index.after(WriteCommandBarSnapshots),
-                    answer_settled_project_index.after(warm_project_index),
-                ),
-            )
             .add_systems(
                 Update,
                 prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
@@ -1094,42 +1083,6 @@ fn retry_pending_command_bar_open(
     }
 }
 
-fn on_path_complete_request(
-    trigger: On<BinReceive<PathCompleteRequest>>,
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
-    browsers: NonSend<Browsers>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-    mut commands: Commands,
-) {
-    let asking = trigger.event().webview;
-    if !browsers.can_emit_to(&asking) {
-        return;
-    }
-    let query = &trigger.event().payload.query;
-
-    let mut completions = None;
-    let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
-    if roots.is_empty() {
-        index.forget(asking);
-    } else {
-        let bias = RankBias::new(
-            ProjectQuery::favoured(
-                projects.active.as_deref(),
-                workspace.project_root.as_deref(),
-            ),
-            &work.recent_files,
-        );
-        completions = index.matches(&roots, &bias, query, asking);
-    }
-    let completions = completions.unwrap_or_else(|| complete_path(query));
-    commands.trigger(BinHostEmitEvent::from_event(
-        asking,
-        &completions.response(),
-    ));
-}
-
 fn mirror_project_roots(
     projects: Res<crate::snapshot::CommandBarProjectRoots>,
     mut work: ResMut<crate::snapshot::CommandBarWorkSnapshot>,
@@ -1138,179 +1091,6 @@ fn mirror_project_roots(
         return;
     }
     work.projects = projects.roots.clone();
-}
-
-fn warm_project_index(
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-) {
-    if !workspace.is_changed() && !projects.is_changed() {
-        return;
-    }
-    let roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
-    if roots.is_empty() {
-        return;
-    }
-    index.warm(&roots);
-}
-
-fn answer_settled_project_index(
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
-    browsers: NonSend<Browsers>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-    mut commands: Commands,
-) {
-    let pending = index.pending();
-    if pending.is_empty() {
-        return;
-    }
-    let bias = RankBias::new(
-        ProjectQuery::favoured(
-            projects.active.as_deref(),
-            workspace.project_root.as_deref(),
-        ),
-        &work.recent_files,
-    );
-    for asked in pending {
-        if !browsers.can_emit_to(&asked.webview) {
-            continue;
-        }
-        let roots = ProjectQuery::roots_for(
-            &asked.query,
-            workspace.project_root.as_deref(),
-            &projects.roots,
-        );
-        if roots.is_empty() {
-            continue;
-        }
-        let Some(completions) = index.settled_for(asked.webview, &roots, &bias) else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_event(
-            asked.webview,
-            &completions.response(),
-        ));
-    }
-}
-
-struct ProjectQuery;
-
-impl ProjectQuery {
-    fn roots_for(
-        query: &str,
-        project_root: Option<&str>,
-        registered: &[String],
-    ) -> Vec<std::path::PathBuf> {
-        let query = query.trim();
-        if query.is_empty() || Self::names_a_location(query) {
-            return Vec::new();
-        }
-        Self::all(project_root, registered)
-    }
-
-    fn favoured<'a>(active: Option<&'a str>, project_root: Option<&'a str>) -> Option<&'a str> {
-        for candidate in [active, project_root] {
-            let Some(candidate) = candidate else {
-                continue;
-            };
-            let candidate = candidate.trim();
-            if !candidate.is_empty() {
-                return Some(candidate);
-            }
-        }
-        None
-    }
-
-    fn all(project_root: Option<&str>, registered: &[String]) -> Vec<std::path::PathBuf> {
-        let mut roots = Vec::new();
-        for candidate in project_root
-            .into_iter()
-            .chain(registered.iter().map(String::as_str))
-        {
-            let root = std::path::PathBuf::from(candidate.trim());
-            if roots.contains(&root) || !root.is_dir() {
-                continue;
-            }
-            roots.push(root);
-        }
-        roots
-    }
-
-    fn names_a_location(query: &str) -> bool {
-        query.starts_with('/') || query.starts_with('~') || query.starts_with('.')
-    }
-}
-
-fn complete_path(query: &str) -> ProjectCompletions {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-
-    let (parent_str, prefix) = if let Some(pos) = query.rfind('/') {
-        (&query[..=pos], &query[pos + 1..])
-    } else {
-        ("", query)
-    };
-
-    let resolved_parent = if parent_str.starts_with("~/") || parent_str == "~/" {
-        std::path::PathBuf::from(&home).join(&parent_str[2..])
-    } else if parent_str.starts_with('/') {
-        std::path::PathBuf::from(parent_str)
-    } else if parent_str.is_empty() {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&home))
-    } else {
-        std::path::PathBuf::from(&home).join(parent_str)
-    };
-
-    let Ok(entries) = std::fs::read_dir(&resolved_parent) else {
-        return ProjectCompletions::listed(Vec::new(), 0);
-    };
-
-    let prefix_lower = prefix.to_lowercase();
-    let mut results: Vec<PathEntry> = Vec::new();
-
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-        if !prefix.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
-            continue;
-        }
-
-        let display_name = if is_dir {
-            format!("{}/", name)
-        } else {
-            name.clone()
-        };
-
-        let child = resolved_parent.join(&name);
-        let full_path = if is_dir {
-            format!("{}/", child.display())
-        } else {
-            child.display().to_string()
-        };
-
-        results.push(PathEntry {
-            name: display_name,
-            is_dir,
-            full_path,
-            project: String::new(),
-        });
-    }
-
-    results.sort_by(|a, b| {
-        let a_hidden = a.name.starts_with('.');
-        let b_hidden = b.name.starts_with('.');
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then(a_hidden.cmp(&b_hidden))
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    let total = results.len();
-    results.truncate(crate::command_bar::project_files::MAX_RESULTS);
-    ProjectCompletions::listed(results, total)
 }
 
 #[cfg(test)]
