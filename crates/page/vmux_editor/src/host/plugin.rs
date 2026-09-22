@@ -17,8 +17,10 @@ use crate::dir::{list_dir, parent_listing, project_root};
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
+use crate::history::EditorHistoryPlugin;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
+use crate::navigation::{EditorNavigationPlugin, NoteRevealLine};
 use crate::page_model::DisplayCells;
 use crate::preview;
 use crate::wrap::WrapView;
@@ -39,6 +41,7 @@ impl Plugin for EditorPlugin {
             EditorFileLifecyclePlugin,
             EditorPresentationPlugin,
             EditorEditingPlugin,
+            EditorNavigationPlugin,
             EditorHistoryPlugin,
             EditorExplorerPlugin,
         ));
@@ -102,9 +105,7 @@ impl Plugin for EditorFileLifecyclePlugin {
                 apply_lsp_workspace_edit
                     .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             )
-            .add_observer(reset_file_sent_markers_on_page_ready)
-            .add_observer(on_file_open)
-            .add_observer(on_knowledge_link_open);
+            .add_observer(reset_file_sent_markers_on_page_ready);
     }
 }
 
@@ -280,7 +281,7 @@ impl FileView {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn navigate(
+    pub(crate) fn navigate(
         &mut self,
         entity: Entity,
         path: PathBuf,
@@ -907,9 +908,6 @@ struct FileKeymapSent;
 
 #[derive(Component)]
 struct NoteSent;
-
-#[derive(Component, Clone, Copy)]
-struct NoteRevealLine(u32);
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
@@ -2514,168 +2512,6 @@ fn on_file_open_external(
     #[cfg(not(target_os = "macos"))]
     let program = "xdg-open";
     let _ = std::process::Command::new(program).arg(&req_path).spawn();
-}
-
-struct EditorHistoryPlugin;
-
-impl Plugin for EditorHistoryPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                show_traversed_file_view.in_set(vmux_core::host::page::HostHistorySet::Apply),
-                record_file_view_visit.in_set(vmux_core::host::page::HostHistorySet::Record),
-            ),
-        );
-    }
-}
-
-fn show_traversed_file_view(
-    mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
-    mut views: Query<NavigableFileView>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    for event in traversed.read() {
-        let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(event.webview) else {
-            continue;
-        };
-        let Some(path) =
-            vmux_core::file_url::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
-        else {
-            continue;
-        };
-        view.navigate(
-            event.webview,
-            path,
-            event.entry.top_line,
-            &mut viewport,
-            &mut metadata,
-            &mut manager,
-            &mut commands,
-        );
-    }
-}
-
-fn record_file_view_visit(
-    mut views: Query<
-        (
-            &PageMetadata,
-            &FileViewport,
-            &mut vmux_core::host::page::HostHistory,
-        ),
-        With<FileView>,
-    >,
-) {
-    for (metadata, viewport, mut history) in &mut views {
-        if metadata.url.is_empty() || history.showing(&metadata.url, viewport.top_row) {
-            continue;
-        }
-        history.observe(&metadata.url, viewport.top_row);
-    }
-}
-
-fn on_file_open(
-    trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<NavigableFileView>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
-        return;
-    };
-    fv.navigate(
-        entity,
-        path,
-        0,
-        &mut vp,
-        &mut meta,
-        &mut manager,
-        &mut commands,
-    );
-}
-
-fn on_knowledge_link_open(
-    trigger: On<BinReceive<KnowledgeLinkOpen>>,
-    mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let root = vmux_core::knowledge::KnowledgeVault::user().into_root();
-    let requested = PathBuf::from(&request.path);
-    let path = if request.create {
-        let Ok(relative) = requested.strip_prefix(&root) else {
-            return;
-        };
-        if requested.exists() {
-            let Ok(canonical_root) = root.canonicalize() else {
-                return;
-            };
-            let Ok(metadata) = std::fs::symlink_metadata(&requested) else {
-                return;
-            };
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                return;
-            }
-            let Ok(path) = requested.canonicalize() else {
-                return;
-            };
-            if !path.starts_with(canonical_root) {
-                return;
-            }
-            path
-        } else {
-            let relative = relative.to_string_lossy();
-            match vmux_core::knowledge::KnowledgeVault::user().write_note(
-                Some(&relative),
-                &request.title,
-                &format!("# {}", request.title),
-            ) {
-                Ok(path) => path,
-                Err(error) => {
-                    if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_event(
-                            entity,
-                            &FileErrorEvent {
-                                message: error,
-                                undecodable: false,
-                            },
-                        ));
-                    }
-                    return;
-                }
-            }
-        }
-    } else {
-        let Ok(root) = root.canonicalize() else {
-            return;
-        };
-        if std::fs::symlink_metadata(&requested)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-        {
-            return;
-        }
-        let Ok(path) = requested.canonicalize() else {
-            return;
-        };
-        if !path.starts_with(root) {
-            return;
-        }
-        path
-    };
-    if let Some(line) = request.line {
-        commands.entity(entity).insert(NoteRevealLine(line));
-    }
-    goto.write(crate::lsp::manager::LspGoto {
-        entity,
-        path,
-        line: request.line.unwrap_or(0),
-        utf16_col: 0,
-    });
 }
 
 #[derive(Component)]
@@ -6538,13 +6374,13 @@ mod page_open_tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(EditorNavigationPlugin)
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .insert_resource(crate::lsp::manager::LspManager::new(
                 crate::lsp::LspOutbox::default(),
                 crate::lsp::server_request::ServerEvents::default().sender(),
             ))
-            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain())
-            .add_observer(on_file_open);
+            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain());
         app
     }
 
@@ -6969,11 +6805,11 @@ mod parked_edit_tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
+                .add_plugins(EditorNavigationPlugin)
                 .add_systems(
                     Update,
                     (load_file_buffers, apply_loaded_file_buffers).chain(),
                 )
-                .add_observer(on_file_open)
                 .add_observer(on_file_encoding_set);
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
@@ -7562,10 +7398,10 @@ mod host_history_tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(vmux_core::CorePlugin)
+                .add_plugins(EditorNavigationPlugin)
                 .add_plugins(EditorHistoryPlugin)
                 .add_message::<vmux_core::event::RecordVisitRequest>()
-                .add_systems(Update, handle_file_page_open)
-                .add_observer(on_file_open);
+                .add_systems(Update, handle_file_page_open);
             app.world_mut()
                 .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
