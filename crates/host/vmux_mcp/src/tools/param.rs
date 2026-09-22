@@ -1,4 +1,4 @@
-use vmux_client::protocol::{AgentCommand, AgentSpaceCommand};
+use vmux_client::protocol::{AgentCommand, AgentSpaceCommand, JsonValue};
 use vmux_macro::McpTool;
 
 #[derive(Debug, McpTool)]
@@ -79,7 +79,7 @@ impl McpParamTool {
                 };
                 Ok(AgentCommand::AppCommand {
                     id: id.to_string(),
-                    args_json: String::new(),
+                    args: JsonValue::Object(Vec::new()),
                 })
             }
             McpParamTool::BrowserNavigate { url, pane } => {
@@ -123,7 +123,7 @@ impl McpParamTool {
                 }
                 Ok(AgentCommand::AppCommand {
                     id: format!("tab_select_{index}"),
-                    args_json: String::new(),
+                    args: JsonValue::Object(Vec::new()),
                 })
             }
             McpParamTool::UpdateSettings { path, value } => {
@@ -132,7 +132,7 @@ impl McpParamTool {
                 }
                 Ok(AgentCommand::UpdateSettings {
                     path,
-                    value_json: value.to_string(),
+                    value: JsonValue::from(value),
                 })
             }
             McpParamTool::BrowserGoBack { pane } => Ok(AgentCommand::BrowserGoBack { pane }),

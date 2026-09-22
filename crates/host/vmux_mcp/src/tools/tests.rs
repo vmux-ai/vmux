@@ -468,7 +468,7 @@ fn auto_generated_tool_dispatches_as_app_command() {
         command,
         AgentCommand::AppCommand {
             id: "terminal_clear".to_string(),
-            args_json: String::new(),
+            args: vmux_client::protocol::JsonValue::Object(Vec::new()),
         }
     );
 }
@@ -872,7 +872,7 @@ fn select_tab_dispatches_to_tab_select_id() {
         command,
         AgentCommand::AppCommand {
             id: "tab_select_3".to_string(),
-            args_json: String::new(),
+            args: vmux_client::protocol::JsonValue::Object(Vec::new()),
         }
     );
 }
@@ -1372,9 +1372,9 @@ fn update_settings_dispatches_with_path_and_value() {
     )
     .unwrap();
     match target {
-        DispatchTarget::Command(AgentCommand::UpdateSettings { path, value_json }) => {
+        DispatchTarget::Command(AgentCommand::UpdateSettings { path, value }) => {
             assert_eq!(path, "layout.pane.gap");
-            let parsed: serde_json::Value = serde_json::from_str(&value_json).unwrap();
+            let parsed = serde_json::Value::try_from(&value).unwrap();
             assert_eq!(parsed, serde_json::json!(12.0));
         }
         other => panic!("expected UpdateSettings command, got {other:?}"),

@@ -27,7 +27,7 @@ pub fn Page() -> Element {
     let mut search = use_signal(String::new);
 
     let _values = use_listener::<SettingsListEvent, _>(move |data| {
-        snapshot.set(data.value.to_serde().unwrap_or(Value::Null));
+        snapshot.set(serde_json::Value::try_from(&data.value).unwrap_or(Value::Null));
     });
 
     let _schema = use_listener::<SettingsSchemaEvent, _>(move |data| {

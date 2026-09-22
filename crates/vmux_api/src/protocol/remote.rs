@@ -1,7 +1,7 @@
 use super::{
     AgentAction, AgentAttachment, AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
-    AgentRequestId, CommandLifecycleKind, CopyModeKey, ManagedMcpServer, ProcessInfo, SharedEvent,
-    SharedMessage,
+    AgentRequestId, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
+    SharedEvent, SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -281,7 +281,7 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         sid: String,
         name: String,
-        args_json: String,
+        args: JsonValue,
     },
     AcpTerminalCreated {
         sid: String,

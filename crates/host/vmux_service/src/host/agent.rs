@@ -7,7 +7,8 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use crate::agent_broker::AgentBroker;
 use crate::message::{AssistantBlock, Message};
 use crate::protocol::{
-    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
+    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, JsonValue, ServiceMessage,
+    SharedEvent,
 };
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
@@ -440,17 +441,17 @@ async fn run_session(
                 break;
             };
 
-            let args_json = if args.trim().is_empty() {
-                "{}".to_string()
+            let args = if args.trim().is_empty() {
+                JsonValue::Object(Vec::new())
             } else {
-                args
+                JsonValue::parse_or_string(&args)
             };
 
             if !auto_tools.contains(&name) {
                 let next_approval = RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
-                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
+                    args: args.clone(),
                 };
                 *approval.lock().unwrap() = Some(next_approval.clone());
                 let _ =
@@ -458,7 +459,7 @@ async fn run_session(
                         sid: sid.clone(),
                         call_id: call_id.clone(),
                         name: name.clone(),
-                        args: vmux_api::json::JsonValue::parse_or_string(&args_json),
+                        args: args.clone(),
                     }));
                 match await_decision(&mut input_rx, &call_id).await {
                     Decision::Closed => return,
@@ -486,7 +487,7 @@ async fn run_session(
             }
 
             let (content, is_error) = match broker
-                .tool_call(AgentRequestId::new(), sid.clone(), name, args_json)
+                .tool_call(AgentRequestId::new(), sid.clone(), name, args)
                 .await
             {
                 Ok(result) => result,

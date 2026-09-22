@@ -8,6 +8,7 @@ pub use shared::{
 };
 
 pub use crate::ProcessId;
+pub use crate::json::JsonValue;
 
 mod agent;
 mod process;
@@ -620,7 +621,7 @@ mod tests {
     fn update_settings_command_rkyv_roundtrip() {
         let cmd = AgentCommand::UpdateSettings {
             path: "layout.pane.gap".to_string(),
-            value_json: "12.0".to_string(),
+            value: JsonValue::Number("12.0".to_string()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
@@ -664,7 +665,7 @@ mod tests {
     fn update_settings_validation_rejects_empty_path() {
         let cmd = AgentCommand::UpdateSettings {
             path: "".to_string(),
-            value_json: "1".to_string(),
+            value: JsonValue::Number("1".to_string()),
         };
         assert!(validate_agent_command(&cmd).is_err());
     }
@@ -996,7 +997,7 @@ mod tests {
                 request_id: AgentRequestId::new(),
                 sid: "s".into(),
                 name: "n".into(),
-                args_json: "{}".into(),
+                args: JsonValue::Object(Vec::new()),
             },
             ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: "s".into(),

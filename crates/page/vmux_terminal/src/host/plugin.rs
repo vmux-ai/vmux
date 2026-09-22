@@ -1580,7 +1580,7 @@ fn poll_service_messages(
                 request_id,
                 sid,
                 name,
-                args_json,
+                args,
             } => {
                 writers
                     .agent_tool_calls
@@ -1588,7 +1588,7 @@ fn poll_service_messages(
                         request_id,
                         sid,
                         name,
-                        args_json,
+                        args,
                     });
             }
             ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
@@ -1608,8 +1608,7 @@ fn poll_service_messages(
                 name,
                 args,
             }) => {
-                let args = args
-                    .to_serde()
+                let args = serde_json::Value::try_from(&args)
                     .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
                 writers.page_agent_awaiting.write(
                     vmux_service::agent_events::PageAgentAwaitingApproval {
