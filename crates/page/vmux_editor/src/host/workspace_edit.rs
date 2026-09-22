@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
+use super::editing::{ClipboardHandle, EditState, EditorKeymap, FileView, run_commands};
 use super::file_lifecycle::{SelfWrites, canon};
-use super::plugin::{ClipboardHandle, EditState, EditorKeymap, FileView, run_commands};
 use super::viewport::FileViewport;
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;

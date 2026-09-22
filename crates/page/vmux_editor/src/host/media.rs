@@ -8,8 +8,8 @@ use vmux_core::event::{
     PreviewKind,
 };
 
+use crate::host::editing::FileView;
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
-use crate::host::plugin::FileView;
 use crate::host::preview;
 use crate::host::status::FileInitialMetaSent;
 

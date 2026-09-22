@@ -14,8 +14,6 @@ use vmux_core::page_open::PageOpenTask;
 
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
-use crate::history::EditorHistoryPlugin;
-use crate::host::explorer::EditorExplorerPlugin;
 #[cfg(test)]
 use crate::host::explorer::{
     ExplorerPanelDefaults, ExplorerTabsPlugin, StackExplorerRevision, StackExplorerVisibility,
@@ -28,51 +26,28 @@ use crate::host::explorer::{
 };
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 #[cfg(test)]
+use crate::host::file_lifecycle::EditorFileLifecyclePlugin;
+#[cfg(test)]
 use crate::host::file_lifecycle::LoadFailure;
 use crate::host::file_lifecycle::{
-    EditorFileLifecyclePlugin, FileBuffer, FileDir, FileLoadTask, ForcedEncoding, SelfWrites, canon,
+    FileBuffer, FileDir, FileLoadTask, ForcedEncoding, SelfWrites, canon,
 };
-use crate::host::note::{EditorNotePlugin, NoteSent};
+#[cfg(test)]
+use crate::host::history::EditorHistoryPlugin;
+#[cfg(test)]
+use crate::host::navigation::EditorNavigationPlugin;
+use crate::host::note::NoteSent;
+#[cfg(test)]
 use crate::host::page_open::EditorPageOpenPlugin;
-use crate::host::status::{EditorStatusPlugin, FileInitialMetaSent, SharedFileViewMode};
-use crate::host::viewport::{
-    EditorCursor, EditorViewportPlugin, EditorWindow, FileViewport, FoldsDirty,
-};
+use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
+use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
-use crate::media::{EditorMediaPlugin, FileMedia};
-use crate::navigation::EditorNavigationPlugin;
+use crate::media::FileMedia;
 use crate::page_model::DisplayCells;
-use crate::workspace_edit::EditorWorkspaceEditPlugin;
 use crate::wrap::WrapView;
 use vmux_core::scroll::clamp_top_line;
 
-pub struct EditorPlugin;
-
-impl Plugin for EditorPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(FILES_PAGE_MANIFEST);
-        app.world_mut().spawn(PROJECTS_PAGE_MANIFEST);
-        app.add_plugins((
-            crate::contract::EditorContractPlugin,
-            crate::lsp::LspPlugin,
-            crate::app_key::FileKeyPlugin,
-            crate::search::ProjectSearchPlugin,
-            EditorPageOpenPlugin,
-            EditorFileLifecyclePlugin,
-            EditorWorkspaceEditPlugin,
-            EditorStatusPlugin,
-            EditorViewportPlugin,
-            EditorMediaPlugin,
-            EditorNotePlugin,
-            EditorEditingPlugin,
-            EditorNavigationPlugin,
-            EditorHistoryPlugin,
-            EditorExplorerPlugin,
-        ));
-    }
-}
-
-struct EditorEditingPlugin;
+pub(super) struct EditorEditingPlugin;
 
 impl Plugin for EditorEditingPlugin {
     fn build(&self, app: &mut App) {
@@ -1827,26 +1802,6 @@ fn flush_lsp_changes(
         commands.entity(entity).remove::<LspEditDirty>();
     }
 }
-
-pub const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "files",
-    title: "Files",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &["file", "open"],
-    icon: Some(vmux_core::BuiltinIcon::Files),
-    command_bar: true,
-};
-
-pub const PROJECTS_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "projects",
-    title: "Projects",
-    title_message_id: Some("layout-projects"),
-    replaces_command: None,
-    keywords: &["project", "files", "folder", "open"],
-    icon: Some(vmux_core::BuiltinIcon::Project),
-    command_bar: true,
-};
 
 #[cfg(test)]
 mod edit_flow_tests {

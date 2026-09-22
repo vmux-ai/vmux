@@ -11,7 +11,7 @@ use crate::explorer_model::flatten_tree;
 
 use super::ExplorerState;
 use super::panel::{ExplorerPanelDefaults, StackExplorerVisibility};
-use crate::host::plugin::FileView;
+use crate::host::editing::FileView;
 
 #[derive(Default)]
 pub(in crate::host) struct ExplorerTree {
