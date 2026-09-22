@@ -1,4 +1,4 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::{
     PageIdentity, PageMetadata,
@@ -58,20 +58,257 @@ pub(crate) struct PageStatePlugin;
 
 impl Plugin for PageStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                push_layout_state_emit,
-                push_stacks_host_emit,
-                push_pane_tree_emit,
-                push_tabs_host_emit,
-                push_bookmarks_host_emit,
-                push_update_notice_emit,
-                push_projects_host_emit,
+        app.init_resource::<PageStateRevision>()
+            .add_systems(
+                Update,
+                mark_page_state_dirty
+                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::stack::ComputeFocusSet),
             )
-                .after(vmux_layout::apply_cef_state_from_webview)
-                .after(vmux_layout::stack::ComputeFocusSet),
-        );
+            .add_systems(
+                Update,
+                (
+                    push_layout_state_emit,
+                    push_stacks_host_emit,
+                    push_pane_tree_emit,
+                    push_tabs_host_emit,
+                    push_bookmarks_host_emit,
+                    push_update_notice_emit,
+                    push_projects_host_emit,
+                )
+                    .after(mark_page_state_dirty),
+            );
+    }
+}
+
+#[derive(Resource, Default)]
+struct PageStateRevision(u64);
+
+impl PageStateRevision {
+    fn advance(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+}
+
+#[derive(Default)]
+struct ProjectionCache {
+    revisions: EntityHashMap<u64>,
+    bodies: EntityHashMap<String>,
+}
+
+impl ProjectionCache {
+    fn needs_rebuild(&self, entity: Entity, revision: u64, page_ready_changed: bool) -> bool {
+        page_ready_changed || self.revisions.get(&entity) != Some(&revision)
+    }
+
+    fn should_emit(
+        &mut self,
+        entity: Entity,
+        revision: u64,
+        body: String,
+        page_ready_changed: bool,
+    ) -> bool {
+        self.revisions.insert(entity, revision);
+        let previous = self
+            .bodies
+            .get(&entity)
+            .map(String::as_str)
+            .unwrap_or_default();
+        if !should_emit_cached_payload(&body, previous, page_ready_changed) {
+            return false;
+        }
+        self.bodies.insert(entity, body);
+        true
+    }
+}
+
+type PageProjectionChanged = Or<(
+    Changed<PageMetadata>,
+    Changed<PageIdentity>,
+    Changed<NavigationState>,
+    Changed<HostHistory>,
+    Changed<Loading>,
+    Changed<vmux_git::GitDiffSource>,
+    Changed<vmux_core::notify::AgentDoneUnseen>,
+)>;
+
+type LayoutProjectionChanged = Or<(
+    Changed<ChildOf>,
+    Changed<Children>,
+    Changed<LastActivatedAt>,
+    Changed<Open>,
+    Changed<Node>,
+    Changed<SideSheetPosition>,
+    Changed<SideSheetCardCollapsed>,
+    Changed<Tab>,
+    Changed<Window>,
+    Changed<HostWindow>,
+    Changed<vmux_layout::space::SpaceId>,
+    Changed<vmux_layout::side_sheet::SideSheetSectionsExpanded>,
+)>;
+
+type LayoutMarkerChanged = Or<(
+    Changed<Browser>,
+    Changed<Header>,
+    Changed<LayoutCef>,
+    Changed<PageReady>,
+    Changed<SideSheet>,
+    Changed<VmuxWindow>,
+    Changed<Stack>,
+    Changed<Pane>,
+    Changed<PaneSplit>,
+    Changed<vmux_layout::pane::Zoomed>,
+    Changed<vmux_layout::space::Space>,
+    Changed<vmux_core::Active>,
+)>;
+
+type BookmarkProjectionChanged = Or<(
+    Changed<vmux_core::Uuid>,
+    Changed<vmux_core::BookmarkOrder>,
+    Changed<vmux_core::Bookmark>,
+    Changed<vmux_core::Pin>,
+    Changed<vmux_core::Folder>,
+    Changed<Name>,
+    Changed<vmux_core::Collapsed>,
+    Changed<vmux_core::SmartBookmarkFolder>,
+)>;
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct PageStateChanges<'w, 's> {
+    pages: Query<'w, 's, (), PageProjectionChanged>,
+    layout: Query<'w, 's, (), LayoutProjectionChanged>,
+    markers: Query<'w, 's, (), LayoutMarkerChanged>,
+    bookmarks: Query<'w, 's, (), BookmarkProjectionChanged>,
+    projects: Query<'w, 's, (), Changed<vmux_space::ExpandedProjectDirs>>,
+}
+
+impl PageStateChanges<'_, '_> {
+    fn any(&self) -> bool {
+        !self.pages.is_empty()
+            || !self.layout.is_empty()
+            || !self.markers.is_empty()
+            || !self.bookmarks.is_empty()
+            || !self.projects.is_empty()
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct PageStateRemovals<'w, 's> {
+    browser: RemovedComponents<'w, 's, Browser>,
+    child_of: RemovedComponents<'w, 's, ChildOf>,
+    children: RemovedComponents<'w, 's, Children>,
+    page_metadata: RemovedComponents<'w, 's, PageMetadata>,
+    page_identity: RemovedComponents<'w, 's, PageIdentity>,
+    page_ready: RemovedComponents<'w, 's, PageReady>,
+    navigation: RemovedComponents<'w, 's, NavigationState>,
+    history: RemovedComponents<'w, 's, HostHistory>,
+    loading: RemovedComponents<'w, 's, Loading>,
+    git_diff: RemovedComponents<'w, 's, vmux_git::GitDiffSource>,
+    done: RemovedComponents<'w, 's, vmux_core::notify::AgentDoneUnseen>,
+    active: RemovedComponents<'w, 's, vmux_core::Active>,
+    header: RemovedComponents<'w, 's, Header>,
+    open: RemovedComponents<'w, 's, Open>,
+    side_sheet: RemovedComponents<'w, 's, SideSheet>,
+    side_sheet_position: RemovedComponents<'w, 's, SideSheetPosition>,
+    collapsed_pane: RemovedComponents<'w, 's, SideSheetCardCollapsed>,
+    vmux_window: RemovedComponents<'w, 's, VmuxWindow>,
+    window: RemovedComponents<'w, 's, Window>,
+    node: RemovedComponents<'w, 's, Node>,
+    layout_cef: RemovedComponents<'w, 's, LayoutCef>,
+    host_window: RemovedComponents<'w, 's, HostWindow>,
+    tab: RemovedComponents<'w, 's, Tab>,
+    stack: RemovedComponents<'w, 's, Stack>,
+    last_activated: RemovedComponents<'w, 's, LastActivatedAt>,
+    pane: RemovedComponents<'w, 's, Pane>,
+    pane_split: RemovedComponents<'w, 's, PaneSplit>,
+    zoomed: RemovedComponents<'w, 's, vmux_layout::pane::Zoomed>,
+    space: RemovedComponents<'w, 's, vmux_layout::space::Space>,
+    space_id: RemovedComponents<'w, 's, vmux_layout::space::SpaceId>,
+    sections_expanded:
+        RemovedComponents<'w, 's, vmux_layout::side_sheet::SideSheetSectionsExpanded>,
+    uuid: RemovedComponents<'w, 's, vmux_core::Uuid>,
+    bookmark_order: RemovedComponents<'w, 's, vmux_core::BookmarkOrder>,
+    bookmark: RemovedComponents<'w, 's, vmux_core::Bookmark>,
+    pin: RemovedComponents<'w, 's, vmux_core::Pin>,
+    folder: RemovedComponents<'w, 's, vmux_core::Folder>,
+    name: RemovedComponents<'w, 's, Name>,
+    collapsed: RemovedComponents<'w, 's, vmux_core::Collapsed>,
+    smart_folder: RemovedComponents<'w, 's, vmux_core::SmartBookmarkFolder>,
+    expanded_projects: RemovedComponents<'w, 's, vmux_space::ExpandedProjectDirs>,
+}
+
+impl PageStateRemovals<'_, '_> {
+    fn any(&mut self) -> bool {
+        let mut any = false;
+        any |= self.browser.read().count() > 0;
+        any |= self.child_of.read().count() > 0;
+        any |= self.children.read().count() > 0;
+        any |= self.page_metadata.read().count() > 0;
+        any |= self.page_identity.read().count() > 0;
+        any |= self.page_ready.read().count() > 0;
+        any |= self.navigation.read().count() > 0;
+        any |= self.history.read().count() > 0;
+        any |= self.loading.read().count() > 0;
+        any |= self.git_diff.read().count() > 0;
+        any |= self.done.read().count() > 0;
+        any |= self.active.read().count() > 0;
+        any |= self.header.read().count() > 0;
+        any |= self.open.read().count() > 0;
+        any |= self.side_sheet.read().count() > 0;
+        any |= self.side_sheet_position.read().count() > 0;
+        any |= self.collapsed_pane.read().count() > 0;
+        any |= self.vmux_window.read().count() > 0;
+        any |= self.window.read().count() > 0;
+        any |= self.node.read().count() > 0;
+        any |= self.layout_cef.read().count() > 0;
+        any |= self.host_window.read().count() > 0;
+        any |= self.tab.read().count() > 0;
+        any |= self.stack.read().count() > 0;
+        any |= self.last_activated.read().count() > 0;
+        any |= self.pane.read().count() > 0;
+        any |= self.pane_split.read().count() > 0;
+        any |= self.zoomed.read().count() > 0;
+        any |= self.space.read().count() > 0;
+        any |= self.space_id.read().count() > 0;
+        any |= self.sections_expanded.read().count() > 0;
+        any |= self.uuid.read().count() > 0;
+        any |= self.bookmark_order.read().count() > 0;
+        any |= self.bookmark.read().count() > 0;
+        any |= self.pin.read().count() > 0;
+        any |= self.folder.read().count() > 0;
+        any |= self.name.read().count() > 0;
+        any |= self.collapsed.read().count() > 0;
+        any |= self.smart_folder.read().count() > 0;
+        any |= self.expanded_projects.read().count() > 0;
+        any
+    }
+}
+
+fn mark_page_state_dirty(
+    changes: PageStateChanges,
+    mut removals: PageStateRemovals,
+    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_stack: Res<vmux_layout::stack::FocusedStack>,
+    side_sheet_width: Res<SideSheetWidth>,
+    settings: Res<AppSettings>,
+    active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
+    active_space_entity: Option<Res<vmux_layout::space::ActiveSpaceEntity>>,
+    repo_info: Option<Res<vmux_git::RepoInfoCache>>,
+    mut revision: ResMut<PageStateRevision>,
+) {
+    let resource_changed = focused_window.is_changed()
+        || focused_stack.is_changed()
+        || side_sheet_width.is_changed()
+        || settings.is_changed()
+        || active_space
+            .as_ref()
+            .is_some_and(|value| value.is_changed())
+        || active_space_entity
+            .as_ref()
+            .is_some_and(|value| value.is_changed())
+        || repo_info.as_ref().is_some_and(|value| value.is_changed());
+    if resource_changed || changes.any() || removals.any() {
+        revision.advance();
     }
 }
 
@@ -86,12 +323,16 @@ fn push_layout_state_emit(
     windows: Query<&Window>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
     let Some(host_window) = layout.host_windows.get(cef_e).ok().map(|host| host.0) else {
@@ -145,12 +386,10 @@ fn push_layout_state_emit(
         window_pad_left: window_padding.left,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    let previous = last.get(&cef_e).map(String::as_str).unwrap_or_default();
-    if !should_emit_cached_payload(&body, previous, page_ready_changed) {
+    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, body);
 }
 
 struct AddressRoots<'a> {
@@ -206,12 +445,16 @@ fn push_stacks_host_emit(
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
     let active_pane = focus.pane;
@@ -271,12 +514,10 @@ fn push_stacks_host_emit(
         is_zoomed,
     };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    let previous = last.get(&cef_e).map(String::as_str).unwrap_or_default();
-    if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
+    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, ron_body);
 }
 
 fn push_pane_tree_emit(
@@ -302,12 +543,16 @@ fn push_pane_tree_emit(
         ),
         With<Browser>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
 
@@ -389,12 +634,10 @@ fn push_pane_tree_emit(
     }
     let payload = PaneTreeEvent { panes };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    let previous = last.get(&cef_e).map(String::as_str).unwrap_or_default();
-    if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
+    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, ron_body);
 }
 
 fn abbreviate_project_path(path: &std::path::Path) -> String {
@@ -421,7 +664,8 @@ fn push_projects_host_emit(
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     space_projects: vmux_space::SpaceProjects,
     expansion_changed: Query<(), Changed<vmux_space::ExpandedProjectDirs>>,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
     mut listed: Local<Option<Vec<vmux_core::event::ProjectRow>>>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
 ) {
@@ -429,6 +673,9 @@ fn push_projects_host_emit(
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
     let stale = listed.is_none()
@@ -483,12 +730,10 @@ fn push_projects_host_emit(
     }
     let payload = TabBoundaryEvent { boundary, projects };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    let previous = last.get(&cef_e).map(String::as_str).unwrap_or_default();
-    if !should_emit_cached_payload(&ron_body, previous, page_ready_changed) {
+    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, ron_body);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -536,12 +781,16 @@ fn push_bookmarks_host_emit(
         ),
         With<vmux_core::Bookmark>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
 
@@ -607,11 +856,10 @@ fn push_bookmarks_host_emit(
         roots,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !page_ready_changed && last.get(&cef_e) == Some(&body) {
+    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, body);
 }
 
 fn push_tabs_host_emit(
@@ -629,12 +877,16 @@ fn push_tabs_host_emit(
     stack_children: Query<&Children>,
     browser_meta: Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
     done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
-    mut last: Local<std::collections::HashMap<Entity, String>>,
+    revision: Res<PageStateRevision>,
+    mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
     };
     if !browsers.can_emit_to(&cef_e) {
+        return;
+    }
+    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
 
@@ -690,11 +942,10 @@ fn push_tabs_host_emit(
 
     let payload = TabsHostEvent { tabs: rows };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !page_ready_changed && last.get(&cef_e) == Some(&body) {
+    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
-    last.insert(cef_e, body);
 }
 
 fn push_update_notice_emit(
@@ -748,4 +999,33 @@ fn push_update_notice_emit(
         )),
     }
     last.insert(cef_e, state.clone());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projection_cache_rebuilds_once_per_revision() {
+        let entity = Entity::from_bits(1);
+        let mut cache = ProjectionCache::default();
+
+        assert!(cache.needs_rebuild(entity, 0, false));
+        assert!(cache.should_emit(entity, 0, "body".to_string(), false));
+        assert!(!cache.needs_rebuild(entity, 0, false));
+
+        assert!(cache.needs_rebuild(entity, 1, false));
+        assert!(!cache.should_emit(entity, 1, "body".to_string(), false));
+        assert!(!cache.needs_rebuild(entity, 1, false));
+    }
+
+    #[test]
+    fn page_ready_forces_cached_projection_emission() {
+        let entity = Entity::from_bits(1);
+        let mut cache = ProjectionCache::default();
+
+        assert!(cache.should_emit(entity, 0, "body".to_string(), false));
+        assert!(cache.needs_rebuild(entity, 0, true));
+        assert!(cache.should_emit(entity, 0, "body".to_string(), true));
+    }
 }
