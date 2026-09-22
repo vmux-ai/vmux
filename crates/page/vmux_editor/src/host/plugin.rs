@@ -141,7 +141,7 @@ struct EditorEditingPlugin;
 impl Plugin for EditorEditingPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 FileOpenEvent,
                 FileTextInput,
                 FilePointerEvent,
@@ -155,7 +155,7 @@ impl Plugin for EditorEditingPlugin {
                 FileGotoRequest,
                 FileCompletionCommit,
             )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,

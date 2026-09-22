@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::event::{
     AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
@@ -10,7 +10,7 @@ pub struct AgentSetupPlugin;
 
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             AgentInstallRunRequest,
             AgentSetupPrereqRequest,
         )>::default())

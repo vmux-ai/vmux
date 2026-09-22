@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
@@ -19,7 +19,7 @@ pub(super) struct ChatResumePlugin;
 
 impl Plugin for ChatResumePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ResumeListRequest,
             ResumeSession,
             RuntimeSwitchRequest,

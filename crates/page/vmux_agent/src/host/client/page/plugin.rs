@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinEventEmitterPlugin;
+use bevy_cef::prelude::UiEventPlugin;
 
 use crate::AgentVariant;
 use crate::events::{AgentApprovalRequest, AgentDelta};
@@ -32,8 +32,8 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::default())
-            .add_plugins(BinEventEmitterPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
+            .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
+            .add_plugins(UiEventPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
             .add_observer(crate::host::on_tidy_request)
             .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)

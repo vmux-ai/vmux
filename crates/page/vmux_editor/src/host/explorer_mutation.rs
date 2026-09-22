@@ -14,7 +14,7 @@ pub(super) struct ExplorerMutationPlugin;
 
 impl Plugin for ExplorerMutationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ExplorerCreate,
             ExplorerRename,
             ExplorerDelete,

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::model::{effort_current_for, emit_mode_state, emit_model_state};
 use super::{AgentChatView, ChatSynced};
@@ -21,7 +21,7 @@ pub(super) struct ChatTranscriptPlugin;
 
 impl Plugin for ChatTranscriptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(ChatHistoryRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(ChatHistoryRequest,)>::default())
             .add_observer(on_chat_history_request)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(

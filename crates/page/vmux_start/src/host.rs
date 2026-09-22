@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
@@ -39,7 +39,7 @@ impl Plugin for StartPlugin {
                 ),
             );
         vmux_core::register_host_spawn(app, "start");
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,

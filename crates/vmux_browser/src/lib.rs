@@ -184,7 +184,7 @@ impl Plugin for BrowserPlugin {
                     os_crypt_key_provider: cef_os_crypt_key_provider(),
                     ..default()
                 },
-                BinEventEmitterPlugin::<(
+                UiEventPlugin::<(
                     HeaderRequest,
                     SideSheetRequest,
                     SideSheetResizeEvent,

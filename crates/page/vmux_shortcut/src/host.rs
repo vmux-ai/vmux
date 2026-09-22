@@ -5,9 +5,7 @@ use crate::{
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow,
-};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEventPlugin};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{AppCommand, ResolvedLocale, localized_command_name};
@@ -26,7 +24,7 @@ impl Plugin for ShortcutPlugin {
         app.init_resource::<ShortcutCaptureTarget>()
             .add_plugins((
                 HostedPagePlugin::<Shortcuts>::default(),
-                BinEventEmitterPlugin::<(ShortcutCaptureEvent,)>::default(),
+                UiEventPlugin::<(ShortcutCaptureEvent,)>::default(),
             ))
             .add_observer(send_shortcuts)
             .add_observer(update_shortcut_capture)

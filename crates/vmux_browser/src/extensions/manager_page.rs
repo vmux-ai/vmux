@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin,
-    Receive, WebviewCommittedNavigationEvent,
+    BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin,
+    WebviewCommittedNavigationEvent,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
@@ -37,12 +37,12 @@ impl Plugin for ExtensionsPlugin {
         app.init_resource::<ExtOutbox>()
             .init_resource::<ExtSubscribers>()
             .init_resource::<WebStoreInjectors>()
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 ExtToggleRequest,
                 ExtUninstallRequest,
                 ExtBrowseStoreRequest,
             )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 ExtListRequest,
                 ExtensionPopupOpenRequest,
                 ExtPinRequest,

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use vmux_core::event::{
     InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
     LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
@@ -24,7 +24,7 @@ impl Plugin for ManagerPlugin {
         vmux_core::register_host_spawn(app, "lsp");
         app.init_resource::<ManagerOutbox>()
             .init_resource::<ActiveInstalls>()
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
                 LspUninstallRequest,

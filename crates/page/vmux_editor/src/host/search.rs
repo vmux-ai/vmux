@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
@@ -20,7 +20,7 @@ pub(crate) struct ProjectSearchPlugin;
 
 impl Plugin for ProjectSearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(ExplorerSearchRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(ExplorerSearchRequest,)>::default())
             .add_observer(start_project_search)
             .add_systems(Update, finish_project_search);
     }

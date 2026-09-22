@@ -3,7 +3,7 @@ use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
 use vmux_core::host::page::PageManifest;
 use vmux_core::{
@@ -16,7 +16,7 @@ impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 BookmarkRequest,
                 BookmarkTextInputEvent,
                 BookmarkContextMenuEvent,

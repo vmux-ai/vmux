@@ -8,7 +8,7 @@ mod transcript;
 mod workspace;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use vmux_chat::event::ChatOpenPage;
 
@@ -27,7 +27,7 @@ impl Plugin for AgentChatPagePlugin {
             transcript::ChatTranscriptPlugin,
             workspace::ChatWorkspacePlugin,
         ))
-        .add_plugins(BinEventEmitterPlugin::<(ChatOpenPage,)>::default())
+        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
         .add_observer(on_chat_open_page);
     }
 }

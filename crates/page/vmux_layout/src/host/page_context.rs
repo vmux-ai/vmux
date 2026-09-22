@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_core::event::{
     PageContextEvent, PageContextRequest, TabWorkspaceEvent, TabWorkspaceRequest,
 };
@@ -14,10 +14,7 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
-            PageContextRequest,
-            TabWorkspaceRequest,
-        )>::default())
+        app.add_plugins(UiEventPlugin::<(PageContextRequest, TabWorkspaceRequest)>::default())
             .add_observer(on_page_context_request)
             .add_observer(on_tab_workspace_request);
     }

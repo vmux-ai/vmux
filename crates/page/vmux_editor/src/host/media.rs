@@ -16,7 +16,7 @@ pub(crate) struct EditorMediaPlugin;
 
 impl Plugin for EditorMediaPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             FilePreviewRequest,
             FileOpenExternalRequest,
             FileVideoRect,

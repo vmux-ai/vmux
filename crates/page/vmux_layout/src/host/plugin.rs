@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinEventEmitterPlugin;
+use bevy_cef::prelude::UiEventPlugin;
 use vmux_core::page::{PageReady, mark_webview_page_ready};
 
 use crate::active_panes::ActivePanesPlugin;
@@ -52,7 +52,7 @@ impl Plugin for LayoutPlugin {
                 Update,
                 (apply::apply_layout_requests, apply::serve_snapshot_requests),
             )
-            .add_plugins(BinEventEmitterPlugin::<(PageReady,)>::default())
+            .add_plugins(UiEventPlugin::<(PageReady,)>::default())
             .add_observer(mark_webview_page_ready)
             .add_plugins((
                 ProfilePlugin,

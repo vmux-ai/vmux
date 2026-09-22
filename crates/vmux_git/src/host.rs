@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::host::page::NativelyHosted;
 use vmux_core::{PageOpenRequest, PageOpenTarget};
@@ -79,7 +79,7 @@ impl Plugin for GitPlugin {
                 guessed: HashMap::new(),
                 wake: repo_info_wake,
             })
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 GitRepositoryRequest,
                 GitRepositoryPickerRequest,
                 GitBranchLogRequest,
@@ -93,7 +93,7 @@ impl Plugin for GitPlugin {
                 GitPushRequest,
                 GitHunkRequest,
             )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 GitFetchRequest,
                 GitAppRequest,
                 GitOperationRequest,
