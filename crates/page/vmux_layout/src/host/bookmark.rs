@@ -1,9 +1,17 @@
-use crate::event::{BookmarkContextMenuEvent, BookmarkRequest, BookmarkTextInputEvent};
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use vmux_api::bookmark::{
+    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderCreateRequest,
+    BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest, BookmarkFolderRenameRequest,
+    BookmarkFolderToggleRequest, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest,
+    BookmarkMenuPinRequest, BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest,
+    BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest, BookmarkRemoveRequest,
+    BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkTextInputRequest,
+    BookmarkToggleRequest, BookmarkUnpinRequest,
+};
 use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
 use vmux_core::host::page::PageManifest;
 use vmux_core::{
@@ -17,13 +25,53 @@ impl Plugin for BookmarkPlugin {
         app.add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(UiEventPlugin::<(
-                BookmarkRequest,
-                BookmarkTextInputEvent,
-                BookmarkContextMenuEvent,
+                BookmarkToggleRequest,
+                BookmarkMenuRootRequest,
+                BookmarkMenuPinRequest,
+                BookmarkMenuEntryRequest,
+                BookmarkMenuFolderRequest,
+                BookmarkOpenRequest,
+                BookmarkAddRequest,
+                BookmarkPinUrlRequest,
+                BookmarkRemoveRequest,
+                BookmarkRenameRequest,
+                BookmarkMoveRequest,
+                BookmarkMovePinRequest,
             )>::default())
-            .add_observer(on_bookmarks_command_emit)
-            .add_observer(on_bookmark_text_input_emit)
-            .add_observer(on_bookmark_context_menu_emit)
+            .add_plugins(UiEventPlugin::<(
+                BookmarkReorderPinRequest,
+                BookmarkPinRequest,
+                BookmarkUnpinRequest,
+                BookmarkFolderToggleRequest,
+                BookmarkFolderCreateRequest,
+                BookmarkFolderMoveRequest,
+                BookmarkFolderRenameRequest,
+                BookmarkFolderRemoveRequest,
+                BookmarkTextInputRequest,
+                BookmarkContextMenuRequest,
+            )>::default())
+            .add_observer(on_bookmark_toggle_request)
+            .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
+            .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
+            .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
+            .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
+            .add_observer(on_bookmark_open_request)
+            .add_observer(on_bookmark_mutation_request::<BookmarkAddRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkPinUrlRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkRemoveRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkRenameRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkMoveRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkMovePinRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkReorderPinRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkPinRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkUnpinRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkFolderToggleRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkFolderCreateRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkFolderMoveRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkFolderRenameRequest>)
+            .add_observer(on_bookmark_mutation_request::<BookmarkFolderRemoveRequest>)
+            .add_observer(on_bookmark_text_input_request)
+            .add_observer(on_bookmark_context_menu_request)
             .add_systems(
                 Update,
                 (
@@ -96,13 +144,19 @@ pub enum BookmarkMutation {
     },
 }
 
+#[derive(Message, Clone, Debug)]
+pub struct ShowBookmarkMenuRequest {
+    pub webview: Entity,
+    pub target: BookmarkMenuTarget,
+}
+
 #[derive(Clone, Debug)]
 pub enum BookmarkMenuTarget {
     Root,
     Pin {
         uuid: String,
     },
-    Bookmark {
+    Entry {
         uuid: String,
     },
     Folder {
@@ -111,20 +165,14 @@ pub enum BookmarkMenuTarget {
     },
 }
 
-#[derive(Message, Clone, Debug)]
-pub struct ShowBookmarkMenuRequest {
-    pub webview: Entity,
-    pub target: BookmarkMenuTarget,
-}
-
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BookmarkTextInputActive;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BookmarkContextMenuActive;
 
-fn on_bookmark_context_menu_emit(
-    trigger: On<BinReceive<BookmarkContextMenuEvent>>,
+fn on_bookmark_context_menu_request(
+    trigger: On<BinReceive<BookmarkContextMenuRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -137,8 +185,8 @@ fn on_bookmark_context_menu_emit(
     }
 }
 
-fn on_bookmark_text_input_emit(
-    trigger: On<BinReceive<BookmarkTextInputEvent>>,
+fn on_bookmark_text_input_request(
+    trigger: On<BinReceive<BookmarkTextInputRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -511,123 +559,184 @@ fn sync_bookmark_metadata(
     }
 }
 
-fn on_bookmarks_command_emit(
-    trigger: On<BinReceive<BookmarkRequest>>,
-    mut ops: MessageWriter<BookmarkMutation>,
+fn on_bookmark_toggle_request(
+    _trigger: On<BinReceive<BookmarkToggleRequest>>,
     mut app_cmds: MessageWriter<AppCommand>,
-    mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
 ) {
-    let e = &trigger.event().payload;
-    match e {
-        BookmarkRequest::ToggleActive => {
-            app_cmds.write(AppCommand::Bookmark(BookmarkCommand::ToggleActive));
+    app_cmds.write(AppCommand::Bookmark(BookmarkCommand::ToggleActive));
+}
+
+fn on_bookmark_open_request(
+    trigger: On<BinReceive<BookmarkOpenRequest>>,
+    mut app_cmds: MessageWriter<AppCommand>,
+) {
+    app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
+        OpenCommand::InNewStack {
+            url: Some(trigger.event().payload.url.clone()),
+        },
+    )));
+}
+
+fn on_bookmark_menu_request<R>(
+    trigger: On<BinReceive<R>>,
+    mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
+) where
+    R: Clone + Send + Sync + 'static,
+    BookmarkMenuTarget: From<R>,
+{
+    menu_req.write(ShowBookmarkMenuRequest {
+        webview: trigger.event().webview,
+        target: trigger.event().payload.clone().into(),
+    });
+}
+
+fn on_bookmark_mutation_request<R>(
+    trigger: On<BinReceive<R>>,
+    mut ops: MessageWriter<BookmarkMutation>,
+) where
+    R: Clone + Send + Sync + 'static,
+    BookmarkMutation: From<R>,
+{
+    ops.write(trigger.event().payload.clone().into());
+}
+
+impl From<BookmarkMenuRootRequest> for BookmarkMenuTarget {
+    fn from(_: BookmarkMenuRootRequest) -> Self {
+        Self::Root
+    }
+}
+
+impl From<BookmarkMenuPinRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuPinRequest) -> Self {
+        Self::Pin { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkMenuEntryRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuEntryRequest) -> Self {
+        Self::Entry { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkMenuFolderRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuFolderRequest) -> Self {
+        Self::Folder {
+            uuid: request.uuid,
+            active_page: request.active_page,
         }
-        BookmarkRequest::MenuRoot => {
-            menu_req.write(ShowBookmarkMenuRequest {
-                webview: trigger.event().webview,
-                target: BookmarkMenuTarget::Root,
-            });
+    }
+}
+
+impl From<BookmarkAddRequest> for BookmarkMutation {
+    fn from(request: BookmarkAddRequest) -> Self {
+        Self::Add {
+            metadata: request.metadata,
+            folder: request.folder,
         }
-        BookmarkRequest::MenuPin { uuid } => {
-            menu_req.write(ShowBookmarkMenuRequest {
-                webview: trigger.event().webview,
-                target: BookmarkMenuTarget::Pin { uuid: uuid.clone() },
-            });
+    }
+}
+
+impl From<BookmarkPinUrlRequest> for BookmarkMutation {
+    fn from(request: BookmarkPinUrlRequest) -> Self {
+        Self::PinUrl {
+            metadata: request.metadata,
         }
-        BookmarkRequest::MenuBookmark { uuid } => {
-            menu_req.write(ShowBookmarkMenuRequest {
-                webview: trigger.event().webview,
-                target: BookmarkMenuTarget::Bookmark { uuid: uuid.clone() },
-            });
+    }
+}
+
+impl From<BookmarkRemoveRequest> for BookmarkMutation {
+    fn from(request: BookmarkRemoveRequest) -> Self {
+        Self::Remove { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkRenameRequest> for BookmarkMutation {
+    fn from(request: BookmarkRenameRequest) -> Self {
+        Self::Rename {
+            uuid: request.uuid,
+            name: request.name,
         }
-        BookmarkRequest::MenuFolder { uuid, active_page } => {
-            menu_req.write(ShowBookmarkMenuRequest {
-                webview: trigger.event().webview,
-                target: BookmarkMenuTarget::Folder {
-                    uuid: uuid.clone(),
-                    active_page: active_page.clone(),
-                },
-            });
+    }
+}
+
+impl From<BookmarkMoveRequest> for BookmarkMutation {
+    fn from(request: BookmarkMoveRequest) -> Self {
+        Self::Move {
+            uuid: request.uuid,
+            folder: request.folder,
         }
-        BookmarkRequest::Open { url } => {
-            app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack {
-                    url: Some(url.clone()),
-                },
-            )));
+    }
+}
+
+impl From<BookmarkMovePinRequest> for BookmarkMutation {
+    fn from(request: BookmarkMovePinRequest) -> Self {
+        Self::MovePin {
+            uuid: request.uuid,
+            folder: request.folder,
         }
-        BookmarkRequest::Add { metadata, folder } => {
-            ops.write(BookmarkMutation::Add {
-                metadata: metadata.clone(),
-                folder: folder.clone(),
-            });
+    }
+}
+
+impl From<BookmarkReorderPinRequest> for BookmarkMutation {
+    fn from(request: BookmarkReorderPinRequest) -> Self {
+        Self::ReorderPin {
+            uuid: request.uuid,
+            target_uuid: request.target_uuid,
         }
-        BookmarkRequest::PinUrl { metadata } => {
-            ops.write(BookmarkMutation::PinUrl {
-                metadata: metadata.clone(),
-            });
+    }
+}
+
+impl From<BookmarkPinRequest> for BookmarkMutation {
+    fn from(request: BookmarkPinRequest) -> Self {
+        Self::Pin { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkUnpinRequest> for BookmarkMutation {
+    fn from(request: BookmarkUnpinRequest) -> Self {
+        Self::Unpin { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkFolderToggleRequest> for BookmarkMutation {
+    fn from(request: BookmarkFolderToggleRequest) -> Self {
+        Self::ToggleFolder { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkFolderCreateRequest> for BookmarkMutation {
+    fn from(request: BookmarkFolderCreateRequest) -> Self {
+        match request.parent {
+            Some(parent) => Self::AddFolderIn {
+                name: request.name,
+                parent,
+            },
+            None => Self::AddFolder { name: request.name },
         }
-        BookmarkRequest::Remove { uuid } => {
-            ops.write(BookmarkMutation::Remove { uuid: uuid.clone() });
+    }
+}
+
+impl From<BookmarkFolderMoveRequest> for BookmarkMutation {
+    fn from(request: BookmarkFolderMoveRequest) -> Self {
+        Self::MoveFolder {
+            uuid: request.uuid,
+            parent: request.parent,
         }
-        BookmarkRequest::Rename { uuid, name } => {
-            ops.write(BookmarkMutation::Rename {
-                uuid: uuid.clone(),
-                name: name.clone(),
-            });
+    }
+}
+
+impl From<BookmarkFolderRenameRequest> for BookmarkMutation {
+    fn from(request: BookmarkFolderRenameRequest) -> Self {
+        Self::RenameFolder {
+            uuid: request.uuid,
+            name: request.name,
         }
-        BookmarkRequest::Move { uuid, folder } => {
-            ops.write(BookmarkMutation::Move {
-                uuid: uuid.clone(),
-                folder: folder.clone(),
-            });
-        }
-        BookmarkRequest::MovePin { uuid, folder } => {
-            ops.write(BookmarkMutation::MovePin {
-                uuid: uuid.clone(),
-                folder: folder.clone(),
-            });
-        }
-        BookmarkRequest::ReorderPin { uuid, target_uuid } => {
-            ops.write(BookmarkMutation::ReorderPin {
-                uuid: uuid.clone(),
-                target_uuid: target_uuid.clone(),
-            });
-        }
-        BookmarkRequest::Pin { uuid } => {
-            ops.write(BookmarkMutation::Pin { uuid: uuid.clone() });
-        }
-        BookmarkRequest::Unpin { uuid } => {
-            ops.write(BookmarkMutation::Unpin { uuid: uuid.clone() });
-        }
-        BookmarkRequest::ToggleFolder { uuid } => {
-            ops.write(BookmarkMutation::ToggleFolder { uuid: uuid.clone() });
-        }
-        BookmarkRequest::CreateFolder { name, parent } => {
-            if let Some(parent) = parent.clone() {
-                ops.write(BookmarkMutation::AddFolderIn {
-                    name: name.clone(),
-                    parent,
-                });
-            } else {
-                ops.write(BookmarkMutation::AddFolder { name: name.clone() });
-            }
-        }
-        BookmarkRequest::MoveFolder { uuid, parent } => {
-            ops.write(BookmarkMutation::MoveFolder {
-                uuid: uuid.clone(),
-                parent: parent.clone(),
-            });
-        }
-        BookmarkRequest::RenameFolder { uuid, name } => {
-            ops.write(BookmarkMutation::RenameFolder {
-                uuid: uuid.clone(),
-                name: name.clone(),
-            });
-        }
-        BookmarkRequest::RemoveFolder { uuid } => {
-            ops.write(BookmarkMutation::RemoveFolder { uuid: uuid.clone() });
-        }
+    }
+}
+
+impl From<BookmarkFolderRemoveRequest> for BookmarkMutation {
+    fn from(request: BookmarkFolderRemoveRequest) -> Self {
+        Self::RemoveFolder { uuid: request.uuid }
     }
 }
 
@@ -726,11 +835,11 @@ mod tests {
             .add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<AppCommand>()
-            .add_observer(on_bookmarks_command_emit);
+            .add_observer(on_bookmark_open_request);
         let webview = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(BinReceive::<BookmarkRequest> {
+        app.world_mut().trigger(BinReceive::<BookmarkOpenRequest> {
             webview,
-            payload: BookmarkRequest::Open {
+            payload: BookmarkOpenRequest {
                 url: "https://a.test".into(),
             },
         });
@@ -753,12 +862,12 @@ mod tests {
     fn text_input_event_toggles_layout_keyboard_marker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_bookmark_text_input_emit);
+            .add_observer(on_bookmark_text_input_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinReceive::<BookmarkTextInputEvent> {
+            .trigger(BinReceive::<BookmarkTextInputRequest> {
                 webview,
-                payload: BookmarkTextInputEvent { active: true },
+                payload: BookmarkTextInputRequest { active: true },
             });
         app.update();
         assert!(
@@ -767,9 +876,9 @@ mod tests {
                 .contains::<BookmarkTextInputActive>()
         );
         app.world_mut()
-            .trigger(BinReceive::<BookmarkTextInputEvent> {
+            .trigger(BinReceive::<BookmarkTextInputRequest> {
                 webview,
-                payload: BookmarkTextInputEvent { active: false },
+                payload: BookmarkTextInputRequest { active: false },
             });
         app.update();
         assert!(
@@ -783,12 +892,12 @@ mod tests {
     fn context_menu_event_toggles_layout_pointer_marker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_bookmark_context_menu_emit);
+            .add_observer(on_bookmark_context_menu_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinReceive::<BookmarkContextMenuEvent> {
+            .trigger(BinReceive::<BookmarkContextMenuRequest> {
                 webview,
-                payload: BookmarkContextMenuEvent { active: true },
+                payload: BookmarkContextMenuRequest { active: true },
             });
         app.update();
         assert!(
@@ -797,9 +906,9 @@ mod tests {
                 .contains::<BookmarkContextMenuActive>()
         );
         app.world_mut()
-            .trigger(BinReceive::<BookmarkContextMenuEvent> {
+            .trigger(BinReceive::<BookmarkContextMenuRequest> {
                 webview,
-                payload: BookmarkContextMenuEvent { active: false },
+                payload: BookmarkContextMenuRequest { active: false },
             });
         app.update();
         assert!(

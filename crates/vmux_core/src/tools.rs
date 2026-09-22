@@ -155,7 +155,7 @@ pub struct ToolCategory {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "tools", name = "snapshot", target = "tools")]
+#[vmux_api::host_event(target = "tools")]
 pub struct ToolsSnapshot {
     pub root: String,
     pub vault: crate::vault::VaultSnapshot,
@@ -178,7 +178,7 @@ pub struct ToolsSnapshot {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tools", name = "refresh_request", target = "tools")]
+#[vmux_api::ui_event(target = "tools")]
 pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
@@ -194,7 +194,7 @@ pub struct ToolsRefreshRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tool", name = "open_request", target = "tools")]
+#[vmux_api::ui_event(target = "tools")]
 pub struct ToolOpenRequest {
     pub path: String,
 }
@@ -210,7 +210,7 @@ pub struct ToolOpenRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tools", name = "navigate_request", target = "tools")]
+#[vmux_api::ui_event(target = "tools")]
 pub struct ToolsNavigateRequest {
     pub url: String,
 }
@@ -241,7 +241,7 @@ impl ToolsNavigateRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tool", name = "request", target = "tools")]
+#[vmux_api::ui_event(target = "tools")]
 pub struct ToolRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,
@@ -261,7 +261,7 @@ pub struct ToolRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "tool", name = "result", target = "tools")]
+#[vmux_api::host_event(target = "tools")]
 pub struct ToolResult {
     pub provider: ToolProvider,
     pub action: ToolAction,

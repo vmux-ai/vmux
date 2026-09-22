@@ -12,39 +12,39 @@ macro_rules! wire {
 }
 
 wire! {
-    #[vmux_api::ui_event(namespace = "git", name = "status_request", targets = ["git", "files"])]
+    #[vmux_api::ui_event(targets = ["git", "files"])]
     pub struct GitStatusRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "repository_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitRepositoryRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "repository_picker_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitRepositoryPickerRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "app_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitAppRequest { pub repo_root: String, pub action: GitAppAction }
-    #[vmux_api::ui_event(namespace = "git", name = "branch_log_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
-    #[vmux_api::ui_event(namespace = "git", name = "directory_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitDirectoryRequest { pub path: String, pub preview: bool }
-    #[vmux_api::ui_event(namespace = "git", name = "diff_request", targets = ["git", "files"])]
+    #[vmux_api::ui_event(targets = ["git", "files"])]
     pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub reference: String, pub generation: u64, pub top_line: u32, pub rows: u32 }
-    #[vmux_api::ui_event(namespace = "git", name = "stage_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitStageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(namespace = "git", name = "unstage_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(namespace = "git", name = "discard_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitDiscardRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(namespace = "git", name = "commit_request", targets = ["git", "files"])]
+    #[vmux_api::ui_event(targets = ["git", "files"])]
     pub struct GitCommitRequest { pub path: String, pub message: String }
-    #[vmux_api::ui_event(namespace = "git", name = "fetch_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitFetchRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "pull_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitPullRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "push_request", targets = ["git", "files"])]
+    #[vmux_api::ui_event(targets = ["git", "files"])]
     pub struct GitPushRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "stage_all_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitStageAllRequest { pub path: String }
-    #[vmux_api::ui_event(namespace = "git", name = "operation_request", target = "git")]
+    #[vmux_api::ui_event(target = "git")]
     pub struct GitOperationRequest { pub repo_root: String, pub operation: GitOperation }
-    #[vmux_api::ui_event(namespace = "git", name = "hunk_request", targets = ["git", "files"])]
+    #[vmux_api::ui_event(targets = ["git", "files"])]
     pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub hunk: u32, pub accept: bool }
 
     pub struct StyledSpan { pub text: String, pub fg: [u8; 3], pub bold: bool, pub italic: bool }
@@ -56,7 +56,7 @@ wire! {
         pub spans: Vec<StyledSpan>,
     }
 
-    #[vmux_api::host_event(namespace = "git", name = "status", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitStatusEvent {
         pub path: String,
         pub branch: String,
@@ -111,7 +111,7 @@ wire! {
         pub message: String,
     }
 
-    #[vmux_api::host_event(namespace = "git", name = "repository", target = "git")]
+    #[vmux_api::host_event(target = "git")]
     pub struct GitRepositoryEvent {
         pub path: String,
         pub repo_root: String,
@@ -128,26 +128,26 @@ wire! {
         pub stashes: Vec<GitStashEntry>,
     }
 
-    #[vmux_api::host_event(namespace = "git", name = "branch_log", target = "git")]
+    #[vmux_api::host_event(target = "git")]
     pub struct GitBranchLogEvent {
         pub repo_root: String,
         pub branch: String,
         pub commits: Vec<GitCommitEntry>,
     }
 
-    #[vmux_api::host_event(namespace = "git", name = "diff_meta", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitDiffMetaEvent { pub total_lines: u32 }
-    #[vmux_api::host_event(namespace = "git", name = "diff_viewport", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitDiffViewportEvent { pub generation: u64, pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine>, pub error: String }
-    #[vmux_api::host_event(namespace = "git", name = "result", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }
-    #[vmux_api::host_event(namespace = "git", name = "error", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitErrorEvent { pub message: String }
-    #[vmux_api::host_event(namespace = "git", name = "changed", targets = ["git", "files"])]
+    #[vmux_api::host_event(targets = ["git", "files"])]
     pub struct GitChangedEvent {}
-    #[vmux_api::host_event(namespace = "git", name = "repository_picked", target = "git")]
+    #[vmux_api::host_event(target = "git")]
     pub struct GitRepositoryPickedEvent { pub path: String }
-    #[vmux_api::host_event(namespace = "git", name = "directory", target = "git")]
+    #[vmux_api::host_event(target = "git")]
     pub struct GitDirectoryEvent {
         pub path: String,
         pub parent_path: String,

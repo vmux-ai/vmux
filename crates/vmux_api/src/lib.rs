@@ -3,6 +3,7 @@ extern crate self as vmux_api;
 pub mod agent;
 pub mod avatar;
 pub mod bin_event;
+pub mod bookmark;
 pub mod chat;
 pub mod command_bar;
 pub mod error;
@@ -14,6 +15,7 @@ pub mod mcp;
 pub mod open_target;
 #[cfg(feature = "bevy")]
 pub mod page;
+pub mod page_metadata;
 pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
@@ -26,8 +28,9 @@ pub mod terminal;
 pub mod vault;
 
 pub use agent::AgentKind;
-pub use bin_event::{BinEvent, BinEventTarget, HostEvent, PageReady, UiEvent};
+pub use bin_event::{BinEvent, BinEventFamily, BinEventTarget, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
+pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use route::{InvalidVmuxRoute, VmuxRoute};
 pub use terminal::{
@@ -35,4 +38,4 @@ pub use terminal::{
     FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
     TermSpan,
 };
-pub use vmux_macro::{bidirectional_event, host_event, payload, ui_event};
+pub use vmux_macro::{HostEvent, UiEvent, bidirectional_event, host_event, payload, ui_event};

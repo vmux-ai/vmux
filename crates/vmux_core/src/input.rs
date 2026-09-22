@@ -40,7 +40,7 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "page", name = "key_context", targets = [
+#[vmux_api::ui_event(targets = [
         "terminal",
         "files",
         "projects",
@@ -67,7 +67,7 @@ pub struct PageKeyContext {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "key", name = "claims", targets = [
+#[vmux_api::host_event(targets = [
     "terminal",
     "files",
     "projects",
@@ -178,7 +178,7 @@ impl KeyModifiers {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "key", name = "stroke", targets = [
+#[vmux_api::ui_event(targets = [
         "terminal",
         "files",
         "projects",

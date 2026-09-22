@@ -8,43 +8,6 @@ pub fn now_millis() -> i64 {
         .as_millis() as i64
 }
 
-#[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct PageIdentity {
-    pub title: Option<String>,
-    pub icon: Option<crate::PageIcon>,
-}
-
-impl From<String> for PageIdentity {
-    fn from(title: String) -> Self {
-        Self {
-            title: Some(title),
-            icon: None,
-        }
-    }
-}
-
-impl From<&str> for PageIdentity {
-    fn from(title: &str) -> Self {
-        Self::from(title.to_string())
-    }
-}
-
-impl crate::PageMetadata {
-    pub fn title_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a str {
-        match identity.and_then(|identity| identity.title.as_deref()) {
-            Some(title) if !title.is_empty() => title,
-            _ => &self.title,
-        }
-    }
-
-    pub fn icon_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a crate::PageIcon {
-        match identity.and_then(|identity| identity.icon.as_ref()) {
-            Some(icon) if !icon.is_none() => icon,
-            _ => &self.icon,
-        }
-    }
-}
-
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 

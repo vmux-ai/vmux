@@ -12,7 +12,7 @@ pub const KNOWLEDGE_PAGE_URL: &str = "vmux://knowledge/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "knowledge-tree", target = "knowledge")]
+#[vmux_api::host_event(target = "knowledge")]
 pub struct KnowledgeTreeEvent {
     pub root: String,
     pub entries: Vec<KnowledgeEntry>,
@@ -54,7 +54,7 @@ pub struct KnowledgeEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(name = "knowledge-tree-toggle", target = "knowledge")]
+#[vmux_api::ui_event(target = "knowledge")]
 pub struct KnowledgeTreeToggle {
     pub path: String,
     #[serde(default)]
@@ -113,7 +113,7 @@ pub struct KnowledgeSearchMatch {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "knowledge-search", target = "knowledge")]
+#[vmux_api::host_event(target = "knowledge")]
 pub struct KnowledgeSearchEvent {
     pub query: String,
     pub matches: Vec<KnowledgeSearchMatch>,
@@ -131,7 +131,7 @@ pub struct KnowledgeSearchEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "knowledge", name = "search_request", target = "knowledge")]
+#[vmux_api::ui_event(target = "knowledge")]
 pub struct KnowledgeSearchRequest {
     pub query: String,
 }
@@ -148,7 +148,7 @@ pub struct KnowledgeSearchRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "knowledge", name = "create_request", target = "knowledge")]
+#[vmux_api::ui_event(target = "knowledge")]
 pub struct KnowledgeCreateRequest {
     pub parent: String,
     pub name: String,
@@ -167,7 +167,7 @@ pub struct KnowledgeCreateRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "knowledge-create-result", target = "knowledge")]
+#[vmux_api::host_event(target = "knowledge")]
 pub struct KnowledgeCreateResult {
     pub ok: bool,
     pub path: String,

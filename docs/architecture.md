@@ -198,13 +198,12 @@ the past tense or uses `Event`. Current state is a `Snapshot`; an operation outc
 actual Bevy world commands. `Message` is reserved for protocol envelopes and conversation
 content.
 
-Binary events name their source. `#[ui_event]` marks an event emitted by Dioxus and consumed
-by the Bevy host; `#[host_event]` marks the reverse direction. The attribute owns the wire name,
-namespace, protocol version, and allowed page hosts so transport metadata cannot drift from the
-payload type. Namespaces hold shared prefixes such as `git`; an event named `status_request` in
-that namespace has the wire id `git.status_request@1`. Every event declares its allowed page host
-or explicitly uses `target = any`; both UI-to-host decoding and host-to-UI delivery reject a
-mismatched host before touching the payload.
+Binary events name their direction. `UiEvent` marks an event emitted by Dioxus and consumed by the
+Bevy host; `HostEvent` marks the reverse direction. The payload type determines the complete wire
+name, while the event family owns its allowed page hosts. `BookmarkMenuPinRequest` therefore has
+the wire id `bookmark_menu_pin@1`, with `BookmarkEvents` supplying its `layout` target. A namespace
+would duplicate the target and the type prefix. Both UI-to-host decoding and host-to-UI delivery
+reject a mismatched host before touching the payload.
 
 ---
 

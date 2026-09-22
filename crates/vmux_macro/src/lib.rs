@@ -55,6 +55,24 @@ pub fn bidirectional_event(args: TokenStream, input: TokenStream) -> TokenStream
     }
 }
 
+#[proc_macro_derive(HostEvent)]
+pub fn derive_host_event(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::derive(input, bin_event::Direction::Host) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_derive(UiEvent)]
+pub fn derive_ui_event(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::derive(input, bin_event::Direction::Ui) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_attribute]
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

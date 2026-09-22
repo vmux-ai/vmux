@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use vmux_core::{PageIcon, PageMetadata};
+use vmux_core::PageIcon;
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
@@ -17,7 +17,7 @@ pub const SERVICES_PAGE_URL: &str = "vmux://services/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "reload", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct ReloadEvent;
 #[derive(
     Clone,
@@ -30,7 +30,7 @@ pub struct ReloadEvent;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "layout-state", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct LayoutStateEvent {
     #[serde(default)]
     pub header_open: bool,
@@ -141,7 +141,7 @@ pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(name = "side-sheet-drag", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct SideSheetResizeEvent {
     pub width: f32,
     pub settled: bool,
@@ -182,7 +182,7 @@ impl SideSheetResizeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "window", name = "drag_region", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct WindowDragRegionEvent {
     pub id: String,
     #[serde(default)]
@@ -411,7 +411,7 @@ mod tests {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "header", name = "request", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct HeaderRequest {
     pub header_command: String,
 }
@@ -428,7 +428,7 @@ pub struct HeaderRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "stacks", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct StacksHostEvent {
     pub stacks: Vec<StackRow>,
     #[serde(default)]
@@ -534,7 +534,7 @@ impl AddressParts {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "tabs", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct TabsHostEvent {
     pub tabs: Vec<TabRow>,
 }
@@ -575,7 +575,7 @@ pub struct TabRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "tabs", name = "request", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct TabsRequest {
     pub command: String,
     #[serde(default)]
@@ -625,7 +625,7 @@ impl TabDropPlacement {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "pane-tree", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct PaneTreeEvent {
     pub panes: Vec<PaneNode>,
 }
@@ -685,7 +685,7 @@ pub struct StackNode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(name = "side-sheet-command", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct SideSheetRequest {
     pub command: String,
     #[serde(default)]
@@ -731,7 +731,7 @@ pub enum RemotePhase {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "remote-state", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct RemoteStateEvent {
     pub enabled: bool,
     pub phase: RemotePhase,
@@ -754,7 +754,7 @@ pub struct RemoteStateEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(name = "remote-command", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct RemoteRequest {
     pub enabled: bool,
 }
@@ -771,7 +771,7 @@ pub struct RemoteRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "layout", name = "overlay", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct LayoutOverlayEvent {
     pub id: String,
     pub active: bool,
@@ -790,7 +790,7 @@ pub struct LayoutOverlayEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "remote", name = "copy", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct RemoteCopyEvent;
 
 #[derive(
@@ -830,7 +830,7 @@ pub struct TabBoundary {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "tab-boundary", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_core::event::ProjectRow>,
@@ -878,7 +878,7 @@ pub enum LayoutNode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "update-ready", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct UpdateReadyEvent {
     pub version: String,
 }
@@ -894,7 +894,7 @@ pub struct UpdateReadyEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "update-progress", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct UpdateProgressEvent {
     pub version: String,
     pub downloaded: u64,
@@ -915,7 +915,7 @@ pub struct UpdateProgressEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "update-cleared", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct UpdateClearedEvent;
 
 #[derive(
@@ -932,132 +932,9 @@ pub struct UpdateClearedEvent;
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(
-    namespace = "restart",
-    name = "request",
     targets = ["debug", "extensions", "layout"]
 )]
 pub struct RestartRequestEvent;
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarkRow {
-    pub uuid: String,
-    pub metadata: PageMetadata,
-    pub bookmarked: bool,
-    pub pinned: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FolderRow {
-    pub uuid: String,
-    pub name: String,
-    pub collapsed: bool,
-    pub parent: Option<String>,
-    pub children: Vec<BookmarkRow>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum BookmarkNode {
-    Entry(BookmarkRow),
-    Folder(FolderRow),
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(name = "bookmarks", target = "layout")]
-pub struct BookmarksHostEvent {
-    pub pins: Vec<BookmarkRow>,
-    pub roots: Vec<BookmarkNode>,
-}
-
-pub use vmux_command::event::BookmarkRequest;
-
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::ui_event(namespace = "bookmark", name = "text_input", target = "layout")]
-pub struct BookmarkTextInputEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::ui_event(namespace = "bookmark", name = "context_menu", target = "layout")]
-pub struct BookmarkContextMenuEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(name = "bookmark-menu-action", target = "layout")]
-pub struct BookmarkMenuRequest {
-    pub sequence: u64,
-    pub action: String,
-    pub uuid: Option<String>,
-}
 
 #[cfg(test)]
 mod update_event_tests {

@@ -1,4 +1,4 @@
-use crate::hooks::use_event::use_event;
+use crate::hooks::use_ui_state::use_ui_state;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
@@ -8,7 +8,7 @@ pub fn use_key_claim(
     unclaimed: Unclaimed,
     context: impl Fn() -> Vec<String> + 'static,
 ) -> KeyClaim {
-    let claims = use_event::<KeyClaims>(KeyClaims::default);
+    let claims = use_ui_state::<KeyClaims>();
     let resolves = use_hook(crate::transport::Host::resolves_keys);
 
     use_effect(move || {

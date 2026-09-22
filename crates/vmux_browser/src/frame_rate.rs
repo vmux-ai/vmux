@@ -350,7 +350,7 @@ mod tests {
     use vmux_layout::event::PaneTreeEvent;
 
     #[derive(rkyv::Archive, rkyv::Serialize)]
-    #[vmux_api::host_event(name = "other", target = any)]
+    #[vmux_api::host_event(target = any)]
     struct OtherEvent;
 
     #[test]

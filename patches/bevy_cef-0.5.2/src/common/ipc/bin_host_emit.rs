@@ -92,7 +92,7 @@ mod tests {
     use bevy::prelude::Entity;
 
     #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::host_event(name = "test", target = "test-host")]
+    #[vmux_api::host_event(target = "test-host")]
     struct TestPayload {
         value: u32,
     }
@@ -101,7 +101,7 @@ mod tests {
     fn bin_host_emit_event_from_event_round_trips() {
         let original = TestPayload { value: 42 };
         let event = BinHostEmitEvent::from_event(Entity::PLACEHOLDER, &original);
-        assert_eq!(event.id(), "test@1");
+        assert_eq!(event.id(), "test_payload@1");
         assert_eq!(event.target(), BinEventTarget::Host("test-host"));
         let recovered =
             rkyv::from_bytes::<TestPayload, rkyv::rancor::Error>(event.payload()).expect("decode");

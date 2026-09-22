@@ -696,7 +696,7 @@ fn BookmarkButton() -> Element {
             onclick: move |event| {
                 event.prevent_default();
                 event.stop_propagation();
-                let _ = send(&crate::event::BookmarkRequest::ToggleActive);
+                let _ = send(&vmux_api::bookmark::BookmarkToggleRequest);
             },
             Icon { class: "h-4 w-4",
                 path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }

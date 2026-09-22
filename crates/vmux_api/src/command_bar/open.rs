@@ -110,7 +110,7 @@ impl SearchEngine {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "command_bar", name = "open", targets = ["command-bar", "start", "layout"])]
+#[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub open_id: OpenId,

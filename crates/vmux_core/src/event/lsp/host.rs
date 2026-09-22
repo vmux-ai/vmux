@@ -4,14 +4,14 @@ use super::{
 };
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "diagnostics", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileDiagnosticsEvent {
     pub path: String,
     pub diagnostics: Vec<FileDiagnostic>,
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "lsp_status", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileLspStatusEvent {
     pub path: String,
     pub server: String,
@@ -21,15 +21,13 @@ pub struct FileLspStatusEvent {
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "lsp", name = "catalog", target = "lsp")]
+#[vmux_api::host_event(target = "lsp")]
 pub struct LspCatalogEvent {
     pub packages: Vec<LspPackage>,
 }
 
 #[vmux_api::payload(Eq)]
 #[vmux_api::host_event(
-    namespace = "lsp",
-    name = "install_progress",
     targets = ["files", "lsp"]
 )]
 pub struct LspInstallProgress {
@@ -41,8 +39,6 @@ pub struct LspInstallProgress {
 
 #[vmux_api::payload(Eq)]
 #[vmux_api::host_event(
-    namespace = "lsp",
-    name = "pkg_status",
     targets = ["files", "lsp"]
 )]
 pub struct LspPkgStatusEvent {
@@ -52,7 +48,7 @@ pub struct LspPkgStatusEvent {
 }
 
 #[vmux_api::payload]
-#[vmux_api::host_event(namespace = "file", name = "hover", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileHoverEvent {
     pub line: u32,
     pub col: u32,
@@ -60,19 +56,19 @@ pub struct FileHoverEvent {
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "code_actions", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileCodeActionsEvent {
     pub titles: Vec<String>,
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "edit_failed", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileEditFailedEvent {
     pub reason: String,
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "rename_begin", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileRenameBeginEvent {
     pub line: u32,
     pub col: u32,
@@ -80,13 +76,13 @@ pub struct FileRenameBeginEvent {
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "references", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileReferencesEvent {
     pub items: Vec<RefItem>,
 }
 
 #[vmux_api::payload(Eq)]
-#[vmux_api::host_event(namespace = "file", name = "completion", target = "files")]
+#[vmux_api::host_event(target = "files")]
 pub struct FileCompletionEvent {
     pub items: Vec<CompletionItem>,
     pub replace_from_col: u32,

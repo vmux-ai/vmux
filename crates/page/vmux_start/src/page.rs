@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
-use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
 
 use crate::event::{StartDataRequest, StartFocusInput};
 use vmux_command::page::{CommandPalette, focus_prompt_input};
@@ -12,7 +12,7 @@ use vmux_ui::launcher::palette::PaletteSurface;
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let state = use_event::<CommandBarOpenEvent>(CommandBarOpenEvent::default);
+    let state = use_ui_state::<CommandBarOpenEvent>();
     let mut mounted = use_signal(|| false);
 
     let _focus_listener = use_listener::<StartFocusInput, _>(move |_| {

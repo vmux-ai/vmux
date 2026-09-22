@@ -44,10 +44,10 @@ mod macos {
     use std::collections::{HashMap, HashSet};
     use std::sync::LazyLock;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use vmux_api::bookmark::BookmarkMenuActionEvent;
     use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid};
     use vmux_layout::bookmark::{BookmarkMenuTarget, BookmarkMutation, ShowBookmarkMenuRequest};
-    use vmux_layout::event::BookmarkMenuRequest;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
     thread_local! {
@@ -183,7 +183,7 @@ mod macos {
         match request.target {
             BookmarkMenuTarget::Root => root_menu(&mut builder, &locale),
             BookmarkMenuTarget::Pin { uuid } => pin_menu(&mut builder, &locale, &entries, &uuid),
-            BookmarkMenuTarget::Bookmark { uuid } => {
+            BookmarkMenuTarget::Entry { uuid } => {
                 bookmark_menu(&mut builder, &locale, &entries, &folders, &uuid)
             }
             BookmarkMenuTarget::Folder { uuid, active_page } => folder_menu(
@@ -603,7 +603,7 @@ mod macos {
         sequence.0 = sequence.0.wrapping_add(1);
         commands.trigger(BinHostEmitEvent::from_event(
             webview,
-            &BookmarkMenuRequest {
+            &BookmarkMenuActionEvent {
                 sequence: sequence.0,
                 action: action.to_string(),
                 uuid,

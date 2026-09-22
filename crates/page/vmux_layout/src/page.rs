@@ -3,14 +3,22 @@
 use std::rc::Rc;
 
 use crate::event::{
-    BookmarkContextMenuEvent, BookmarkMenuRequest, BookmarkNode, BookmarkRequest, BookmarkRow,
-    BookmarkTextInputEvent, BookmarksHostEvent, FolderRow, HeaderRequest, LayoutOverlayEvent,
-    LayoutStateEvent, PaneNode, PaneTreeEvent, ReloadEvent, RemoteCopyEvent, RemotePhase,
-    RemoteRequest, RemoteStateEvent, StackNode, StackRow, StacksHostEvent, TabDropPlacement,
-    TabRow, TabsHostEvent, TabsRequest, WindowDragRegionEvent,
+    HeaderRequest, LayoutOverlayEvent, LayoutStateEvent, PaneNode, PaneTreeEvent, ReloadEvent,
+    RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteStateEvent, StackNode, StackRow,
+    StacksHostEvent, TabDropPlacement, TabRow, TabsHostEvent, TabsRequest, WindowDragRegionEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use vmux_api::bookmark::{
+    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderCreateRequest,
+    BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest, BookmarkFolderRenameRequest,
+    BookmarkFolderRow, BookmarkFolderToggleRequest, BookmarkMenuActionEvent,
+    BookmarkMenuEntryRequest, BookmarkMenuFolderRequest, BookmarkMenuPinRequest,
+    BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest, BookmarkNode,
+    BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest, BookmarkRemoveRequest,
+    BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkRow, BookmarkStateEvent,
+    BookmarkTextInputRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
+};
 use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_core::event::{
@@ -35,7 +43,7 @@ use vmux_ui::components::tree_row::{
     SidebarTreeRow, SidebarTreeRowGroup,
 };
 use vmux_ui::favicon::{Favicon, favicon_src_for_url};
-use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 use vmux_ui::platform::sleep_ms;
@@ -67,11 +75,11 @@ pub fn Page() -> Element {
         tabs_state.set(data);
     });
 
-    let mut bookmarks_state = use_signal(BookmarksHostEvent::default);
-    let _bookmarks_listener = use_listener::<BookmarksHostEvent, _>(move |data| {
+    let mut bookmarks_state = use_signal(BookmarkStateEvent::default);
+    let _bookmarks_listener = use_listener::<BookmarkStateEvent, _>(move |data| {
         bookmarks_state.set(data);
     });
-    let bookmark_menu_action = use_event::<BookmarkMenuRequest>(BookmarkMenuRequest::default);
+    let bookmark_menu_action = use_ui_state::<BookmarkMenuActionEvent>();
     use_context_provider(|| bookmark_menu_action);
 
     let mut reload_key = use_signal(|| 0u32);
@@ -94,16 +102,14 @@ pub fn Page() -> Element {
             spaces_state.set(data);
         });
 
-    let projects_state =
-        use_event::<crate::event::TabBoundaryEvent>(crate::event::TabBoundaryEvent::default);
+    let projects_state = use_ui_state::<crate::event::TabBoundaryEvent>();
 
-    let team_state = use_event::<TeamEvent>(TeamEvent::default);
-    let remote_state = use_event::<RemoteStateEvent>(RemoteStateEvent::default);
+    let team_state = use_ui_state::<TeamEvent>();
+    let remote_state = use_ui_state::<RemoteStateEvent>();
 
-    let extensions_state = use_event::<ExtensionsEvent>(ExtensionsEvent::default);
-    let extension_popup = use_event::<ExtensionPopupEvent>(ExtensionPopupEvent::default);
-    let extension_popup_size =
-        use_event::<ExtensionPopupSizeEvent>(ExtensionPopupSizeEvent::default);
+    let extensions_state = use_ui_state::<ExtensionsEvent>();
+    let extension_popup = use_ui_state::<ExtensionPopupEvent>();
+    let extension_popup_size = use_ui_state::<ExtensionPopupSizeEvent>();
     use_effect(move || {
         let _ = send(&ExtListRequest);
     });
@@ -489,7 +495,7 @@ impl StackReveal {
 fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
-    bookmarks: BookmarksHostEvent,
+    bookmarks: BookmarkStateEvent,
     projects: Vec<vmux_core::event::ProjectRow>,
     boundary: Option<crate::event::TabBoundary>,
     team: Vec<TeamMemberRow>,
@@ -622,7 +628,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
 fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
-    bookmarks: BookmarksHostEvent,
+    bookmarks: BookmarkStateEvent,
     team: Vec<TeamMemberRow>,
     extensions: Vec<ExtRow>,
     remote: RemoteStateEvent,
@@ -774,7 +780,7 @@ fn HeaderView(
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = send(&BookmarkRequest::ToggleActive);
+                                let _ = send(&BookmarkToggleRequest);
                             },
                             Icon { class: "h-4 w-4",
                                 path {
@@ -1563,17 +1569,17 @@ fn pairing_qr_svg(value: &str) -> Option<String> {
 
 #[component]
 fn BookmarksSection(
-    bookmarks: BookmarksHostEvent,
+    bookmarks: BookmarkStateEvent,
     active_page: Option<StackNode>,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
-    let BookmarksHostEvent { pins, roots } = bookmarks;
+    let BookmarkStateEvent { pins, roots } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
-    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     use_effect(move || {
@@ -1624,7 +1630,7 @@ fn BookmarksSection(
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
-                request_bookmark_menu(BookmarkRequest::MenuRoot);
+                BookmarkContextTarget::Root.request();
             },
             div {
                 "data-bookmark-drop": "root",
@@ -2084,7 +2090,7 @@ fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
     })
 }
 
-fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<FolderRow> {
+fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderRow> {
     nodes
         .iter()
         .filter_map(|node| match node {
@@ -2096,7 +2102,7 @@ fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<FolderRow> {
 
 fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> {
     fn collect(
-        folders: &[FolderRow],
+        folders: &[BookmarkFolderRow],
         parent: Option<&str>,
         parent_label: &str,
         ancestors: &[String],
@@ -3229,7 +3235,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                 div { class: "pointer-events-none absolute inset-0 z-10 rounded-md ring-2 ring-primary/70" }
             }
             BookmarkContextMenu {
-                command: BookmarkRequest::MenuPin { uuid: row.uuid.clone() },
+                target: BookmarkContextTarget::Pin { uuid: row.uuid.clone() },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -3307,7 +3313,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
 }
 
 fn open_bookmark(url: String) {
-    let _ = send(&BookmarkRequest::Open { url });
+    let _ = send(&BookmarkOpenRequest { url });
 }
 
 #[derive(Clone, Copy)]
@@ -3320,14 +3326,23 @@ enum BookmarkIdCommand {
 }
 
 fn bookmark_cmd(command: BookmarkIdCommand, uuid: String) {
-    let command = match command {
-        BookmarkIdCommand::Remove => BookmarkRequest::Remove { uuid },
-        BookmarkIdCommand::Pin => BookmarkRequest::Pin { uuid },
-        BookmarkIdCommand::Unpin => BookmarkRequest::Unpin { uuid },
-        BookmarkIdCommand::ToggleFolder => BookmarkRequest::ToggleFolder { uuid },
-        BookmarkIdCommand::RemoveFolder => BookmarkRequest::RemoveFolder { uuid },
-    };
-    let _ = send(&command);
+    match command {
+        BookmarkIdCommand::Remove => {
+            let _ = send(&BookmarkRemoveRequest { uuid });
+        }
+        BookmarkIdCommand::Pin => {
+            let _ = send(&BookmarkPinRequest { uuid });
+        }
+        BookmarkIdCommand::Unpin => {
+            let _ = send(&BookmarkUnpinRequest { uuid });
+        }
+        BookmarkIdCommand::ToggleFolder => {
+            let _ = send(&BookmarkFolderToggleRequest { uuid });
+        }
+        BookmarkIdCommand::RemoveFolder => {
+            let _ = send(&BookmarkFolderRemoveRequest { uuid });
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -3337,27 +3352,30 @@ enum BookmarkPageCommand {
 }
 
 fn add_to_bookmarks(command: BookmarkPageCommand, metadata: PageMetadata, folder: Option<String>) {
-    let command = match command {
-        BookmarkPageCommand::Add => BookmarkRequest::Add { metadata, folder },
-        BookmarkPageCommand::Pin => BookmarkRequest::PinUrl { metadata },
-    };
-    let _ = send(&command);
+    match command {
+        BookmarkPageCommand::Add => {
+            let _ = send(&BookmarkAddRequest { metadata, folder });
+        }
+        BookmarkPageCommand::Pin => {
+            let _ = send(&BookmarkPinUrlRequest { metadata });
+        }
+    }
 }
 
 fn move_bookmark(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkRequest::Move { uuid, folder });
+    let _ = send(&BookmarkMoveRequest { uuid, folder });
 }
 
 fn move_pin(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkRequest::MovePin { uuid, folder });
+    let _ = send(&BookmarkMovePinRequest { uuid, folder });
 }
 
 fn reorder_pin(uuid: String, target_uuid: String) -> bool {
-    send(&BookmarkRequest::ReorderPin { uuid, target_uuid }).is_ok()
+    send(&BookmarkReorderPinRequest { uuid, target_uuid }).is_ok()
 }
 
 fn move_bookmark_folder(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkRequest::MoveFolder {
+    let _ = send(&BookmarkFolderMoveRequest {
         uuid,
         parent: folder,
     });
@@ -3368,7 +3386,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     if name.is_empty() {
         return;
     }
-    let _ = send(&BookmarkRequest::Rename { uuid, name });
+    let _ = send(&BookmarkRenameRequest { uuid, name });
 }
 
 fn create_bookmark_folder(name: String, parent: Option<String>) {
@@ -3376,7 +3394,7 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
     if name.is_empty() {
         return;
     }
-    let _ = send(&BookmarkRequest::CreateFolder { name, parent });
+    let _ = send(&BookmarkFolderCreateRequest { name, parent });
 }
 
 fn begin_bookmark_drag(
@@ -3571,11 +3589,11 @@ fn bookmark_drop_targeted(
 }
 
 fn set_bookmark_text_input_active(active: bool) {
-    let _ = send(&BookmarkTextInputEvent { active });
+    let _ = send(&BookmarkTextInputRequest { active });
 }
 
 fn set_bookmark_context_menu_active(active: bool) {
-    let _ = send(&BookmarkContextMenuEvent { active });
+    let _ = send(&BookmarkContextMenuRequest { active });
 }
 
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
@@ -3588,10 +3606,10 @@ fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, nam
 
 #[component]
 fn BookmarkFolder(
-    folder: FolderRow,
+    folder: BookmarkFolderRow,
     parent_uuid: Option<String>,
     folders: Vec<BookmarkFolderChoice>,
-    folder_rows: Vec<FolderRow>,
+    folder_rows: Vec<BookmarkFolderRow>,
     active_page: Option<StackNode>,
 ) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
@@ -3603,7 +3621,7 @@ fn BookmarkFolder(
     let child_draft = use_signal(|| translate("layout-new-folder"));
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
-    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = uuid.clone();
@@ -3695,7 +3713,7 @@ fn BookmarkFolder(
                 }
             } else {
                 BookmarkContextMenu {
-                    command: BookmarkRequest::MenuFolder {
+                    target: BookmarkContextTarget::Folder {
                         uuid: folder.uuid.clone(),
                         active_page: active_metadata,
                     },
@@ -3894,7 +3912,7 @@ fn BookmarkEntry(
     };
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| title.clone());
-    let bookmark_menu_action: Signal<BookmarkMenuRequest> = use_context();
+    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = row.uuid.clone();
@@ -3958,7 +3976,7 @@ fn BookmarkEntry(
             }
         } else {
             BookmarkContextMenu {
-                command: BookmarkRequest::MenuBookmark { uuid: row.uuid.clone() },
+                target: BookmarkContextTarget::Entry { uuid: row.uuid.clone() },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -4055,18 +4073,13 @@ fn BookmarkEntry(
     }
 }
 
-fn request_bookmark_menu(command: BookmarkRequest) {
-    let _ = send(&command);
-}
-
 fn commit_folder_rename(uuid: String, name: String) {
     let name = name.trim().to_string();
-    let command = if name.is_empty() {
-        BookmarkRequest::RemoveFolder { uuid }
+    if name.is_empty() {
+        let _ = send(&BookmarkFolderRemoveRequest { uuid });
     } else {
-        BookmarkRequest::RenameFolder { uuid, name }
-    };
-    let _ = send(&command);
+        let _ = send(&BookmarkFolderRenameRequest { uuid, name });
+    }
 }
 
 #[component]
@@ -4085,7 +4098,7 @@ fn LayoutContextMenu(children: Element) -> Element {
 }
 
 #[component]
-fn BookmarkContextMenu(command: BookmarkRequest, trigger: Element, menu: Element) -> Element {
+fn BookmarkContextMenu(target: BookmarkContextTarget, trigger: Element, menu: Element) -> Element {
     #[cfg(target_os = "macos")]
     {
         let _ = menu;
@@ -4097,7 +4110,7 @@ fn BookmarkContextMenu(command: BookmarkRequest, trigger: Element, menu: Element
                 oncontextmenu: move |event: Event<MouseData>| {
                     event.prevent_default();
                     event.stop_propagation();
-                    request_bookmark_menu(command.clone());
+                    target.request();
                 },
                 {trigger}
             }
@@ -4105,11 +4118,48 @@ fn BookmarkContextMenu(command: BookmarkRequest, trigger: Element, menu: Element
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = command;
+        let _ = target;
         rsx! {
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![], {trigger} }
                 {menu}
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum BookmarkContextTarget {
+    Root,
+    Pin {
+        uuid: String,
+    },
+    Entry {
+        uuid: String,
+    },
+    Folder {
+        uuid: String,
+        active_page: Option<PageMetadata>,
+    },
+}
+
+impl BookmarkContextTarget {
+    fn request(&self) {
+        match self {
+            Self::Root => {
+                let _ = send(&BookmarkMenuRootRequest);
+            }
+            Self::Pin { uuid } => {
+                let _ = send(&BookmarkMenuPinRequest { uuid: uuid.clone() });
+            }
+            Self::Entry { uuid } => {
+                let _ = send(&BookmarkMenuEntryRequest { uuid: uuid.clone() });
+            }
+            Self::Folder { uuid, active_page } => {
+                let _ = send(&BookmarkMenuFolderRequest {
+                    uuid: uuid.clone(),
+                    active_page: active_page.clone(),
+                });
             }
         }
     }

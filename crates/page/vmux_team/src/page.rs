@@ -10,13 +10,13 @@ use vmux_ui::components::select::{
 };
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::favicon::favicon_src_for_url;
-use vmux_ui::hooks::{send, use_event, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_event::<TeamEvent>(TeamEvent::default);
+    let team = use_ui_state::<TeamEvent>();
 
     let snapshot = team();
     let profiles = snapshot.profiles;
