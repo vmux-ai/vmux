@@ -291,8 +291,8 @@ mod tests {
                 .world()
                 .get::<ExplorerState>(page)
                 .unwrap()
-                .open_editors
-                .clone()
+                .open_editors()
+                .to_vec()
         }
 
         fn url(&self, page: Entity) -> String {

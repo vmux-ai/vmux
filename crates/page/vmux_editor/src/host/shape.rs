@@ -5,7 +5,7 @@ use vmux_core::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet}
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
-use crate::host::editor::EditState;
+use crate::host::editor::Editor;
 
 pub(super) struct EditorShapePlugin;
 
@@ -145,7 +145,7 @@ impl Reindent {
 #[allow(clippy::too_many_arguments)]
 fn on_file_shape_set(
     trigger: On<BinReceive<FileShapeSet>>,
-    mut views: Query<&mut EditState>,
+    mut views: Query<&mut Editor>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

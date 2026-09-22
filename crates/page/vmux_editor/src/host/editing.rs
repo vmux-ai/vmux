@@ -7,7 +7,7 @@ use vmux_core::input::KeyStroke;
 #[cfg(test)]
 use crate::edit::EditCore;
 use crate::edit::{EditCommand, Motion, Selection};
-use crate::host::editor::EditState;
+use crate::host::editor::Editor;
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 use crate::host::file_lifecycle::{SelfWrites, canon};
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
@@ -156,7 +156,7 @@ fn reapply_keymap_on_change(
     mut last: Local<Option<KeymapConfig>>,
     mut q: Query<(
         Entity,
-        &mut EditState,
+        &mut Editor,
         &mut EditorKeymap,
         Option<&FileViewport>,
     )>,
@@ -200,7 +200,7 @@ fn reapply_keymap_on_change(
 fn apply_edit_request(
     trigger: On<EditRequest>,
     mut views: Query<(
-        &mut EditState,
+        &mut Editor,
         &EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
@@ -475,7 +475,7 @@ fn apply_edit_request(
 
 fn on_file_key(
     trigger: On<BinReceive<KeyStroke>>,
-    mut q: Query<(&EditState, &mut EditorKeymap)>,
+    mut q: Query<(&Editor, &mut EditorKeymap)>,
     app_keys: ScopedKeys,
     view_mode: Res<SharedFileViewMode>,
     mut commands: Commands,
@@ -514,7 +514,7 @@ fn on_file_key(
 
 fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
-    mut q: Query<(&EditState, &mut EditorKeymap)>,
+    mut q: Query<(&Editor, &mut EditorKeymap)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -540,7 +540,7 @@ fn on_file_text_input(
 
 fn on_file_property_edit(
     trigger: On<BinReceive<FilePropertyEdit>>,
-    q: Query<&EditState>,
+    q: Query<&Editor>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -578,7 +578,7 @@ fn on_file_property_edit(
 fn run_submitted_ex_lines(
     mut submitted: MessageReader<vmux_command::host::ExLineSubmitted>,
     children: Query<&Children>,
-    q: Query<(), (With<EditState>, With<EditorKeymap>)>,
+    q: Query<(), (With<Editor>, With<EditorKeymap>)>,
     mut commands: Commands,
 ) {
     for message in submitted.read() {
@@ -601,7 +601,7 @@ fn run_submitted_ex_lines(
 
 fn on_file_find_request(
     trigger: On<BinReceive<FileFindRequest>>,
-    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    mut q: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -638,7 +638,7 @@ fn on_file_find_request(
 
 fn on_file_pointer(
     trigger: On<BinReceive<FilePointerEvent>>,
-    mut q: Query<(&mut EditState, &mut EditorKeymap, &FileViewport)>,
+    mut q: Query<(&mut Editor, &mut EditorKeymap, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

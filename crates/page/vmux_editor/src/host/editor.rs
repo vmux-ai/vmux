@@ -100,7 +100,7 @@ impl FileView {
 }
 
 #[derive(Component)]
-pub struct EditState {
+pub struct Editor {
     pub core: EditCore,
     pub hl: HighlightCache,
     pub folds: crate::fold::FoldState,
@@ -110,7 +110,7 @@ pub struct EditState {
     wrap_cache: Option<CachedWrapView>,
 }
 
-impl EditState {
+impl Editor {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
@@ -198,7 +198,7 @@ pub(super) struct ParkedEdits {
 }
 
 pub(super) struct ParkedEdit {
-    pub(super) edit: EditState,
+    pub(super) edit: Editor,
     pub(super) diff: vmux_git::GitDiffSource,
     pub(super) modified: Option<std::time::SystemTime>,
 }
@@ -207,10 +207,10 @@ impl ParkedEdits {
     pub(super) const CAPACITY: usize = 8;
 
     fn park(entity: &mut EntityWorldMut, path: PathBuf) {
-        if !entity.contains::<EditState>() || !entity.contains::<vmux_git::GitDiffSource>() {
+        if !entity.contains::<Editor>() || !entity.contains::<vmux_git::GitDiffSource>() {
             return;
         }
-        let Some(edit) = entity.take::<EditState>() else {
+        let Some(edit) = entity.take::<Editor>() else {
             return;
         };
         let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
@@ -336,7 +336,7 @@ mod tests {
         fn encoding(&self) -> FileEncoding {
             self.app
                 .world()
-                .get::<EditState>(self.entity)
+                .get::<Editor>(self.entity)
                 .expect("a loaded buffer")
                 .core
                 .buffer
@@ -374,7 +374,7 @@ mod tests {
             let mut edit = self
                 .app
                 .world_mut()
-                .get_mut::<EditState>(self.entity)
+                .get_mut::<Editor>(self.entity)
                 .expect("a loaded buffer");
             edit.core.apply(EditCommand::InsertText(text.to_string()));
         }
@@ -382,7 +382,7 @@ mod tests {
         fn text(&self) -> String {
             self.app
                 .world()
-                .get::<EditState>(self.entity)
+                .get::<Editor>(self.entity)
                 .unwrap()
                 .core
                 .buffer
@@ -392,7 +392,7 @@ mod tests {
         fn undo(&mut self) {
             self.app
                 .world_mut()
-                .get_mut::<EditState>(self.entity)
+                .get_mut::<Editor>(self.entity)
                 .unwrap()
                 .core
                 .apply(EditCommand::Undo);
@@ -466,11 +466,7 @@ mod tests {
 
         assert_eq!(session.failure(), Some(LoadFailure::Undecodable));
         assert!(
-            session
-                .app
-                .world()
-                .get::<EditState>(session.entity)
-                .is_none(),
+            session.app.world().get::<Editor>(session.entity).is_none(),
             "no buffer is loaded, so the footer chooser has nothing to hang off"
         );
 
@@ -578,7 +574,7 @@ mod tests {
             edits.insert(
                 path,
                 ParkedEdit {
-                    edit: EditState::new(
+                    edit: Editor::new(
                         core,
                         HighlightCache::new(Path::new("/tmp/a.rs")),
                         crate::fold::FoldState::default(),

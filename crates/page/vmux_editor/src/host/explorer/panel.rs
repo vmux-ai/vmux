@@ -2,11 +2,13 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 
-use super::ExplorerState;
-use super::tree::{ExplorerTrees, emit_explorer_focus, reveal_current_in_tree};
+use super::tree::{emit_explorer_focus, reveal_current_in_tree};
+use super::{
+    ExplorerPanelDefaults, ExplorerPanelSent, ExplorerState, ExplorerTrees, StackExplorerRevision,
+};
 use crate::host::editor::FileView;
 
-pub(in crate::host) struct ExplorerPanelPlugin;
+pub(super) struct ExplorerPanelPlugin;
 
 impl Plugin for ExplorerPanelPlugin {
     fn build(&self, app: &mut App) {
@@ -22,26 +24,11 @@ impl Plugin for ExplorerPanelPlugin {
     }
 }
 
-#[derive(Component)]
-pub(in crate::host) struct ExplorerPanelSent;
-
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_editor::plugin"]
 pub struct StackExplorerVisibility {
     pub visible: bool,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(in crate::host) struct StackExplorerRevision {
-    pub(in crate::host) client_id: u64,
-    pub(in crate::host) request_id: u64,
-}
-
-#[derive(Resource, Clone, Copy)]
-pub(in crate::host) struct ExplorerPanelDefaults {
-    pub(in crate::host) default_visible: bool,
-    pub(in crate::host) width: u32,
 }
 
 #[derive(Resource, Default)]

@@ -7,7 +7,7 @@ use vmux_core::event::{
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 
 use crate::host::edit::Selection;
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, canon};
 use crate::host::keymap::{EditorKeymap, Keymap};
 
@@ -66,11 +66,11 @@ impl FileViewport {
         ));
     }
 
-    pub(crate) fn visible_rows(&self, edit: &mut EditState) -> u32 {
+    pub(crate) fn visible_rows(&self, edit: &mut Editor) -> u32 {
         edit.wrapped_view(self).total_rows()
     }
 
-    pub(crate) fn autoscroll(&self, edit: &mut EditState) -> Option<u32> {
+    pub(crate) fn autoscroll(&self, edit: &mut Editor) -> Option<u32> {
         if self.rows == 0 {
             return None;
         }
@@ -85,7 +85,7 @@ impl FileViewport {
         None
     }
 
-    pub(crate) fn follow_scrolled_cursor(&self, edit: &mut EditState) -> bool {
+    pub(crate) fn follow_scrolled_cursor(&self, edit: &mut Editor) -> bool {
         ScrolledCursor::follow(edit, self)
     }
 
@@ -102,7 +102,7 @@ pub(crate) struct EditorWindow;
 impl EditorWindow {
     pub(crate) fn emit(
         entity: Entity,
-        edit: &mut EditState,
+        edit: &mut Editor,
         viewport: &FileViewport,
         browsers: &Browsers,
         commands: &mut Commands,
@@ -116,7 +116,7 @@ impl EditorWindow {
         ));
     }
 
-    fn render(edit: &mut EditState, viewport: &FileViewport) -> FileViewportPatch {
+    fn render(edit: &mut Editor, viewport: &FileViewport) -> FileViewportPatch {
         let total = edit.core.buffer.len_lines() as u32;
         let wrap = edit.wrapped_view(viewport);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
@@ -188,7 +188,7 @@ pub(crate) struct EditorCursor;
 impl EditorCursor {
     pub(crate) fn emit(
         entity: Entity,
-        edit: &mut EditState,
+        edit: &mut Editor,
         keymap: &dyn Keymap,
         viewport: &FileViewport,
         browsers: &Browsers,
@@ -266,7 +266,7 @@ impl EditorCursor {
 struct HighlightedLines;
 
 impl HighlightedLines {
-    fn window(edit: &mut EditState, viewport: &FileViewport) -> (u32, u16) {
+    fn window(edit: &mut Editor, viewport: &FileViewport) -> (u32, u16) {
         let wrap = edit.wrapped_view(viewport);
         let visible = wrap.total_rows();
         let (first_row, end_row) = window_range(visible, viewport.top_row, viewport.rows);
@@ -311,7 +311,7 @@ impl DriftedWindow {
 struct ScrolledCursor;
 
 impl ScrolledCursor {
-    fn follow(edit: &mut EditState, viewport: &FileViewport) -> bool {
+    fn follow(edit: &mut Editor, viewport: &FileViewport) -> bool {
         if viewport.rows == 0 {
             return false;
         }
@@ -350,7 +350,7 @@ impl ScrolledCursor {
 
 fn rehighlight_on_color_scheme(
     mut changes: MessageReader<vmux_setting::ColorSchemeChanged>,
-    mut views: Query<(Entity, &mut EditState, &FileViewport)>,
+    mut views: Query<(Entity, &mut Editor, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -368,7 +368,7 @@ fn sync_editor_wrap_settings(
     mut views: Query<(
         Entity,
         &mut FileViewport,
-        Option<&mut EditState>,
+        Option<&mut Editor>,
         Option<&EditorKeymap>,
     )>,
     browsers: NonSend<Browsers>,
@@ -411,7 +411,7 @@ fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
     mut views: Query<(
         &mut FileViewport,
-        Option<&mut EditState>,
+        Option<&mut Editor>,
         Option<&EditorKeymap>,
     )>,
     browsers: NonSend<Browsers>,
@@ -447,7 +447,7 @@ fn on_file_resize(
 
 fn on_file_scroll(
     trigger: On<BinReceive<FileScrollEvent>>,
-    mut views: Query<(&mut EditState, &mut FileViewport, &EditorKeymap)>,
+    mut views: Query<(&mut Editor, &mut FileViewport, &EditorKeymap)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -475,7 +475,7 @@ fn on_file_scroll(
 
 fn on_file_fold_toggle(
     trigger: On<BinReceive<FileFoldToggle>>,
-    mut views: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    mut views: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -499,7 +499,7 @@ fn on_file_fold_toggle(
 }
 
 fn persist_folds(
-    views: Query<(Entity, &FileView, &EditState), With<FoldsDirty>>,
+    views: Query<(Entity, &FileView, &Editor), With<FoldsDirty>>,
     mut store: NonSendMut<crate::host::fold_store::FoldStore>,
     mut commands: Commands,
 ) {
@@ -518,7 +518,7 @@ fn persist_folds(
 
 fn apply_lsp_folds(
     mut folds: MessageReader<crate::host::lsp::manager::LspFolds>,
-    mut views: Query<(&mut EditState, &FileView, &EditorKeymap, &FileViewport)>,
+    mut views: Query<(&mut Editor, &FileView, &EditorKeymap, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -560,7 +560,7 @@ mod tests {
     use crate::host::keymap::KeymapKindExt;
 
     impl ScrolledCursor {
-        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (EditState, FileViewport) {
+        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (Editor, FileViewport) {
             let text = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
             let mut core = EditCore::new(
                 PathBuf::from("/tmp/scroll.rs"),
@@ -569,7 +569,7 @@ mod tests {
                 crate::host::edit::EditMode::Normal,
             );
             core.set_caret(core.buffer.coords_to_char(cursor_line, 3));
-            let edit = EditState::new(
+            let edit = Editor::new(
                 core,
                 HighlightCache::new(Path::new("/tmp/scroll.rs")),
                 crate::host::fold::FoldState::default(),
@@ -584,7 +584,7 @@ mod tests {
             (edit, viewport)
         }
 
-        fn cursor_line(edit: &EditState) -> u32 {
+        fn cursor_line(edit: &Editor) -> u32 {
             edit.core.cursor_pos().line
         }
     }
@@ -599,7 +599,7 @@ mod tests {
                 &text,
                 crate::host::edit::EditMode::Normal,
             );
-            let edit = EditState::new(
+            let edit = Editor::new(
                 core,
                 HighlightCache::new(&path),
                 crate::host::fold::FoldState::default(),
@@ -626,7 +626,7 @@ mod tests {
     }
 
     impl EditorWindow {
-        fn nested_file(lines: usize) -> EditState {
+        fn nested_file(lines: usize) -> Editor {
             let mut text = String::new();
             for i in 0..lines {
                 match i % 8 {
@@ -644,7 +644,7 @@ mod tests {
             );
             let mut folds = crate::host::fold::FoldState::default();
             folds.set_regions(crate::host::fold::indent_regions(&core.buffer.rope));
-            let mut edit = EditState::new(core, HighlightCache::new(&path), folds);
+            let mut edit = Editor::new(core, HighlightCache::new(&path), folds);
             edit.sync_fold_view();
             edit
         }
@@ -724,7 +724,7 @@ mod tests {
             120
         );
         assert_eq!(
-            app.world().get::<EditState>(entity).unwrap().core.top_row,
+            app.world().get::<Editor>(entity).unwrap().core.top_row,
             120,
             "screen-relative motions read core.top_row"
         );

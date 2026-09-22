@@ -6,7 +6,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
 use crate::host::keymap::EditorKeymap;
 use crate::host::note::NoteRevealLine;
@@ -171,7 +171,7 @@ fn on_knowledge_link_open(
 
 fn goto_caret(
     entity: Entity,
-    edit: &mut EditState,
+    edit: &mut Editor,
     line: u32,
     utf16_col: u32,
     viewport: &mut FileViewport,
@@ -203,7 +203,7 @@ fn goto_caret(
 fn apply_goto(
     mut messages: MessageReader<crate::lsp::manager::LspGoto>,
     mut views: Query<(
-        &mut EditState,
+        &mut Editor,
         &mut FileViewport,
         &mut FileView,
         &mut PageMetadata,
@@ -257,7 +257,7 @@ fn apply_goto(
         viewport.top_row = 0;
         commands
             .entity(goto.entity)
-            .remove::<EditState>()
+            .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileMedia>()
@@ -277,7 +277,7 @@ fn apply_goto(
 fn apply_pending_goto(
     mut views: Query<(
         Entity,
-        &mut EditState,
+        &mut Editor,
         &mut FileViewport,
         &EditorKeymap,
         &PendingGoto,
@@ -358,7 +358,7 @@ mod tests {
                 &text,
                 crate::edit::EditMode::Normal,
             );
-            let edit = EditState::new(
+            let edit = Editor::new(
                 core,
                 HighlightCache::new(path),
                 crate::fold::FoldState::default(),

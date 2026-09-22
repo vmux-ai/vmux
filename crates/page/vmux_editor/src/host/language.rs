@@ -6,7 +6,7 @@ use vmux_core::event::*;
 
 use crate::edit::{EditCommand, Selection};
 use crate::host::editing::EditRequest;
-use crate::host::editor::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
 use crate::page_model::DisplayCells;
 
 pub(super) struct EditorLanguagePlugin;
@@ -107,7 +107,7 @@ impl LspPosition {
     }
 }
 
-impl EditState {
+impl Editor {
     fn caret_lsp_position(&self) -> LspPosition {
         let head = self.core.primary().head;
         let (line, char_col) = self.core.buffer.char_to_coords(head);
@@ -144,7 +144,7 @@ struct WikiCompletion {
 }
 
 impl WikiCompletion {
-    fn for_edit(edit: &EditState, index: &vmux_core::knowledge::KnowledgeIndex) -> Option<Self> {
+    fn for_edit(edit: &Editor, index: &vmux_core::knowledge::KnowledgeIndex) -> Option<Self> {
         if !index.loaded()
             || !edit.core.buffer.path.starts_with(index.root())
             || !crate::markdown::is_markdown_path(&edit.core.buffer.path)
@@ -202,7 +202,7 @@ impl WikiCompletion {
 
 fn on_editor_language_request(
     trigger: On<EditorLanguageRequest>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
     browsers: NonSend<Browsers>,
@@ -300,7 +300,7 @@ fn on_editor_language_request(
 
 fn on_wiki_completion_request(
     trigger: On<WikiCompletionRequest>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -320,7 +320,7 @@ fn on_wiki_completion_request(
 
 fn on_file_hover_request(
     trigger: On<BinReceive<FileHoverRequest>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
@@ -340,7 +340,7 @@ fn on_file_hover_request(
 
 fn on_file_definition_request(
     trigger: On<BinReceive<FileDefinitionRequest>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
@@ -418,7 +418,7 @@ fn on_file_editor_action(
 
 fn on_file_code_action_pick(
     trigger: On<BinReceive<FileCodeActionPick>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
 ) {
@@ -441,7 +441,7 @@ fn on_file_code_action_pick(
 
 fn on_file_rename_request(
     trigger: On<BinReceive<FileRenameRequest>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
@@ -464,7 +464,7 @@ fn on_file_rename_request(
 
 fn on_file_references_request(
     trigger: On<BinReceive<FileReferencesRequest>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
@@ -483,7 +483,7 @@ fn on_file_references_request(
 
 fn on_file_completion_request(
     trigger: On<BinReceive<FileCompletionRequest>>,
-    views: Query<&EditState>,
+    views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -529,7 +529,7 @@ fn on_file_goto_request(
 
 fn on_file_completion_commit(
     trigger: On<BinReceive<FileCompletionCommit>>,
-    mut views: Query<&mut EditState>,
+    mut views: Query<&mut Editor>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -555,7 +555,7 @@ fn on_file_completion_commit(
 fn flush_lsp_changes(
     time: Res<Time>,
     mut elapsed: Local<f32>,
-    views: Query<(Entity, &FileView, &EditState), With<LspEditDirty>>,
+    views: Query<(Entity, &FileView, &Editor), With<LspEditDirty>>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {

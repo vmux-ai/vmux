@@ -5,12 +5,10 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
-use super::ExplorerState;
-use super::tabs::OpenEditorsDirty;
-use super::tree::{ExplorerTreeDirty, ExplorerTrees};
+use super::{ExplorerState, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use crate::host::editor::FileView;
 
-pub(in crate::host) struct ExplorerMutationPlugin;
+pub(super) struct ExplorerMutationPlugin;
 
 impl Plugin for ExplorerMutationPlugin {
     fn build(&self, app: &mut App) {

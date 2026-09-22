@@ -2,9 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::OutlineEvent;
 
-use crate::host::editor::{EditState, FileView};
+use super::OutlineDirty;
+use crate::host::editor::{Editor, FileView};
 
-pub(in crate::host) struct ExplorerOutlinePlugin;
+pub(super) struct ExplorerOutlinePlugin;
 
 impl Plugin for ExplorerOutlinePlugin {
     fn build(&self, app: &mut App) {
@@ -12,13 +13,10 @@ impl Plugin for ExplorerOutlinePlugin {
     }
 }
 
-#[derive(Component)]
-pub(in crate::host) struct OutlineDirty;
-
 type DirtyOutline = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
 
 fn emit_markdown_outline(
-    query: Query<(Entity, &EditState), DirtyOutline>,
+    query: Query<(Entity, &Editor), DirtyOutline>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

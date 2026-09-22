@@ -8,7 +8,7 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
-use super::editor::{EditState, FileView, ParkedEdits};
+use super::editor::{Editor, FileView, ParkedEdits};
 use super::explorer::OutlineDirty;
 use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use super::keymap::KeymapConfig;
@@ -130,7 +130,7 @@ impl FileLoadTask {
                 && (world.get::<FileBuffer>(entity).is_some()
                     || world.get::<FileDir>(entity).is_some()
                     || world.get::<FileMedia>(entity).is_some()
-                    || world.get::<EditState>(entity).is_some());
+                    || world.get::<Editor>(entity).is_some());
             if loaded {
                 return;
             }
@@ -257,7 +257,7 @@ type UnloadedFileView = (
     Without<FileBuffer>,
     Without<FileDir>,
     Without<FileMedia>,
-    Without<EditState>,
+    Without<Editor>,
     Without<FileLoadTask>,
 );
 
@@ -373,7 +373,7 @@ fn apply_loaded_file_buffers(
                 core.fold_view = folds.view(core.buffer.len_lines() as u32);
                 entity_commands
                     .insert((
-                        EditState::new(core, highlight, folds),
+                        Editor::new(core, highlight, folds),
                         keymap.keymap(),
                         vmux_git::GitDiffSource {
                             content: text,
@@ -501,18 +501,11 @@ fn drain_file_changes(
             changed_dirs.insert(canon(parent));
         }
     }
-    for root in trees.roots() {
-        let cached: Vec<PathBuf> = trees.at(&root).children.keys().cloned().collect();
-        for dir in cached {
-            if changed_dirs.contains(&canon(&dir)) {
-                trees.start_dir_load(&root, dir, &mut commands, true);
-            }
-        }
-    }
+    trees.refresh_changed(&changed_dirs, &mut commands);
 }
 
 fn reload_changed_files(
-    files: Query<(Entity, &FileView, Option<&EditState>), With<FileReloadRequested>>,
+    files: Query<(Entity, &FileView, Option<&Editor>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
@@ -580,7 +573,7 @@ fn reload_changed_files(
         }
         commands
             .entity(entity)
-            .remove::<EditState>()
+            .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileInitialMetaSent>()
@@ -655,7 +648,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .get::<EditState>(entity)
+                .get::<Editor>(entity)
                 .unwrap()
                 .core
                 .buffer
