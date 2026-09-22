@@ -9,7 +9,7 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim, use_listener};
 use vmux_ui::platform::sleep_ms;
 
-pub fn use_file_keys(page: FilePage) -> FileKeys {
+pub(crate) fn use_file_keys(page: FilePage) -> FileKeys {
     let keys = FileKeys {
         page,
         claim: use_key_claim(Unclaimed::Types, move || page.key_context()),
@@ -156,7 +156,7 @@ impl FilePanel {
 }
 
 #[derive(Clone, Copy)]
-pub struct FilePage {
+pub(crate) struct FilePage {
     pub mode: Signal<Mode>,
     pub explorer: ExplorerPane,
     pub completion_open: Signal<bool>,
