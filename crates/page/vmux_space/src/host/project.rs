@@ -6,7 +6,7 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<ExpandedProjectDirs>()
             .init_resource::<RepoRoots>()
-            .init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
+            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,
@@ -41,7 +41,7 @@ fn on_project_tree_toggle(
 
 fn publish_project_roots(
     projects: SpaceProjects,
-    mut roots: ResMut<vmux_command::snapshot::CommandBarProjectRoots>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarUiState>,
 ) {
     let mut next = Vec::new();
     let mut active = None;
@@ -54,11 +54,12 @@ fn publish_project_roots(
         }
         next.push(project.path);
     }
-    if roots.roots != next {
-        roots.roots = next;
-    }
-    if roots.active != active {
-        roots.active = active;
+    let roots = vmux_command::snapshot::CommandBarProjectRoots {
+        roots: next,
+        active,
+    };
+    if state.projects != roots {
+        state.projects = roots;
     }
 }
 

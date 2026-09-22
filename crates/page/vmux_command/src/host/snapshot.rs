@@ -1,5 +1,4 @@
 use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
@@ -9,15 +8,7 @@ pub struct CommandBarSnapshotPlugin;
 
 impl Plugin for CommandBarSnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CommandBarAgentsSnapshot>()
-            .init_resource::<CommandBarWorkspaceSnapshot>()
-            .init_resource::<CommandBarProjectRoots>()
-            .init_resource::<CommandBarAgentModels>()
-            .init_resource::<CommandBarAgentModes>()
-            .init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarTerminalsSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Startup, update_pages_snapshot);
     }
 }
@@ -25,7 +16,20 @@ impl Plugin for CommandBarSnapshotPlugin {
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
 
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+#[derive(Resource, Default, Clone, Debug)]
+pub struct CommandBarUiState {
+    pub agents: CommandBarAgentsSnapshot,
+    pub workspace: CommandBarWorkspaceSnapshot,
+    pub projects: CommandBarProjectRoots,
+    pub agent_models: CommandBarAgentModels,
+    pub agent_modes: CommandBarAgentModes,
+    pub spaces: CommandBarSpacesSnapshot,
+    pub terminals: CommandBarTerminalsSnapshot,
+    pub pages: CommandBarPagesSnapshot,
+    pub work: CommandBarWorkSnapshot,
+}
+
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarWorkspaceSnapshot {
     pub stack: Option<Entity>,
     pub pane: Option<Entity>,
@@ -34,23 +38,23 @@ pub struct CommandBarWorkspaceSnapshot {
     pub project_root: Option<String>,
 }
 
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarProjectRoots {
     pub roots: Vec<String>,
     pub active: Option<String>,
 }
 
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModels {
     pub agents: Vec<vmux_api::command_bar::AgentModels>,
 }
 
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModes {
     pub agents: Vec<vmux_api::command_bar::AgentModes>,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentsSnapshot {
     pub providers: Vec<AgentProviderSummary>,
     pub strategies: Vec<AgentStrategySummary>,
@@ -68,64 +72,33 @@ impl AgentPromptTarget {
     }
 }
 
-#[derive(SystemParam)]
-pub struct Contributions<'w, 's> {
-    pages: Query<'w, 's, &'static ContributedPage>,
-    commands: Query<'w, 's, &'static ContributedCommand>,
-    claimed: Query<'w, 's, &'static ClaimedUrl>,
-}
-
-impl Contributions<'_, '_> {
-    pub fn pages(&self) -> Vec<&ContributedPage> {
-        let mut pages: Vec<&ContributedPage> = self.pages.iter().collect();
+impl ContributedPage {
+    pub fn sorted(pages: &Query<&Self>) -> Vec<Self> {
+        let mut pages: Vec<Self> = pages.iter().cloned().collect();
         pages.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
         pages
     }
 
-    pub fn commands(&self) -> impl Iterator<Item = &ContributedCommand> {
-        self.commands.iter()
-    }
-
-    pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
+    pub fn prompt_url(pages: &Query<&Self>, requested: Option<&str>) -> Option<String> {
         if let Some(requested) = requested
-            && self.pages.iter().any(|entry| entry.page.url == requested)
+            && pages.iter().any(|entry| entry.page.url == requested)
         {
             return Some(requested.to_string());
         }
-        let pages = self.pages();
+        let pages = Self::sorted(pages);
         let first = pages.first()?;
         Some(first.page.url.clone())
     }
 
-    pub fn page_url(&self, id: &str) -> Option<String> {
-        let entry = self.pages.iter().find(|entry| entry.id == id)?;
+    pub fn page_url(pages: &Query<&Self>, id: &str) -> Option<String> {
+        let entry = pages.iter().find(|entry| entry.id == id)?;
         Some(entry.page.url.clone())
     }
-
-    pub fn claims_url(&self, url: &str) -> bool {
-        self.claimed.iter().any(|claimed| claimed.0 == url)
-    }
 }
 
-type ContributionTouched = Or<(
-    Changed<ContributedPage>,
-    Changed<ContributedCommand>,
-    Changed<ClaimedUrl>,
-)>;
-
-#[derive(SystemParam)]
-pub struct ContributionsChanged<'w, 's> {
-    touched: Query<'w, 's, (), ContributionTouched>,
-    pages: RemovedComponents<'w, 's, ContributedPage>,
-    commands: RemovedComponents<'w, 's, ContributedCommand>,
-    claimed: RemovedComponents<'w, 's, ClaimedUrl>,
-}
-
-impl ContributionsChanged<'_, '_> {
-    pub fn any(&mut self) -> bool {
-        let removed =
-            self.pages.read().count() + self.commands.read().count() + self.claimed.read().count();
-        removed > 0 || !self.touched.is_empty()
+impl ClaimedUrl {
+    pub fn contains(claimed: &Query<&Self>, url: &str) -> bool {
+        claimed.iter().any(|claimed| claimed.0 == url)
     }
 }
 
@@ -161,7 +134,7 @@ impl AgentPromptTarget {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AgentProviderSummary {
     pub id: String,
     pub name: String,
@@ -169,13 +142,13 @@ pub struct AgentProviderSummary {
     pub icon: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AgentStrategySummary {
     pub provider: String,
     pub model: String,
 }
 
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
     pub active_space_id: String,
@@ -190,14 +163,14 @@ pub struct SpaceSummary {
     pub profile: String,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct CommandBarTerminalsSnapshot {
     pub running: HashMap<String, Entity>,
     pub agent_session_to_entity: HashMap<(AgentKind, String), Entity>,
     pub terminal_page_url: String,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
     pub pages: Vec<RegisteredPage>,
 }
@@ -205,11 +178,11 @@ pub struct CommandBarPagesSnapshot {
 #[derive(Clone, Debug)]
 pub struct RegisteredPage {
     pub page: CommandBarPage,
-    pub title_message_id: Option<&'static str>,
-    pub replaces_command: Option<&'static str>,
+    pub title_message_id: Option<String>,
+    pub replaces_command: Option<String>,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct CommandBarWorkSnapshot {
     pub work_dirs: Vec<CommandBarWorkDir>,
     pub recent_files: Vec<CommandBarRecentFile>,
@@ -217,10 +190,8 @@ pub struct CommandBarWorkSnapshot {
     pub projects: Vec<String>,
 }
 
-fn update_pages_snapshot(
-    manifests: Query<&PageManifest>,
-    mut snapshot: ResMut<CommandBarPagesSnapshot>,
-) {
+fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<CommandBarUiState>) {
+    let snapshot = &mut state.pages;
     if !snapshot.pages.is_empty() {
         return;
     }
@@ -242,8 +213,8 @@ fn update_pages_snapshot(
                 shortcut: String::new(),
                 prompt_target: false,
             },
-            title_message_id: manifest.title_message_id,
-            replaces_command: manifest.replaces_command,
+            title_message_id: manifest.title_message_id.map(str::to_string),
+            replaces_command: manifest.replaces_command.map(str::to_string),
         });
     }
     pages.sort_by(|a, b| a.page.url.cmp(&b.page.url));
@@ -276,8 +247,8 @@ mod tests {
             }
             let requested = requested.map(str::to_string);
             world
-                .run_system_once(move |contributions: Contributions| {
-                    contributions.prompt_url(requested.as_deref())
+                .run_system_once(move |pages: Query<&ContributedPage>| {
+                    ContributedPage::prompt_url(&pages, requested.as_deref())
                 })
                 .expect("prompt_url system runs")
         }
@@ -364,9 +335,8 @@ mod tests {
             .expect("republish runs");
 
         let ids = world
-            .run_system_once(|contributions: Contributions| {
-                let mut ids: Vec<String> =
-                    contributions.commands().map(|row| row.id.clone()).collect();
+            .run_system_once(|commands: Query<&ContributedCommand>| {
+                let mut ids: Vec<String> = commands.iter().map(|row| row.id.clone()).collect();
                 ids.sort();
                 ids
             })
@@ -377,7 +347,7 @@ mod tests {
     #[test]
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
-        app.init_resource::<CommandBarPagesSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_pages_snapshot);
         app.world_mut().spawn(PageManifest {
             host: "services",
@@ -400,11 +370,17 @@ mod tests {
 
         app.update();
 
-        let snap = app.world().resource::<CommandBarPagesSnapshot>();
+        let snap = &app.world().resource::<CommandBarUiState>().pages;
         assert_eq!(snap.pages.len(), 1);
         assert_eq!(snap.pages[0].page.host, "services");
         assert_eq!(snap.pages[0].page.url, "vmux://services/");
-        assert_eq!(snap.pages[0].title_message_id, Some("services-title"));
-        assert_eq!(snap.pages[0].replaces_command, Some("service_open"));
+        assert_eq!(
+            snap.pages[0].title_message_id.as_deref(),
+            Some("services-title")
+        );
+        assert_eq!(
+            snap.pages[0].replaces_command.as_deref(),
+            Some("service_open")
+        );
     }
 }

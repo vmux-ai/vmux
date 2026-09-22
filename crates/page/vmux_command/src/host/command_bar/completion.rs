@@ -6,10 +6,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
 use crate::event::{PathCompleteRequest, PathEntry};
-use crate::snapshot::{
-    CommandBarProjectRoots, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
-    WriteCommandBarSnapshots,
-};
+use crate::snapshot::{CommandBarUiState, WriteCommandBarSnapshots};
 
 pub(super) struct CommandBarCompletionPlugin;
 
@@ -32,14 +29,15 @@ impl Plugin for CommandBarCompletionPlugin {
 
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
-    workspace: Res<CommandBarWorkspaceSnapshot>,
-    projects: Res<CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
+    state: Res<CommandBarUiState>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
     mut commands: Commands,
 ) {
+    let workspace = &state.workspace;
+    let projects = &state.projects;
+    let work = &state.work;
     let asking = trigger.event().webview;
     if !browsers.can_emit_to(&asking) {
         return;
@@ -69,14 +67,12 @@ fn on_path_complete_request(
     ));
 }
 
-fn warm_project_index(
-    workspace: Res<CommandBarWorkspaceSnapshot>,
-    projects: Res<CommandBarProjectRoots>,
-    mut index: ResMut<ProjectIndex>,
-) {
-    if !workspace.is_changed() && !projects.is_changed() {
+fn warm_project_index(state: Res<CommandBarUiState>, mut index: ResMut<ProjectIndex>) {
+    if !state.is_changed() {
         return;
     }
+    let workspace = &state.workspace;
+    let projects = &state.projects;
     let roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
         return;
@@ -85,14 +81,15 @@ fn warm_project_index(
 }
 
 fn answer_settled_project_index(
-    workspace: Res<CommandBarWorkspaceSnapshot>,
-    projects: Res<CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
+    state: Res<CommandBarUiState>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
     mut commands: Commands,
 ) {
+    let workspace = &state.workspace;
+    let projects = &state.projects;
+    let work = &state.work;
     let pending = index.pending();
     if pending.is_empty() {
         return;

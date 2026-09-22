@@ -1,5 +1,5 @@
 use crate::event::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
-use crate::snapshot::CommandBarWorkSnapshot;
+use crate::snapshot::CommandBarUiState;
 use bevy::prelude::*;
 use vmux_core::terminal::{Terminal, TerminalLaunch};
 use vmux_core::{LastVisitedAt, PageMetadata, Url, VisitCount};
@@ -49,7 +49,7 @@ pub fn update_work_dirs_snapshot(
     terminals: Query<(&TerminalLaunch, Option<&LastActivatedAt>), With<Terminal>>,
     agent_dirs: Query<(&vmux_core::AgentWorkingDir, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
-    mut snapshot: ResMut<CommandBarWorkSnapshot>,
+    mut state: ResMut<CommandBarUiState>,
 ) {
     let mut by_cwd: Vec<(String, i64)> = Vec::new();
     let merge = |cwd: &str, ts: i64, acc: &mut Vec<(String, i64)>| {
@@ -90,8 +90,8 @@ pub fn update_work_dirs_snapshot(
             break;
         }
     }
-    if entries != snapshot.work_dirs {
-        snapshot.work_dirs = entries;
+    if entries != state.work.work_dirs {
+        state.work.work_dirs = entries;
     }
 }
 
@@ -99,7 +99,7 @@ pub fn update_recent_files_snapshot(
     changed: Query<(), Or<(Added<Url>, Changed<LastVisitedAt>)>>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut initialized: Local<bool>,
-    mut snapshot: ResMut<CommandBarWorkSnapshot>,
+    mut state: ResMut<CommandBarUiState>,
 ) {
     if *initialized && changed.is_empty() {
         return;
@@ -143,11 +143,11 @@ pub fn update_recent_files_snapshot(
         .into_iter()
         .map(|(engine, _)| engine)
         .collect::<Vec<_>>();
-    if recent_files != snapshot.recent_files {
-        snapshot.recent_files = recent_files;
+    if recent_files != state.work.recent_files {
+        state.work.recent_files = recent_files;
     }
-    if search_engines != snapshot.search_engines {
-        snapshot.search_engines = search_engines;
+    if search_engines != state.work.search_engines {
+        state.work.search_engines = search_engines;
     }
 }
 
@@ -177,13 +177,13 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_work_dirs_snapshot);
         app.world_mut()
             .spawn((Terminal, launch(&cwd, TerminalKind::Plain)));
         app.update();
 
-        let snap = app.world().resource::<CommandBarWorkSnapshot>();
+        let snap = &app.world().resource::<CommandBarUiState>().work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -206,14 +206,14 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
-        app.init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_work_dirs_snapshot);
         app.world_mut().spawn((
             Terminal,
             launch(&root.to_string_lossy(), TerminalKind::Plain),
         ));
         app.update();
-        let snap = app.world().resource::<CommandBarWorkSnapshot>();
+        let snap = &app.world().resource::<CommandBarUiState>().work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -233,13 +233,13 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_work_dirs_snapshot);
         app.world_mut()
             .spawn(vmux_core::AgentWorkingDir(cwd.clone()));
         app.update();
 
-        let snap = app.world().resource::<CommandBarWorkSnapshot>();
+        let snap = &app.world().resource::<CommandBarUiState>().work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -253,7 +253,7 @@ mod tests {
     fn recent_files_only_file_urls_ranked() {
         use vmux_core::CreatedAt;
         let mut app = App::new();
-        app.init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_recent_files_snapshot);
         app.world_mut().spawn((
             Url,
@@ -277,7 +277,7 @@ mod tests {
             CreatedAt(0),
         ));
         app.update();
-        let snap = app.world().resource::<CommandBarWorkSnapshot>();
+        let snap = &app.world().resource::<CommandBarUiState>().work;
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
     }
@@ -286,7 +286,7 @@ mod tests {
     fn search_engines_are_ordered_by_most_recent_visit() {
         use vmux_core::CreatedAt;
         let mut app = App::new();
-        app.init_resource::<CommandBarWorkSnapshot>()
+        app.init_resource::<CommandBarUiState>()
             .add_systems(Update, update_recent_files_snapshot);
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),
@@ -308,7 +308,8 @@ mod tests {
 
         let engines = &app
             .world()
-            .resource::<CommandBarWorkSnapshot>()
+            .resource::<CommandBarUiState>()
+            .work
             .search_engines;
         assert_eq!(engines.len(), SearchEngine::ALL.len());
         assert_eq!(
