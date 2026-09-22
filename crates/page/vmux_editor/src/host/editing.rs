@@ -322,17 +322,6 @@ struct CachedWrapView {
 #[derive(Component)]
 pub struct EditorKeymap(pub Box<dyn Keymap>);
 
-impl EditorKeymap {
-    pub(crate) fn configured_kind(
-        settings: &Option<Res<vmux_setting::AppSettings>>,
-    ) -> vmux_core::KeymapKind {
-        settings
-            .as_ref()
-            .map(|settings| settings.editor.keymap)
-            .unwrap_or_default()
-    }
-}
-
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
 #[derive(Event)]
@@ -345,22 +334,128 @@ impl EditRequest {
     pub(super) fn new(entity: Entity, commands: Vec<EditCommand>) -> Self {
         Self { entity, commands }
     }
-}
 
-pub(super) fn settings_mappings(
-    settings: &Option<Res<vmux_setting::AppSettings>>,
-) -> (Vec<vmux_core::editor::KeyMapping>, String) {
-    settings
-        .as_ref()
-        .map(|s| (s.editor.mappings.clone(), s.editor.leader.clone()))
-        .unwrap_or_else(|| (Vec::new(), " ".to_string()))
+    fn accelerated_navigation(mut self, repeat: bool) -> Self {
+        if !repeat {
+            return self;
+        }
+        let mut commands = Vec::with_capacity(self.commands.len() * 2);
+        for command in self.commands {
+            if let EditCommand::ScrollViewport(lines) = command {
+                commands.push(EditCommand::ScrollViewport(lines.saturating_mul(2)));
+                continue;
+            }
+            let accelerate = matches!(
+                &command,
+                EditCommand::Move(
+                    Motion::Left
+                        | Motion::Right
+                        | Motion::LeftBounded
+                        | Motion::RightBounded
+                        | Motion::Up
+                        | Motion::Down,
+                ) | EditCommand::Select(
+                    Motion::Left
+                        | Motion::Right
+                        | Motion::LeftBounded
+                        | Motion::RightBounded
+                        | Motion::Up
+                        | Motion::Down,
+                )
+            );
+            if accelerate {
+                commands.push(command.clone());
+            }
+            commands.push(command);
+        }
+        self.commands = commands;
+        self
+    }
+
+    fn remapped_for_note(mut self, blocks: &[NoteBlock], start_line: u32) -> Self {
+        let mut line = start_line;
+        let mut commands = Vec::new();
+        for command in self.commands {
+            let (direction, select) = match &command {
+                EditCommand::Move(Motion::Down) => (1, false),
+                EditCommand::Move(Motion::Up) => (-1, false),
+                EditCommand::Select(Motion::Down) => (1, true),
+                EditCommand::Select(Motion::Up) => (-1, true),
+                _ => {
+                    commands.push(command);
+                    continue;
+                }
+            };
+            let Some(target) = crate::markdown::note_vertical_target(blocks, line, direction)
+            else {
+                line = if direction > 0 {
+                    line.saturating_add(1)
+                } else {
+                    line.saturating_sub(1)
+                };
+                commands.push(command);
+                continue;
+            };
+            if target == line {
+                continue;
+            }
+            let steps = target.abs_diff(line) as usize;
+            line = target;
+            let motion = if direction > 0 {
+                Motion::Down
+            } else {
+                Motion::Up
+            };
+            let command = if select {
+                EditCommand::Select(motion)
+            } else {
+                EditCommand::Move(motion)
+            };
+            commands.extend(std::iter::repeat_n(command, steps));
+        }
+        self.commands = commands;
+        self
+    }
+
+    fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
 }
 
 #[derive(PartialEq, Eq)]
-struct KeymapConfig {
+pub(super) struct KeymapConfig {
     kind: vmux_core::KeymapKind,
     maps: Vec<vmux_core::editor::KeyMapping>,
     leader: String,
+}
+
+impl KeymapConfig {
+    pub(super) fn resolve(settings: Option<&vmux_setting::AppSettings>) -> Self {
+        let Some(settings) = settings else {
+            return Self {
+                kind: vmux_core::KeymapKind::default(),
+                maps: Vec::new(),
+                leader: " ".to_string(),
+            };
+        };
+        Self {
+            kind: settings.editor.keymap,
+            maps: settings.editor.mappings.clone(),
+            leader: settings.editor.leader.clone(),
+        }
+    }
+
+    pub(super) fn keymap(&self) -> EditorKeymap {
+        EditorKeymap(self.kind.make(&self.maps, &self.leader))
+    }
+
+    pub(super) fn initial_mode(&self) -> vmux_core::EditMode {
+        self.kind.initial_mode()
+    }
+
+    pub(super) fn kind(&self) -> vmux_core::KeymapKind {
+        self.kind
+    }
 }
 
 fn reapply_keymap_on_change(
@@ -375,18 +470,12 @@ fn reapply_keymap_on_change(
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
-    let (maps, leader) = settings_mappings(&settings);
-    let next = KeymapConfig {
-        kind: EditorKeymap::configured_kind(&settings),
-        maps,
-        leader,
-    };
+    let next = KeymapConfig::resolve(settings.as_deref());
     if last.as_ref() == Some(&next) {
         return;
     }
     let first = last.is_none();
     let kind_changed = last.as_ref().is_none_or(|prev| prev.kind != next.kind);
-    let kind = next.kind;
     *last = Some(next);
     if first {
         return;
@@ -395,9 +484,9 @@ fn reapply_keymap_on_change(
         return;
     };
     for (entity, mut edit, mut keymap, viewport) in &mut q {
-        keymap.0 = kind.make(&config.maps, &config.leader);
+        *keymap = config.keymap();
         if kind_changed {
-            edit.core.mode = kind.initial_mode();
+            edit.core.mode = config.initial_mode();
         }
         if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
             EditorCursor::emit(
@@ -714,98 +803,18 @@ fn on_file_key(
         },
         repeat: evt.repeat,
     };
-    let mut cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
-    if cmds.is_empty() {
-        return;
-    }
+    let mut request =
+        EditRequest::new(entity, keymap.0.handle(&input)).accelerated_navigation(evt.repeat);
     if view_mode.0 == FileViewMode::Note
         && let Some(note) = edit.parsed_note.as_ref()
     {
         let line = edit.core.cursor_pos().line;
-        cmds = remap_note_vertical_commands(cmds, &note.blocks, line);
+        request = request.remapped_for_note(&note.blocks, line);
     }
-    commands.trigger(EditRequest::new(entity, cmds));
-}
-
-fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<EditCommand> {
-    if !repeat {
-        return cmds;
+    if request.is_empty() {
+        return;
     }
-    let mut out = Vec::with_capacity(cmds.len() * 2);
-    for cmd in cmds {
-        if let EditCommand::ScrollViewport(lines) = cmd {
-            out.push(EditCommand::ScrollViewport(lines.saturating_mul(2)));
-            continue;
-        }
-        let accelerate = matches!(
-            &cmd,
-            EditCommand::Move(
-                Motion::Left
-                    | Motion::Right
-                    | Motion::LeftBounded
-                    | Motion::RightBounded
-                    | Motion::Up
-                    | Motion::Down,
-            ) | EditCommand::Select(
-                Motion::Left
-                    | Motion::Right
-                    | Motion::LeftBounded
-                    | Motion::RightBounded
-                    | Motion::Up
-                    | Motion::Down,
-            )
-        );
-        if accelerate {
-            out.push(cmd.clone());
-        }
-        out.push(cmd);
-    }
-    out
-}
-
-fn remap_note_vertical_commands(
-    cmds: Vec<EditCommand>,
-    blocks: &[NoteBlock],
-    start_line: u32,
-) -> Vec<EditCommand> {
-    let mut line = start_line;
-    cmds.into_iter()
-        .flat_map(|cmd| {
-            let (direction, select) = match &cmd {
-                EditCommand::Move(Motion::Down) => (1, false),
-                EditCommand::Move(Motion::Up) => (-1, false),
-                EditCommand::Select(Motion::Down) => (1, true),
-                EditCommand::Select(Motion::Up) => (-1, true),
-                _ => return vec![cmd],
-            };
-            match crate::markdown::note_vertical_target(blocks, line, direction) {
-                Some(target) if target == line => Vec::new(),
-                Some(target) => {
-                    let steps = target.abs_diff(line) as usize;
-                    line = target;
-                    let motion = if direction > 0 {
-                        Motion::Down
-                    } else {
-                        Motion::Up
-                    };
-                    let command = if select {
-                        EditCommand::Select(motion)
-                    } else {
-                        EditCommand::Move(motion)
-                    };
-                    std::iter::repeat_n(command, steps).collect()
-                }
-                None => {
-                    line = if direction > 0 {
-                        line.saturating_add(1)
-                    } else {
-                        line.saturating_sub(1)
-                    };
-                    vec![cmd]
-                }
-            }
-        })
-        .collect()
+    commands.trigger(request);
 }
 
 fn on_file_text_input(
@@ -1009,21 +1018,29 @@ mod edit_flow_tests {
     #[test]
     fn repeated_navigation_advances_two_steps_without_accelerating_edits() {
         assert_eq!(
-            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
+            EditRequest::new(Entity::PLACEHOLDER, vec![EditCommand::Move(Motion::Down)])
+                .accelerated_navigation(true)
+                .commands,
             [
                 EditCommand::Move(Motion::Down),
                 EditCommand::Move(Motion::Down)
             ]
         );
         assert_eq!(
-            accelerate_repeated_navigation(vec![EditCommand::DeleteBack], true),
+            EditRequest::new(Entity::PLACEHOLDER, vec![EditCommand::DeleteBack])
+                .accelerated_navigation(true)
+                .commands,
             [EditCommand::DeleteBack]
         );
     }
 
     #[test]
     fn a_held_scroll_key_covers_the_same_ground_as_a_held_motion_key() {
-        let held = |cmd| accelerate_repeated_navigation(vec![cmd], true);
+        let held = |command| {
+            EditRequest::new(Entity::PLACEHOLDER, vec![command])
+                .accelerated_navigation(true)
+                .commands
+        };
         let rows = |cmds: Vec<EditCommand>| {
             cmds.iter()
                 .map(|cmd| match cmd {
@@ -1048,11 +1065,10 @@ mod edit_flow_tests {
     #[test]
     fn repeated_note_navigation_skips_a_separator_after_the_first_step() {
         let blocks = crate::markdown::parse_note("- one\n- two\n\nnext\n");
-        let commands = remap_note_vertical_commands(
-            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
-            &blocks,
-            0,
-        );
+        let commands = EditRequest::new(Entity::PLACEHOLDER, vec![EditCommand::Move(Motion::Down)])
+            .accelerated_navigation(true)
+            .remapped_for_note(&blocks, 0)
+            .commands;
         assert_eq!(
             commands,
             [

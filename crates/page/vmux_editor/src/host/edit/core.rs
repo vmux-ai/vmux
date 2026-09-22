@@ -370,7 +370,7 @@ impl EditCore {
             .slice(line_start..line_start + col)
             .chars()
             .collect();
-        DisplayCells::width_of(&s)
+        DisplayCells::from(s.as_str()).width()
     }
 
     pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {
@@ -382,7 +382,7 @@ impl EditCore {
             .chars()
             .filter(|ch| *ch != '\n' && *ch != '\r')
             .collect();
-        DisplayCells::char_at(&text, cell)
+        DisplayCells::from(text.as_str()).char_at(cell)
     }
 
     pub fn cursor_pos(&self) -> CursorPos {

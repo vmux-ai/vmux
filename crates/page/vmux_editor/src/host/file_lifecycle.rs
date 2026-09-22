@@ -8,14 +8,13 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
-use super::editing::{EditState, EditorKeymap, FileView, ParkedEdits, settings_mappings};
+use super::editing::{EditState, FileView, KeymapConfig, ParkedEdits};
 use super::explorer::OutlineDirty;
 use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
 use crate::dir::{list_dir, parent_listing};
 use crate::edit::{EditCore, highlight_cache::HighlightCache};
-use crate::keymap::KeymapKindExt;
 use crate::media::FileMedia;
 
 pub(super) struct EditorFileLifecyclePlugin;
@@ -274,10 +273,9 @@ fn load_file_buffers(
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let keymap = KeymapConfig::resolve(settings.as_deref());
     for (entity, file, mut parked, forced) in &mut files {
         let forced = forced.and_then(|encoding| encoding.for_path(&file.path));
-        let kind = EditorKeymap::configured_kind(&settings);
-        let (mappings, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&file.path);
         if forced.is_none()
             && let Some(parked) = parked.as_mut()
@@ -285,11 +283,7 @@ fn load_file_buffers(
         {
             let mut entity_commands = commands.entity(entity);
             entity_commands
-                .insert((
-                    resumed.edit,
-                    EditorKeymap(kind.make(&mappings, &leader)),
-                    resumed.diff,
-                ))
+                .insert((resumed.edit, keymap.keymap(), resumed.diff))
                 .remove::<MissingFileView>();
             if markdown {
                 entity_commands.remove::<NoteSent>().insert(OutlineDirty);
@@ -319,6 +313,7 @@ fn apply_loaded_file_buffers(
     store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
+    let keymap = KeymapConfig::resolve(settings.as_deref());
     for (entity, view, mut pending) in &mut files {
         let Some(loaded) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
@@ -353,8 +348,6 @@ fn apply_loaded_file_buffers(
                 }
             }
             FileLoad::Text { decoded, heavy } => {
-                let kind = EditorKeymap::configured_kind(&settings);
-                let (mappings, leader) = settings_mappings(&settings);
                 let markdown = crate::markdown::is_markdown_path(&view.path);
                 let crate::encoding::DecodedText { text, encoding } = decoded;
                 let highlight = match heavy {
@@ -365,7 +358,7 @@ fn apply_loaded_file_buffers(
                     view.path.clone(),
                     highlight.language.clone(),
                     &text,
-                    kind.initial_mode(),
+                    keymap.initial_mode(),
                 );
                 core.buffer.encoding = encoding;
                 let mut folds = crate::fold::FoldState::default();
@@ -380,7 +373,7 @@ fn apply_loaded_file_buffers(
                 entity_commands
                     .insert((
                         EditState::new(core, highlight, folds),
-                        EditorKeymap(kind.make(&mappings, &leader)),
+                        keymap.keymap(),
                         vmux_git::GitDiffSource {
                             content: text,
                             dirty: false,

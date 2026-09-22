@@ -459,34 +459,54 @@ pub fn gutter_width(total_lines: u32) -> usize {
     digits.max(3)
 }
 
-pub struct DisplayCells;
+#[derive(Clone, Copy)]
+struct DisplayCellWidth(u32);
 
-impl DisplayCells {
-    pub fn width_of_char(ch: char) -> u32 {
-        UnicodeWidthChar::width(ch).unwrap_or(0) as u32
+impl From<char> for DisplayCellWidth {
+    fn from(character: char) -> Self {
+        Self(UnicodeWidthChar::width(character).unwrap_or(0) as u32)
     }
+}
 
-    pub fn width_of(text: &str) -> u32 {
+impl DisplayCellWidth {
+    fn get(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DisplayCells<'a> {
+    text: &'a str,
+}
+
+impl<'a> From<&'a str> for DisplayCells<'a> {
+    fn from(text: &'a str) -> Self {
+        Self { text }
+    }
+}
+
+impl DisplayCells<'_> {
+    pub fn width(self) -> u32 {
         let mut cells = 0;
-        for ch in text.chars() {
-            cells += Self::width_of_char(ch);
+        for character in self.text.chars() {
+            cells += DisplayCellWidth::from(character).get();
         }
         cells
     }
 
-    pub fn char_at(text: &str, cell: u32) -> usize {
+    pub fn char_at(self, cell: u32) -> usize {
         let mut cells = 0;
-        for (index, ch) in text.chars().enumerate() {
+        for (index, character) in self.text.chars().enumerate() {
             if cells >= cell {
                 return index;
             }
-            let width = Self::width_of_char(ch);
+            let width = DisplayCellWidth::from(character).get();
             if cells + width > cell {
                 return index;
             }
             cells += width;
         }
-        text.chars().count()
+        self.text.chars().count()
     }
 }
 
@@ -517,7 +537,7 @@ impl CellMetrics {
     }
 
     fn advance_of(self, ch: char) -> f64 {
-        match DisplayCells::width_of_char(ch) {
+        match DisplayCellWidth::from(ch).get() {
             0 => 0.0,
             2 => self.wide_advance(),
             cells => self.narrow * f64::from(cells),
@@ -537,7 +557,7 @@ impl<'a> ColumnRuler<'a> {
 
     pub fn wrapped_row(text: &'a str, metrics: CellMetrics, wrap_columns: u16, index: u32) -> Self {
         if wrap_columns == 0
-            || index == 0 && u32::from(wrap_columns) >= DisplayCells::width_of(text)
+            || index == 0 && u32::from(wrap_columns) >= DisplayCells::from(text).width()
         {
             return Self::new(text, metrics);
         }
@@ -554,7 +574,7 @@ impl<'a> ColumnRuler<'a> {
                 end = at;
                 break;
             }
-            cells += DisplayCells::width_of_char(ch);
+            cells += DisplayCellWidth::from(ch).get();
         }
         let start = start.unwrap_or(text.len());
         Self::new(&text[start..end.max(start)], metrics)
@@ -567,7 +587,7 @@ impl<'a> ColumnRuler<'a> {
             if cells >= col {
                 return x;
             }
-            let width = DisplayCells::width_of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             let advance = self.metrics.advance_of(ch);
             if cells + width > col {
                 return x + advance * f64::from(col - cells) / f64::from(width);
@@ -598,7 +618,7 @@ impl<'a> ColumnRuler<'a> {
     pub fn advance_at(&self, col: u32) -> f64 {
         let mut cells = 0;
         for ch in self.text.chars() {
-            let width = DisplayCells::width_of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             if width == 0 {
                 continue;
             }
@@ -617,7 +637,7 @@ impl<'a> ColumnRuler<'a> {
         let mut cells = 0;
         let mut at = 0.0;
         for ch in self.text.chars() {
-            let width = DisplayCells::width_of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             if width == 0 {
                 continue;
             }
@@ -1108,12 +1128,12 @@ mod column_tests {
         let text = "ab今c😀d\u{0301}e";
         let ruler = ColumnRuler::new(text, MENLO);
 
-        assert_eq!(DisplayCells::width_of(text), 9);
+        assert_eq!(DisplayCells::from(text).width(), 9);
 
         let mut boundaries = vec![0];
         let mut cells = 0;
         for ch in text.chars() {
-            cells += DisplayCells::width_of_char(ch);
+            cells += DisplayCellWidth::from(ch).get();
             boundaries.push(cells);
         }
         boundaries.dedup();
@@ -1181,10 +1201,10 @@ mod column_tests {
 
     #[test]
     fn cell_and_character_columns_diverge_on_wide_text() {
-        assert_eq!(DisplayCells::width_of("今日の予定は？"), 14);
-        assert_eq!(DisplayCells::char_at("今日の予定は？", 14), 7);
-        assert_eq!(DisplayCells::char_at("今日の予定は？", 4), 2);
-        assert_eq!(DisplayCells::char_at("ab今", 3), 2);
-        assert_eq!(DisplayCells::char_at("ab今", 4), 3);
+        assert_eq!(DisplayCells::from("今日の予定は？").width(), 14);
+        assert_eq!(DisplayCells::from("今日の予定は？").char_at(14), 7);
+        assert_eq!(DisplayCells::from("今日の予定は？").char_at(4), 2);
+        assert_eq!(DisplayCells::from("ab今").char_at(3), 2);
+        assert_eq!(DisplayCells::from("ab今").char_at(4), 3);
     }
 }
