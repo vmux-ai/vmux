@@ -7,6 +7,7 @@ mod note;
 mod sidebar;
 mod status;
 mod toolbar;
+mod viewport;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -26,16 +27,15 @@ pub(crate) use sidebar::ExplorerPane;
 use sidebar::{ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
+use viewport::{FileViewport, RowRuler, ScrolledLineHeight};
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::{EditorTabCommand, SidebarView};
 use crate::page_key::{Completions, FilePage, use_file_keys};
 use crate::page_model::{
-    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, centered_scroll_top,
-    clamp_selection, editor_drag_started, gutter_width, note_cursor_activation,
-    severity_color_class, span_style,
+    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
+    editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
 };
-use dioxus::html::geometry::ElementPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -692,10 +692,7 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         explorer.sync();
-        viewport
-            .geometry
-            .read()
-            .announce(cell_dims(), total_lines(), last_resize);
+        viewport.announce(cell_dims(), total_lines(), last_resize);
     });
 
     use_effect(move || match mode() {
@@ -1420,12 +1417,12 @@ pub fn Page() -> Element {
                             let (cw, ch) = (cell.narrow, cell.height);
                             let overlay_lines = lines();
                             let overlay_layouts = line_layouts();
-                            let ruler = RowRuler {
-                                lines: &overlay_lines,
-                                layouts: &overlay_layouts,
-                                metrics: cell,
-                                wrap_columns: wrap_columns(),
-                            };
+                            let ruler = RowRuler::new(
+                                &overlay_lines,
+                                &overlay_layouts,
+                                cell,
+                                wrap_columns(),
+                            );
                             let gutter = gw as f64 * cw + 48.0;
                             let cx = gutter + ruler.x_of(cursor().row, cursor().col);
                             let cy = cursor().row as f64 * ch;
@@ -1919,20 +1916,6 @@ const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
 
-struct ScrolledLineHeight;
-
-impl ScrolledLineHeight {
-    const NOTE: f64 = 28.0;
-
-    fn resolve(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
-        let height = match mode == FileViewMode::Note && is_markdown_file(path) {
-            true => Self::NOTE,
-            false => cell_height,
-        };
-        (height > 0.0).then_some(height)
-    }
-}
-
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
         .map(|(_, extension)| {
@@ -1949,30 +1932,6 @@ fn file_mode_class(active: bool) -> &'static str {
     } else {
         "rounded px-1.5 py-0.5 text-foreground/45 transition-[background-color,color,box-shadow] duration-200 ease-out hover:bg-foreground/[0.06] hover:text-foreground"
     }
-}
-
-fn column_in_line(
-    at: ElementPoint,
-    gutter: f64,
-    cell: CellMetrics,
-    text: &str,
-    wrap_columns: u16,
-    snap: bool,
-) -> (f64, u32) {
-    let x = at.x - gutter;
-    if !cell.measured() {
-        return (x, 0);
-    }
-    if wrap_columns == 0 {
-        return (x, ColumnRuler::new(text, cell).col_at(x, snap));
-    }
-    let segment = (at.y.max(0.0) / cell.height).floor() as u32;
-    let local = ColumnRuler::wrapped_row(text, cell, wrap_columns, segment).col_at(x, snap);
-
-    (
-        x,
-        segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
-    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2071,107 +2030,6 @@ pub(crate) fn focus_find_input() {
     FocusClaim::new(FIND_INPUT_ID).request();
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
-struct ScrollBox {
-    size: (f64, f64),
-}
-
-impl ScrollBox {
-    fn announce(self, cell: CellMetrics, total_lines: u32, mut last: Signal<FileResizeEvent>) {
-        let (cw, ch) = (cell.narrow, cell.height);
-        if !cell.measured() || self.size.0 <= 0.0 {
-            return;
-        }
-        let next = FileResizeEvent {
-            char_height: ch as f32,
-            viewport_height: self.size.1 as f32,
-            wrap_columns: ((self.size.0 - gutter_px(total_lines, cw) - 32.0).max(cw) / cw)
-                .floor()
-                .min(u16::MAX as f64) as u16,
-        };
-        let previous = last.peek().clone();
-        if (previous.char_height - next.char_height).abs() <= 0.01
-            && (previous.viewport_height - next.viewport_height).abs() <= 0.01
-            && previous.wrap_columns == next.wrap_columns
-        {
-            return;
-        }
-        last.set(next.clone());
-        let _ = send(&next);
-    }
-}
-
-fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
-    gutter_width(total_lines) as f64 * char_width + 48.0
-}
-
-struct RowRuler<'a> {
-    lines: &'a [FileLine],
-    layouts: &'a [FileLineLayout],
-    metrics: CellMetrics,
-    wrap_columns: u16,
-}
-
-impl RowRuler<'_> {
-    fn segment_of(&self, row: u32) -> Option<(String, u32)> {
-        let mut owner = None;
-        for layout in self.layouts {
-            if row >= layout.row && row < layout.row + u32::from(layout.rows) {
-                owner = Some(layout);
-                break;
-            }
-        }
-        let layout = owner?;
-        for line in self.lines {
-            if line.line_no != layout.line_no {
-                continue;
-            }
-            let mut text = String::new();
-            for span in &line.spans {
-                text.push_str(&span.text);
-            }
-            return Some((text, row - layout.row));
-        }
-        None
-    }
-
-    fn x_of(&self, row: u32, col: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return f64::from(col) * self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).x_of(col)
-    }
-
-    fn width_between(&self, row: u32, start: u32, end: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return f64::from(end.saturating_sub(start)) * self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment)
-            .width_between(start, end)
-    }
-
-    fn advance_at(&self, row: u32, col: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).advance_at(col)
-    }
-
-    fn x_of_char(&self, line_no: u32, char_col: u32) -> f64 {
-        for line in self.lines {
-            if line.line_no != line_no {
-                continue;
-            }
-            let mut text = String::new();
-            for span in &line.spans {
-                text.push_str(&span.text);
-            }
-            return ColumnRuler::new(&text, self.metrics).x_of_char(char_col);
-        }
-        f64::from(char_col) * self.metrics.narrow
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FileMeta {
     OpensFile,
@@ -2188,90 +2046,6 @@ impl FileMeta {
 
     fn resets_view(self) -> bool {
         self == Self::OpensFile
-    }
-}
-
-#[derive(Clone, Copy)]
-struct FileViewport {
-    element: Signal<Option<Rc<MountedData>>>,
-    field: Signal<Option<Rc<MountedData>>>,
-    geometry: Signal<ScrollBox>,
-    offset: Signal<(f64, f64)>,
-}
-
-impl FileViewport {
-    fn new() -> Self {
-        Self {
-            element: use_signal(|| None),
-            field: use_signal(|| None),
-            geometry: use_signal(ScrollBox::default),
-            offset: use_signal(|| (0.0, 0.0)),
-        }
-    }
-
-    fn scrolled_to(self, offset: (f64, f64)) {
-        let mut current = self.offset;
-        current.set(offset);
-    }
-
-    fn resized(self, size: (f64, f64)) {
-        let mut geometry = self.geometry;
-        if geometry.peek().size == size {
-            return;
-        }
-        geometry.write().size = size;
-    }
-
-    fn mounted(self, element: Rc<MountedData>) {
-        let mut current = self.element;
-        current.set(Some(element));
-        self.measure();
-    }
-
-    fn field_mounted(self, element: Rc<MountedData>) {
-        let mut current = self.field;
-        current.set(Some(element));
-    }
-
-    fn measure(self) {
-        spawn(async move {
-            let Some(element) = self.element.peek().clone() else {
-                return;
-            };
-            let Ok(rect) = element.get_client_rect().await else {
-                return;
-            };
-            let mut geometry = self.geometry;
-            geometry.write().size = (rect.size.width, rect.size.height);
-        });
-    }
-
-    fn scroll_to(self, top: f64) {
-        ScrollIntoView::element_to(SCROLL_ID, top);
-    }
-
-    fn scroll_by(self, lines: i32, line_height: f64) {
-        let from = self.offset.peek().1;
-        self.scroll_to(from + lines as f64 * line_height);
-    }
-
-    fn reset(self) {
-        self.scroll_to(0.0);
-    }
-
-    fn reveal_caret(self) {
-        ScrollIntoView::nearest(INPUT_ID);
-    }
-
-    fn center_row(self, row: u32, ch: f64) {
-        let geometry = *self.geometry.peek();
-        if ch <= 0.0 || geometry.size.1 <= 0.0 {
-            return;
-        }
-        self.scroll_to(centered_scroll_top(
-            row as f64 * ch + ch * 0.5,
-            geometry.size.1,
-        ));
     }
 }
 
@@ -2385,36 +2159,5 @@ mod file_meta_tests {
             "a freshly loaded page shows nothing, so its first META opens the file"
         );
         assert!(FileMeta::arriving("", "").resets_view());
-    }
-}
-
-#[cfg(test)]
-mod scrolled_line_height_tests {
-    use super::*;
-
-    #[test]
-    fn a_code_file_scrolls_by_the_cell_height_its_rows_are_drawn_at() {
-        assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 18.0),
-            Some(18.0),
-            "a non-markdown file shows the editor even while the shared view mode is Note, \
-             so an announced scroll moves by the row height the editor lays rows out with"
-        );
-        assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Editor, "/w/notes/a.md", 18.0),
-            Some(18.0)
-        );
-        assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/notes/a.md", 18.0),
-            Some(ScrolledLineHeight::NOTE)
-        );
-    }
-
-    #[test]
-    fn an_unmeasured_cell_refuses_the_scroll_rather_than_landing_at_zero() {
-        assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 0.0),
-            None
-        );
     }
 }
