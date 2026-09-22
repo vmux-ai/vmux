@@ -32,6 +32,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::event::*;
 use crate::pid::{self, Pid};
+use crate::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
@@ -52,12 +53,28 @@ impl Plugin for TerminalPlugin {
             .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
             .add_plugins((
                 crate::pid::PidPlugin,
+                TerminalRequestPlugin,
                 TerminalServicePlugin,
                 TerminalInputPlugin,
                 crate::processes_monitor::ProcessesMonitorPlugin,
                 crate::snapshot_updater::TerminalSnapshotPlugin,
                 TerminalLoadingPlugin,
             ));
+    }
+}
+
+pub struct TerminalRequestPlugin;
+
+impl Plugin for TerminalRequestPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            crate::contract::TerminalContractPlugin,
+            crate::process_index::TerminalProcessIndexPlugin,
+        ))
+        .add_systems(
+            Update,
+            (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+        );
     }
 }
 
@@ -72,12 +89,7 @@ impl Plugin for TerminalServicePlugin {
             .add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
-                (
-                    handle_terminal_send_requests,
-                    handle_run_shell_requests,
-                    respond_terminal_stack_spawn,
-                )
-                    .after(ServiceMessageSet),
+                respond_terminal_stack_spawn.after(ServiceMessageSet),
             )
             .add_systems(
                 Update,
@@ -907,6 +919,32 @@ struct MissingTerminalRestart {
     agent_kind: Option<vmux_core::agent::AgentKind>,
 }
 
+impl MissingTerminalRestart {
+    fn new(
+        entity: Entity,
+        launch: crate::launch::TerminalLaunch,
+        agent_kind: Option<vmux_core::agent::AgentKind>,
+    ) -> Self {
+        let new_id = ProcessId::new();
+        let cwd = launch.cwd.clone();
+        Self {
+            entity,
+            new_id,
+            command: ClientMessage::CreateProcess {
+                process_id: new_id,
+                command: launch.command,
+                args: launch.args,
+                cwd: launch.cwd,
+                env: launch.env,
+                cols: 80,
+                rows: 24,
+            },
+            cwd,
+            agent_kind,
+        }
+    }
+}
+
 fn terminal_shell(settings: &AppSettings) -> String {
     settings
         .terminal
@@ -919,41 +957,6 @@ const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
 
 fn process_create_budget(in_flight: usize, max_concurrent: usize) -> usize {
     max_concurrent.saturating_sub(in_flight)
-}
-
-fn missing_terminal_restart(
-    process_id: ProcessId,
-    terminals: impl IntoIterator<
-        Item = (
-            Entity,
-            ProcessId,
-            crate::launch::TerminalLaunch,
-            Option<vmux_core::agent::AgentKind>,
-        ),
-    >,
-) -> Option<MissingTerminalRestart> {
-    terminals
-        .into_iter()
-        .find(|(_, terminal_pid, _, _)| *terminal_pid == process_id)
-        .map(|(entity, _, launch, agent_kind)| {
-            let new_id = ProcessId::new();
-            let cwd = launch.cwd.clone();
-            MissingTerminalRestart {
-                entity,
-                new_id,
-                command: ClientMessage::CreateProcess {
-                    process_id: new_id,
-                    command: launch.command,
-                    args: launch.args,
-                    cwd: launch.cwd,
-                    env: launch.env,
-                    cols: 80,
-                    rows: 24,
-                },
-                cwd,
-                agent_kind,
-            }
-        })
 }
 
 fn missing_process_id(message: &str) -> Option<ProcessId> {
@@ -1139,6 +1142,14 @@ struct PollServiceWriters<'w> {
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PollServiceState<'w> {
+    process_index: Res<'w, TerminalProcessIndex>,
+    mode_map: ResMut<'w, TerminalModeMap>,
+    local_copy_mode: ResMut<'w, LocalCopyModeState>,
+    mouse_state: ResMut<'w, MouseSelectionState>,
+}
+
 fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
@@ -1255,9 +1266,7 @@ fn poll_service_messages(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writers: PollServiceWriters,
-    mut mode_map: ResMut<TerminalModeMap>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-    mut mouse_state: ResMut<MouseSelectionState>,
+    mut state: PollServiceState,
     settings: Res<AppSettings>,
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
@@ -1308,10 +1317,10 @@ fn poll_service_messages(
     for msg in messages {
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
-                let entity = (&awaiting_create)
-                    .into_iter()
-                    .find(|(_, pid_c, _)| **pid_c == process_id)
-                    .map(|(e, _, _)| e);
+                let entity = state
+                    .process_index
+                    .get(&process_id)
+                    .filter(|entity| awaiting_create.contains(*entity));
                 if let Some(entity) = entity {
                     service.0.send(ClientMessage::AttachProcess { process_id });
                     apply_process_created(&mut commands, entity, process_id, pid);
@@ -1323,10 +1332,10 @@ fn poll_service_messages(
             }
             ServiceMessage::ProcessCreateFailed { process_id, reason } => {
                 bevy::log::warn!("service failed to create process: {reason}");
-                if let Some(entity) = (&awaiting_create)
-                    .into_iter()
-                    .find(|(_, pid_c, _)| **pid_c == process_id)
-                    .map(|(e, _, _)| e)
+                if let Some(entity) = state
+                    .process_index
+                    .get(&process_id)
+                    .filter(|entity| awaiting_create.contains(*entity))
                 {
                     apply_process_create_failed(&mut commands, entity);
                 }
@@ -1346,41 +1355,41 @@ fn poll_service_messages(
                 mouse,
                 evicted_total,
             } => {
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !output_seen.contains(entity) {
-                            let has_content =
-                                changed_lines.iter().any(|(_, l)| line_has_content(l));
-                            if shell_prompt_ready(has_content, cursor.col) {
-                                commands.entity(entity).insert(ShellOutputSeen);
-                            }
-                        }
-                        if !browsers.can_emit_to(&entity) {
-                            commands.entity(entity).insert(OwedSnapshot);
-                            continue;
-                        }
-                        let mut changed_lines = changed_lines;
-                        for (_, line) in changed_lines.iter_mut() {
-                            crate::link::annotate_links(line, None);
-                        }
-                        let patch = TermViewportPatch {
-                            changed_lines,
-                            cursor,
-                            cols,
-                            rows,
-                            selection,
-                            copy_mode,
-                            full,
-                            first_row,
-                            total_rows,
-                            alt,
-                            mouse,
-                            evicted_total,
-                        };
-                        commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
-                        break;
+                let Some(entity) = state.process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) {
+                    continue;
+                }
+                if !output_seen.contains(entity) {
+                    let has_content = changed_lines.iter().any(|(_, l)| line_has_content(l));
+                    if shell_prompt_ready(has_content, cursor.col) {
+                        commands.entity(entity).insert(ShellOutputSeen);
                     }
                 }
+                if !browsers.can_emit_to(&entity) {
+                    commands.entity(entity).insert(OwedSnapshot);
+                    continue;
+                }
+                let mut changed_lines = changed_lines;
+                for (_, line) in changed_lines.iter_mut() {
+                    crate::link::annotate_links(line, None);
+                }
+                let patch = TermViewportPatch {
+                    changed_lines,
+                    cursor,
+                    cols,
+                    rows,
+                    selection,
+                    copy_mode,
+                    full,
+                    first_row,
+                    total_rows,
+                    alt,
+                    mouse,
+                    evicted_total,
+                };
+                commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
             }
             ServiceMessage::Bell { process_id } => {
                 writers
@@ -1392,16 +1401,14 @@ fn poll_service_messages(
                     process_id,
                     title: title.clone(),
                 });
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !browsers.can_emit_to(&entity) {
-                            continue;
-                        }
-                        let evt = TermTitleEvent { title };
-                        commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
-                        break;
-                    }
+                let Some(entity) = state.process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) || !browsers.can_emit_to(&entity) {
+                    continue;
                 }
+                let evt = TermTitleEvent { title };
+                commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
             }
             ServiceMessage::Snapshot {
                 process_id,
@@ -1410,82 +1417,84 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !output_seen.contains(entity) {
-                            let has_content = lines.iter().any(line_has_content);
-                            if shell_prompt_ready(has_content, cursor.col) {
-                                commands.entity(entity).insert(ShellOutputSeen);
-                            }
-                        }
-                        if !browsers.can_emit_to(&entity) {
-                            continue;
-                        }
-                        let mut changed_lines: Vec<(u32, TermLine)> = lines
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, l)| (i as u32, l))
-                            .collect();
-                        for (_, line) in changed_lines.iter_mut() {
-                            crate::link::annotate_links(line, None);
-                        }
-                        let patch = TermViewportPatch {
-                            changed_lines,
-                            cursor,
-                            cols,
-                            rows,
-                            selection: None,
-                            copy_mode: false,
-                            full: true,
-                            first_row: 0,
-                            total_rows: rows as u32,
-                            alt: false,
-                            mouse: false,
-                            evicted_total: 0,
-                        };
-                        commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
-                        break;
+                let Some(entity) = state.process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) {
+                    continue;
+                }
+                if !output_seen.contains(entity) {
+                    let has_content = lines.iter().any(line_has_content);
+                    if shell_prompt_ready(has_content, cursor.col) {
+                        commands.entity(entity).insert(ShellOutputSeen);
                     }
                 }
+                if !browsers.can_emit_to(&entity) {
+                    continue;
+                }
+                let mut changed_lines: Vec<(u32, TermLine)> = lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, l)| (i as u32, l))
+                    .collect();
+                for (_, line) in changed_lines.iter_mut() {
+                    crate::link::annotate_links(line, None);
+                }
+                let patch = TermViewportPatch {
+                    changed_lines,
+                    cursor,
+                    cols,
+                    rows,
+                    selection: None,
+                    copy_mode: false,
+                    full: true,
+                    first_row: 0,
+                    total_rows: rows as u32,
+                    alt: false,
+                    mouse: false,
+                    evicted_total: 0,
+                };
+                commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
             }
             ServiceMessage::ProcessExited { process_id, .. } => {
                 writers
                     .process_exited
                     .write(ProcessExitedEvent { process_id });
-                mode_map.modes.remove(&process_id);
-                set_local_copy_mode(&mut local_copy_mode, process_id, false);
-                mouse_state.per_process.remove(&process_id);
-                for (entity, pid, child_of, retain_on_exit) in &terminals {
-                    if *pid == process_id {
-                        commands
-                            .entity(entity)
-                            .insert(ProcessExited)
-                            .remove::<CloseRequiresConfirmation>()
-                            .remove::<AgentLoading>();
-                        let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                            commands.trigger(BinHostEmitEvent::from_event(
-                                entity,
-                                &crate::event::TermLoadingEvent {
-                                    loading: false,
-                                    label: session.kind.display_name().to_string(),
-                                    segment: session.kind.as_url_segment().to_string(),
-                                },
-                            ));
-                            true
-                        } else {
-                            false
-                        };
-                        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
-                            let tab = child_of.get();
-                            commands.entity(tab).insert(LastActivatedAt::now());
-                            writers
-                                .app_commands
-                                .write(AppCommand::Layout(LayoutCommand::Stack(
-                                    StackCommand::Close,
-                                )));
-                        }
-                        break;
-                    }
+                state.mode_map.modes.remove(&process_id);
+                set_local_copy_mode(&mut state.local_copy_mode, process_id, false);
+                state.mouse_state.per_process.remove(&process_id);
+                let Some(entity) = state.process_index.get(&process_id) else {
+                    continue;
+                };
+                let Ok((_, _, child_of, retain_on_exit)) = terminals.get(entity) else {
+                    continue;
+                };
+                commands
+                    .entity(entity)
+                    .insert(ProcessExited)
+                    .remove::<CloseRequiresConfirmation>()
+                    .remove::<AgentLoading>();
+                let is_agent = if let Ok(session) = agent_sessions.get(entity) {
+                    commands.trigger(BinHostEmitEvent::from_event(
+                        entity,
+                        &crate::event::TermLoadingEvent {
+                            loading: false,
+                            label: session.kind.display_name().to_string(),
+                            segment: session.kind.as_url_segment().to_string(),
+                        },
+                    ));
+                    true
+                } else {
+                    false
+                };
+                if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
+                    let tab = child_of.get();
+                    commands.entity(tab).insert(LastActivatedAt::now());
+                    writers
+                        .app_commands
+                        .write(AppCommand::Layout(LayoutCommand::Stack(
+                            StackCommand::Close,
+                        )));
                 }
             }
             ServiceMessage::ProcessList { processes } => {
@@ -1495,38 +1504,36 @@ fn poll_service_messages(
             ServiceMessage::Error { message } => {
                 if let Some(stale_pid) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&stale_pid)
+                    && let Some(entity) = state.process_index.get(&stale_pid)
+                    && terminals.contains(entity)
                 {
-                    let candidates = terminals.iter().map(|(entity, terminal_pid, _, _)| {
-                        let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
-                            crate::launch::TerminalLaunch {
-                                command: terminal_shell(&settings),
-                                args: vec![],
-                                cwd: String::new(),
-                                env: vec![],
-                                kind: crate::launch::TerminalKind::Plain,
-                            }
-                        });
-                        let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
-                        (entity, *terminal_pid, launch, agent_kind)
-                    });
-                    if let Some(restart) = missing_terminal_restart(stale_pid, candidates) {
-                        restarted_missing_processes.push(stale_pid);
-                        let cwd = restart.cwd.clone();
-                        let agent_kind = restart.agent_kind;
-                        let new_id = restart.new_id;
-                        let entity = restart.entity;
-                        service.0.send(restart.command);
-                        commands.entity(entity).insert(new_id);
-                        mark_terminal_restarting(&mut commands, entity);
-                        if let Some(kind) = agent_kind {
-                            commands
-                                .entity(entity)
-                                .insert(vmux_core::agent::PendingAgentSession {
-                                    kind,
-                                    spawn_time: std::time::SystemTime::now(),
-                                    cwd: std::path::PathBuf::from(&cwd),
-                                });
+                    let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
+                        crate::launch::TerminalLaunch {
+                            command: terminal_shell(&settings),
+                            args: vec![],
+                            cwd: String::new(),
+                            env: vec![],
+                            kind: crate::launch::TerminalKind::Plain,
                         }
+                    });
+                    let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
+                    let restart = MissingTerminalRestart::new(entity, launch, agent_kind);
+                    restarted_missing_processes.push(stale_pid);
+                    let cwd = restart.cwd.clone();
+                    let agent_kind = restart.agent_kind;
+                    let new_id = restart.new_id;
+                    let entity = restart.entity;
+                    service.0.send(restart.command);
+                    commands.entity(entity).insert(new_id);
+                    mark_terminal_restarting(&mut commands, entity);
+                    if let Some(kind) = agent_kind {
+                        commands
+                            .entity(entity)
+                            .insert(vmux_core::agent::PendingAgentSession {
+                                kind,
+                                spawn_time: std::time::SystemTime::now(),
+                                cwd: std::path::PathBuf::from(&cwd),
+                            });
                     }
                 }
                 warn!("Service error: {message}");
@@ -1538,7 +1545,7 @@ fn poll_service_messages(
                 alt_screen,
                 focus_reporting,
             } => {
-                mode_map.modes.insert(
+                state.mode_map.modes.insert(
                     process_id,
                     TerminalModeFlags {
                         mouse_capture,
@@ -1547,7 +1554,7 @@ fn poll_service_messages(
                         focus_reporting,
                     },
                 );
-                set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
+                set_local_copy_mode(&mut state.local_copy_mode, process_id, copy_mode);
             }
             ServiceMessage::SelectionText {
                 process_id: _,
@@ -1801,20 +1808,23 @@ fn flush_pending_terminal_input(
 
 fn handle_terminal_reinput_requests(
     mut requests: MessageReader<TerminalReinputRequest>,
-    terminals: Query<(Entity, &ProcessId), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<(), With<Terminal>>,
     mut pending_inputs: Query<&mut PendingTerminalInput>,
     mut commands: Commands,
 ) {
     let mut queued = std::collections::HashMap::<Entity, Vec<u8>>::new();
     for req in requests.read() {
-        for (entity, pid) in &terminals {
-            if *pid == req.process_id {
-                queued
-                    .entry(entity)
-                    .or_default()
-                    .extend_from_slice(&req.data);
-            }
+        let Some(entity) = process_index.get(&req.process_id) else {
+            continue;
+        };
+        if !terminals.contains(entity) {
+            continue;
         }
+        queued
+            .entry(entity)
+            .or_default()
+            .extend_from_slice(&req.data);
     }
     for (entity, data) in queued {
         if let Ok(mut pending) = pending_inputs.get_mut(entity) {
@@ -3346,15 +3356,17 @@ pub struct OscTitleChanged {
     pub title: String,
 }
 
-pub fn apply_osc_title(
+fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId, Option<&PageIdentity>), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<Option<&PageIdentity>, With<Terminal>>,
 ) {
     for ev in reader.read() {
-        let Some((entity, _, current)) =
-            terminals.iter().find(|(_, pid, _)| **pid == ev.process_id)
-        else {
+        let Some(entity) = process_index.get(&ev.process_id) else {
+            continue;
+        };
+        let Ok(current) = terminals.get(entity) else {
             continue;
         };
         if ev.title.is_empty() {
@@ -3370,13 +3382,16 @@ pub fn apply_osc_title(
     }
 }
 
-pub fn clear_osc_title_on_exit(
+fn clear_osc_title_on_exit(
     mut reader: MessageReader<ProcessExitedEvent>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<PageIdentity>)>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<(), (With<Terminal>, With<PageIdentity>)>,
 ) {
     for ev in reader.read() {
-        if let Some((entity, _)) = terminals.iter().find(|(_, pid)| **pid == ev.process_id) {
+        if let Some(entity) = process_index.get(&ev.process_id)
+            && terminals.contains(entity)
+        {
             commands.entity(entity).remove::<PageIdentity>();
         }
     }
@@ -3398,9 +3413,10 @@ fn update_local_copy_mode_for_mouse_action(
     }
 }
 
-pub fn handle_terminal_send_requests(
+fn handle_terminal_send_requests(
     mut reader: MessageReader<crate::TerminalSendRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
+    process_index: Res<TerminalProcessIndex>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut commands: Commands,
 ) {
@@ -3408,7 +3424,7 @@ pub fn handle_terminal_send_requests(
         let crate::TerminalSendRequest { text, terminal } = request.clone();
 
         let target = if let Some(s) = terminal.as_deref() {
-            match crate::target::parse_terminal_target(s, &terminals) {
+            match crate::target::parse_terminal_target(s, &process_index, &terminals) {
                 Some(t) => Ok(Some(t)),
                 None => Err(format!("terminal_send: invalid terminal id '{s}'")),
             }
@@ -3433,7 +3449,7 @@ pub fn handle_terminal_send_requests(
     }
 }
 
-pub fn handle_run_shell_requests(
+fn handle_run_shell_requests(
     mut reader: MessageReader<crate::RunShellRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     panes: Query<
@@ -3563,6 +3579,7 @@ mod prompt_capture_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::schedule::Schedules;
     use std::time::{Duration, Instant};
     use vmux_core::agent::{AgentKind, AgentSession};
@@ -3603,7 +3620,7 @@ mod tests {
     #[test]
     fn terminal_reinput_appends_to_existing_pending_input() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<TerminalReinputRequest>()
             .add_systems(Update, handle_terminal_reinput_requests);
         let pid = process_id(7);
@@ -3638,7 +3655,7 @@ mod tests {
     #[test]
     fn terminal_reinput_preserves_multiple_messages_in_order() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<TerminalReinputRequest>()
             .add_systems(Update, handle_terminal_reinput_requests);
         let pid = process_id(8);
@@ -3736,7 +3753,7 @@ mod tests {
     #[test]
     fn terminal_send_resolves_target_by_process_id_uuid() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<crate::TerminalSendRequest>()
             .insert_resource(vmux_layout::stack::FocusedStack::default())
             .add_systems(Update, handle_terminal_send_requests);
@@ -4054,24 +4071,16 @@ mod tests {
     }
 
     #[test]
-    fn missing_service_process_restarts_matching_terminal() {
-        let missing = process_id(7);
+    fn missing_service_process_restart_preserves_launch() {
         let target = Entity::from_bits(1);
-        let plain_launch = || crate::launch::TerminalLaunch {
+        let launch = crate::launch::TerminalLaunch {
             command: default_shell(),
             args: vec![],
             cwd: String::new(),
             env: vec![],
             kind: crate::launch::TerminalKind::Plain,
         };
-        let restart = missing_terminal_restart(
-            missing,
-            [
-                (Entity::from_bits(2), process_id(8), plain_launch(), None),
-                (target, missing, plain_launch(), None),
-            ],
-        )
-        .unwrap();
+        let restart = MissingTerminalRestart::new(target, launch, None);
 
         assert_eq!(restart.entity, target);
         assert!(restart.agent_kind.is_none());
@@ -5196,7 +5205,7 @@ mod tests {
     fn apply_osc_title_sets_and_clears() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<OscTitleChanged>()
             .add_systems(Update, apply_osc_title);
         let pid = ProcessId::new();
@@ -5230,7 +5239,7 @@ mod tests {
     fn clear_osc_title_on_exit_removes_override() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<ProcessExitedEvent>()
             .add_systems(Update, clear_osc_title_on_exit);
         let pid = ProcessId::new();

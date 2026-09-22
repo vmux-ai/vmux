@@ -9,6 +9,7 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
+use crate::process_index::TerminalProcessIndex;
 use vmux_core::KeyboardOwner;
 use vmux_layout::{
     event::SERVICES_PAGE_URL,
@@ -340,7 +341,8 @@ fn broadcast_to_monitors(
 
 fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
@@ -351,24 +353,22 @@ fn on_process_navigate(
     mut commands: Commands,
 ) {
     let pid = &trigger.event().payload.process_id;
-
-    for (_, process_id, content_child_of) in &terminals {
-        if process_id.to_string() == *pid {
-            let tab = content_child_of.get();
-            commands.entity(tab).insert(LastActivatedAt::now());
-            if let Ok(tab_child_of) = tab_parent.get(tab) {
-                commands
-                    .entity(tab_child_of.get())
-                    .insert(LastActivatedAt::now());
-            }
-            return;
-        }
-    }
-
     let Ok(process_id) = pid.parse::<ProcessId>() else {
         warn!("Invalid process ID from navigate event: {pid}");
         return;
     };
+    if let Some(entity) = process_index.get(&process_id)
+        && let Ok(content_child_of) = terminals.get(entity)
+    {
+        let tab = content_child_of.get();
+        commands.entity(tab).insert(LastActivatedAt::now());
+        if let Ok(tab_child_of) = tab_parent.get(tab) {
+            commands
+                .entity(tab_child_of.get())
+                .insert(LastActivatedAt::now());
+        }
+        return;
+    }
     let (_, active_pane, _) = focused_stack(
         active_tab_param.get(),
         &all_children,
@@ -389,7 +389,8 @@ fn on_process_kill(
     trigger: On<BinReceive<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     mut commands: Commands,
 ) {
@@ -401,13 +402,12 @@ fn on_process_kill(
         remove_processes_from_cached_list(&mut process_list, [process_id]);
         service.0.send(ClientMessage::ListProcesses);
 
-        for (_, terminal_pid, content_child_of) in &terminals {
-            if *terminal_pid == process_id {
-                let tab = content_child_of.get();
-                if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
-                    commands.entity(tab).despawn();
-                }
-                break;
+        if let Some(entity) = process_index.get(&process_id)
+            && let Ok(content_child_of) = terminals.get(entity)
+        {
+            let tab = content_child_of.get();
+            if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
+                commands.entity(tab).despawn();
             }
         }
     }
@@ -417,7 +417,8 @@ fn on_process_kill_all(
     _trigger: On<BinReceive<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<&ChildOf, With<Terminal>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
@@ -428,12 +429,10 @@ fn on_process_kill_all(
             process_id: *process_id,
         });
 
-        for (_, terminal_pid, content_child_of) in &terminals {
-            if *terminal_pid == *process_id {
-                let tab = content_child_of.get();
-                commands.entity(tab).despawn();
-                break;
-            }
+        if let Some(entity) = process_index.get(process_id)
+            && let Ok(content_child_of) = terminals.get(entity)
+        {
+            commands.entity(content_child_of.get()).despawn();
         }
     }
     if !process_ids.is_empty() {

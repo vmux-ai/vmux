@@ -1083,7 +1083,7 @@ mod tests {
             fn build(&self, app: &mut App) {
                 app.add_plugins((
                     vmux_layout::LayoutContractPlugin,
-                    vmux_terminal::TerminalContractPlugin,
+                    vmux_terminal::TerminalRequestPlugin,
                 ))
                 .add_message::<PageOpenRequest>()
                 .add_message::<CefPageAttachRequest>()
@@ -1114,8 +1114,6 @@ mod tests {
                         crate::page_open::handle_unclaimed_page_open_tasks
                             .in_set(PageOpenSet::Fallback),
                         crate::page_open::respond_page_open_tasks.in_set(PageOpenSet::Respond),
-                        vmux_terminal::handle_terminal_send_requests,
-                        vmux_terminal::handle_run_shell_requests,
                     ),
                 );
             }
