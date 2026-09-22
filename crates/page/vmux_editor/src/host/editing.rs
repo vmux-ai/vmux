@@ -199,6 +199,45 @@ pub struct EditState {
     wrap_cache: Option<CachedWrapView>,
 }
 
+struct LspPosition {
+    line: u32,
+    utf16_col: u32,
+    char_col: usize,
+    line_text: String,
+}
+
+impl LspPosition {
+    fn from_char_col(line: u32, line_text: String, char_col: usize) -> Self {
+        let char_col = char_col.min(line_text.chars().count());
+        let utf16_col = crate::lsp::manager::char_to_utf16_col(&line_text, char_col as u32);
+        Self {
+            line,
+            utf16_col,
+            char_col,
+            line_text,
+        }
+    }
+
+    fn word_start_col(&self) -> u32 {
+        let chars: Vec<char> = self.line_text.chars().collect();
+        let mut start = self.char_col;
+        while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
+            start -= 1;
+        }
+        start as u32
+    }
+
+    fn word(&self) -> String {
+        let chars: Vec<char> = self.line_text.chars().collect();
+        let start = self.word_start_col() as usize;
+        let mut end = self.char_col;
+        while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+            end += 1;
+        }
+        chars[start..end].iter().collect()
+    }
+}
+
 impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
@@ -223,6 +262,34 @@ impl EditState {
 
     pub(crate) fn cursor_line(&self) -> u32 {
         self.core.cursor_pos().line
+    }
+
+    fn caret_lsp_position(&self) -> LspPosition {
+        let head = self.core.primary().head;
+        let (line, char_col) = self.core.buffer.char_to_coords(head);
+        self.lsp_position_at_char(line as u32, char_col)
+    }
+
+    fn lsp_position_at_cell(&self, line: u32, cell: u32) -> LspPosition {
+        let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
+        let line_text = self.line_text(line);
+        let char_col = DisplayCells::char_at(&line_text, cell);
+        LspPosition::from_char_col(line, line_text, char_col)
+    }
+
+    fn lsp_position_at_char(&self, line: u32, char_col: usize) -> LspPosition {
+        let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
+        LspPosition::from_char_col(line, self.line_text(line), char_col)
+    }
+
+    fn line_text(&self, line: u32) -> String {
+        self.core
+            .buffer
+            .rope
+            .line(line as usize)
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .collect()
     }
 
     pub(crate) fn indent_width(&self) -> u16 {
@@ -444,92 +511,67 @@ fn reapply_keymap_on_change(
     }
 }
 
-fn caret_lsp(edit: &EditState) -> (u32, u32, usize, String) {
-    let head = edit.core.primary().head;
-    let (line, ccol) = edit.core.buffer.char_to_coords(head);
-    let lt: String = edit
-        .core
-        .buffer
-        .rope
-        .line(line)
-        .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
-        .collect();
-    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, ccol as u32);
-    (line as u32, utf16, ccol, lt)
+struct WikiCompletion {
+    line: u32,
+    replace_from_col: u32,
+    prefix: String,
 }
 
-fn word_start_col(line_text: &str, char_col: usize) -> u32 {
-    let chars: Vec<char> = line_text.chars().collect();
-    let mut i = char_col.min(chars.len());
-    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
-        i -= 1;
-    }
-    i as u32
-}
-
-fn word_at_col(line_text: &str, char_col: usize) -> String {
-    let chars: Vec<char> = line_text.chars().collect();
-    let start = word_start_col(line_text, char_col) as usize;
-    let mut end = char_col.min(chars.len());
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
-    }
-    chars[start..end].iter().collect()
-}
-
-fn wiki_completion_context(edit: &EditState) -> Option<(u32, u32, String)> {
-    if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
-        return None;
-    }
-    let (line, _, col, text) = caret_lsp(edit);
-    let chars = text.chars().collect::<Vec<_>>();
-    let col = col.min(chars.len());
-    let open = (0..col.saturating_sub(1))
-        .rev()
-        .find(|index| chars[*index] == '[' && chars[*index + 1] == '[')?;
-    let fragment = chars[open + 2..col].iter().collect::<String>();
-    if fragment.contains("]]") || fragment.contains('|') || fragment.contains('#') {
-        return None;
-    }
-    Some((line, open as u32 + 2, fragment))
-}
-
-fn emit_wiki_completions(
-    entity: Entity,
-    edit: &EditState,
-    index: &vmux_core::knowledge::KnowledgeIndex,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) -> bool {
-    if !index.loaded() || !edit.core.buffer.path.starts_with(index.root()) {
-        return false;
-    }
-    let Some((line, replace_from_col, prefix)) = wiki_completion_context(edit) else {
-        return false;
-    };
-    if !browsers.can_emit_to(&entity) {
-        return true;
-    }
-    let items = index
-        .completions(&prefix, 32)
-        .into_iter()
-        .map(|(title, relative)| CompletionItem {
-            label: title.clone(),
-            insert_text: format!("{title}]]"),
-            detail: relative,
-            kind: "knowledge".to_string(),
+impl WikiCompletion {
+    fn for_edit(edit: &EditState, index: &vmux_core::knowledge::KnowledgeIndex) -> Option<Self> {
+        if !index.loaded()
+            || !edit.core.buffer.path.starts_with(index.root())
+            || !crate::markdown::is_markdown_path(&edit.core.buffer.path)
+        {
+            return None;
+        }
+        let position = edit.caret_lsp_position();
+        let chars = position.line_text.chars().collect::<Vec<_>>();
+        let open = (0..position.char_col.saturating_sub(1))
+            .rev()
+            .find(|offset| chars[*offset] == '[' && chars[*offset + 1] == '[')?;
+        let prefix = chars[open + 2..position.char_col]
+            .iter()
+            .collect::<String>();
+        if prefix.contains("]]") || prefix.contains('|') || prefix.contains('#') {
+            return None;
+        }
+        Some(Self {
+            line: position.line,
+            replace_from_col: open as u32 + 2,
+            prefix,
         })
-        .collect();
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &FileCompletionEvent {
-            items,
-            replace_from_col,
-            line,
-        },
-    ));
-    true
+    }
+
+    fn emit(
+        self,
+        entity: Entity,
+        index: &vmux_core::knowledge::KnowledgeIndex,
+        browsers: &Browsers,
+        commands: &mut Commands,
+    ) {
+        if !browsers.can_emit_to(&entity) {
+            return;
+        }
+        let items = index
+            .completions(&self.prefix, 32)
+            .into_iter()
+            .map(|(title, relative)| CompletionItem {
+                label: title.clone(),
+                insert_text: format!("{title}]]"),
+                detail: relative,
+                kind: "knowledge".to_string(),
+            })
+            .collect();
+        commands.trigger(BinHostEmitEvent::from_event(
+            entity,
+            &FileCompletionEvent {
+                items,
+                replace_from_col: self.replace_from_col,
+                line: self.line,
+            },
+        ));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -635,28 +677,28 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::GotoDefinition => {
-                let (line, utf16, _, _) = caret_lsp(&edit);
+                let position = edit.caret_lsp_position();
                 let path = edit.core.buffer.path.clone();
-                manager.definition(entity, &path, line, utf16);
+                manager.definition(entity, &path, position.line, position.utf16_col);
                 continue;
             }
             EditCommand::FindReferences => {
-                let (line, utf16, _, _) = caret_lsp(&edit);
+                let position = edit.caret_lsp_position();
                 let path = edit.core.buffer.path.clone();
-                manager.references(entity, &path, line, utf16);
+                manager.references(entity, &path, position.line, position.utf16_col);
                 continue;
             }
             EditCommand::BeginRename => {
-                let (line, _, ccol, lt) = caret_lsp(&edit);
-                let current = word_at_col(&lt, ccol);
+                let position = edit.caret_lsp_position();
+                let current = position.word();
                 if current.is_empty() || !browsers.can_emit_to(&entity) {
                     continue;
                 }
                 commands.trigger(BinHostEmitEvent::from_event(
                     entity,
                     &vmux_core::event::FileRenameBeginEvent {
-                        line,
-                        col: ccol as u32,
+                        line: position.line,
+                        col: position.char_col as u32,
                         current,
                     },
                 ));
@@ -685,10 +727,15 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::TriggerCompletion => {
-                let (line, utf16, ccol, lt) = caret_lsp(&edit);
-                let replace_from = word_start_col(&lt, ccol);
+                let position = edit.caret_lsp_position();
                 let path = edit.core.buffer.path.clone();
-                manager.completion(entity, &path, line, utf16, replace_from);
+                manager.completion(
+                    entity,
+                    &path,
+                    position.line,
+                    position.utf16_col,
+                    position.word_start_col(),
+                );
                 continue;
             }
             EditCommand::ScrollViewport(_) => unreachable!(),
@@ -1005,7 +1052,10 @@ fn on_wiki_completion_request(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    emit_wiki_completions(entity, edit, index, &browsers, &mut commands);
+    let Some(completion) = WikiCompletion::for_edit(edit, index) else {
+        return;
+    };
+    completion.emit(entity, index, &browsers, &mut commands);
 }
 
 fn on_file_property_edit(
@@ -1116,23 +1166,14 @@ fn on_file_hover_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _, col) = req_pos(edit, req.line, req.col);
-    manager.hover(entity, &edit.core.buffer.path, line, utf16, col);
-}
-
-fn req_pos(edit: &EditState, line: u32, cell: u32) -> (u32, u32, String, u32) {
-    let line = line.min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
-    let lt: String = edit
-        .core
-        .buffer
-        .rope
-        .line(line as usize)
-        .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
-        .collect();
-    let col = DisplayCells::char_at(&lt, cell) as u32;
-    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, col);
-    (line, utf16, lt, col)
+    let position = edit.lsp_position_at_cell(req.line, req.col);
+    manager.hover(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+        position.char_col as u32,
+    );
 }
 
 fn on_file_definition_request(
@@ -1145,9 +1186,9 @@ fn on_file_definition_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
+    let position = edit.lsp_position_at_cell(req.line, req.col);
     let path = edit.core.buffer.path.clone();
-    manager.definition(entity, &path, line, utf16);
+    manager.definition(entity, &path, position.line, position.utf16_col);
 }
 
 fn on_file_editor_action(
@@ -1164,7 +1205,7 @@ fn on_file_editor_action(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, ccol, lt) = caret_lsp(edit);
+    let position = edit.caret_lsp_position();
     let path = edit.core.buffer.path.clone();
 
     let cmds = match action.action {
@@ -1187,15 +1228,15 @@ fn on_file_editor_action(
             return;
         }
         EditorAction::GotoDeclaration => {
-            manager.declaration(entity, &path, line, utf16);
+            manager.declaration(entity, &path, position.line, position.utf16_col);
             return;
         }
         EditorAction::GotoTypeDefinition => {
-            manager.type_definition(entity, &path, line, utf16);
+            manager.type_definition(entity, &path, position.line, position.utf16_col);
             return;
         }
         EditorAction::GotoImplementation => {
-            manager.implementation(entity, &path, line, utf16);
+            manager.implementation(entity, &path, position.line, position.utf16_col);
             return;
         }
         EditorAction::FormatDocument => {
@@ -1208,13 +1249,13 @@ fn on_file_editor_action(
             return;
         }
         EditorAction::Rename => {
-            let current = word_at_col(&lt, ccol);
+            let current = position.word();
             if !current.is_empty() && browsers.can_emit_to(&entity) {
                 commands.trigger(BinHostEmitEvent::from_event(
                     entity,
                     &vmux_core::event::FileRenameBeginEvent {
-                        line,
-                        col: ccol as u32,
+                        line: position.line,
+                        col: position.char_col as u32,
                         current,
                     },
                 ));
@@ -1273,9 +1314,15 @@ fn on_file_rename_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
+    let position = edit.lsp_position_at_cell(req.line, req.col);
     let path = edit.core.buffer.path.clone();
-    manager.rename(entity, &path, line, utf16, &req.new_name);
+    manager.rename(
+        entity,
+        &path,
+        position.line,
+        position.utf16_col,
+        &req.new_name,
+    );
 }
 
 fn on_file_references_request(
@@ -1288,9 +1335,9 @@ fn on_file_references_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    let (line, utf16, _, _) = req_pos(edit, req.line, req.col);
+    let position = edit.lsp_position_at_cell(req.line, req.col);
     let path = edit.core.buffer.path.clone();
-    manager.references(entity, &path, line, utf16);
+    manager.references(entity, &path, position.line, position.utf16_col);
 }
 
 fn on_file_completion_request(
@@ -1306,16 +1353,21 @@ fn on_file_completion_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    if index
-        .as_deref()
-        .is_some_and(|index| emit_wiki_completions(entity, edit, index, &browsers, &mut commands))
+    if let Some(index) = index.as_deref()
+        && let Some(completion) = WikiCompletion::for_edit(edit, index)
     {
+        completion.emit(entity, index, &browsers, &mut commands);
         return;
     }
-    let (line, utf16, lt, col) = req_pos(edit, req.line, req.col);
-    let replace_from = word_start_col(&lt, col as usize);
+    let position = edit.lsp_position_at_cell(req.line, req.col);
     let path = edit.core.buffer.path.clone();
-    manager.completion(entity, &path, line, utf16, replace_from);
+    manager.completion(
+        entity,
+        &path,
+        position.line,
+        position.utf16_col,
+        position.word_start_col(),
+    );
 }
 
 fn on_file_goto_request(
@@ -1426,10 +1478,24 @@ mod edit_flow_tests {
 
     #[test]
     fn rename_prefill_is_the_identifier_around_the_caret() {
-        assert_eq!(word_at_col("let some_name = 1;", 8), "some_name");
-        assert_eq!(word_at_col("let some_name = 1;", 4), "some_name");
-        assert_eq!(word_at_col("let some_name = 1;", 13), "some_name");
-        assert_eq!(word_at_col("let some_name = 1;", 14), "");
+        let text = "let some_name = 1;";
+
+        assert_eq!(
+            LspPosition::from_char_col(0, text.to_string(), 8).word(),
+            "some_name"
+        );
+        assert_eq!(
+            LspPosition::from_char_col(0, text.to_string(), 4).word(),
+            "some_name"
+        );
+        assert_eq!(
+            LspPosition::from_char_col(0, text.to_string(), 13).word(),
+            "some_name"
+        );
+        assert_eq!(
+            LspPosition::from_char_col(0, text.to_string(), 14).word(),
+            ""
+        );
     }
 
     #[test]
