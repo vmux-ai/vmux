@@ -1,3 +1,4 @@
+mod app_plugin;
 mod bin_event;
 mod expand;
 mod named_fields;
@@ -7,6 +8,15 @@ mod variant_names;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
+
+#[proc_macro_attribute]
+pub fn app_plugin(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match app_plugin::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
 
 #[proc_macro_attribute]
 pub fn host_event(args: TokenStream, input: TokenStream) -> TokenStream {

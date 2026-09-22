@@ -71,6 +71,7 @@ vmux_history = { path = "../page/vmux_history", optional = true }
 vmux_knowledge = { path = "../page/vmux_knowledge", optional = true }
 vmux_layout = { path = "../page/vmux_layout", optional = true }
 vmux_mcp = { path = "../host/vmux_mcp", optional = true }
+vmux_macro = { path = "../vmux_macro" }
 vmux_service = { path = "../host/vmux_service", optional = true }
 vmux_setting = { path = "../page/vmux_setting", optional = true }
 vmux_shortcut = { path = "../page/vmux_shortcut", optional = true }
