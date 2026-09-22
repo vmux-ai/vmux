@@ -21,6 +21,7 @@ impl Plugin for EditorPlugin {
             media::EditorMediaPlugin,
             note::EditorNotePlugin,
             editing::EditorEditingPlugin,
+            language::EditorLanguagePlugin,
             shape::EditorShapePlugin,
             encoding::EditorEncodingPlugin,
             navigation::EditorNavigationPlugin,
@@ -69,6 +70,7 @@ pub(crate) mod editing;
 pub(crate) mod explorer;
 pub(crate) mod file_lifecycle;
 pub(crate) mod history;
+pub(crate) mod language;
 pub(crate) mod media;
 pub(crate) mod navigation;
 pub(crate) mod note;
