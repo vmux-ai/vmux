@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod editor;
+mod menu;
 mod note;
 mod sidebar;
 mod status;
@@ -10,11 +11,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use editor::{EditorLines, StickyScope};
+use menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
 use note::{
     NoteBlankLine, NoteBlockView, NoteProperties, activate_note_cursor,
     activate_note_cursor_centered, ensure_note_caret_visible, note_blank_line_slot,
     note_block_index_for_line,
 };
+pub(crate) use sidebar::ExplorerPane;
 use sidebar::{ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
@@ -26,7 +29,7 @@ use crate::page_key::{Completions, FilePage, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, centered_scroll_top,
     clamp_selection, dir_select_index, editor_drag_started, gutter_width, image_mime,
-    note_cursor_activation, severity_color_class, should_apply_explorer_panel, span_style,
+    note_cursor_activation, severity_color_class, span_style,
 };
 use dioxus::html::geometry::ElementPoint;
 use dioxus::html::input_data::MouseButton;
@@ -44,7 +47,7 @@ use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::{ImeGuard, use_ime_guard};
 use vmux_ui::media::MediaElement;
-use vmux_ui::platform::{now_millis, random_index, sleep_ms};
+use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::util::cn;
 
@@ -148,10 +151,9 @@ pub fn Page() -> Element {
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let ime = use_ime_guard();
     let typed = use_signal(String::new);
-    let rename_ime = use_ime_guard();
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
-    let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
+    let ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
     let mut refs = use_signal(Vec::<RefItem>::new);
     let mut refs_sel = use_signal(|| 0usize);
     let mut refs_open = use_signal(|| false);
@@ -160,24 +162,7 @@ pub fn Page() -> Element {
     let mut comp_sel = use_signal(|| 0usize);
     let mut comp_anchor = use_signal(|| (0u32, 0u32));
     let mut last_scroll_req = use_signal(|| 0u32);
-    let explorer_visible = use_signal(|| false);
-    let mut explorer_preferred_visible = use_signal(|| false);
-    let mut explorer_width = use_signal(|| 240u32);
-    let mut explorer_resizing = use_signal(|| false);
-    let explorer_client_id = use_signal(explorer_client_id);
-    let explorer_request_id = use_signal(|| 0u64);
-    let explorer_reflowed_at = use_signal(|| Option::<ExplorerReflowKey>::None);
-    let explorer_user_chose = use_signal(|| false);
-    let explorer = ExplorerPane {
-        visible: explorer_visible,
-        preferred_visible: explorer_preferred_visible,
-        width: explorer_width,
-        page_width,
-        client_id: explorer_client_id,
-        request_id: explorer_request_id,
-        reflowed_at: explorer_reflowed_at,
-        user_chose: explorer_user_chose,
-    };
+    let explorer = ExplorerPane::new(page_width);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
 
@@ -207,18 +192,7 @@ pub fn Page() -> Element {
     use_context_provider(|| keys);
 
     let _panel = use_listener::<ExplorerPanelEvent, _>(move |event| {
-        if should_apply_explorer_panel(
-            explorer_client_id(),
-            explorer_request_id(),
-            event.client_id,
-            event.request_id,
-        ) {
-            explorer_preferred_visible.set(event.visible);
-        }
-        if explorer_width() != event.width {
-            explorer_width.set(event.width);
-        }
-        explorer.sync();
+        explorer.apply_panel(event);
     });
 
     let _tidy = use_listener::<FileTidyPromptEvent, _>(move |e| {
@@ -596,12 +570,7 @@ pub fn Page() -> Element {
 
     let _rename_begin = use_listener::<FileRenameBeginEvent, _>(move |e| {
         rename_failed.set(String::new());
-        rename_box.set(Some(RenameBox {
-            line: e.line,
-            col: e.col,
-            original: e.current.clone(),
-            draft: e.current,
-        }));
+        rename_box.set(Some(RenameBox::new(e.line, e.col, e.current)));
     });
 
     let _rename_failed = use_listener::<FileEditFailedEvent, _>(move |e| {
@@ -776,20 +745,13 @@ pub fn Page() -> Element {
             id: PAGE_ID,
             class: "relative flex h-full w-full flex-col overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
-                if explorer_resizing() {
-                    let x = e.client_coordinates().x as i32;
-                    explorer_width
-                        .set((x.max(0) as u32).clamp(EXPLORER_MIN_WIDTH_PX, EXPLORER_MAX_WIDTH_PX));
-                }
+                explorer.resize_to(e.client_coordinates().x);
             },
             onmouseup: move |_| {
                 note_dragging.set(false);
                 editor_dragging.set(false);
                 editor_drag_origin.set(None);
-                if explorer_resizing() {
-                    explorer_resizing.set(false);
-                    let _ = send(&ExplorerPanelWidth { px: explorer_width() });
-                }
+                explorer.finish_resize();
             },
 
             PaneWidth { width: page_width }
@@ -798,9 +760,7 @@ pub fn Page() -> Element {
             class: "flex min-h-0 flex-1 flex-row overflow-hidden",
 
             ExplorerSidebar {
-                visible: explorer_visible,
-                width: explorer_width,
-                resizing: explorer_resizing,
+                pane: explorer,
                 caret_line: breadcrumb_caret_line,
                 view: sidebar_view,
             }
@@ -1766,112 +1726,19 @@ pub fn Page() -> Element {
                                             })
                                         }
 
-                                        {
-                                            (!code_actions().is_empty()).then(|| {
-                                                let titles = code_actions();
-                                                let chosen = code_action_sel().min(titles.len() - 1);
-                                                let top = cursor().row as f64 * ch + ch;
-                                                let left = gutter + ruler.x_of(cursor().row, cursor().col);
-                                                rsx! {
-                                                    div {
-                                                        id: CODE_ACTION_ID,
-                                                        tabindex: 0,
-                                                        autofocus: true,
-                                                        class: "absolute z-50 max-h-56 min-w-64 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground outline-none ring-1 ring-inset ring-primary/30 backdrop-blur-2xl shadow-lg",
-                                                        style: "left:{left}px;top:{top}px;",
-                                                        onkeydown: move |e| {
-                                                            e.stop_propagation();
-                                                            let len = code_actions().len();
-                                                            match e.key() {
-                                                                Key::ArrowDown => {
-                                                                    e.prevent_default();
-                                                                    code_action_sel.set((chosen + 1) % len);
-                                                                }
-                                                                Key::ArrowUp => {
-                                                                    e.prevent_default();
-                                                                    code_action_sel.set((chosen + len - 1) % len);
-                                                                }
-                                                                Key::Enter => {
-                                                                    e.prevent_default();
-                                                                    let _ = send(&FileCodeActionPick { index: chosen as u32 });
-                                                                    code_actions.set(Vec::new());
-                                                                    focus_file_input();
-                                                                }
-                                                                Key::Escape => {
-                                                                    e.prevent_default();
-                                                                    code_actions.set(Vec::new());
-                                                                    focus_file_input();
-                                                                }
-                                                                _ => {}
-                                                            }
-                                                        },
-                                                        onblur: move |_| code_actions.set(Vec::new()),
-                                                        for (i, title) in titles.iter().enumerate() {
-                                                            div {
-                                                                key: "{i}",
-                                                                class: if i == chosen { "cursor-default px-3 py-1 bg-primary/15" } else { "cursor-default px-3 py-1" },
-                                                                onmousedown: move |e: Event<MouseData>| {
-                                                                    e.prevent_default();
-                                                                    let _ = send(&FileCodeActionPick { index: i as u32 });
-                                                                    code_actions.set(Vec::new());
-                                                                    focus_file_input();
-                                                                },
-                                                                "{title}"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            })
+                                        CodeActionMenu {
+                                            titles: code_actions,
+                                            selected: code_action_sel,
+                                            top: cursor().row as f64 * ch + ch,
+                                            left: gutter + ruler.x_of(cursor().row, cursor().col),
                                         }
 
-                                        {
-                                            rename_box().map(|box_| {
-                                                let top = box_.line as f64 * ch + ch;
-                                                let left = gutter + ruler.x_of_char(box_.line, box_.col);
-                                                rsx! {
-                                                    input {
-                                                        id: RENAME_ID,
-                                                        autofocus: true,
-                                                        spellcheck: false,
-                                                        autocomplete: "off",
-                                                        class: "absolute z-50 min-w-32 rounded-md bg-background/95 px-2 py-1 text-xs text-foreground ring-1 ring-inset ring-primary/40 outline-none backdrop-blur-2xl shadow-lg",
-                                                        style: "left:{left}px;top:{top}px;",
-                                                        value: "{box_.draft}",
-                                                        oninput: move |e| {
-                                                            if let Some(open) = rename_box.write().as_mut() {
-                                                                open.draft = e.value();
-                                                            }
-                                                        },
-                                                        oncompositionstart: move |_| rename_ime.start(),
-                                                        oncompositionend: move |_| rename_ime.commit(),
-                                                        onkeydown: move |e: Event<KeyboardData>| {
-                                                            e.stop_propagation();
-                                                            if rename_ime.swallows(&e) {
-                                                                return;
-                                                            }
-                                                            match e.key() {
-                                                                Key::Enter => {
-                                                                    e.prevent_default();
-                                                                    if let Some(open) = rename_box() {
-                                                                        open.submit();
-                                                                    }
-                                                                    rename_box.set(None);
-                                                                    focus_file_input();
-                                                                }
-                                                                Key::Escape => {
-                                                                    e.prevent_default();
-                                                                    rename_box.set(None);
-                                                                    focus_file_input();
-                                                                }
-                                                                _ => {}
-                                                            }
-                                                        },
-                                                        onblur: move |_| {
-                                                            rename_box.set(None);
-                                                        },
-                                                    }
-                                                }
-                                            })
+                                        if let Some(rename) = rename_box() {
+                                            RenameInput {
+                                                state: rename_box,
+                                                top: rename.line() as f64 * ch + ch,
+                                                left: gutter + ruler.x_of_char(rename.line(), rename.col()),
+                                            }
                                         }
 
                                         {
@@ -1964,102 +1831,8 @@ pub fn Page() -> Element {
                 })
             }
 
-            {
-                ctx_menu().map(|(x, y, line, col)| rsx! {
-                    div {
-                        class: "fixed inset-0 z-40",
-                        onmousedown: move |_| ctx_menu.set(None),
-                        oncontextmenu: move |e| {
-                            e.prevent_default();
-                            ctx_menu.set(None);
-                        },
-                    }
-                    div {
-                        class: "fixed z-50 min-w-56 overflow-hidden rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
-                        style: "left:{x}px;top:{y}px;",
-                        for (i, row) in EditorMenu::offering(&lsp_actions()).rows().into_iter().enumerate() {
-                            div {
-                                key: "{i}",
-                                class: if row.opens_group && i > 0 {
-                                    "mt-1 flex cursor-default items-center gap-6 border-t border-foreground/10 px-3 pt-2 pb-1.5 hover:bg-primary/15"
-                                } else {
-                                    "flex cursor-default items-center gap-6 px-3 py-1.5 hover:bg-primary/15"
-                                },
-                                onmousedown: move |e: Event<MouseData>| {
-                                    e.prevent_default();
-                                    row.invoke(line, col);
-                                    ctx_menu.set(None);
-                                },
-                                span { class: "grow whitespace-nowrap", {translate(row.label)} }
-                                span { class: "shrink-0 text-[10px] text-foreground/40", "{row.shortcut}" }
-                            }
-                        }
-                    }
-                })
-            }
-
-            {
-                refs_open().then(|| {
-                    let items = refs();
-                    rsx! {
-                        div {
-                            id: "refs-panel",
-                            tabindex: "0",
-                            class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
-                            onkeydown: move |e: Event<KeyboardData>| {
-                                e.stop_propagation();
-                                if keys.offer(&e) {
-                                    return;
-                                }
-                                let key = e.key().to_string();
-                                let len = refs.read().len();
-                                match key.as_str() {
-                                    "j" => {
-                                        e.prevent_default();
-                                        if len > 0 {
-                                            refs_sel.set((refs_sel() + 1).min(len - 1));
-                                        }
-                                    }
-                                    "k" => {
-                                        e.prevent_default();
-                                        refs_sel.set(refs_sel().saturating_sub(1));
-                                    }
-                                    _ => {}
-                                }
-                            },
-                            div { class: "px-2 py-1 text-[10px] uppercase tracking-wide text-foreground/50",
-                                {translate_with(
-                                    "editor-references",
-                                    &[("count", TranslationValue::Number(items.len() as i64))],
-                                )}
-                            }
-                            for (i, it) in items.iter().enumerate() {
-                                {
-                                    let nav = (it.path.clone(), it.line, it.col);
-                                    rsx! {
-                                        div {
-                                            key: "{i}",
-                                            class: if i == refs_sel() { "flex gap-2 rounded bg-primary/15 px-2 py-1" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
-                                            onmousedown: move |e: Event<MouseData>| {
-                                                e.prevent_default();
-                                                let _ = send(&FileGotoRequest {
-                                                    path: nav.0.clone(),
-                                                    line: nav.1,
-                                                    col: nav.2,
-                                                });
-                                                refs_open.set(false);
-                                                focus_file_input();
-                                            },
-                                            span { class: "shrink-0 text-primary/80", "{it.display}" }
-                                            span { class: "truncate text-foreground/60", "{it.preview}" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                })
-            }
+            EditorContextMenu { position: ctx_menu, offered: lsp_actions }
+            ReferencesPanel { open: refs_open, items: refs, selected: refs_sel }
         }
         }
 
@@ -2135,175 +1908,15 @@ const MEASURE_ROWS: usize = 8;
 const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
-const RENAME_ID: &str = "file-rename";
-const CODE_ACTION_ID: &str = "file-code-action";
 pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 const RENAME_NOTICE_MS: u32 = 2400;
 const HOVER_DELAY_MS: u32 = 300;
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
-const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
 const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
-
-#[derive(Clone, Copy, PartialEq)]
-struct MenuRow {
-    label: &'static str,
-    shortcut: &'static str,
-    action: Option<EditorAction>,
-    opens_group: bool,
-}
-
-impl MenuRow {
-    fn invoke(self, line: u32, col: u32) {
-        match self.action {
-            Some(action) => {
-                let _ = send(&FileEditorAction { action, line, col });
-            }
-            None if self.label == "editor-go-to-definition" => {
-                let _ = send(&FileDefinitionRequest { line, col });
-            }
-            None => {
-                let _ = send(&FileReferencesRequest { line, col });
-            }
-        }
-    }
-}
-
-struct EditorMenu {
-    offered: Vec<EditorAction>,
-}
-
-impl EditorMenu {
-    fn offering(offered: &[EditorAction]) -> Self {
-        Self {
-            offered: offered.to_vec(),
-        }
-    }
-
-    fn rows(&self) -> Vec<MenuRow> {
-        let lsp = |label, shortcut, action, opens_group| MenuRow {
-            label,
-            shortcut,
-            action: Some(action),
-            opens_group,
-        };
-        let mut rows = vec![
-            MenuRow {
-                label: "editor-go-to-definition",
-                shortcut: "F12",
-                action: None,
-                opens_group: false,
-            },
-            MenuRow {
-                label: "editor-find-references",
-                shortcut: "⇧F12",
-                action: None,
-                opens_group: false,
-            },
-        ];
-        for (action, label, shortcut) in [
-            (
-                EditorAction::GotoDeclaration,
-                "editor-go-to-declaration",
-                "",
-            ),
-            (
-                EditorAction::GotoTypeDefinition,
-                "editor-go-to-type-definition",
-                "",
-            ),
-            (
-                EditorAction::GotoImplementation,
-                "editor-go-to-implementation",
-                "⌘F12",
-            ),
-        ] {
-            if self.offered.contains(&action) {
-                rows.push(lsp(label, shortcut, action, false));
-            }
-        }
-
-        let mut modifying = Vec::new();
-        if self.offered.contains(&EditorAction::Rename) {
-            modifying.push(lsp(
-                "editor-rename-symbol",
-                "F2",
-                EditorAction::Rename,
-                false,
-            ));
-        }
-        modifying.push(lsp(
-            "editor-change-all-occurrences",
-            "⌘F2",
-            EditorAction::ChangeAllOccurrences,
-            false,
-        ));
-        if self.offered.contains(&EditorAction::FormatDocument) {
-            modifying.push(lsp(
-                "editor-format-document",
-                "⇧⌥F",
-                EditorAction::FormatDocument,
-                false,
-            ));
-        }
-        if self.offered.contains(&EditorAction::FormatSelection) {
-            modifying.push(lsp(
-                "editor-format-selection",
-                "",
-                EditorAction::FormatSelection,
-                false,
-            ));
-        }
-        if self.offered.contains(&EditorAction::CodeAction) {
-            modifying.push(lsp(
-                "editor-code-action",
-                "⌃⇧R",
-                EditorAction::CodeAction,
-                false,
-            ));
-        }
-        if let Some(first) = modifying.first_mut() {
-            first.opens_group = true;
-        }
-        rows.append(&mut modifying);
-
-        rows.push(lsp("editor-cut", "⌘X", EditorAction::Cut, true));
-        rows.push(lsp("editor-copy", "⌘C", EditorAction::Copy, false));
-        rows.push(lsp("editor-paste", "⌘V", EditorAction::Paste, false));
-        rows.push(lsp(
-            "editor-command-palette",
-            "⇧⌘P",
-            EditorAction::CommandPalette,
-            true,
-        ));
-        rows
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct RenameBox {
-    line: u32,
-    col: u32,
-    original: String,
-    draft: String,
-}
-
-impl RenameBox {
-    fn submit(&self) {
-        let name = self.draft.trim();
-        if name.is_empty() || name == self.original {
-            return;
-        }
-        let _ = send(&FileRenameRequest {
-            line: self.line,
-            col: self.col,
-            new_name: name.to_string(),
-        });
-    }
-}
 
 struct ScrolledLineHeight;
 
@@ -2629,150 +2242,6 @@ pub(crate) fn PreviewPane(preview: Preview) -> Element {
         Preview::Error(m) => rsx! {
             div { class: "text-xs text-ansi-1", "{m}" }
         },
-    }
-}
-
-fn explorer_client_id() -> u64 {
-    ((now_millis() as u64) << 12) ^ random_index(4096) as u64
-}
-
-const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
-const EDITOR_MIN_WIDTH_PX: u32 = 320;
-const EXPLORER_MIN_WIDTH_PX: u32 = 160;
-const EXPLORER_MAX_WIDTH_PX: u32 = 600;
-
-#[derive(Clone, Copy)]
-struct ExplorerRoom {
-    page_width: u32,
-    explorer_width: u32,
-    open: bool,
-}
-
-impl ExplorerRoom {
-    fn fits(self) -> bool {
-        if self.page_width == 0 {
-            return false;
-        }
-        let mut needed = NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(self.explorer_width);
-        if self.open {
-            needed = needed.saturating_sub(EXPLORER_SQUEEZE_TOLERANCE_PX);
-        }
-        self.page_width >= needed
-    }
-
-    fn leaves_editor_usable(self) -> bool {
-        if self.page_width == 0 {
-            return false;
-        }
-        self.page_width >= self.explorer_width.saturating_add(EDITOR_MIN_WIDTH_PX)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct ExplorerReflowKey {
-    page_width: u32,
-    preferred_visible: bool,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub struct ExplorerPane {
-    pub visible: Signal<bool>,
-    pub preferred_visible: Signal<bool>,
-    pub width: Signal<u32>,
-    pub page_width: Signal<u32>,
-    pub client_id: Signal<u64>,
-    pub request_id: Signal<u64>,
-    pub reflowed_at: Signal<Option<ExplorerReflowKey>>,
-    pub user_chose: Signal<bool>,
-}
-
-impl ExplorerPane {
-    fn room(self) -> ExplorerRoom {
-        ExplorerRoom {
-            page_width: (self.page_width)(),
-            explorer_width: (self.width)(),
-            open: (self.visible)(),
-        }
-    }
-
-    fn has_room(self) -> bool {
-        self.room().fits()
-    }
-
-    fn opens_unasked(self) -> bool {
-        let room = self.room();
-        room.leaves_editor_usable() && room.fits()
-    }
-
-    fn reflow_key(self) -> ExplorerReflowKey {
-        ExplorerReflowKey {
-            page_width: (self.page_width)(),
-            preferred_visible: (self.preferred_visible)(),
-        }
-    }
-
-    fn sync(mut self) {
-        let key = self.reflow_key();
-        if key.page_width == 0 || (self.reflowed_at)() == Some(key) {
-            return;
-        }
-        self.reflowed_at.set(Some(key));
-        let next = key.preferred_visible && ((self.user_chose)() || self.opens_unasked());
-        if (self.visible)() != next {
-            self.visible.set(next);
-        }
-    }
-
-    fn set_visible(mut self, next: bool, mode: Signal<Mode>) {
-        let request_id = (self.request_id)().wrapping_add(1);
-        self.request_id.set(request_id);
-        self.preferred_visible.set(next);
-        self.visible.set(next);
-        self.reflowed_at.set(Some(self.reflow_key()));
-        let _ = send(&ExplorerPanelSetVisible {
-            visible: next,
-            client_id: (self.client_id)(),
-            request_id,
-        });
-        if next {
-            return;
-        }
-        match mode() {
-            Mode::Text => focus_file_input(),
-            Mode::Dir | Mode::Media(_) => focus_container(),
-        }
-    }
-
-    pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
-        self.user_chose.set(true);
-        self.set_visible(!(self.visible)(), mode);
-    }
-
-    pub(crate) fn show(mut self, mode: Signal<Mode>) {
-        if (self.visible)() {
-            return;
-        }
-        self.user_chose.set(true);
-        self.set_visible(true, mode);
-    }
-
-    pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {
-        if (self.visible)() {
-            let _ = send(&ExplorerRevealCurrent);
-            return;
-        }
-        self.user_chose.set(true);
-        self.set_visible(true, mode);
-    }
-
-    fn show_if_room(self, mode: Signal<Mode>) {
-        spawn(async move {
-            sleep_ms(0).await;
-            if (self.visible)() || !self.has_room() {
-                return;
-            }
-            self.set_visible(true, mode);
-        });
     }
 }
 
@@ -3157,164 +2626,6 @@ mod scrolled_line_height_tests {
         assert_eq!(
             ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 0.0),
             None
-        );
-    }
-}
-
-#[cfg(test)]
-mod menu_tests {
-    use super::*;
-
-    fn labels(offered: &[EditorAction]) -> Vec<&'static str> {
-        EditorMenu::offering(offered)
-            .rows()
-            .into_iter()
-            .map(|row| row.label)
-            .collect()
-    }
-
-    #[test]
-    fn a_file_without_a_server_keeps_only_the_rows_needing_none() {
-        let rows = labels(&[]);
-        assert!(rows.contains(&"editor-cut"));
-        assert!(rows.contains(&"editor-change-all-occurrences"));
-        assert!(!rows.contains(&"editor-rename-symbol"));
-        assert!(!rows.contains(&"editor-format-document"));
-    }
-
-    #[test]
-    fn a_row_appears_exactly_when_its_server_offers_it() {
-        let rows = labels(&[EditorAction::Rename, EditorAction::GotoImplementation]);
-        assert!(rows.contains(&"editor-rename-symbol"));
-        assert!(rows.contains(&"editor-go-to-implementation"));
-        assert!(!rows.contains(&"editor-go-to-declaration"));
-        assert!(!rows.contains(&"editor-format-selection"));
-    }
-
-    #[test]
-    fn each_group_opens_exactly_once() {
-        let all = [
-            EditorAction::GotoDeclaration,
-            EditorAction::GotoTypeDefinition,
-            EditorAction::GotoImplementation,
-            EditorAction::Rename,
-            EditorAction::FormatDocument,
-            EditorAction::FormatSelection,
-        ];
-        let opens = EditorMenu::offering(&all)
-            .rows()
-            .into_iter()
-            .filter(|row| row.opens_group)
-            .count();
-        assert_eq!(
-            opens, 3,
-            "modification, clipboard and the palette; navigation is first so it opens nothing"
-        );
-    }
-}
-
-#[cfg(test)]
-mod explorer_room_tests {
-    use super::*;
-
-    #[test]
-    fn the_width_that_will_not_open_the_explorer_does_not_close_it_either() {
-        let explorer_width = 240;
-        let short = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - 1;
-
-        assert!(
-            ExplorerRoom {
-                page_width: short,
-                explorer_width,
-                open: true,
-            }
-            .fits()
-        );
-        assert!(
-            !ExplorerRoom {
-                page_width: short,
-                explorer_width,
-                open: false,
-            }
-            .fits()
-        );
-    }
-
-    #[test]
-    fn the_editor_floor_never_preempts_the_squeeze_tolerance() {
-        let explorer_width = 240;
-        let auto_closes_below =
-            NOTE_MAX_CONTENT_WIDTH_PX + explorer_width - EXPLORER_SQUEEZE_TOLERANCE_PX;
-        let floor = explorer_width + EDITOR_MIN_WIDTH_PX;
-
-        assert!(floor < auto_closes_below);
-        assert!(
-            ExplorerRoom {
-                page_width: floor,
-                explorer_width,
-                open: true,
-            }
-            .leaves_editor_usable()
-        );
-        assert!(
-            !ExplorerRoom {
-                page_width: floor - 1,
-                explorer_width,
-                open: true,
-            }
-            .leaves_editor_usable()
-        );
-    }
-
-    #[test]
-    fn the_row_settles_even_when_what_it_measures_follows_the_panel_it_renders() {
-        let explorer_width = 240;
-        let grip = 4;
-
-        for pane_width in [480u32, 502, 560, 746, 1496] {
-            let mut open = true;
-            let mut seen = Vec::new();
-
-            for _ in 0..6 {
-                let panel = explorer_width;
-                let measured = pane_width.saturating_sub(panel + grip);
-                let room = ExplorerRoom {
-                    page_width: measured,
-                    explorer_width,
-                    open,
-                };
-                open = room.fits() && room.leaves_editor_usable();
-                seen.push((measured, open));
-            }
-
-            let settled = seen[seen.len() - 1];
-            assert!(
-                seen[2..].iter().all(|step| *step == settled),
-                "a pane of {pane_width} never settled: {seen:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_explorer_still_opens_at_the_width_it_always_did() {
-        let explorer_width = 240;
-        let snug = NOTE_MAX_CONTENT_WIDTH_PX + explorer_width;
-
-        assert!(
-            ExplorerRoom {
-                page_width: snug,
-                explorer_width,
-                open: false,
-            }
-            .fits()
-        );
-        assert!(
-            !ExplorerRoom {
-                page_width: snug - 1,
-                explorer_width,
-                open: false,
-            }
-            .fits()
         );
     }
 }

@@ -314,15 +314,6 @@ pub enum PkgAction {
     None,
 }
 
-pub fn should_apply_explorer_panel(
-    local_client_id: u64,
-    latest_request_id: u64,
-    event_client_id: u64,
-    event_request_id: u64,
-) -> bool {
-    event_client_id != local_client_id || event_request_id >= latest_request_id
-}
-
 pub fn merge_tree_motion_rows(current: &[TreeRow], next: &[TreeRow]) -> Vec<(TreeRow, bool)> {
     let current_paths: HashSet<&str> = current.iter().map(|row| row.path.as_str()).collect();
     let next_indices: HashMap<&str, usize> = next
@@ -977,14 +968,6 @@ mod tests {
         assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
         assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
         assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
-    }
-
-    #[test]
-    fn rapid_explorer_toggle_ignores_stale_echoes() {
-        assert!(!should_apply_explorer_panel(7, 3, 7, 1));
-        assert!(!should_apply_explorer_panel(7, 3, 7, 2));
-        assert!(should_apply_explorer_panel(7, 3, 7, 3));
-        assert!(should_apply_explorer_panel(7, 3, 9, 1));
     }
 
     #[test]
