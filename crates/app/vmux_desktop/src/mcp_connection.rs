@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use parking_lot::Mutex;
 use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
@@ -27,7 +27,7 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<McpActionQueue>()
-            .add_plugins(BinEventEmitterPlugin::<(McpServersRequest, McpServerRequest)>::default())
+            .add_plugins(UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default())
             .add_observer(McpConnections::request)
             .add_observer(McpConnections::act)
             .add_systems(

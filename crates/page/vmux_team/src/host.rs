@@ -28,7 +28,7 @@ impl Plugin for TeamPlugin {
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(Update, answer_list_team)
             .add_plugins(HostedPagePlugin::<Team>::default())
-            .add_plugins(BinEventEmitterPlugin::<(TeamRequest,)>::default())
+            .add_plugins(UiEventPlugin::<(TeamRequest,)>::default())
             .add_observer(on_team_request)
             .add_observer(reset_team_sent_on_page_ready);
     }

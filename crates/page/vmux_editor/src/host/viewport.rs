@@ -16,7 +16,7 @@ pub(crate) struct EditorViewportPlugin;
 
 impl Plugin for EditorViewportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
+        app.add_plugins(UiEventPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
             .add_systems(
                 Update,
                 (

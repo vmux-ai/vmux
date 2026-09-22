@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
@@ -18,7 +18,7 @@ pub(super) struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ChatSubmit,
             ChatCancel,
             ChatEscape,
@@ -26,7 +26,7 @@ impl Plugin for ChatPromptPlugin {
             ChatClearQueue,
             ChatCancelQueuedPrompt,
         )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
+            .add_plugins(UiEventPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
             .add_observer(on_chat_submit)
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_escape)

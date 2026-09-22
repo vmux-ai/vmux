@@ -21,7 +21,7 @@ impl KeyStrokePlugin {
 #[cfg(host)]
 impl bevy::prelude::Plugin for KeyStrokePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
+        app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(
             KeyStroke,
             PageKeyContext,
         )>::default());

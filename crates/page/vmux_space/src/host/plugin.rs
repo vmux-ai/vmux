@@ -57,7 +57,7 @@ impl Plugin for SpacePlugin {
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
-                BinEventEmitterPlugin::<(
+                UiEventPlugin::<(
                     SpaceRequest,
                     ProjectRequest,
                     vmux_core::event::ProjectTreeToggle,

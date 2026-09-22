@@ -7,7 +7,7 @@ use crate::event::{
     HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
 };
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
 pub struct HistoryQueryPlugin;
@@ -15,13 +15,13 @@ pub struct HistoryQueryPlugin;
 impl Plugin for HistoryQueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            BinEventEmitterPlugin::<(
+            UiEventPlugin::<(
                 HistoryQueryRequest,
                 HistoryDeleteRequest,
                 HistoryClearAllRequest,
                 HistoryOpenRequest,
             )>::default(),
-            BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::default(),
+            UiEventPlugin::<(HistorySuggestionsRequest,)>::default(),
         ))
         .add_message::<HistoryOpenIntent>()
         .add_observer(on_history_query_request)

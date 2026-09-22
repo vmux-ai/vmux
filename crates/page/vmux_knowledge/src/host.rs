@@ -3,9 +3,7 @@ use std::sync::mpsc;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow,
-};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEventPlugin};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::knowledge::{
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
@@ -53,7 +51,7 @@ impl Plugin for KnowledgePlugin {
         app.init_resource::<KnowledgeState>()
             .init_resource::<KnowledgeIndex>()
             .register_type::<ExpandedKnowledgeDirs>()
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 KnowledgeSearchRequest,
                 KnowledgeCreateRequest,
                 KnowledgeTreeToggle,

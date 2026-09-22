@@ -1,7 +1,7 @@
 use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 
 use vmux_chat::event::{
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
@@ -13,7 +13,7 @@ pub(super) struct ChatMediaPlugin;
 
 impl Plugin for ChatMediaPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ChatPickFiles,
             ChatPasteMedia,
             ChatMediaListRequest,

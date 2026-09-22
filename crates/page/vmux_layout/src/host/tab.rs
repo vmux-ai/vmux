@@ -32,7 +32,7 @@ impl Plugin for TabPlugin {
             .init_resource::<crate::window::FocusedWindow>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(TabsRequest,)>::default())
+            .add_plugins(UiEventPlugin::<(TabsRequest,)>::default())
             .add_observer(on_tabs_request)
             .add_systems(
                 Update,

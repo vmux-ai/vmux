@@ -27,7 +27,7 @@ impl Plugin for SettingsViewPlugin {
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
                 vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
-                BinEventEmitterPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
+                UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
             ))
             .add_observer(on_settings_request)
             .add_observer(on_check_for_updates)

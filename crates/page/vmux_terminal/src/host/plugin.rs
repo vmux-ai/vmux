@@ -96,7 +96,7 @@ impl Plugin for TerminalInputPlugin {
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 TermResizeEvent,
                 TermMouseEvent,
                 TermScrollEvent,

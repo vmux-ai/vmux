@@ -15,7 +15,7 @@ impl Plugin for EditorStatusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedFileViewMode>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
+            .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
                 (send_initial_meta, send_initial_text_meta, send_initial_dir)

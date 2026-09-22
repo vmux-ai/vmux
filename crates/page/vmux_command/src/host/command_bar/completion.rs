@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
 use crate::event::{PathCompleteRequest, PathEntry};
@@ -15,7 +15,7 @@ pub(super) struct CommandBarCompletionPlugin;
 
 impl Plugin for CommandBarCompletionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(PathCompleteRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
             .init_resource::<ProjectIndex>()
             .init_resource::<PathCompletions>()
             .add_observer(on_path_complete_request)

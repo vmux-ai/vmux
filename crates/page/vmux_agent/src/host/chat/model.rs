@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;
@@ -28,12 +28,8 @@ impl Plugin for ChatModelPlugin {
             .add_message::<ModeSelectRequest>()
             .add_message::<ModelSelectRequest>()
             .add_message::<EffortSetRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                SelectModel,
-                SetAgentEffort,
-                SelectMode,
-            )>::default())
-            .add_plugins(BinEventEmitterPlugin::<(StartSelectModel, StartSelectMode)>::default())
+            .add_plugins(UiEventPlugin::<(SelectModel, SetAgentEffort, SelectMode)>::default())
+            .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
             .add_systems(
                 Startup,
                 (

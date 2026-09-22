@@ -14,7 +14,7 @@ pub(super) struct ExplorerSearchPlugin;
 impl Plugin for ExplorerSearchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingGlobalSearch>()
-            .add_plugins(BinEventEmitterPlugin::<(ExplorerGoto, ExplorerSearchOpen)>::default())
+            .add_plugins(UiEventPlugin::<(ExplorerGoto, ExplorerSearchOpen)>::default())
             .add_systems(
                 Update,
                 (

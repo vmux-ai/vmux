@@ -34,7 +34,7 @@ impl Plugin for ProcessesMonitorPlugin {
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 ProcessNavigateEvent,
                 ProcessKillEvent,
                 ProcessKillAllEvent,

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_api::command_bar::CommandBarPick;
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
@@ -17,7 +17,7 @@ pub(crate) struct FileKeyPlugin;
 
 impl Plugin for FileKeyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(FileStatusPickerOpen,)>::default())
+        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
             .add_systems(Update, echo_key_command.in_set(ReadAppCommands))
             .add_systems(Update, apply_status_picks)
             .add_observer(open_status_picker);

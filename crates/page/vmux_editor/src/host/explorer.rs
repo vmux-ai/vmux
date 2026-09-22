@@ -26,7 +26,7 @@ impl Plugin for EditorExplorerPlugin {
             ExplorerSearchPlugin,
             ExplorerTabsPlugin,
         ))
-        .add_plugins(BinEventEmitterPlugin::<(
+        .add_plugins(UiEventPlugin::<(
             ExplorerTreeToggle,
             ExplorerTreePrefetch,
             ExplorerTreeRefresh,
@@ -35,7 +35,7 @@ impl Plugin for EditorExplorerPlugin {
             ExplorerPanelSetVisible,
             ExplorerPanelWidth,
         )>::default())
-        .add_plugins(BinEventEmitterPlugin::<(ExplorerCollapseAll,)>::default());
+        .add_plugins(UiEventPlugin::<(ExplorerCollapseAll,)>::default());
     }
 }
 

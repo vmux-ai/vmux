@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use crate::CommandBar;
 use crate::event::CommandBarPanelRequest;
@@ -9,7 +9,7 @@ pub struct CommandBarPanelPlugin;
 
 impl Plugin for CommandBarPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(CommandBarPanelRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
             .add_observer(on_command_bar_panel_active)
             .add_systems(Update, mark_command_bar_shown_inline);
     }

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::AgentChatView;
 use crate::events::{AgentCommandRequest, CommandOrigin};
@@ -15,7 +15,7 @@ pub(super) struct ChatWorkspacePlugin;
 
 impl Plugin for ChatWorkspacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ChatSelectWorkspace,
             ChatBranchesRequest,
             ChatGoToBranch,

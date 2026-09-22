@@ -56,7 +56,7 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 CommandBarRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,

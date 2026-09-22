@@ -10,7 +10,7 @@ use crate::event::{
     SimulatorTouchPhase,
 };
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -35,7 +35,7 @@ impl Plugin for SimulatorInputPlugin {
                     .chain()
                     .in_set(SimulatorInputSet),
             )
-            .add_plugins(BinEventEmitterPlugin::<(
+            .add_plugins(UiEventPlugin::<(
                 SimulatorTouch,
                 SimulatorKey,
                 SimulatorClipboard,

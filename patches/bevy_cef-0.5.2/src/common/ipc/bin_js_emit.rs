@@ -46,15 +46,15 @@ where
     }
 }
 
-pub trait BinEventList {
+pub trait UiEventList {
     fn register_events(app: &mut App);
 }
 
-pub struct BinEventEmitterPlugin<T> {
+pub struct UiEventPlugin<T> {
     marker: PhantomData<T>,
 }
 
-impl<T> Default for BinEventEmitterPlugin<T> {
+impl<T> Default for UiEventPlugin<T> {
     fn default() -> Self {
         Self {
             marker: PhantomData,
@@ -62,9 +62,9 @@ impl<T> Default for BinEventEmitterPlugin<T> {
     }
 }
 
-impl<T> Plugin for BinEventEmitterPlugin<T>
+impl<T> Plugin for UiEventPlugin<T>
 where
-    T: BinEventList + Send + Sync + 'static,
+    T: UiEventList + Send + Sync + 'static,
 {
     fn build(&self, app: &mut App) {
         T::register_events(app);
@@ -92,7 +92,7 @@ where
 
 macro_rules! impl_bin_event_list {
     ($head:ident $(, $tail:ident)*) => {
-        impl<$head $(, $tail)*> BinEventList for ($head, $($tail,)*)
+        impl<$head $(, $tail)*> UiEventList for ($head, $($tail,)*)
         where
             $head: UiEvent + rkyv::Archive + Send + Sync + 'static,
             $head::Archived: rkyv::Deserialize<$head, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
