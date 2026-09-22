@@ -1189,7 +1189,9 @@ fn apply_semantic_tokens(
         let Ok((mut edit, view, vp)) = views.get_mut(message.entity) else {
             continue;
         };
-        if crate::host::plugin::canon(&view.path) != crate::host::plugin::canon(&message.path) {
+        if crate::host::file_lifecycle::canon(&view.path)
+            != crate::host::file_lifecycle::canon(&message.path)
+        {
             continue;
         }
         edit.hl

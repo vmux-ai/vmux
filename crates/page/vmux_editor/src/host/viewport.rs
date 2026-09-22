@@ -7,8 +7,9 @@ use vmux_core::event::{
 use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 
 use crate::host::edit::Selection;
+use crate::host::file_lifecycle::{EditorFileLoadedSet, canon};
 use crate::host::keymap::Keymap;
-use crate::host::plugin::{EditState, EditorFileLoadedSet, EditorKeymap, FileView, canon};
+use crate::host::plugin::{EditState, EditorKeymap, FileView};
 
 const STICKY_SCROLL_DEPTH: usize = 5;
 

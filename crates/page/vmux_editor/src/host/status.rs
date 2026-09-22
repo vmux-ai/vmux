@@ -3,10 +3,9 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::host::dir::parent_listing;
+use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
 use crate::host::note::{NoteRevealLine, NoteSent};
-use crate::host::plugin::{
-    EditState, EditorFileLoadedSet, EditorKeymap, FileBuffer, FileDir, FileView,
-};
+use crate::host::plugin::{EditState, EditorKeymap, FileView};
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
 
 pub(crate) struct EditorStatusPlugin;

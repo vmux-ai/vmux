@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_command::ScopedKeys;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
@@ -13,7 +12,6 @@ use vmux_core::input::KeyStroke;
 #[cfg(test)]
 use vmux_core::page_open::{PageOpenHandled, PageOpenTask};
 
-use crate::dir::{list_dir, parent_listing};
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::history::EditorHistoryPlugin;
@@ -23,6 +21,7 @@ use crate::host::explorer::ExplorerState;
 use crate::host::explorer_outline::OutlineDirty;
 #[cfg(test)]
 use crate::host::explorer_panel::ExplorerPanelPlugin;
+#[cfg(test)]
 use crate::host::explorer_panel::ExplorerPanelSent;
 #[cfg(test)]
 use crate::host::explorer_panel::{
@@ -32,14 +31,17 @@ use crate::host::explorer_panel::{
 use crate::host::explorer_tabs::ExplorerTabsPlugin;
 use crate::host::explorer_tabs::OpenEditorsDirty;
 #[cfg(test)]
-use crate::host::explorer_tree::{ExplorerTree, ExplorerTreePlugin, IDLE_TREE_CAPACITY};
-use crate::host::explorer_tree::{ExplorerTreeDirty, ExplorerTrees};
+use crate::host::explorer_tree::{
+    ExplorerTree, ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees, IDLE_TREE_CAPACITY,
+};
+#[cfg(test)]
+use crate::host::file_lifecycle::LoadFailure;
+use crate::host::file_lifecycle::{
+    EditorFileLifecyclePlugin, FileBuffer, FileDir, FileLoadTask, ForcedEncoding, SelfWrites, canon,
+};
 use crate::host::note::{EditorNotePlugin, NoteSent};
 use crate::host::page_open::EditorPageOpenPlugin;
-use crate::host::status::{
-    EditorStatusPlugin, FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent,
-    SharedFileViewMode,
-};
+use crate::host::status::{EditorStatusPlugin, FileInitialMetaSent, SharedFileViewMode};
 use crate::host::viewport::{
     EditorCursor, EditorViewportPlugin, EditorWindow, FileViewport, FoldsDirty,
 };
@@ -76,64 +78,6 @@ impl Plugin for EditorPlugin {
     }
 }
 
-struct EditorFileLifecyclePlugin;
-
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct EditorFileLoadedSet;
-
-impl Plugin for EditorFileLifecyclePlugin {
-    fn build(&self, app: &mut App) {
-        let (tx, rx) = mpsc::channel();
-        let proxy = app
-            .world()
-            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let wake = res
-                .as_ref()
-                .is_ok_and(|event| !matches!(event.kind, notify::EventKind::Access(_)));
-            let _ = tx.send(res);
-            if wake && let Some(proxy) = proxy.as_ref() {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        }) {
-            Ok(watcher) => {
-                app.insert_non_send(FileWatch {
-                    watcher,
-                    rx,
-                    dirs: HashSet::new(),
-                });
-            }
-            Err(e) => tracing::warn!("file watcher init failed: {e}"),
-        }
-        app.insert_non_send(SelfWrites::default())
-            .insert_non_send(crate::fold_store::FoldStore::load())
-            .add_systems(
-                Update,
-                (
-                    (
-                        reconcile_file_watches,
-                        drain_file_changes,
-                        reload_changed_files,
-                        load_file_buffers,
-                        apply_loaded_file_buffers.in_set(EditorFileLoadedSet),
-                    )
-                        .chain(),
-                    flush_lsp_changes,
-                    apply_goto,
-                    apply_pending_goto,
-                    reapply_keymap_on_change,
-                ),
-            )
-            .add_systems(
-                Update,
-                apply_lsp_workspace_edit
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
-            )
-            .add_observer(reset_file_sent_markers_on_page_ready);
-    }
-}
-
 struct EditorEditingPlugin;
 
 impl Plugin for EditorEditingPlugin {
@@ -164,7 +108,21 @@ impl Plugin for EditorEditingPlugin {
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
             .add_observer(on_file_hover_request)
-            .add_systems(Update, run_submitted_ex_lines)
+            .add_systems(
+                Update,
+                (
+                    flush_lsp_changes,
+                    apply_goto,
+                    apply_pending_goto,
+                    reapply_keymap_on_change,
+                    run_submitted_ex_lines,
+                ),
+            )
+            .add_systems(
+                Update,
+                apply_lsp_workspace_edit
+                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
+            )
             .add_observer(on_file_find_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
@@ -264,164 +222,6 @@ impl FileView {
     }
 }
 
-#[derive(Component, Clone, Debug)]
-pub struct FileBuffer {
-    pub language: String,
-}
-
-impl FileBuffer {
-    fn failed(reason: LoadFailure, message: String) -> Self {
-        Self {
-            language: format!("{}{message}", reason.marker()),
-        }
-    }
-
-    pub(crate) fn load_error(&self) -> Option<(bool, &str)> {
-        LoadFailure::parse(&self.language)
-            .map(|(reason, message)| (reason == LoadFailure::Undecodable, message))
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum LoadFailure {
-    Fatal,
-    Undecodable,
-}
-
-impl LoadFailure {
-    const FATAL: &'static str = "__error__:";
-    const UNDECODABLE: &'static str = "__undecodable__:";
-
-    fn marker(self) -> &'static str {
-        match self {
-            Self::Fatal => Self::FATAL,
-            Self::Undecodable => Self::UNDECODABLE,
-        }
-    }
-
-    fn parse(language: &str) -> Option<(Self, &str)> {
-        if let Some(message) = language.strip_prefix(Self::UNDECODABLE) {
-            return Some((Self::Undecodable, message));
-        }
-        let message = language.strip_prefix(Self::FATAL)?;
-        Some((Self::Fatal, message))
-    }
-}
-
-#[derive(Component, Clone, Debug)]
-pub struct FileDir {
-    pub entries: Vec<FileDirEntry>,
-}
-
-#[derive(Component)]
-struct FileLoadTask {
-    path: PathBuf,
-    task: Task<FileLoad>,
-}
-
-#[cfg(test)]
-impl FileLoadTask {
-    fn settle(app: &mut App, entity: Entity) {
-        for _ in 0..10_000 {
-            app.update();
-            let world = app.world();
-            let loaded = world.get::<FileLoadTask>(entity).is_none()
-                && (world.get::<FileBuffer>(entity).is_some()
-                    || world.get::<FileDir>(entity).is_some()
-                    || world.get::<FileMedia>(entity).is_some()
-                    || world.get::<EditState>(entity).is_some());
-            if loaded {
-                return;
-            }
-            std::thread::yield_now();
-        }
-        panic!("file load did not settle");
-    }
-}
-
-enum FileLoad {
-    Directory(Vec<FileDirEntry>),
-    Media {
-        kind: vmux_core::media::MediaKind,
-        mime: String,
-    },
-    Text {
-        decoded: crate::encoding::DecodedText,
-        heavy: bool,
-    },
-    Failed {
-        reason: LoadFailure,
-        message: String,
-        missing: bool,
-    },
-}
-
-impl FileLoad {
-    fn read(path: &Path, forced: Option<FileEncoding>) -> Self {
-        let metadata = std::fs::metadata(path);
-        if metadata.as_ref().is_ok_and(|metadata| metadata.is_dir()) {
-            return Self::Directory(list_dir(path));
-        }
-
-        let path_text = path.to_string_lossy();
-        if let Some(kind) = vmux_core::media::media_kind(&path_text) {
-            let mime = vmux_core::media::media_mime(&path_text)
-                .unwrap_or("application/octet-stream")
-                .to_string();
-            return Self::Media { kind, mime };
-        }
-
-        let size = match metadata {
-            Ok(metadata) => metadata.len(),
-            Err(error) => {
-                return Self::Failed {
-                    reason: LoadFailure::Fatal,
-                    message: format!("cannot open {}: {error}", path.display()),
-                    missing: error.kind() == std::io::ErrorKind::NotFound,
-                };
-            }
-        };
-        if size > crate::highlight::FILE_VIEW_MAX_BYTES {
-            return Self::Failed {
-                reason: LoadFailure::Fatal,
-                message: format!(
-                    "file too large ({size} bytes, max {})",
-                    crate::highlight::FILE_VIEW_MAX_BYTES
-                ),
-                missing: false,
-            };
-        }
-
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return Self::Failed {
-                    reason: LoadFailure::Fatal,
-                    message: format!("cannot read {}: {error}", path.display()),
-                    missing: error.kind() == std::io::ErrorKind::NotFound,
-                };
-            }
-        };
-        let decoded = match forced {
-            Some(encoding) => crate::encoding::DecodedText::forced(&bytes, encoding),
-            None => match crate::encoding::DecodedText::decode(&bytes) {
-                Some(decoded) => decoded,
-                None => {
-                    return Self::Failed {
-                        reason: LoadFailure::Undecodable,
-                        message: format!("not a text file: {}", path.display()),
-                        missing: false,
-                    };
-                }
-            },
-        };
-        Self::Text {
-            decoded,
-            heavy: size > crate::highlight::HIGHLIGHT_MAX_BYTES,
-        }
-    }
-}
-
 #[derive(Component)]
 pub struct EditState {
     pub core: EditCore,
@@ -508,9 +308,9 @@ pub(super) struct ParkedEdits {
     recent: Vec<PathBuf>,
 }
 
-struct ParkedEdit {
-    edit: EditState,
-    diff: vmux_git::GitDiffSource,
+pub(super) struct ParkedEdit {
+    pub(super) edit: EditState,
+    pub(super) diff: vmux_git::GitDiffSource,
     modified: Option<std::time::SystemTime>,
 }
 
@@ -547,7 +347,7 @@ impl ParkedEdits {
         }
     }
 
-    fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
+    pub(super) fn resume(&mut self, path: &Path) -> Option<ParkedEdit> {
         let parked = self.by_path.remove(path)?;
         self.recent.retain(|p| p != path);
         if parked.edit.core.dirty || parked.modified == Self::modified_at(path) {
@@ -594,22 +394,6 @@ struct LspEditDirty;
 
 struct ClipboardHandle(Option<arboard::Clipboard>);
 
-#[derive(Default)]
-struct SelfWrites(std::collections::HashMap<PathBuf, std::time::Instant>);
-
-type UnloadedFileView = (
-    Without<FileBuffer>,
-    Without<FileDir>,
-    Without<FileMedia>,
-    Without<EditState>,
-    Without<FileLoadTask>,
-);
-type UnloadedFile = (
-    Entity,
-    &'static FileView,
-    Option<&'static mut ParkedEdits>,
-    Option<&'static ForcedEncoding>,
-);
 type EncodingTarget = (
     &'static FileView,
     Option<&'static mut EditState>,
@@ -617,140 +401,13 @@ type EncodingTarget = (
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
 );
-fn settings_mappings(
+pub(super) fn settings_mappings(
     settings: &Option<Res<vmux_setting::AppSettings>>,
 ) -> (Vec<vmux_core::editor::KeyMapping>, String) {
     settings
         .as_ref()
         .map(|s| (s.editor.mappings.clone(), s.editor.leader.clone()))
         .unwrap_or_else(|| (Vec::new(), " ".to_string()))
-}
-
-fn load_file_buffers(
-    mut q: Query<UnloadedFile, UnloadedFileView>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, fv, mut parked, forced) in &mut q {
-        let forced = forced.and_then(|f| f.for_path(&fv.path));
-        let kind = EditorKeymap::configured_kind(&settings);
-        let (maps, leader) = settings_mappings(&settings);
-        let markdown = crate::markdown::is_markdown_path(&fv.path);
-        if forced.is_none()
-            && let Some(parked) = parked.as_mut()
-            && let Some(resumed) = parked.resume(&fv.path)
-        {
-            let mut entity_commands = commands.entity(entity);
-            entity_commands
-                .insert((
-                    resumed.edit,
-                    EditorKeymap(kind.make(&maps, &leader)),
-                    resumed.diff,
-                ))
-                .remove::<MissingFileView>();
-            if markdown {
-                entity_commands.remove::<NoteSent>().insert(OutlineDirty);
-            }
-            continue;
-        }
-        let path = fv.path.clone();
-        let task_path = path.clone();
-        let wake = proxy.as_deref().map(|wrapper| (**wrapper).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let loaded = FileLoad::read(&path, forced);
-            if let Some(proxy) = wake {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            loaded
-        });
-        commands.entity(entity).insert(FileLoadTask {
-            path: task_path,
-            task,
-        });
-    }
-}
-
-fn apply_loaded_file_buffers(
-    mut q: Query<(Entity, &FileView, &mut FileLoadTask)>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    store: Option<NonSend<crate::fold_store::FoldStore>>,
-    mut commands: Commands,
-) {
-    for (entity, view, mut pending) in &mut q {
-        let Some(loaded) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        if pending.path != view.path {
-            commands.entity(entity).remove::<FileLoadTask>();
-            continue;
-        }
-        let mut entity_commands = commands.entity(entity);
-        entity_commands.remove::<FileLoadTask>();
-        match loaded {
-            FileLoad::Directory(entries) => {
-                entity_commands
-                    .remove::<MissingFileView>()
-                    .insert(FileDir { entries });
-            }
-            FileLoad::Media { kind, mime } => {
-                entity_commands
-                    .remove::<MissingFileView>()
-                    .insert(FileMedia { kind, mime });
-            }
-            FileLoad::Failed {
-                reason,
-                message,
-                missing,
-            } => {
-                entity_commands.insert(FileBuffer::failed(reason, message));
-                if missing {
-                    entity_commands.insert(MissingFileView);
-                } else {
-                    entity_commands.remove::<MissingFileView>();
-                }
-            }
-            FileLoad::Text { decoded, heavy } => {
-                let kind = EditorKeymap::configured_kind(&settings);
-                let (maps, leader) = settings_mappings(&settings);
-                let markdown = crate::markdown::is_markdown_path(&view.path);
-                let crate::encoding::DecodedText { text, encoding } = decoded;
-                let hl = match heavy {
-                    true => HighlightCache::plain(&view.path),
-                    false => HighlightCache::new(&view.path),
-                };
-                let mut core = EditCore::new(
-                    view.path.clone(),
-                    hl.language.clone(),
-                    &text,
-                    kind.initial_mode(),
-                );
-                core.buffer.encoding = encoding;
-                let mut folds = crate::fold::FoldState::default();
-                if !heavy {
-                    folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
-                    if let Some(store) = &store {
-                        folds.collapsed.extend(store.get(&view.path));
-                        folds.reconcile();
-                    }
-                }
-                core.fold_view = folds.view(core.buffer.len_lines() as u32);
-                entity_commands
-                    .insert((
-                        EditState::new(core, hl, folds),
-                        EditorKeymap(kind.make(&maps, &leader)),
-                        vmux_git::GitDiffSource {
-                            content: text,
-                            dirty: false,
-                        },
-                    ))
-                    .remove::<MissingFileView>();
-                if markdown {
-                    entity_commands.remove::<NoteSent>().insert(OutlineDirty);
-                }
-            }
-        }
-    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -806,32 +463,6 @@ fn reapply_keymap_on_change(
                 &mut commands,
             );
         }
-    }
-}
-
-fn reset_file_sent_markers_on_page_ready(
-    trigger: On<BinReceive<vmux_core::page::PageReady>>,
-    file_views: Query<&FileView>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let Ok(fv) = file_views.get(entity) else {
-        return;
-    };
-    commands
-        .entity(entity)
-        .remove::<FileInitialMetaSent>()
-        .remove::<FileThemeSent>()
-        .remove::<FileViewModeSent>()
-        .remove::<FileKeymapSent>()
-        .remove::<NoteSent>()
-        .remove::<crate::lsp::manager::LspStatusSent>()
-        .remove::<crate::lsp::manager::DiagSent>()
-        .remove::<ExplorerPanelSent>()
-        .insert(ExplorerTreeDirty)
-        .insert(OpenEditorsDirty);
-    if crate::explorer_model::is_markdown(&fv.path) {
-        commands.entity(entity).insert(OutlineDirty);
     }
 }
 
@@ -943,207 +574,6 @@ fn on_file_encoding_set(
             encoding: edit.core.buffer.encoding,
         },
     ));
-}
-
-#[derive(Component)]
-struct FileReloadRequested;
-
-#[derive(Component, Clone)]
-struct ForcedEncoding {
-    path: PathBuf,
-    encoding: FileEncoding,
-}
-
-impl ForcedEncoding {
-    fn for_path(&self, path: &Path) -> Option<FileEncoding> {
-        match self.path == path {
-            true => Some(self.encoding),
-            false => None,
-        }
-    }
-}
-
-#[derive(Component)]
-struct MissingFileView;
-
-struct FileWatch {
-    watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
-    dirs: HashSet<PathBuf>,
-}
-
-pub(crate) fn canon(p: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(p).into_path_buf()
-}
-
-fn watch_dir_for(path: &Path) -> Option<PathBuf> {
-    let mut dir = if path.is_dir() { path } else { path.parent()? };
-    loop {
-        if dir.is_dir() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
-
-fn ensure_file_watch(watch: &mut FileWatch, dir: PathBuf) {
-    if !watch.dirs.contains(&dir)
-        && watch
-            .watcher
-            .watch(&dir, RecursiveMode::NonRecursive)
-            .is_ok()
-    {
-        watch.dirs.insert(dir);
-    }
-}
-
-fn reconcile_file_watches(
-    views: Query<&FileView>,
-    trees: Res<ExplorerTrees>,
-    watch: Option<NonSendMut<FileWatch>>,
-) {
-    let Some(mut watch) = watch else {
-        return;
-    };
-    for fv in &views {
-        if let Some(dir) = watch_dir_for(&fv.path) {
-            ensure_file_watch(&mut watch, dir);
-        }
-    }
-    for dir in trees.expanded_dirs() {
-        ensure_file_watch(&mut watch, dir.clone());
-    }
-}
-
-fn drain_file_changes(
-    watch: Option<NonSend<FileWatch>>,
-    self_writes: Option<NonSendMut<SelfWrites>>,
-    views: Query<(Entity, &FileView, Has<MissingFileView>)>,
-    mut trees: ResMut<ExplorerTrees>,
-    mut commands: Commands,
-) {
-    let Some(watch) = watch else {
-        return;
-    };
-    let mut changed: HashSet<PathBuf> = HashSet::new();
-    while let Ok(res) = watch.rx.try_recv() {
-        if let Ok(event) = res {
-            for p in event.paths {
-                changed.insert(canon(&p));
-            }
-        }
-    }
-    if changed.is_empty() {
-        return;
-    }
-    let mut sw = self_writes;
-    if let Some(sw) = sw.as_mut() {
-        sw.0.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(2));
-    }
-    for (entity, fv, missing) in &views {
-        let cp = canon(&fv.path);
-        let self_written = sw
-            .as_ref()
-            .map(|sw| sw.0.contains_key(&cp))
-            .unwrap_or(false);
-        let ancestor_changed = missing && changed.iter().any(|path| cp.starts_with(path));
-        if (changed.contains(&cp) || ancestor_changed) && !self_written {
-            commands.entity(entity).insert(FileReloadRequested);
-        }
-    }
-    let mut changed_dirs: HashSet<PathBuf> = HashSet::new();
-    for path in &changed {
-        if let Some(parent) = path.parent() {
-            changed_dirs.insert(canon(parent));
-        }
-    }
-    for root in trees.roots() {
-        let cached: Vec<PathBuf> = trees.at(&root).children.keys().cloned().collect();
-        for d in cached {
-            if !changed_dirs.contains(&canon(&d)) {
-                continue;
-            }
-            trees.start_dir_load(&root, d, &mut commands, true);
-        }
-    }
-}
-
-fn reload_changed_files(
-    q: Query<(Entity, &FileView, Option<&EditState>), With<FileReloadRequested>>,
-    browsers: NonSend<Browsers>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    for (entity, fv, edit) in &q {
-        commands.entity(entity).remove::<FileReloadRequested>();
-        let ready = browsers.can_emit_to(&entity);
-
-        if fv.path.is_dir() {
-            let entries = list_dir(&fv.path);
-            commands.entity(entity).insert(FileDir {
-                entries: entries.clone(),
-            });
-            if ready {
-                let (parent_path, parent_entries) = parent_listing(&fv.path);
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &FileDirEvent {
-                        path: fv.display_path(),
-                        abs_path: fv.path.to_string_lossy().into_owned(),
-                        entries,
-                        parent_path,
-                        parent_entries,
-                    },
-                ));
-            }
-            continue;
-        }
-
-        if let Some(kind) = vmux_core::media::media_kind(&fv.path.to_string_lossy()) {
-            if ready {
-                let mime = vmux_core::media::media_mime(&fv.path.to_string_lossy())
-                    .unwrap_or("application/octet-stream")
-                    .to_string();
-                let nonce = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                let url = format!("{}&v={nonce}", fv.raw_media_url());
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &FileMediaEvent {
-                        kind,
-                        mime,
-                        url,
-                        abs_path: fv.path.to_string_lossy().into_owned(),
-                    },
-                ));
-            }
-            continue;
-        }
-
-        if let Some(edit) = edit
-            && edit.core.dirty
-        {
-            if ready {
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &FileExternalChange {
-                        path: fv.display_path(),
-                    },
-                ));
-            }
-            continue;
-        }
-        commands
-            .entity(entity)
-            .remove::<EditState>()
-            .remove::<vmux_git::GitDiffSource>()
-            .remove::<FileBuffer>()
-            .remove::<FileInitialMetaSent>()
-            .remove::<crate::lsp::manager::LintRan>();
-        manager.change(&fv.path);
-    }
 }
 
 fn caret_lsp(edit: &EditState) -> (u32, u32, usize, String) {
@@ -2609,81 +2039,6 @@ mod edit_flow_tests {
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
 
     #[test]
-    fn missing_file_view_loads_when_file_is_created() {
-        let temp = tempfile::tempdir().unwrap();
-        let parent = temp.path().join("created-after-open");
-        let path = parent.join("file.txt");
-        let (tx, rx) = mpsc::channel();
-        let watcher = notify::recommended_watcher(|_| {}).unwrap();
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<ExplorerTrees>()
-            .add_systems(
-                Update,
-                (
-                    reconcile_file_watches,
-                    drain_file_changes,
-                    reload_changed_files,
-                    load_file_buffers,
-                    apply_loaded_file_buffers,
-                )
-                    .chain(),
-            );
-        app.world_mut().insert_non_send(FileWatch {
-            watcher,
-            rx,
-            dirs: HashSet::new(),
-        });
-        app.world_mut().insert_non_send(SelfWrites::default());
-        app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut()
-            .insert_resource(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspOutbox::default(),
-                crate::lsp::server_request::ServerEvents::default().sender(),
-            ));
-        let entity = app
-            .world_mut()
-            .spawn((
-                FileView { path: path.clone() },
-                FileViewport {
-                    top_row: 0,
-                    rows: 0,
-                    wrap_columns: 0,
-                    word_wrap: vmux_core::editor::WordWrap::default(),
-                    word_wrap_column: 80,
-                },
-            ))
-            .id();
-
-        FileLoadTask::settle(&mut app, entity);
-        assert!(
-            app.world()
-                .get::<FileBuffer>(entity)
-                .unwrap()
-                .language
-                .starts_with("__error__:cannot open")
-        );
-
-        std::fs::create_dir(&parent).unwrap();
-        std::fs::write(&path, "created\n").unwrap();
-        tx.send(Ok(
-            notify::Event::new(notify::EventKind::Any).add_path(parent)
-        ))
-        .unwrap();
-        FileLoadTask::settle(&mut app, entity);
-
-        assert_eq!(
-            app.world()
-                .get::<EditState>(entity)
-                .unwrap()
-                .core
-                .buffer
-                .text(),
-            "created\n"
-        );
-    }
-
-    #[test]
     fn parse_goto_fragment_line_and_select() {
         let g = PendingGoto::from_url("file:///a/b.rs#L10").unwrap();
         assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 0, None));
@@ -3757,53 +3112,6 @@ mod page_open_tests {
         let page = stack.page();
         assert_eq!(stack.path(page), PathBuf::from("/etc/hostname"));
     }
-
-    #[test]
-    fn navigate_relists_when_path_changes() {
-        use std::fs;
-        let tmp = tempfile::tempdir().unwrap();
-        let a = tmp.path().join("a");
-        fs::create_dir(&a).unwrap();
-        fs::write(a.join("f1"), "").unwrap();
-        let b = tmp.path().join("b");
-        fs::create_dir(&b).unwrap();
-        fs::write(b.join("f2"), "").unwrap();
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (load_file_buffers, apply_loaded_file_buffers).chain(),
-        );
-        let e = app
-            .world_mut()
-            .spawn((
-                FileView { path: a.clone() },
-                FileViewport {
-                    top_row: 0,
-                    rows: 0,
-                    wrap_columns: 0,
-                    word_wrap: vmux_core::editor::WordWrap::default(),
-                    word_wrap_column: 80,
-                },
-            ))
-            .id();
-        FileLoadTask::settle(&mut app, e);
-        assert!(
-            app.world()
-                .get::<FileDir>(e)
-                .unwrap()
-                .entries
-                .iter()
-                .any(|x| x.name == "f1")
-        );
-
-        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
-        app.world_mut().entity_mut(e).remove::<FileDir>();
-        FileLoadTask::settle(&mut app, e);
-        let dir = app.world().get::<FileDir>(e).unwrap();
-        assert!(dir.entries.iter().any(|x| x.name == "f2"));
-        assert!(!dir.entries.iter().any(|x| x.name == "f1"));
-    }
 }
 
 #[cfg(test)]
@@ -3822,12 +3130,9 @@ mod parked_edit_tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(EditorNavigationPlugin)
-                .add_systems(
-                    Update,
-                    (load_file_buffers, apply_loaded_file_buffers).chain(),
-                )
+                .init_resource::<ExplorerTrees>()
+                .add_plugins(EditorFileLifecyclePlugin)
                 .add_observer(on_file_encoding_set);
-            app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut()
