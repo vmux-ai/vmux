@@ -5,7 +5,8 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
-use super::plugin::{EditState, ExplorerState, FileView, ParkedEdits};
+use super::explorer::ExplorerState;
+use super::plugin::{EditState, FileView, ParkedEdits};
 use super::viewport::FileViewport;
 
 pub(super) struct ExplorerTabsPlugin;
