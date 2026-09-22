@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
-use super::edit_state::{EditState, FileView};
 use super::editing::EditRequest;
+use super::editor::{EditState, FileView};
 use super::file_lifecycle::{SelfWrites, canon};
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;

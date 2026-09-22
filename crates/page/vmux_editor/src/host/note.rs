@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{FileNoteEvent, FileViewMode, NoteBlock};
 
-use crate::host::edit_state::{EditState, FileView};
+use crate::host::editor::{EditState, FileView};
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 
 pub(crate) struct EditorNotePlugin;

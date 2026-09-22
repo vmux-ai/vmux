@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::host::dir::parent_listing;
-use crate::host::edit_state::{EditState, FileView};
+use crate::host::editor::{EditState, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::note::{NoteRevealLine, NoteSent};

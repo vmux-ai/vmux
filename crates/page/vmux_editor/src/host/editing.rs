@@ -12,9 +12,9 @@ use vmux_core::input::KeyStroke;
 #[cfg(test)]
 use crate::edit::EditCore;
 use crate::edit::{EditCommand, Motion, Selection};
-use crate::host::edit_state::EditState;
+use crate::host::editor::EditState;
 #[cfg(test)]
-use crate::host::edit_state::FileView;
+use crate::host::editor::FileView;
 #[cfg(test)]
 use crate::host::explorer::{
     ExplorerPanelDefaults, ExplorerTabsPlugin, StackExplorerRevision, StackExplorerVisibility,

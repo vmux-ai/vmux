@@ -8,7 +8,7 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
-use super::edit_state::{EditState, FileView, ParkedEdits};
+use super::editor::{EditState, FileView, ParkedEdits};
 use super::explorer::OutlineDirty;
 use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use super::keymap::KeymapConfig;

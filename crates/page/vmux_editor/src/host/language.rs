@@ -5,8 +5,8 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::edit::{EditCommand, Selection};
-use crate::host::edit_state::{EditState, FileView};
 use crate::host::editing::EditRequest;
+use crate::host::editor::{EditState, FileView};
 use crate::page_model::DisplayCells;
 
 pub(super) struct EditorLanguagePlugin;
