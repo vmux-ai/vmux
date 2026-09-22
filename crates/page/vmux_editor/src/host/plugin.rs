@@ -23,6 +23,7 @@ use crate::host::explorer_panel::StackExplorerRevision;
 use crate::host::explorer_panel::{
     ExplorerPanelDefaults, ExplorerPanelPlugin, ExplorerPanelSent, StackExplorerVisibility,
 };
+use crate::host::explorer_tabs::{ExplorerTabsPlugin, OpenEditorsDirty};
 #[cfg(test)]
 use crate::host::explorer_tree::{ExplorerTree, IDLE_TREE_CAPACITY};
 use crate::host::explorer_tree::{ExplorerTreeDirty, ExplorerTreePlugin, ExplorerTrees};
@@ -100,7 +101,6 @@ impl Plugin for EditorFileLifecyclePlugin {
         app.insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_message::<vmux_layout::CloseStackRequest>()
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -186,6 +186,7 @@ impl Plugin for EditorExplorerPlugin {
                 ExplorerTreePlugin,
                 ExplorerPanelPlugin,
                 ExplorerMutationPlugin,
+                ExplorerTabsPlugin,
             ))
             .add_plugins(BinEventEmitterPlugin::<(
                 ExplorerTreeToggle,
@@ -202,15 +203,12 @@ impl Plugin for EditorExplorerPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_open_editors,
-                    emit_open_editors,
                     emit_outline_markdown,
                     clear_outline_on_file_change,
                     apply_global_search_requests,
                     emit_global_search.after(apply_global_search_requests),
                 ),
             )
-            .add_observer(on_explorer_close_editor)
             .add_observer(on_explorer_goto)
             .add_observer(on_explorer_search_open);
     }
@@ -539,7 +537,7 @@ impl EditState {
 }
 
 #[derive(Component, Default)]
-struct ParkedEdits {
+pub(super) struct ParkedEdits {
     by_path: HashMap<PathBuf, ParkedEdit>,
     recent: Vec<PathBuf>,
 }
@@ -592,7 +590,7 @@ impl ParkedEdits {
         None
     }
 
-    fn is_dirty(&self, path: &Path) -> bool {
+    pub(super) fn is_dirty(&self, path: &Path) -> bool {
         self.by_path
             .get(path)
             .is_some_and(|parked| parked.edit.core.dirty)
@@ -638,8 +636,8 @@ pub(crate) struct ExplorerState {
     pub root: PathBuf,
     pub open_editors: Vec<PathBuf>,
     pub focus_path: Option<PathBuf>,
-    active_editor: Option<PathBuf>,
-    active_editor_is_dir: bool,
+    pub(super) active_editor: Option<PathBuf>,
+    pub(super) active_editor_is_dir: bool,
 }
 
 impl ExplorerState {
@@ -647,16 +645,13 @@ impl ExplorerState {
         path.starts_with(&self.root)
     }
 
-    fn close_editor(&mut self, path: &Path) -> Option<PathBuf> {
+    pub(super) fn close_editor(&mut self, path: &Path) -> Option<PathBuf> {
         let at = self.open_editors.iter().position(|open| open == path)?;
         self.open_editors.remove(at);
         let neighbour = at.min(self.open_editors.len().saturating_sub(1));
         self.open_editors.get(neighbour).cloned()
     }
 }
-
-#[derive(Component)]
-pub(super) struct OpenEditorsDirty;
 
 #[derive(Component)]
 struct OutlineDirty;
@@ -706,7 +701,6 @@ type EncodingTarget = (
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
 );
-type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
 type GlobalSearchDirtyReady = (
     With<GlobalSearchState>,
@@ -2845,130 +2839,6 @@ fn flush_lsp_changes(
     }
 }
 
-fn sync_open_editors(
-    mut q: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
-    mut commands: Commands,
-) {
-    for (entity, fv, mut st) in &mut q {
-        if st.active_editor_is_dir
-            && let Some(previous) = st.active_editor.clone()
-        {
-            st.open_editors.retain(|open| open != &previous);
-        }
-        crate::explorer_model::note_open(&mut st.open_editors, &fv.path);
-        st.active_editor = Some(fv.path.clone());
-        st.active_editor_is_dir = fv.path.is_dir();
-        commands.entity(entity).insert(OpenEditorsDirty);
-    }
-}
-
-fn open_editor_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string_lossy().to_string())
-}
-
-type OpenEditorsView = (
-    Entity,
-    &'static FileView,
-    &'static ExplorerState,
-    Option<&'static EditState>,
-    Option<&'static ParkedEdits>,
-);
-
-fn emit_open_editors(
-    q: Query<OpenEditorsView, OpenEditorsDirtyReady>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, fv, st, edit, parked) in &q {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let active_dirty = edit.map(|e| e.core.dirty).unwrap_or(false);
-        let mut items = Vec::with_capacity(st.open_editors.len());
-        for path in &st.open_editors {
-            let active = *path == fv.path;
-            let dirty = match active {
-                true => active_dirty,
-                false => parked.is_some_and(|p| p.is_dirty(path)),
-            };
-            items.push(OpenEditorItem {
-                name: open_editor_name(path),
-                path: path.to_string_lossy().into_owned(),
-                active,
-                dirty,
-                is_dir: path.is_dir(),
-            });
-        }
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &OpenEditorsEvent { items },
-        ));
-        commands.entity(entity).remove::<OpenEditorsDirty>();
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct EditorPageClose<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    stacks: Query<'w, 's, (), With<vmux_layout::stack::Stack>>,
-    closing: MessageWriter<'w, vmux_layout::CloseStackRequest>,
-}
-
-impl EditorPageClose<'_, '_> {
-    fn holding(&mut self, webview: Entity) {
-        let mut current = webview;
-        for _ in 0..8 {
-            if self.stacks.contains(current) {
-                self.closing
-                    .write(vmux_layout::CloseStackRequest::by_user(current));
-                return;
-            }
-            let Ok(parent) = self.child_of.get(current) else {
-                return;
-            };
-            current = parent.parent();
-        }
-    }
-}
-
-fn on_explorer_close_editor(
-    trigger: On<BinReceive<ExplorerCloseEditor>>,
-    mut q: Query<&mut ExplorerState>,
-    mut views: Query<NavigableFileView>,
-    mut page: EditorPageClose,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok(mut st) = q.get_mut(entity) else {
-        return;
-    };
-    let next = st.close_editor(&path);
-    commands.entity(entity).insert(OpenEditorsDirty);
-    let Some(next) = next else {
-        page.holding(entity);
-        return;
-    };
-    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
-        return;
-    };
-    if fv.path != path {
-        return;
-    }
-    fv.navigate(
-        entity,
-        next,
-        0,
-        &mut vp,
-        &mut meta,
-        &mut manager,
-        &mut commands,
-    );
-}
-
 fn emit_outline_markdown(
     q: Query<(Entity, &EditState), OutlineDirtyReady>,
     browsers: NonSend<Browsers>,
@@ -4061,14 +3931,11 @@ mod explorer_tests {
         let dir = tmp.path().join("src");
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, ExplorerTabsPlugin))
             .insert_resource(crate::lsp::manager::LspManager::new(
                 crate::lsp::LspOutbox::default(),
                 crate::lsp::server_request::ServerEvents::default().sender(),
-            ))
-            .add_message::<vmux_layout::CloseStackRequest>()
-            .add_systems(Update, sync_open_editors)
-            .add_observer(on_explorer_close_editor);
+            ));
         let a = PathBuf::from("/proj/a.rs");
         let b = PathBuf::from("/proj/b.rs");
         let e = app
@@ -4163,14 +4030,13 @@ mod page_open_tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(EditorNavigationPlugin)
+        app.add_plugins((MinimalPlugins, EditorNavigationPlugin, ExplorerTabsPlugin))
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .insert_resource(crate::lsp::manager::LspManager::new(
                 crate::lsp::LspOutbox::default(),
                 crate::lsp::server_request::ServerEvents::default().sender(),
             ))
-            .add_systems(Update, (handle_file_page_open, sync_open_editors).chain());
+            .add_systems(Update, handle_file_page_open);
         app
     }
 

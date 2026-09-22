@@ -16,6 +16,7 @@ pub(crate) mod dir;
 pub(crate) mod explorer_fs;
 pub(crate) mod explorer_mutation;
 pub(crate) mod explorer_panel;
+pub(crate) mod explorer_tabs;
 pub(crate) mod explorer_tree;
 pub(crate) mod history;
 pub(crate) mod media;

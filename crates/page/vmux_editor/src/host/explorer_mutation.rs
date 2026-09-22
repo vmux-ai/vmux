@@ -5,8 +5,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
+use super::explorer_tabs::OpenEditorsDirty;
 use super::explorer_tree::{ExplorerTreeDirty, ExplorerTrees};
-use super::plugin::{ExplorerState, FileView, OpenEditorsDirty};
+use super::plugin::{ExplorerState, FileView};
 
 pub(super) struct ExplorerMutationPlugin;
 
