@@ -6,9 +6,7 @@ use std::path::Path;
 use dioxus::prelude::*;
 use vmux_core::event::FileDirEntry;
 use vmux_core::event::space::ProjectRequest;
-use vmux_core::event::{
-    PageContextEvent, PageContextRequest, TabWorkspaceEvent, TabWorkspaceRequest,
-};
+use vmux_core::event::{PageContextRequest, TabWorkspaceRequest};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::card::{Card, CardVariant};
@@ -17,13 +15,14 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::textarea::{Textarea, TextareaVariant};
 use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorAction, visible_directory_entries};
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 use vmux_ui::list_nav::{MenuDirection, move_selection};
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::*;
+use crate::page_state::{GitPageState, use_git_page_state};
 use crate::ui::DiffView;
 use crate::view::EditorDiffMarker;
 
@@ -39,224 +38,38 @@ pub static LEGACY_NATIVE_PAGE: vmux_native::NativePage =
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut workspace = use_signal(String::new);
-    let mut repository = use_signal(|| Option::<GitRepositoryEvent>::None);
-    let mut directory = use_signal(|| Option::<GitDirectoryEvent>::None);
-    let mut directory_selected = use_signal(|| 0usize);
-    let mut directory_children = use_signal(|| Option::<Vec<FileDirEntry>>::None);
-    let mut directory_preview_path = use_signal(String::new);
-    let mut directory_came_from = use_signal(String::new);
-    let mut directory_show_hidden = use_signal(|| true);
-    let mut selected_path = use_signal(String::new);
-    let mut selected_path_bytes = use_signal(Vec::<u8>::new);
-    let mut selected_abs_path = use_signal(String::new);
-    let mut selected_commit = use_signal(String::new);
-    let mut selected_branch = use_signal(String::new);
-    let mut branch_collection = use_signal(BranchCollection::default);
-    let mut branch_prompt = use_signal(|| Option::<BranchPrompt>::None);
-    let mut branch_draft = use_signal(String::new);
-    let mut pending_branch_checkout = use_signal(String::new);
-    let mut selected_stash = use_signal(String::new);
-    let mut confirm_discard = use_signal(Vec::<u8>::new);
-    let mut commit_message = use_signal(String::new);
-    let mut pending_commit_message = use_signal(String::new);
-    let mut fetching = use_signal(|| false);
-    let mut loading = use_signal(|| true);
-    let mut message = use_signal(String::new);
-    let mut focused_panel = use_signal(GitPanel::default);
-    let mut command_log = use_signal(Vec::<GitCommandLogEntry>::new);
-    let mut branch_log = use_signal(|| Option::<GitBranchLogEvent>::None);
-    let mut shortcut_help = use_signal(|| false);
-    let mut nonce = use_signal(|| 0u32);
-    let markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
-
-    let _context = use_listener::<PageContextEvent, _>(move |context| {
-        let path = crate::GitUrl::parse(&context.page_url)
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or(context.working_directory);
-        workspace.set(path.clone());
-        repository.set(None);
-        directory.set(None);
-        directory_children.set(None);
-        directory_selected.set(0);
-        directory_preview_path.set(String::new());
-        directory_came_from.set(String::new());
-        directory_show_hidden.set(true);
-        selected_path.set(String::new());
-        selected_path_bytes.set(Vec::new());
-        selected_abs_path.set(String::new());
-        selected_commit.set(String::new());
-        selected_branch.set(String::new());
-        branch_collection.set(BranchCollection::Local);
-        branch_prompt.set(None);
-        branch_draft.set(String::new());
-        pending_branch_checkout.set(String::new());
-        selected_stash.set(String::new());
-        fetching.set(false);
-        loading.set(true);
-        message.set(String::new());
-        focused_panel.set(GitPanel::Status);
-        command_log.set(Vec::new());
-        branch_log.set(None);
-        GitWorkspace::browse(&path, false);
-    });
-    let _repository = use_listener::<GitRepositoryEvent, _>(move |event| {
-        if event.path != workspace() && event.repo_root != workspace() {
-            return;
-        }
-        let next_file = event
-            .files
-            .iter()
-            .find(|entry| entry.path_bytes == selected_path_bytes())
-            .or_else(|| event.files.first())
-            .cloned();
-        let next_commit = event
-            .commits
-            .iter()
-            .find(|entry| entry.sha == selected_commit())
-            .or_else(|| event.commits.first())
-            .map(|entry| entry.sha.clone())
-            .unwrap_or_default();
-        let next_branch = branch_collection().selected_reference(&event, &selected_branch());
-        let next_stash = event
-            .stashes
-            .iter()
-            .find(|entry| entry.reference == selected_stash())
-            .or_else(|| event.stashes.first())
-            .map(|entry| entry.reference.clone())
-            .unwrap_or_default();
-        selected_abs_path.set(
-            next_file
-                .as_ref()
-                .map(|entry| GitWorkspace::absolute_path(&event.repo_root, &entry.path))
-                .unwrap_or_default(),
-        );
-        selected_path.set(
-            next_file
-                .as_ref()
-                .map(|entry| entry.path.clone())
-                .unwrap_or_default(),
-        );
-        selected_path_bytes.set(next_file.map(|entry| entry.path_bytes).unwrap_or_default());
-        selected_commit.set(next_commit);
-        selected_branch.set(next_branch);
-        selected_stash.set(next_stash);
-        workspace.set(event.repo_root.clone());
-        repository.set(Some(event));
-        directory.set(None);
-        loading.set(false);
-        message.set(String::new());
-    });
-    let _directory = use_listener::<GitDirectoryEvent, _>(move |event| {
-        if event.preview {
-            if event.path == directory_preview_path() {
-                directory_children.set(Some(event.entries));
-            }
-            return;
-        }
-        workspace.set(event.path.clone());
-        if !event.repo_root.is_empty() {
-            workspace.set(event.repo_root.clone());
-            loading.set(true);
-            GitWorkspace::activate(&event.repo_root);
-            GitWorkspace::request(&event.repo_root);
-            return;
-        }
-        let came_from = directory_came_from();
-        directory_came_from.set(String::new());
-        let selected = event
-            .entries
-            .iter()
-            .position(|entry| entry.path == came_from)
-            .unwrap_or(0);
-        let preview = event.entries.get(selected).filter(|entry| entry.is_dir);
-        directory_selected.set(selected);
-        directory_children.set(None);
-        directory_preview_path.set(String::new());
-        if let Some(entry) = preview {
-            directory_preview_path.set(entry.path.clone());
-            GitWorkspace::browse(&entry.path, true);
-        }
-        directory.set(Some(event));
-        loading.set(false);
-        message.set(String::new());
-    });
-    let _branch_log = use_listener::<GitBranchLogEvent, _>(move |event| {
-        if event.repo_root == workspace() && event.branch == selected_branch() {
-            branch_log.set(Some(event));
-        }
-    });
-    let _repository_picked = use_listener::<GitRepositoryPickedEvent, _>(move |event| {
-        if event.path.is_empty() {
-            return;
-        }
-        loading.set(true);
-        GitWorkspace::browse(&event.path, false);
-    });
-    let _result = use_listener::<GitResultEvent, _>(move |result| {
-        {
-            let mut entries = command_log.write();
-            GitCommandLogEntry::from_result(&result).append(&mut entries);
-        }
-        if result.action == "commit" {
-            if result.ok && commit_message().trim() == pending_commit_message() {
-                commit_message.set(String::new());
-            }
-            pending_commit_message.set(String::new());
-        }
-        if result.action == "fetch" {
-            fetching.set(false);
-        }
-        if result.action == "new branch" {
-            let branch = pending_branch_checkout();
-            pending_branch_checkout.set(String::new());
-            if result.ok && !branch.is_empty() {
-                GitWorkspace::select_branch_name(&workspace(), &branch);
-            }
-        }
-        if result.ok {
-            message.set(String::new());
-        } else {
-            message.set(result.message);
-        }
-        nonce.set(nonce().wrapping_add(1));
-        GitWorkspace::request(&workspace());
-    });
-    let _error = use_listener::<GitErrorEvent, _>(move |event| {
-        {
-            let mut entries = command_log.write();
-            GitCommandLogEntry::error(&event.message).append(&mut entries);
-        }
-        loading.set(false);
-        fetching.set(false);
-        message.set(event.message);
-    });
-    let _changed = use_listener::<GitChangedEvent, _>(move |_| {
-        nonce.set(nonce().wrapping_add(1));
-        GitWorkspace::request(&workspace());
-    });
-    let _workspace = use_listener::<TabWorkspaceEvent, _>(move |event| {
-        if !event.error.is_empty() {
-            GitCommandLogEntry::error(&event.error).append(&mut command_log.write());
-            message.set(event.error);
-            return;
-        }
-        if event.path.is_empty() || event.path == workspace() {
-            return;
-        }
-        workspace.set(event.path.clone());
-        repository.set(None);
-        selected_path.set(String::new());
-        selected_path_bytes.set(Vec::new());
-        selected_abs_path.set(String::new());
-        selected_commit.set(String::new());
-        selected_branch.set(event.branch);
-        selected_stash.set(String::new());
-        fetching.set(false);
-        branch_log.set(None);
-        loading.set(true);
-        GitWorkspace::request(&event.path);
-    });
+    let GitPageState {
+        workspace,
+        repository,
+        directory,
+        directory_selected,
+        directory_children,
+        directory_preview_path,
+        directory_came_from,
+        directory_show_hidden,
+        selected_path,
+        selected_path_bytes,
+        selected_abs_path,
+        selected_commit,
+        selected_branch,
+        branch_collection,
+        mut branch_prompt,
+        mut branch_draft,
+        pending_branch_checkout,
+        selected_stash,
+        mut confirm_discard,
+        commit_message,
+        pending_commit_message,
+        fetching,
+        loading,
+        message,
+        mut focused_panel,
+        command_log,
+        branch_log,
+        mut shortcut_help,
+        nonce,
+        markers,
+    } = use_git_page_state();
 
     use_effect(move || {
         let _ = send(&PageContextRequest {});
@@ -594,10 +407,10 @@ pub fn Page() -> Element {
     }
 }
 
-struct GitWorkspace;
+pub(super) struct GitWorkspace;
 
 impl GitWorkspace {
-    fn request(path: &str) {
+    pub(super) fn request(path: &str) {
         if path.is_empty() {
             return;
         }
@@ -606,21 +419,21 @@ impl GitWorkspace {
         });
     }
 
-    fn absolute_path(root: &str, relative: &str) -> String {
+    pub(super) fn absolute_path(root: &str, relative: &str) -> String {
         if root.is_empty() || relative.is_empty() {
             return String::new();
         }
         Path::new(root).join(relative).to_string_lossy().to_string()
     }
 
-    fn browse(path: &str, preview: bool) {
+    pub(super) fn browse(path: &str, preview: bool) {
         let _ = send(&GitDirectoryRequest {
             path: path.to_string(),
             preview,
         });
     }
 
-    fn activate(path: &str) {
+    pub(super) fn activate(path: &str) {
         let _ = send(&ProjectRequest {
             command: "activate".to_string(),
             path: Some(path.to_string()),
@@ -646,7 +459,7 @@ impl GitWorkspace {
         });
     }
 
-    fn select_branch_name(repo_root: &str, branch: &str) {
+    pub(super) fn select_branch_name(repo_root: &str, branch: &str) {
         let _ = send(&ProjectRequest {
             command: "activate".to_string(),
             path: Some(repo_root.to_string()),
@@ -675,7 +488,7 @@ impl GitWorkspace {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum BranchPrompt {
+pub(super) enum BranchPrompt {
     Create { base: String },
     Delete { branch: String },
 }
@@ -791,7 +604,7 @@ fn BranchPromptDialog(
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum BranchCollection {
+pub(super) enum BranchCollection {
     #[default]
     Local,
     Remote,
@@ -819,7 +632,11 @@ impl BranchCollection {
         }
     }
 
-    fn selected_reference(self, repository: &GitRepositoryEvent, selected: &str) -> String {
+    pub(super) fn selected_reference(
+        self,
+        repository: &GitRepositoryEvent,
+        selected: &str,
+    ) -> String {
         let references = self.references(repository);
         if references.iter().any(|reference| reference == selected) {
             return selected.to_string();
@@ -834,7 +651,7 @@ impl BranchCollection {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum GitPanel {
+pub(super) enum GitPanel {
     #[default]
     Status,
     Files,
@@ -988,14 +805,14 @@ impl GitPanel {
 }
 
 #[derive(Clone, PartialEq)]
-struct GitCommandLogEntry {
+pub(super) struct GitCommandLogEntry {
     action: String,
     message: String,
     ok: bool,
 }
 
 impl GitCommandLogEntry {
-    fn from_result(result: &GitResultEvent) -> Self {
+    pub(super) fn from_result(result: &GitResultEvent) -> Self {
         Self {
             action: result.action.clone(),
             message: result.message.clone(),
@@ -1003,7 +820,7 @@ impl GitCommandLogEntry {
         }
     }
 
-    fn error(message: &str) -> Self {
+    pub(super) fn error(message: &str) -> Self {
         Self {
             action: String::new(),
             message: message.to_string(),
@@ -1011,7 +828,7 @@ impl GitCommandLogEntry {
         }
     }
 
-    fn append(self, entries: &mut Vec<Self>) {
+    pub(super) fn append(self, entries: &mut Vec<Self>) {
         if entries.len() >= 24 {
             entries.remove(0);
         }

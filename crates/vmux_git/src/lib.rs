@@ -44,6 +44,8 @@ impl GitUrl {
 #[cfg(ui)]
 pub mod page;
 #[cfg(ui)]
+mod page_state;
+#[cfg(ui)]
 pub mod ui;
 
 #[cfg(host)]
