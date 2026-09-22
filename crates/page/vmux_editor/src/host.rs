@@ -14,6 +14,7 @@ pub mod shape;
 pub(crate) mod app_key;
 pub(crate) mod dir;
 pub(crate) mod explorer_fs;
+pub(crate) mod explorer_panel;
 pub(crate) mod explorer_tree;
 pub(crate) mod history;
 pub(crate) mod media;
@@ -28,8 +29,7 @@ pub(crate) mod wrap;
 mod plugin;
 
 pub use contract::EditorContractPlugin;
+pub use explorer_panel::StackExplorerVisibility;
 pub use lsp::LspPlugin;
-pub use plugin::{
-    EditorPlugin, FileView, GlobalSearchRequest, StackExplorerVisibility, restore_file_view_bundle,
-};
+pub use plugin::{EditorPlugin, FileView, GlobalSearchRequest, restore_file_view_bundle};
 pub use status::FileViewModeRequest;

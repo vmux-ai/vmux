@@ -9,7 +9,8 @@ use vmux_core::event::*;
 use crate::dir::{list_dir, project_root};
 use crate::explorer_model::flatten_tree;
 
-use super::plugin::{ExplorerPanelDefaults, ExplorerState, FileView, StackExplorerVisibility};
+use super::explorer_panel::{ExplorerPanelDefaults, StackExplorerVisibility};
+use super::plugin::{ExplorerState, FileView};
 
 #[derive(Default)]
 pub(super) struct ExplorerTree {
