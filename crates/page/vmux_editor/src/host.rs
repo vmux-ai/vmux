@@ -24,6 +24,7 @@ pub(crate) mod preview;
 pub(crate) mod search;
 pub(crate) mod status;
 pub(crate) mod viewport;
+pub(crate) mod workspace_edit;
 pub(crate) mod wrap;
 
 mod plugin;
