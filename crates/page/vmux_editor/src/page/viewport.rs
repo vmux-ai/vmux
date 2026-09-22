@@ -6,7 +6,8 @@ use vmux_core::event::{FileLine, FileLineLayout, FileResizeEvent, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::{INPUT_ID, SCROLL_ID, is_markdown_file};
+use super::document::is_markdown_file;
+use super::{INPUT_ID, SCROLL_ID};
 use crate::page_model::{CellMetrics, ColumnRuler, centered_scroll_top, gutter_width};
 
 pub(super) struct ScrolledLineHeight;
