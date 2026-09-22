@@ -7,8 +7,8 @@ use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpen
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
+use super::editing::{FileView, PendingGoto};
 use super::explorer::ExplorerState;
-use super::plugin::{FileView, PendingGoto};
 use super::viewport::FileViewport;
 
 pub(super) struct EditorPageOpenPlugin;

@@ -8,10 +8,10 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
+use super::editing::{EditState, EditorKeymap, FileView, ParkedEdits, settings_mappings};
 use super::explorer::OutlineDirty;
 use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use super::note::NoteSent;
-use super::plugin::{EditState, EditorKeymap, FileView, ParkedEdits, settings_mappings};
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
 use crate::dir::{list_dir, parent_listing};
 use crate::edit::{EditCore, highlight_cache::HighlightCache};
