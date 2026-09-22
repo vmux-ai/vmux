@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
-use super::editing::{ClipboardHandle, EditState, EditorKeymap, FileView, run_commands};
+use super::editing::{EditRequest, EditState, FileView};
 use super::file_lifecycle::{SelfWrites, canon};
-use super::viewport::FileViewport;
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 
@@ -20,22 +19,14 @@ impl Plugin for EditorWorkspaceEditPlugin {
     }
 }
 
-type EditableFileViews = (
-    Entity,
-    &'static FileView,
-    &'static mut EditState,
-    &'static EditorKeymap,
-    &'static mut FileViewport,
-    &'static mut vmux_git::GitDiffSource,
-);
+type EditableFileViews = (Entity, &'static FileView, &'static EditState);
 
 #[allow(clippy::too_many_arguments)]
 fn apply_lsp_workspace_edit(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
-    mut views: Query<EditableFileViews>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
+    views: Query<EditableFileViews>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    manager: Res<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
@@ -43,15 +34,9 @@ fn apply_lsp_workspace_edit(
 ) {
     for (request, awaiting) in &requests {
         let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => apply_planned_documents(
-                plan,
-                &mut views,
-                &mut clipboard,
-                &mut self_writes,
-                &mut manager,
-                &browsers,
-                &mut commands,
-            ),
+            Ok(plan) => {
+                apply_planned_documents(plan, &views, &mut self_writes, &manager, &mut commands)
+            }
             Err(refusal) => Some(refusal.to_string()),
         };
         replies.write(crate::lsp::server_request::ServerReply {
@@ -69,15 +54,9 @@ fn apply_lsp_workspace_edit(
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
             Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
-                Ok(plan) => apply_planned_documents(
-                    plan,
-                    &mut views,
-                    &mut clipboard,
-                    &mut self_writes,
-                    &mut manager,
-                    &browsers,
-                    &mut commands,
-                ),
+                Ok(plan) => {
+                    apply_planned_documents(plan, &views, &mut self_writes, &manager, &mut commands)
+                }
                 Err(refusal) => Some(refusal.to_string()),
             },
         };
@@ -96,11 +75,9 @@ fn apply_lsp_workspace_edit(
 #[allow(clippy::too_many_arguments)]
 fn apply_planned_documents(
     plan: WorkspaceEditPlan,
-    views: &mut Query<EditableFileViews>,
-    clipboard: &mut ClipboardHandle,
+    views: &Query<EditableFileViews>,
     self_writes: &mut SelfWrites,
-    manager: &mut crate::lsp::manager::LspManager,
-    browsers: &Browsers,
+    manager: &crate::lsp::manager::LspManager,
     commands: &mut Commands,
 ) -> Option<String> {
     for document in plan.documents {
@@ -142,8 +119,7 @@ fn apply_planned_documents(
         }
 
         for entity in open {
-            let Ok((_, _, mut edit, keymap, mut viewport, mut diff_source)) = views.get_mut(entity)
-            else {
+            let Ok((_, _, edit)) = views.get(entity) else {
                 continue;
             };
             let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
@@ -152,19 +128,10 @@ fn apply_planned_documents(
                     return Some(format!("{}: {error}", document.path.as_path().display()));
                 }
             };
-            run_commands(
+            commands.trigger(EditRequest::new(
                 entity,
                 vec![EditCommand::ReplaceText(updated)],
-                &mut edit,
-                &mut diff_source,
-                keymap.0.as_ref(),
-                &mut viewport,
-                clipboard,
-                self_writes,
-                manager,
-                browsers,
-                commands,
-            );
+            ));
         }
     }
     None
@@ -203,6 +170,8 @@ mod tests {
     use super::*;
     use crate::edit::highlight_cache::HighlightCache;
     use crate::edit::{EditCore, EditMode};
+    use crate::host::editing::{ClipboardHandle, EditorKeymap};
+    use crate::host::viewport::FileViewport;
     use crate::keymap::KeymapKindExt;
 
     struct ApplyEdit {
@@ -254,6 +223,7 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 crate::lsp::server_request::ServerRequestPlugin,
+                super::super::editing::EditExecutionPlugin,
                 EditorWorkspaceEditPlugin,
             ));
             app.world_mut().insert_non_send(ClipboardHandle(None));

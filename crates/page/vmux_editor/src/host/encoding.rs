@@ -1,6 +1,68 @@
+use bevy::prelude::*;
+use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
-use vmux_core::event::FileEncoding;
+use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingEvent, FileEncodingSet};
+
+use crate::edit::EditCommand;
+use crate::host::editing::{EditRequest, EditState, FileView};
+use crate::host::file_lifecycle::{FileBuffer, ForcedEncoding};
+use crate::host::status::FileInitialMetaSent;
+
+pub(super) struct EditorEncodingPlugin;
+
+impl Plugin for EditorEncodingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(FileEncodingSet,)>::default())
+            .add_observer(on_file_encoding_set);
+    }
+}
+
+type EncodingTarget = (&'static FileView, Option<&'static mut EditState>);
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_encoding_set(
+    trigger: On<BinReceive<FileEncodingSet>>,
+    mut views: Query<EncodingTarget>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok((view, edit)) = views.get_mut(entity) else {
+        return;
+    };
+    if wanted.action == FileEncodingAction::Reopen {
+        commands
+            .entity(entity)
+            .insert(ForcedEncoding {
+                path: view.path.clone(),
+                encoding: wanted.encoding,
+            })
+            .remove::<EditState>()
+            .remove::<vmux_git::GitDiffSource>()
+            .remove::<FileBuffer>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LintRan>();
+        manager.change(&view.path);
+        return;
+    }
+    let Some(mut edit) = edit else {
+        return;
+    };
+    edit.core.buffer.encoding = wanted.encoding;
+    commands.trigger(EditRequest::new(entity, vec![EditCommand::Save]));
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_event(
+        entity,
+        &FileEncodingEvent {
+            encoding: edit.core.buffer.encoding,
+        },
+    ));
+}
 
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
