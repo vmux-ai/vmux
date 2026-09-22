@@ -53,11 +53,9 @@ impl Registration {
         let address = resolve(relay.url()).await?;
         let server_name = host_of(relay.url())?;
 
-        let endpoint = vmux_remote::quic::endpoint::Trust::Relay {
-            host: server_name.clone(),
-        }
-        .endpoint(address)
-        .map_err(|error| format!("relay client endpoint: {error}"))?;
+        let endpoint = vmux_remote::quic::endpoint::Trust::Relay
+            .endpoint(address)
+            .map_err(|error| format!("relay client endpoint: {error}"))?;
         let control = endpoint
             .connect(address, &server_name)
             .map_err(|error| format!("relay dial {} at {address}: {error}", relay.url()))?

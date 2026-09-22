@@ -67,6 +67,21 @@ async fn a_different_certificate_is_refused() {
 }
 
 #[tokio::test]
+async fn a_private_relay_with_an_untrusted_certificate_is_refused() {
+    let (_identity, address, server) = desktop();
+    let accepting = tokio::spawn(accept_once(server));
+
+    let client = Trust::Relay.endpoint(address).expect("bind client");
+    let connecting = client.connect(address, "localhost").expect("dial");
+    let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
+        .await
+        .expect("client did not settle");
+
+    assert!(outcome.is_err());
+    assert!(!accepting.await.expect("accept task"));
+}
+
+#[tokio::test]
 async fn a_peer_offering_another_alpn_is_rejected() {
     let (_identity, address, server) = desktop();
     let accepting = tokio::spawn(accept_once(server));
