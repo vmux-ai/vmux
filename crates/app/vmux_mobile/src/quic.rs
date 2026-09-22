@@ -170,11 +170,9 @@ impl QuicApi {
             .unwrap_or(&self.endpoint.address)
             .to_string();
 
-        let relay_endpoint = Trust::Relay {
-            host: server_name.clone(),
-        }
-        .endpoint(address)
-        .map_err(QuicError::Transport)?;
+        let relay_endpoint = Trust::Relay
+            .endpoint(address)
+            .map_err(QuicError::Transport)?;
         let control = relay_endpoint
             .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?

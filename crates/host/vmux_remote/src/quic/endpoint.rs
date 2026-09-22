@@ -107,7 +107,7 @@ impl SelfSignedIdentity {
 #[derive(Clone, Debug)]
 pub enum Trust {
     Desktop { fingerprint: String },
-    Relay { host: String },
+    Relay,
 }
 
 impl Trust {
@@ -158,19 +158,6 @@ impl Trust {
         Ok(())
     }
 
-    fn is_local_development_host(host: &str) -> bool {
-        if host.eq_ignore_ascii_case("localhost") {
-            return true;
-        }
-        match host.parse::<std::net::IpAddr>() {
-            Ok(std::net::IpAddr::V4(ip)) => {
-                ip.is_loopback() || ip.is_private() || ip.is_link_local()
-            }
-            Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.segments()[0] & 0xfe00 == 0xfc00,
-            Err(_) => false,
-        }
-    }
-
     fn client_config(&self) -> Result<ClientConfig, String> {
         self.client_config_offering(ALPN)
     }
@@ -187,11 +174,7 @@ impl Trust {
                     expected: fingerprint.to_ascii_lowercase(),
                 }))
                 .with_no_client_auth(),
-            Self::Relay { host } if Self::is_local_development_host(host) => builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(AnyCertificate))
-                .with_no_client_auth(),
-            Self::Relay { .. } => {
+            Self::Relay => {
                 let roots = rustls::RootCertStore {
                     roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
                 };
@@ -237,53 +220,6 @@ fn transport_config() -> Arc<TransportConfig> {
     transport.max_concurrent_bidi_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
     transport.max_concurrent_uni_streams(MAX_CONCURRENT_UNI_STREAMS.into());
     Arc::new(transport)
-}
-
-#[derive(Debug)]
-struct AnyCertificate;
-
-impl ServerCertVerifier for AnyCertificate {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Err(rustls::Error::PeerIncompatible(
-            rustls::PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig,
-        ))
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &provider().signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
 }
 
 #[derive(Debug)]
@@ -403,25 +339,7 @@ mod tests {
         }
         .client_config()
         .unwrap();
-        Trust::Relay {
-            host: "relay.vmux.ai".into(),
-        }
-        .client_config()
-        .unwrap();
-        Trust::Relay {
-            host: "localhost".into(),
-        }
-        .client_config()
-        .unwrap();
-    }
-
-    #[test]
-    fn only_private_relay_hosts_skip_verification() {
-        assert!(Trust::is_local_development_host("localhost"));
-        assert!(Trust::is_local_development_host("127.0.0.1"));
-        assert!(Trust::is_local_development_host("192.168.1.4"));
-        assert!(!Trust::is_local_development_host("relay.vmux.ai"));
-        assert!(!Trust::is_local_development_host("8.8.8.8"));
+        Trust::Relay.client_config().unwrap();
     }
 
     #[test]
