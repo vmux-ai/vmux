@@ -8,7 +8,7 @@ use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, Explore
 use super::ExplorerState;
 use super::tabs::OpenEditorsDirty;
 use super::tree::{ExplorerTreeDirty, ExplorerTrees};
-use crate::host::edit_state::FileView;
+use crate::host::editor::FileView;
 
 pub(in crate::host) struct ExplorerMutationPlugin;
 

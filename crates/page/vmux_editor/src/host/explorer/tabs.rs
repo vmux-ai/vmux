@@ -6,7 +6,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::ExplorerState;
-use crate::host::edit_state::{EditState, FileView, ParkedEdits};
+use crate::host::editor::{EditState, FileView, ParkedEdits};
 use crate::host::viewport::FileViewport;
 
 pub(in crate::host) struct ExplorerTabsPlugin;

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::OutlineEvent;
 
-use crate::host::edit_state::{EditState, FileView};
+use crate::host::editor::{EditState, FileView};
 
 pub(in crate::host) struct ExplorerOutlinePlugin;
 

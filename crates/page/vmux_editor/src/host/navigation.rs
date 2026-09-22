@@ -6,7 +6,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
-use crate::host::edit_state::{EditState, FileView};
+use crate::host::editor::{EditState, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
 use crate::host::keymap::EditorKeymap;
 use crate::host::note::NoteRevealLine;

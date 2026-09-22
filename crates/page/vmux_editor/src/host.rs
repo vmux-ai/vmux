@@ -66,8 +66,8 @@ pub mod shape;
 
 pub(crate) mod app_key;
 pub(crate) mod dir;
-pub(crate) mod edit_state;
 pub(crate) mod editing;
+pub(crate) mod editor;
 pub(crate) mod explorer;
 pub(crate) mod file_lifecycle;
 pub(crate) mod history;
@@ -84,7 +84,7 @@ pub(crate) mod workspace_edit;
 pub(crate) mod wrap;
 
 pub use contract::EditorContractPlugin;
-pub use edit_state::FileView;
+pub use editor::FileView;
 pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
 pub use lsp::LspPlugin;
 pub use page_open::restore_file_view_bundle;
