@@ -7,7 +7,9 @@ use vmux_core::event::{FileDirEntry, FileLine, FileOpenEvent, FilePreviewRequest
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
+use vmux_ui::media::MediaElement;
 use vmux_ui::platform::now_millis;
+use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::util::cn;
 
 use crate::page_model::{dir_select_index, image_mime, span_style};
@@ -50,6 +52,14 @@ pub(super) fn clear_preview(
 
 pub(super) fn request_preview(path: String) {
     let _ = send(&FilePreviewRequest { path, thumb: false });
+}
+
+pub(super) fn scroll_row_into_view(index: usize) {
+    ScrollIntoView::nearest(&format!("dir-row-{index}"));
+}
+
+pub(super) fn toggle_video() {
+    MediaElement::with_id("preview-video").toggle_playback();
 }
 
 fn request_thumb(path: String) {

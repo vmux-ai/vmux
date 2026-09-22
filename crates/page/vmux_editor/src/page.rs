@@ -1,7 +1,9 @@
 #![allow(non_snake_case)]
 
 mod directory;
+mod document;
 mod editor;
+mod input;
 mod menu;
 mod note;
 mod sidebar;
@@ -9,14 +11,16 @@ mod status;
 mod toolbar;
 mod viewport;
 
-use std::collections::HashMap;
-use std::rc::Rc;
-
 use directory::{
-    DirColumns, DirWindow, Preview, VIDEO_HOST_ID, apply_dir, clear_preview, image_data_url,
-    open_path, parent_of, request_preview, visible_entries,
+    DirColumns, DirWindow, Preview, apply_dir, clear_preview, image_data_url, open_path, parent_of,
+    request_preview, scroll_row_into_view, toggle_video, visible_entries,
 };
+use document::{FileArrival, is_markdown_file};
 use editor::{EditorLines, StickyScope};
+use input::{
+    CONTAINER_ID, INPUT_ID, PreeditField, focus_container, forward_file_key, send_committed_text,
+};
+pub(crate) use input::{FIND_INPUT_ID, focus_file_input, focus_find_input};
 use menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
 use note::{
     NoteBlankLine, NoteBlockView, NoteProperties, activate_note_cursor,
@@ -26,6 +30,7 @@ use note::{
 pub(crate) use sidebar::ExplorerPane;
 use sidebar::{ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
+use std::collections::HashMap;
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
 use viewport::{FileViewport, RowRuler, ScrolledLineHeight};
 
@@ -48,10 +53,8 @@ use vmux_ui::diff::DiffTone;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::ime::{ImeGuard, use_ime_guard};
-use vmux_ui::media::MediaElement;
+use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
-use vmux_ui::scroll::ScrollIntoView;
 
 #[component]
 pub fn Page() -> Element {
@@ -202,7 +205,7 @@ pub fn Page() -> Element {
     });
 
     let _meta = use_listener::<FileMetaEvent, _>(move |m| {
-        let arrival = FileMeta::arriving(&m.abs_path, &git_path.peek());
+        let arrival = FileArrival::new(&m.abs_path, &git_path.peek());
         doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
         git_path.set(m.abs_path);
@@ -818,7 +821,7 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 let next = if len == 0 { 0 } else { (cur + 1).min(len - 1) };
                                 selected.set(next);
-                                scroll_dir_row_into_view(next);
+                                scroll_row_into_view(next);
                                 if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
@@ -827,7 +830,7 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 let next = cur.saturating_sub(1);
                                 selected.set(next);
-                                scroll_dir_row_into_view(next);
+                                scroll_row_into_view(next);
                                 if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
@@ -902,14 +905,14 @@ pub fn Page() -> Element {
                                 let vis2 = visible_entries(&dir_entries.read(), next);
                                 let idx = clamp_selection(cur, vis2.len());
                                 selected.set(idx);
-                                scroll_dir_row_into_view(idx);
+                                scroll_row_into_view(idx);
                                 if let Some(p) = vis2.get(idx).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
                             }
                             " " => {
                                 e.prevent_default();
-                                toggle_preview_video();
+                                toggle_video();
                             }
                             _ => {
                                 keys.offer(&e);
@@ -1898,15 +1901,12 @@ pub fn Page() -> Element {
     }
 }
 
-const CONTAINER_ID: &str = "file-container";
 const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
 const MEASURE_WIDE_ID: &str = "file-measure-wide";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
-const INPUT_ID: &str = "file-input";
-pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 const RENAME_NOTICE_MS: u32 = 2400;
 const HOVER_DELAY_MS: u32 = 300;
 const SCROLL_ID: &str = "file-scroll";
@@ -1915,16 +1915,6 @@ const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 std::thread_local! {}
-
-fn is_markdown_file(path: &str) -> bool {
-    path.rsplit_once('.')
-        .map(|(_, extension)| {
-            extension.eq_ignore_ascii_case("md")
-                || extension.eq_ignore_ascii_case("markdown")
-                || extension.eq_ignore_ascii_case("mdx")
-        })
-        .unwrap_or(false)
-}
 
 fn file_mode_class(active: bool) -> &'static str {
     if active {
@@ -2008,156 +1998,4 @@ fn schedule_lsp_notice_clear(
             request.set(None);
         }
     });
-}
-
-fn scroll_dir_row_into_view(idx: usize) {
-    ScrollIntoView::nearest(&format!("dir-row-{idx}"));
-}
-
-fn toggle_preview_video() {
-    MediaElement::with_id("preview-video").toggle_playback();
-}
-
-fn focus_container() {
-    FocusClaim::new(CONTAINER_ID).request();
-}
-
-pub(crate) fn focus_file_input() {
-    FocusClaim::new(INPUT_ID).request();
-}
-
-pub(crate) fn focus_find_input() {
-    FocusClaim::new(FIND_INPUT_ID).request();
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FileMeta {
-    OpensFile,
-    RefreshesOpenFile,
-}
-
-impl FileMeta {
-    fn arriving(abs_path: &str, showing: &str) -> Self {
-        if !showing.is_empty() && showing == abs_path {
-            return Self::RefreshesOpenFile;
-        }
-        Self::OpensFile
-    }
-
-    fn resets_view(self) -> bool {
-        self == Self::OpensFile
-    }
-}
-
-fn send_committed_text(mut field: Signal<String>, text: String) {
-    if text.is_empty() {
-        return;
-    }
-    let _ = send(&FileTextInput { text });
-    field.set(String::new());
-}
-
-fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMode) -> bool {
-    let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
-        return false;
-    };
-    if mode.accepts_text() && stroke.is_text_input() {
-        return false;
-    }
-    event.prevent_default();
-    let _ = send(&stroke);
-    true
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct PreeditField(bool);
-
-impl From<ImeGuard> for PreeditField {
-    fn from(ime: ImeGuard) -> Self {
-        Self(ime.active())
-    }
-}
-
-impl PreeditField {
-    fn text_color(self) -> &'static str {
-        match self.0 {
-            true => "inherit",
-            false => "transparent",
-        }
-    }
-
-    fn caret_class(self) -> &'static str {
-        match self.0 {
-            true => "",
-            false => "caret-transparent",
-        }
-    }
-
-    fn owns_caret(self) -> bool {
-        self.0
-    }
-}
-
-#[component]
-fn NativeVideoHost(path: String) -> Element {
-    let mut element = use_signal(|| None::<Rc<MountedData>>);
-    let reported = path.clone();
-    let report = use_callback(move |()| {
-        let path = reported.clone();
-        spawn(async move {
-            let Some(element) = element.peek().clone() else {
-                return;
-            };
-            let Ok(rect) = element.get_client_rect().await else {
-                return;
-            };
-            if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
-                return;
-            }
-            let _ = send(&FileVideoRect {
-                path,
-                x: rect.origin.x as f32,
-                y: rect.origin.y as f32,
-                w: rect.size.width as f32,
-                h: rect.size.height as f32,
-            });
-        });
-    });
-
-    rsx! {
-        div {
-            key: "{path}",
-            id: VIDEO_HOST_ID,
-            class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-primary/20",
-            onmounted: move |event: Event<MountedData>| {
-                element.set(Some(event.data()));
-                report.call(());
-            },
-            onresize: move |_| report.call(()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod file_meta_tests {
-    use super::*;
-
-    #[test]
-    fn a_meta_for_the_file_already_on_screen_leaves_the_view_alone() {
-        assert!(
-            !FileMeta::arriving("/w/src/main.rs", "/w/src/main.rs").resets_view(),
-            "the host re-sends META whenever a page announces itself ready, and a page that \
-             is already showing that file still holds the scroll position the reader left it at"
-        );
-    }
-
-    #[test]
-    fn a_meta_for_any_other_file_resets_the_view() {
-        assert!(FileMeta::arriving("/w/src/other.rs", "/w/src/main.rs").resets_view());
-        assert!(
-            FileMeta::arriving("/w/src/main.rs", "").resets_view(),
-            "a freshly loaded page shows nothing, so its first META opens the file"
-        );
-        assert!(FileMeta::arriving("", "").resets_view());
-    }
 }
