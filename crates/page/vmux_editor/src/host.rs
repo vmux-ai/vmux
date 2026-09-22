@@ -14,6 +14,7 @@ pub mod shape;
 pub(crate) mod app_key;
 pub(crate) mod dir;
 pub(crate) mod explorer_fs;
+pub(crate) mod explorer_tree;
 pub(crate) mod history;
 pub(crate) mod media;
 pub(crate) mod navigation;
