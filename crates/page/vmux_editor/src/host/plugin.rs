@@ -10,14 +10,16 @@ use vmux_command::ScopedKeys;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
-use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
-use vmux_layout::Browser;
+#[cfg(test)]
+use vmux_core::page_open::{PageOpenHandled, PageOpenTask};
 
 use crate::dir::{list_dir, parent_listing};
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::history::EditorHistoryPlugin;
-use crate::host::explorer::{EditorExplorerPlugin, ExplorerState};
+use crate::host::explorer::EditorExplorerPlugin;
+#[cfg(test)]
+use crate::host::explorer::ExplorerState;
 use crate::host::explorer_outline::OutlineDirty;
 #[cfg(test)]
 use crate::host::explorer_panel::ExplorerPanelPlugin;
@@ -33,6 +35,7 @@ use crate::host::explorer_tabs::OpenEditorsDirty;
 use crate::host::explorer_tree::{ExplorerTree, ExplorerTreePlugin, IDLE_TREE_CAPACITY};
 use crate::host::explorer_tree::{ExplorerTreeDirty, ExplorerTrees};
 use crate::host::note::{EditorNotePlugin, NoteSent};
+use crate::host::page_open::EditorPageOpenPlugin;
 use crate::host::status::{
     EditorStatusPlugin, FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent,
     SharedFileViewMode,
@@ -47,7 +50,6 @@ use crate::navigation::EditorNavigationPlugin;
 use crate::page_model::DisplayCells;
 use crate::wrap::WrapView;
 use vmux_core::scroll::clamp_top_line;
-use vmux_flex::prelude::*;
 
 pub struct EditorPlugin;
 
@@ -60,6 +62,7 @@ impl Plugin for EditorPlugin {
             crate::lsp::LspPlugin,
             crate::app_key::FileKeyPlugin,
             crate::search::ProjectSearchPlugin,
+            EditorPageOpenPlugin,
             EditorFileLifecyclePlugin,
             EditorStatusPlugin,
             EditorViewportPlugin,
@@ -105,11 +108,6 @@ impl Plugin for EditorFileLifecyclePlugin {
         }
         app.insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
-            .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_systems(
-                Update,
-                handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
             .add_systems(
                 Update,
                 (
@@ -188,10 +186,10 @@ pub struct FileView {
 }
 
 impl FileView {
-    fn in_stack(
+    pub(super) fn in_stack(
         stack: Entity,
         children_q: &Query<&Children>,
-        views: &Query<NavigableFileView>,
+        views: &Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
     ) -> Option<Entity> {
         let Ok(children) = children_q.get(stack) else {
             return None;
@@ -239,7 +237,7 @@ impl FileView {
             .remove::<crate::lsp::manager::LintRan>();
     }
 
-    fn url(&self) -> String {
+    pub(super) fn url(&self) -> String {
         url::Url::from_file_path(&self.path)
             .map(|url| url.to_string())
             .unwrap_or_else(|_| format!("file://{}", self.path.to_string_lossy()))
@@ -599,7 +597,6 @@ struct ClipboardHandle(Option<arboard::Clipboard>);
 #[derive(Default)]
 struct SelfWrites(std::collections::HashMap<PathBuf, std::time::Instant>);
 
-type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
     Without<FileDir>,
@@ -620,182 +617,6 @@ type EncodingTarget = (
     Option<&'static mut FileViewport>,
     Option<&'static mut vmux_git::GitDiffSource>,
 );
-type NavigableFileView = (
-    &'static mut FileView,
-    &'static mut FileViewport,
-    &'static mut PageMetadata,
-);
-
-fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
-    let title = if url.starts_with("vmux://") {
-        url.to_string()
-    } else {
-        path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string())
-    };
-    (
-        (
-            FileView { path },
-            FileViewport {
-                top_row: 0,
-                rows: 0,
-                wrap_columns: 0,
-                word_wrap: vmux_core::editor::WordWrap::default(),
-                word_wrap_column: 80,
-            },
-            ExplorerState::default(),
-            Browser,
-            WebviewWindowed,
-            WebviewWindowedNativeFocus,
-            WebviewOpaqueWindowedBackground,
-            PageMetadata {
-                title,
-                url: url.to_string(),
-                icon: vmux_core::PageIcon::None,
-                bg_color: None,
-            },
-            vmux_core::host::page::HostsPage,
-            vmux_core::host::page::BindsEditingChords,
-            vmux_core::host::page::HostHistory::default(),
-        ),
-        (
-            WebviewSize(Vec2::new(1280.0, 720.0)),
-            Transform::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-            Visibility::Visible,
-        ),
-    )
-}
-
-pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
-    let path = vmux_core::file_url::FileUrl::parse(url)?.path()?;
-    Some(new_file_view_bundle(url, path))
-}
-
-pub fn handle_file_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    children_q: Query<&Children>,
-    mut views: Query<NavigableFileView>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    effective_startup_dir: Option<Res<vmux_layout::settings::EffectiveStartupDir>>,
-    mut commands: Commands,
-    mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
-) {
-    for (entity, task) in &tasks {
-        let project_dir = effective_startup_dir
-            .as_deref()
-            .and_then(|effective| effective.0.as_ref())
-            .and_then(|(_, path)| path.as_deref());
-        let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
-        let Some(target) = FilePageTarget::resolve(&task.url, project_dir, &knowledge_root) else {
-            continue;
-        };
-        let Some(path) = target.path else {
-            commands.entity(entity).insert(PageOpenError {
-                message: target.error,
-            });
-            continue;
-        };
-        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        let page_url = if clean_url.trim_end_matches('/')
-            == vmux_core::knowledge::KNOWLEDGE_PAGE_URL.trim_end_matches('/')
-        {
-            FileView { path: path.clone() }.url()
-        } else {
-            clean_url.clone()
-        };
-        if !path.is_dir() {
-            let title = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string_lossy().to_string());
-            record_writer.write(vmux_core::event::RecordVisitRequest {
-                url: clean_url.clone(),
-                title,
-            });
-        }
-        let pending = parse_goto_fragment(&task.url);
-        let view = match FileView::in_stack(task.stack, &children_q, &views) {
-            Some(view) => {
-                if let Ok((mut fv, mut viewport, mut metadata)) = views.get_mut(view)
-                    && fv.path != path
-                {
-                    fv.navigate(
-                        view,
-                        path,
-                        0,
-                        &mut viewport,
-                        &mut metadata,
-                        &mut manager,
-                        &mut commands,
-                    );
-                }
-                if let Ok((_, _, mut metadata)) = views.get_mut(view)
-                    && page_url.starts_with("vmux://")
-                {
-                    metadata.title.clone_from(&page_url);
-                    metadata.url = page_url.clone();
-                    metadata.icon = vmux_core::PageIcon::None;
-                }
-                view
-            }
-            None => {
-                vmux_layout::stack::Stack::clear_children(task.stack, &children_q, &mut commands);
-                commands
-                    .spawn((new_file_view_bundle(&page_url, path), ChildOf(task.stack)))
-                    .id()
-            }
-        };
-        if let Some(pg) = pending {
-            commands.entity(view).insert(pg);
-        }
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
-struct FilePageTarget {
-    path: Option<PathBuf>,
-    error: String,
-}
-
-impl FilePageTarget {
-    fn resolve(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
-        if url.trim_end_matches('/') == vmux_api::space::PROJECTS_PAGE_URL.trim_end_matches('/') {
-            return Some(Self {
-                path: Some(
-                    project_dir
-                        .map(Path::to_path_buf)
-                        .unwrap_or_else(vmux_core::profile::projects_dir),
-                ),
-                error: String::new(),
-            });
-        }
-        if url.trim_end_matches('/')
-            == vmux_core::knowledge::KNOWLEDGE_PAGE_URL.trim_end_matches('/')
-        {
-            return Some(Self {
-                path: Some(knowledge_root.to_path_buf()),
-                error: String::new(),
-            });
-        }
-        if !url.starts_with("file:") {
-            return None;
-        }
-        Some(Self {
-            path: vmux_core::file_url::FileUrl::parse(url).and_then(|file| file.path()),
-            error: format!("malformed file URL '{url}'"),
-        })
-    }
-}
-
 fn settings_mappings(
     settings: &Option<Res<vmux_setting::AppSettings>>,
 ) -> (Vec<vmux_core::editor::KeyMapping>, String) {
@@ -2249,6 +2070,24 @@ pub(super) struct PendingGoto {
 }
 
 impl PendingGoto {
+    pub(super) fn from_url(url: &str) -> Option<Self> {
+        let body = url.split_once('#')?.1.strip_prefix('L')?;
+        let (line, selection) = match body.split_once(':') {
+            Some((line, selection)) => (line, Some(selection)),
+            None => (body, None),
+        };
+        let line = line.parse::<u32>().ok()?.saturating_sub(1);
+        let (utf16_col, select_end_col) = match selection.and_then(|value| value.split_once('-')) {
+            Some((start, end)) => (start.parse().unwrap_or(0), end.parse::<u32>().ok()),
+            None => (0, None),
+        };
+        Some(Self {
+            line,
+            utf16_col,
+            select_end_col,
+        })
+    }
+
     pub(super) fn selection(line: u32, utf16_col: u32, select_end_col: u32) -> Self {
         Self {
             line,
@@ -2256,24 +2095,6 @@ impl PendingGoto {
             select_end_col: Some(select_end_col),
         }
     }
-}
-
-fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
-    let body = url.split_once('#')?.1.strip_prefix('L')?;
-    let (line_s, sel) = match body.split_once(':') {
-        Some((l, r)) => (l, Some(r)),
-        None => (body, None),
-    };
-    let line = line_s.parse::<u32>().ok()?.saturating_sub(1);
-    let (utf16_col, select_end_col) = match sel.and_then(|r| r.split_once('-')) {
-        Some((s, e)) => (s.parse().unwrap_or(0), e.parse::<u32>().ok()),
-        None => (0, None),
-    };
-    Some(PendingGoto {
-        line,
-        utf16_col,
-        select_end_col,
-    })
 }
 
 fn req_pos(edit: &EditState, line: u32, cell: u32) -> (u32, u32, String, u32) {
@@ -2864,12 +2685,12 @@ mod edit_flow_tests {
 
     #[test]
     fn parse_goto_fragment_line_and_select() {
-        let g = parse_goto_fragment("file:///a/b.rs#L10").unwrap();
+        let g = PendingGoto::from_url("file:///a/b.rs#L10").unwrap();
         assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 0, None));
-        let g = parse_goto_fragment("file:///a/b.rs#L10:5-12").unwrap();
+        let g = PendingGoto::from_url("file:///a/b.rs#L10:5-12").unwrap();
         assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 5, Some(12)));
-        assert!(parse_goto_fragment("file:///a/b.rs").is_none());
-        assert!(parse_goto_fragment("file:///a/b.rs#x").is_none());
+        assert!(PendingGoto::from_url("file:///a/b.rs").is_none());
+        assert!(PendingGoto::from_url("file:///a/b.rs#x").is_none());
     }
 
     #[test]
@@ -3709,13 +3530,16 @@ mod page_open_tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, EditorNavigationPlugin, ExplorerTabsPlugin))
-            .add_message::<vmux_core::event::RecordVisitRequest>()
-            .insert_resource(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspOutbox::default(),
-                crate::lsp::server_request::ServerEvents::default().sender(),
-            ))
-            .add_systems(Update, handle_file_page_open);
+        app.add_plugins((
+            MinimalPlugins,
+            EditorNavigationPlugin,
+            ExplorerTabsPlugin,
+            EditorPageOpenPlugin,
+        ))
+        .insert_resource(crate::lsp::manager::LspManager::new(
+            crate::lsp::LspOutbox::default(),
+            crate::lsp::server_request::ServerEvents::default().sender(),
+        ));
         app
     }
 
@@ -4592,8 +4416,7 @@ mod host_history_tests {
                 .add_plugins(vmux_core::CorePlugin)
                 .add_plugins(EditorNavigationPlugin)
                 .add_plugins(EditorHistoryPlugin)
-                .add_message::<vmux_core::event::RecordVisitRequest>()
-                .add_systems(Update, handle_file_page_open);
+                .add_plugins(EditorPageOpenPlugin);
             app.world_mut()
                 .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),
