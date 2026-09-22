@@ -1,8 +1,10 @@
 use crate::command::AppCommand;
 use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
-use crate::snapshot::{CommandBarPagesSnapshot, CommandBarSpacesSnapshot, Contributions};
-use bevy::prelude::default;
+use crate::snapshot::{
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPage,
+};
+use bevy::prelude::{Query, default};
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarSpace, CommandBarTab, SearchEngine,
@@ -75,7 +77,8 @@ pub fn build_command_bar_open_payload(
     space_name: String,
     url: String,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &Contributions,
+    contributed_pages: &Query<&ContributedPage>,
+    contributed_commands: &Query<&ContributedCommand>,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &crate::snapshot::CommandBarWorkSnapshot,
     locale: &Locale,
@@ -84,7 +87,7 @@ pub fn build_command_bar_open_payload(
     target: Option<OpenTarget>,
 ) -> CommandBarOpenEvent {
     let mut contributed = Vec::new();
-    for command in contributions.commands() {
+    for command in contributed_commands {
         let args: Vec<(&str, TranslationValue<'_>)> = command
             .args
             .iter()
@@ -100,17 +103,17 @@ pub fn build_command_bar_open_payload(
     let mut superseded = Vec::new();
     for entry in &pages_snapshot.pages {
         let mut page = entry.page.clone();
-        if let Some(message_id) = entry.title_message_id {
+        if let Some(message_id) = entry.title_message_id.as_deref() {
             page.title = locale.translate(message_id);
         }
-        if let Some(command_id) = entry.replaces_command {
+        if let Some(command_id) = entry.replaces_command.as_deref() {
             page.shortcut = command_shortcut(command_id);
             superseded.push(command_id);
         }
         pages.push(page);
     }
-    for entry in contributions.pages() {
-        pages.push(entry.page.clone());
+    for entry in ContributedPage::sorted(contributed_pages) {
+        pages.push(entry.page);
     }
     let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed, &superseded)
         .into_iter()

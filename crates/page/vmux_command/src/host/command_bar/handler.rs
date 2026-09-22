@@ -19,14 +19,13 @@ use crate::event::{
 use crate::open::OpenCommand;
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
-    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
+    ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceRequest;
 use vmux_core::host::page::HostsPage;
@@ -459,15 +458,11 @@ fn handle_open_command_bar(
     windows: Query<&Window>,
     all_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    focus: Res<CommandBarWorkspaceSnapshot>,
+    state: Res<CommandBarUiState>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    contributions: Contributions,
-    mut snapshot_params: ParamSet<(
-        Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarPagesSnapshot>,
-        Res<crate::snapshot::CommandBarWorkSnapshot>,
-        Option<Res<ResolvedLocale>>,
-    )>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
+    locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
     let Some((layout_e, is_open, _)) = layout_q
@@ -479,13 +474,11 @@ fn handle_open_command_bar(
     else {
         return;
     };
+    let focus = &state.workspace;
     let active_stack_count = focus.stack_count;
-    let spaces_snapshot = snapshot_params.p0().clone();
+    let spaces_snapshot = &state.spaces;
     let space_name = spaces_snapshot.active_space_name.clone();
-    let pages_snap = snapshot_params.p1().clone();
-    let work_snap = snapshot_params.p2().clone();
-    let locale = snapshot_params
-        .p3()
+    let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
@@ -540,10 +533,11 @@ fn handle_open_command_bar(
         false,
         space_name,
         current_url,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snap,
-        &work_snap,
+        spaces_snapshot,
+        &contributed_pages,
+        &contributed_commands,
+        &state.pages,
+        &state.work,
         &locale,
         active_stack_count,
         bar_tabs,
@@ -561,30 +555,6 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
         layout,
         &CommandBarPanelCloseEvent,
     ));
-}
-
-#[derive(SystemParam)]
-struct CommandBarRequestQueries<'w, 's> {
-    child_of_q: Query<'w, 's, &'static ChildOf>,
-    launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
-    focus: Res<'w, CommandBarWorkspaceSnapshot>,
-}
-
-impl CommandBarRequestQueries<'_, '_> {
-    fn focused_stack(&self) -> Option<Entity> {
-        self.focus.stack
-    }
-
-    fn focused_pane(&self) -> Option<Entity> {
-        self.focus.pane
-    }
-
-    fn inline_transition_stack(&self, webview: Entity) -> Option<Entity> {
-        if !self.launcher_hosts.contains(webview) {
-            return None;
-        }
-        self.child_of_q.get(webview).ok().map(|parent| parent.0)
-    }
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -662,13 +632,14 @@ fn on_command_bar_request(
         ),
         With<CommandBar>,
     >,
-    queries: CommandBarRequestQueries,
-    mut resource_params: ParamSet<(
-        Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarTerminalsSnapshot>,
-        Contributions,
-        Option<Res<ResolvedLocale>>,
-    )>,
+    queries: (
+        Query<&ChildOf>,
+        Query<(), With<HostsLauncher>>,
+        Query<&ContributedPage>,
+        Query<&ContributedCommand>,
+        Query<&ClaimedUrl>,
+    ),
+    resources: (Res<CommandBarUiState>, Option<Res<ResolvedLocale>>),
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
         MessageWriter<PageOpenRequest>,
@@ -685,16 +656,22 @@ fn on_command_bar_request(
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let (child_of_q, launcher_hosts, contributed_pages, contributed_commands, claimed_urls) =
+        queries;
+    let (command_bar, locale) = resources;
+    let focus = &command_bar.workspace;
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    let terminals_snapshot = resource_params.p1().clone();
+    let terminals_snapshot = &command_bar.terminals;
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let running_terminals = terminals_snapshot.running.clone();
     let mut custom_keyboard_restore = false;
-    let inline_transition_stack = queries.inline_transition_stack(webview);
-    let locale = resource_params
-        .p3()
+    let inline_transition_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of_q.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
@@ -716,9 +693,10 @@ fn on_command_bar_request(
                 })
                 .collect::<Vec<_>>();
             if !prompt.is_empty() || !attachments.is_empty() {
-                let focused = queries.focused_stack();
+                let focused = focus.stack;
                 if let Some(stack) = focused
-                    && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
+                    && let Some(url) =
+                        ContributedPage::prompt_url(&contributed_pages, target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
                         && vmux_api::agent::supports_inline_agent_transition(&url)
@@ -758,7 +736,7 @@ fn on_command_bar_request(
                 } else {
                     expanded.parent().unwrap_or(&expanded)
                 };
-                if let Some(pane_e) = queries.focused_pane() {
+                if let Some(pane_e) = focus.pane {
                     writer_params.p2().write(TerminalSpawnRequest {
                         cwd: Some(dir.to_path_buf()),
                         target: TerminalSpawnTarget::NewStackInPane(pane_e),
@@ -790,8 +768,8 @@ fn on_command_bar_request(
                 } else {
                     false
                 };
-                if !inline_transition && resource_params.p2().claims_url(&url) {
-                    if let Some(pane_e) = queries.focused_pane() {
+                if !inline_transition && ClaimedUrl::contains(&claimed_urls, &url) {
+                    if let Some(pane_e) = focus.pane {
                         chosen_writer.write(vmux_core::ContributedCommandChosen {
                             id: url.clone(),
                             stack: None,
@@ -814,7 +792,7 @@ fn on_command_bar_request(
         CommandBarRequest::Terminal { value } => {
             let known_terminal = running_terminals.get(value).copied();
             if let Some(entity) = known_terminal {
-                focus_pane_entity(entity, &mut commands, &queries.child_of_q);
+                focus_pane_entity(entity, &mut commands, &child_of_q);
                 custom_keyboard_restore = true;
             } else {
                 if value.starts_with(&terminal_page_url) {
@@ -837,7 +815,7 @@ fn on_command_bar_request(
                     Some(expanded)
                 };
                 {
-                    let active_pane_opt = queries.focused_pane();
+                    let active_pane_opt = focus.pane;
                     if let Some(pane_e) = active_pane_opt {
                         writer_params.p2().write(TerminalSpawnRequest {
                             cwd: cwd.clone(),
@@ -863,12 +841,9 @@ fn on_command_bar_request(
             }
         }
         CommandBarRequest::Command { id, open } => {
-            let is_contributed = resource_params
-                .p2()
-                .commands()
-                .any(|command| &command.id == id);
+            let is_contributed = contributed_commands.iter().any(|command| &command.id == id);
             if is_contributed {
-                if let Some(pane) = queries.focused_pane() {
+                if let Some(pane) = focus.pane {
                     chosen_writer.write(vmux_core::ContributedCommandChosen {
                         id: id.clone(),
                         stack: None,
@@ -876,7 +851,7 @@ fn on_command_bar_request(
                     });
                     custom_keyboard_restore = true;
                 }
-            } else if let Some(url) = resource_params.p2().page_url(id) {
+            } else if let Some(url) = ContributedPage::page_url(&contributed_pages, id) {
                 let target = *open;
                 let cmd =
                     AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
@@ -913,7 +888,7 @@ fn on_command_bar_request(
         }
         CommandBarRequest::Ex { line } => {
             ex_lines.write(crate::host::ExLineSubmitted {
-                stack: queries.focused_stack(),
+                stack: focus.stack,
                 line: line.clone(),
             });
         }
@@ -929,7 +904,7 @@ fn on_command_bar_request(
                 }
             } else {
                 picked.write(crate::host::FileStatusPicked {
-                    stack: queries.focused_stack(),
+                    stack: focus.stack,
                     pick: pick.clone(),
                 });
             }
@@ -946,7 +921,7 @@ fn on_command_bar_request(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if !custom_keyboard_restore && let Some(stack) = queries.focused_stack() {
+    if !custom_keyboard_restore && let Some(stack) = focus.stack {
         restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }
@@ -1083,14 +1058,11 @@ fn retry_pending_command_bar_open(
     }
 }
 
-fn mirror_project_roots(
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    mut work: ResMut<crate::snapshot::CommandBarWorkSnapshot>,
-) {
-    if !projects.is_changed() || work.projects == projects.roots {
+fn mirror_project_roots(mut state: ResMut<CommandBarUiState>) {
+    if !state.is_changed() || state.work.projects == state.projects.roots {
         return;
     }
-    work.projects = projects.roots.clone();
+    state.work.projects = state.projects.roots.clone();
 }
 
 #[cfg(test)]
@@ -1109,22 +1081,25 @@ mod tests {
     fn build_payload_includes_commands_and_target() {
         let mut world = World::new();
         let payload = world
-            .run_system_once(|contributions: Contributions| {
-                build_command_bar_open_payload(
-                    OpenId(7),
-                    false,
-                    String::new(),
-                    String::new(),
-                    &CommandBarSpacesSnapshot::default(),
-                    &contributions,
-                    &CommandBarPagesSnapshot::default(),
-                    &crate::snapshot::CommandBarWorkSnapshot::default(),
-                    &Locale::from("en-US"),
-                    0,
-                    Vec::new(),
-                    Some(OpenTarget::InPlace),
-                )
-            })
+            .run_system_once(
+                |pages: Query<&ContributedPage>, commands: Query<&ContributedCommand>| {
+                    build_command_bar_open_payload(
+                        OpenId(7),
+                        false,
+                        String::new(),
+                        String::new(),
+                        &Default::default(),
+                        &pages,
+                        &commands,
+                        &Default::default(),
+                        &crate::snapshot::CommandBarWorkSnapshot::default(),
+                        &Locale::from("en-US"),
+                        0,
+                        Vec::new(),
+                        Some(OpenTarget::InPlace),
+                    )
+                },
+            )
             .expect("payload system runs");
         assert_eq!(payload.open_id, OpenId(7));
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
@@ -1670,10 +1645,7 @@ mod tests {
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .init_resource::<CommandBarWorkspaceSnapshot>()
-            .init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<crate::snapshot::CommandBarWorkSnapshot>()
+            .init_resource::<CommandBarUiState>()
             .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
@@ -1739,7 +1711,8 @@ mod tests {
             ChildOf(stack),
         ));
         app.world_mut()
-            .resource_mut::<CommandBarWorkspaceSnapshot>()
+            .resource_mut::<CommandBarUiState>()
+            .workspace
             .stack = Some(stack);
 
         send(

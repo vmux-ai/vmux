@@ -283,13 +283,6 @@ pub(crate) fn remote_agents(
         .collect()
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct DesktopContext<'w, 's> {
-    focus: Res<'w, FocusedStack>,
-    agents: Res<'w, vmux_command::snapshot::CommandBarAgentsSnapshot>,
-    contributions: vmux_command::snapshot::Contributions<'w, 's>,
-}
-
 pub(super) fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -305,13 +298,18 @@ pub(super) fn handle_agent_commands(
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
     mut process_stack_spawn_writer: MessageWriter<ProcessStackSpawnRequest>,
-    desktop: DesktopContext,
+    desktop: (
+        Res<FocusedStack>,
+        Res<vmux_command::snapshot::CommandBarUiState>,
+        Query<&vmux_command::snapshot::ContributedPage>,
+    ),
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     lookups: AgentLookups,
     mut sp: SettingsParams,
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut writers: AgentSpaceWriters,
 ) {
+    let (focus, command_bar, contributed_pages) = desktop;
     let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
 
@@ -397,7 +395,7 @@ pub(super) fn handle_agent_commands(
                 command,
                 args,
                 env,
-            } => match desktop.focus.pane.filter(|pane| panes.contains(*pane)) {
+            } => match focus.pane.filter(|pane| panes.contains(*pane)) {
                 None => AgentCommandResult::Error("no active pane".to_string()),
                 Some(pane) => match valid_cwd(cwd) {
                     Err(message) => AgentCommandResult::Error(message),
@@ -565,7 +563,7 @@ pub(super) fn handle_agent_commands(
             ServiceAgentCommand::UpdateLayout { layout } => {
                 let mut layout = layout.clone();
                 if origin_is_agent(&request.origin) {
-                    preserve_current_focus_in_layout_snapshot(&mut layout, &desktop.focus);
+                    preserve_current_focus_in_layout_snapshot(&mut layout, &focus);
                 }
                 writers
                     .layout_apply
@@ -655,7 +653,10 @@ pub(super) fn handle_agent_commands(
                 prompt,
                 agent_url,
                 ..
-            }) => match desktop.contributions.prompt_url(agent_url.as_deref()) {
+            }) => match vmux_command::snapshot::ContributedPage::prompt_url(
+                &contributed_pages,
+                agent_url.as_deref(),
+            ) {
                 Some(url) => {
                     stack_writers.2.write(vmux_layout::NewTabRequest {
                         url,
@@ -666,7 +667,7 @@ pub(super) fn handle_agent_commands(
                 None => AgentCommandResult::Error("no agent is installed".to_string()),
             },
             ServiceAgentCommand::Shared(SharedAgentCommand::ListAgents) => {
-                match serde_json::to_string(&remote_agents(&desktop.agents)) {
+                match serde_json::to_string(&remote_agents(&command_bar.agents)) {
                     Ok(json) => AgentCommandResult::Text(json),
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }

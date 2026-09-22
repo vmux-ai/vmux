@@ -4,10 +4,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
-use vmux_command::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
-    ContributionsChanged,
-};
+use vmux_command::snapshot::{ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage};
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
@@ -28,8 +25,7 @@ impl Plugin for StartPlugin {
             crate::PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ));
-        app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+        app.init_resource::<CommandBarUiState>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -80,15 +76,14 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
-    agent_modes: Res<'w, vmux_command::snapshot::CommandBarAgentModes>,
+    command_bar: Res<'w, CommandBarUiState>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
     warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContextParams<'_, '_> {
     fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.agent_models.is_changed() || self.agent_modes.is_changed() {
+        if self.command_bar.is_changed() {
             return true;
         }
         let Some(tab) = tab else {
@@ -414,11 +409,21 @@ impl ChosenProject {
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     mut prompt_context: StartPromptContextParams,
-    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Contributions,
-    mut contributions_changed: ContributionsChanged,
-    pages_snapshot: Res<CommandBarPagesSnapshot>,
-    work_snapshot: Res<CommandBarWorkSnapshot>,
+    contributions: (
+        Query<&ContributedPage>,
+        Query<&ContributedCommand>,
+        Query<
+            (),
+            Or<(
+                Changed<ContributedPage>,
+                Changed<ContributedCommand>,
+                Changed<ClaimedUrl>,
+            )>,
+        >,
+        RemovedComponents<ContributedPage>,
+        RemovedComponents<ContributedCommand>,
+        RemovedComponents<ClaimedUrl>,
+    ),
     locale: Option<Res<ResolvedLocale>>,
     focused: Res<vmux_layout::stack::FocusedStack>,
     starts: Query<
@@ -437,6 +442,14 @@ fn sync_live_start_pages(
     space_projects: vmux_space::SpaceProjects,
     mut commands: Commands,
 ) {
+    let (
+        contributed_pages,
+        contributed_commands,
+        contribution_changes,
+        mut removed_pages,
+        mut removed_commands,
+        mut removed_claims,
+    ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
     let git_info = (!cwd.is_empty())
         .then(|| {
@@ -449,11 +462,13 @@ fn sync_live_start_pages(
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
+    let contributions_changed = !contribution_changes.is_empty()
+        || removed_pages.read().next().is_some()
+        || removed_commands.read().next().is_some()
+        || removed_claims.read().next().is_some();
     let changed = should_refresh_start_payload(
-        spaces_snapshot.is_changed(),
-        contributions_changed.any(),
-        pages_snapshot.is_changed(),
-        work_snapshot.is_changed(),
+        prompt_context.command_bar.is_changed(),
+        contributions_changed,
         focus_changed,
     ) || prompt_context.changed(tab_gather.active_tab.get())
         || git_changed
@@ -488,16 +503,15 @@ fn sync_live_start_pages(
     }
     let payload = build_start_payload(
         &tab_gather,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snapshot,
-        &work_snapshot,
+        &prompt_context.command_bar,
+        &contributed_pages,
+        &contributed_commands,
         &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.agent_models.agents.clone(),
-        prompt_context.agent_modes.agents.clone(),
+        prompt_context.command_bar.agent_models.agents.clone(),
+        prompt_context.command_bar.agent_modes.agents.clone(),
         &locale,
     );
     let project = vmux_ui::launcher::palette::ActiveProject::resolve(&payload.prompt_context);
@@ -524,13 +538,11 @@ fn sync_live_start_pages(
 }
 
 fn should_refresh_start_payload(
-    spaces_changed: bool,
+    command_bar_changed: bool,
     contributions_changed: bool,
-    pages_changed: bool,
-    work_changed: bool,
     focus_changed: bool,
 ) -> bool {
-    spaces_changed || contributions_changed || pages_changed || work_changed || focus_changed
+    command_bar_changed || contributions_changed || focus_changed
 }
 
 fn should_focus_start_sync(
@@ -547,10 +559,8 @@ fn on_start_data_request(
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
-    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Contributions,
-    pages_snapshot: Res<CommandBarPagesSnapshot>,
-    work_snapshot: Res<CommandBarWorkSnapshot>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
     locale: Option<Res<ResolvedLocale>>,
     space_projects: vmux_space::SpaceProjects,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
@@ -569,16 +579,15 @@ fn on_start_data_request(
         .flatten();
     let payload = build_start_payload(
         &tab_gather,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snapshot,
-        &work_snapshot,
+        &prompt_context.command_bar,
+        &contributed_pages,
+        &contributed_commands,
         &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.agent_models.agents.clone(),
-        prompt_context.agent_modes.agents.clone(),
+        prompt_context.command_bar.agent_models.agents.clone(),
+        prompt_context.command_bar.agent_modes.agents.clone(),
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -592,10 +601,9 @@ fn on_start_data_request(
 
 fn build_start_payload(
     tab_gather: &TabGatherParams,
-    spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &Contributions,
-    pages_snapshot: &CommandBarPagesSnapshot,
-    work_snapshot: &CommandBarWorkSnapshot,
+    command_bar: &CommandBarUiState,
+    contributed_pages: &Query<&ContributedPage>,
+    contributed_commands: &Query<&ContributedCommand>,
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
@@ -605,7 +613,7 @@ fn build_start_payload(
     locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
-    let space_name = spaces_snapshot.active_space_name.clone();
+    let space_name = command_bar.spaces.active_space_name.clone();
     let tabs = gather_command_bar_tabs(
         active_tab,
         &tab_gather.all_children,
@@ -624,10 +632,11 @@ fn build_start_payload(
         false,
         space_name,
         String::new(),
-        spaces_snapshot,
-        contributions,
-        pages_snapshot,
-        work_snapshot,
+        &command_bar.spaces,
+        contributed_pages,
+        contributed_commands,
+        &command_bar.pages,
+        &command_bar.work,
         locale,
         active_stack_count,
         tabs,
@@ -689,11 +698,7 @@ mod tests {
 
     fn start_ready_app() -> App {
         let mut app = App::new();
-        app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<CommandBarWorkSnapshot>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+        app.init_resource::<CommandBarUiState>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(capture_emit);

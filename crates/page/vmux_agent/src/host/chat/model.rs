@@ -21,8 +21,7 @@ impl Plugin for ChatModelPlugin {
             .init_resource::<AcpModeRequestCounter>()
             .init_resource::<AgentModelSelections>()
             .init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<AcpSetModeRequest>()
             .add_message::<ModeSelectRequest>()
@@ -521,7 +520,7 @@ fn remember_acp_mode_lists(
 
 fn publish_agent_models(
     last_used: Res<AgentModelSelections>,
-    mut published: ResMut<vmux_command::snapshot::CommandBarAgentModels>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarUiState>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -538,14 +537,14 @@ fn publish_agent_models(
             models: memory.models.clone(),
         });
     }
-    if published.agents != next {
-        published.agents = next;
+    if state.agent_models.agents != next {
+        state.agent_models.agents = next;
     }
 }
 
 fn publish_agent_modes(
     last_used: Res<AgentModeSelections>,
-    mut published: ResMut<vmux_command::snapshot::CommandBarAgentModes>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarUiState>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -562,8 +561,8 @@ fn publish_agent_modes(
             modes: memory.modes.clone(),
         });
     }
-    if published.agents != next {
-        published.agents = next;
+    if state.agent_modes.agents != next {
+        state.agent_modes.agents = next;
     }
 }
 
@@ -1213,14 +1212,15 @@ mod tests {
         );
         let mut app = App::new();
         app.insert_resource(selections)
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
             .add_systems(Update, publish_agent_models);
 
         app.update();
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarAgentModels>();
+            .resource::<vmux_command::snapshot::CommandBarUiState>();
+        let published = &published.agent_models;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "cli:codex");
         assert_eq!(published.agents[0].url, "vmux://sessions/codex/cli");
@@ -1231,7 +1231,7 @@ mod tests {
     fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
         let mut app = App::new();
         app.init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
             .add_systems(
                 Update,
                 (
@@ -1263,7 +1263,8 @@ mod tests {
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarAgentModes>();
+            .resource::<vmux_command::snapshot::CommandBarUiState>();
+        let published = &published.agent_modes;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "codex");
         assert_eq!(published.agents[0].url, "vmux://sessions/codex");

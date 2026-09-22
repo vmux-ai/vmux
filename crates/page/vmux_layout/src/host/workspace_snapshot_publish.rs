@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
+    CommandBarUiState, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_ui::i18n::Locale;
 
@@ -20,10 +20,9 @@ impl Plugin for WorkspaceSnapshotPlugin {
 
 fn publish_workspace_snapshot(
     tab_gather: TabGatherParams,
-    spaces: Res<CommandBarSpacesSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    mut snapshot: ResMut<CommandBarWorkspaceSnapshot>,
+    mut state: ResMut<CommandBarUiState>,
 ) {
     let active_tab = tab_gather.active_tab.get();
     let project_root = ProjectRoot::resolve(active_tab, &projects);
@@ -49,7 +48,7 @@ fn publish_workspace_snapshot(
         &tab_gather.stack_q,
         &tab_gather.browser_meta,
         &tab_gather.child_of_q,
-        &spaces.active_space_name,
+        &state.spaces.active_space_name,
         &locale,
     );
     let next = CommandBarWorkspaceSnapshot {
@@ -59,8 +58,8 @@ fn publish_workspace_snapshot(
         stack_count: tab_gather.stack_q.iter().count(),
         project_root,
     };
-    if *snapshot != next {
-        *snapshot = next;
+    if state.workspace != next {
+        state.workspace = next;
     }
 }
 
