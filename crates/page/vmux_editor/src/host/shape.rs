@@ -1,5 +1,19 @@
+use bevy::prelude::*;
+use bevy_cef::prelude::*;
 use ropey::Rope;
-use vmux_core::event::{FileIndent, FileLineEnding};
+use vmux_core::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
+
+use crate::edit::EditCommand;
+use crate::host::editing::{EditRequest, EditState};
+
+pub(super) struct EditorShapePlugin;
+
+impl Plugin for EditorShapePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(FileShapeSet,)>::default())
+            .add_observer(on_file_shape_set);
+    }
+}
 
 const SAMPLE_LINES: usize = 2000;
 const WIDTHS: &[u16] = &[2, 4, 8];
@@ -125,6 +139,36 @@ impl Reindent {
         }
         out
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_shape_set(
+    trigger: On<BinReceive<FileShapeSet>>,
+    mut views: Query<&mut EditState>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let wanted = trigger.event().payload;
+    let Ok(mut edit) = views.get_mut(entity) else {
+        return;
+    };
+    let shape = BufferShape {
+        indent: wanted.indent,
+        line_ending: wanted.line_ending,
+    };
+    edit.set_shape(shape);
+    commands.trigger(EditRequest::new(entity, vec![EditCommand::Reshape(shape)]));
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_event(
+        entity,
+        &FileShapeEvent {
+            indent: shape.indent,
+            line_ending: shape.line_ending,
+        },
+    ));
 }
 
 #[cfg(test)]

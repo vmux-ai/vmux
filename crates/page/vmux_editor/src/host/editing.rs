@@ -29,9 +29,7 @@ use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 use crate::host::file_lifecycle::EditorFileLifecyclePlugin;
 #[cfg(test)]
 use crate::host::file_lifecycle::LoadFailure;
-use crate::host::file_lifecycle::{
-    FileBuffer, FileDir, FileLoadTask, ForcedEncoding, SelfWrites, canon,
-};
+use crate::host::file_lifecycle::{FileBuffer, FileDir, FileLoadTask, SelfWrites, canon};
 #[cfg(test)]
 use crate::host::history::EditorHistoryPlugin;
 #[cfg(test)]
@@ -51,7 +49,7 @@ pub(super) struct EditorEditingPlugin;
 
 impl Plugin for EditorEditingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+        app.add_plugins(EditExecutionPlugin)
             .add_plugins(UiEventPlugin::<(
                 FileOpenEvent,
                 FileTextInput,
@@ -70,8 +68,6 @@ impl Plugin for EditorEditingPlugin {
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,
-                FileShapeSet,
-                FileEncodingSet,
             )>::default())
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
@@ -94,9 +90,16 @@ impl Plugin for EditorEditingPlugin {
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
-            .add_observer(on_file_property_edit)
-            .add_observer(on_file_shape_set)
-            .add_observer(on_file_encoding_set);
+            .add_observer(on_file_property_edit);
+    }
+}
+
+pub(super) struct EditExecutionPlugin;
+
+impl Plugin for EditExecutionPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+            .add_observer(apply_edit_request);
     }
 }
 
@@ -258,6 +261,10 @@ impl EditState {
         self.wrap_generation = self.wrap_generation.wrapping_add(1);
     }
 
+    pub(super) fn set_shape(&mut self, shape: crate::shape::BufferShape) {
+        self.indent_width = shape.indent.width;
+    }
+
     fn refresh_parsed_note(&mut self) {
         self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
@@ -356,13 +363,18 @@ struct LspEditDirty;
 
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
-type EncodingTarget = (
-    &'static FileView,
-    Option<&'static mut EditState>,
-    Option<&'static EditorKeymap>,
-    Option<&'static mut FileViewport>,
-    Option<&'static mut vmux_git::GitDiffSource>,
-);
+#[derive(Event)]
+pub(super) struct EditRequest {
+    entity: Entity,
+    commands: Vec<EditCommand>,
+}
+
+impl EditRequest {
+    pub(super) fn new(entity: Entity, commands: Vec<EditCommand>) -> Self {
+        Self { entity, commands }
+    }
+}
+
 pub(super) fn settings_mappings(
     settings: &Option<Res<vmux_setting::AppSettings>>,
 ) -> (Vec<vmux_core::editor::KeyMapping>, String) {
@@ -426,116 +438,6 @@ fn reapply_keymap_on_change(
             );
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn on_file_shape_set(
-    trigger: On<BinReceive<FileShapeSet>>,
-    mut q: Query<(
-        &mut EditState,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let wanted = trigger.event().payload;
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
-        return;
-    };
-    run_commands(
-        entity,
-        vec![EditCommand::Reshape(crate::shape::BufferShape {
-            indent: wanted.indent,
-            line_ending: wanted.line_ending,
-        })],
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
-    let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-    edit.indent_width = shape.indent.width;
-    if !browsers.can_emit_to(&entity) {
-        return;
-    }
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &FileShapeEvent {
-            indent: shape.indent,
-            line_ending: shape.line_ending,
-        },
-    ));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn on_file_encoding_set(
-    trigger: On<BinReceive<FileEncodingSet>>,
-    mut q: Query<EncodingTarget>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let wanted = trigger.event().payload;
-    let Ok((fv, edit, keymap, vp, diff_source)) = q.get_mut(entity) else {
-        return;
-    };
-    if wanted.action == FileEncodingAction::Reopen {
-        commands
-            .entity(entity)
-            .insert(ForcedEncoding {
-                path: fv.path.clone(),
-                encoding: wanted.encoding,
-            })
-            .remove::<EditState>()
-            .remove::<vmux_git::GitDiffSource>()
-            .remove::<FileBuffer>()
-            .remove::<FileInitialMetaSent>()
-            .remove::<crate::lsp::manager::LintRan>();
-        manager.change(&fv.path);
-        return;
-    }
-    let (Some(mut edit), Some(keymap), Some(mut vp), Some(mut diff_source)) =
-        (edit, keymap, vp, diff_source)
-    else {
-        return;
-    };
-    edit.core.buffer.encoding = wanted.encoding;
-    run_commands(
-        entity,
-        vec![EditCommand::Save],
-        &mut edit,
-        &mut diff_source,
-        keymap.0.as_ref(),
-        &mut vp,
-        &mut clipboard,
-        &mut self_writes,
-        &mut manager,
-        &browsers,
-        &mut commands,
-    );
-    if !browsers.can_emit_to(&entity) {
-        return;
-    }
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &FileEncodingEvent {
-            encoding: edit.core.buffer.encoding,
-        },
-    ));
 }
 
 fn caret_lsp(edit: &EditState) -> (u32, u32, usize, String) {
@@ -627,7 +529,42 @@ fn emit_wiki_completions(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run_commands(
+fn apply_edit_request(
+    trigger: On<EditRequest>,
+    mut views: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let Ok((mut edit, keymap, mut viewport, mut diff_source)) = views.get_mut(request.entity)
+    else {
+        return;
+    };
+    run_commands(
+        request.entity,
+        request.commands.clone(),
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut viewport,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_commands(
     entity: Entity,
     cmds: Vec<EditCommand>,
     edit: &mut EditState,
@@ -2473,7 +2410,8 @@ mod parked_edit_tests {
                 .add_plugins(EditorNavigationPlugin)
                 .init_resource::<ExplorerTrees>()
                 .add_plugins(EditorFileLifecyclePlugin)
-                .add_observer(on_file_encoding_set);
+                .add_plugins((EditExecutionPlugin, crate::encoding::EditorEncodingPlugin))
+                .init_resource::<BinIpcEventRawBuffer>();
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut()

@@ -11,6 +11,8 @@ impl Plugin for EditorPlugin {
             lsp::LspPlugin,
             app_key::FileKeyPlugin,
             search::ProjectSearchPlugin,
+        ))
+        .add_plugins((
             page_open::EditorPageOpenPlugin,
             file_lifecycle::EditorFileLifecyclePlugin,
             workspace_edit::EditorWorkspaceEditPlugin,
@@ -19,6 +21,8 @@ impl Plugin for EditorPlugin {
             media::EditorMediaPlugin,
             note::EditorNotePlugin,
             editing::EditorEditingPlugin,
+            shape::EditorShapePlugin,
+            encoding::EditorEncodingPlugin,
             navigation::EditorNavigationPlugin,
             history::EditorHistoryPlugin,
             explorer::EditorExplorerPlugin,
