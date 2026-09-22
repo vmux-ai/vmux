@@ -32,6 +32,7 @@ use crate::host::file_lifecycle::LoadFailure;
 use crate::host::file_lifecycle::{FileBuffer, FileDir, FileLoadTask, SelfWrites, canon};
 #[cfg(test)]
 use crate::host::history::EditorHistoryPlugin;
+use crate::host::language::{EditorLanguageRequest, LspEditDirty, WikiCompletionRequest};
 #[cfg(test)]
 use crate::host::navigation::EditorNavigationPlugin;
 use crate::host::note::NoteSent;
@@ -41,7 +42,6 @@ use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::media::FileMedia;
-use crate::page_model::DisplayCells;
 use crate::wrap::WrapView;
 use vmux_core::scroll::clamp_top_line;
 
@@ -54,15 +54,6 @@ impl Plugin for EditorEditingPlugin {
                 FileOpenEvent,
                 FileTextInput,
                 FilePointerEvent,
-                FileHoverRequest,
-                FileDefinitionRequest,
-                FileReferencesRequest,
-                FileRenameRequest,
-                FileEditorAction,
-                FileCodeActionPick,
-                FileCompletionRequest,
-                FileGotoRequest,
-                FileCompletionCommit,
             )>::default())
             .add_plugins(UiEventPlugin::<(
                 KnowledgeLinkOpen,
@@ -71,26 +62,9 @@ impl Plugin for EditorEditingPlugin {
             )>::default())
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
-            .add_observer(on_wiki_completion_request)
             .add_observer(on_file_pointer)
-            .add_observer(on_file_hover_request)
-            .add_systems(
-                Update,
-                (
-                    flush_lsp_changes,
-                    reapply_keymap_on_change,
-                    run_submitted_ex_lines,
-                ),
-            )
+            .add_systems(Update, (reapply_keymap_on_change, run_submitted_ex_lines))
             .add_observer(on_file_find_request)
-            .add_observer(on_file_definition_request)
-            .add_observer(on_file_references_request)
-            .add_observer(on_file_rename_request)
-            .add_observer(on_file_editor_action)
-            .add_observer(on_file_code_action_pick)
-            .add_observer(on_file_completion_request)
-            .add_observer(on_file_goto_request)
-            .add_observer(on_file_completion_commit)
             .add_observer(on_file_property_edit);
     }
 }
@@ -199,45 +173,6 @@ pub struct EditState {
     wrap_cache: Option<CachedWrapView>,
 }
 
-struct LspPosition {
-    line: u32,
-    utf16_col: u32,
-    char_col: usize,
-    line_text: String,
-}
-
-impl LspPosition {
-    fn from_char_col(line: u32, line_text: String, char_col: usize) -> Self {
-        let char_col = char_col.min(line_text.chars().count());
-        let utf16_col = crate::lsp::manager::char_to_utf16_col(&line_text, char_col as u32);
-        Self {
-            line,
-            utf16_col,
-            char_col,
-            line_text,
-        }
-    }
-
-    fn word_start_col(&self) -> u32 {
-        let chars: Vec<char> = self.line_text.chars().collect();
-        let mut start = self.char_col;
-        while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-            start -= 1;
-        }
-        start as u32
-    }
-
-    fn word(&self) -> String {
-        let chars: Vec<char> = self.line_text.chars().collect();
-        let start = self.word_start_col() as usize;
-        let mut end = self.char_col;
-        while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-            end += 1;
-        }
-        chars[start..end].iter().collect()
-    }
-}
-
 impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
         let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
@@ -262,34 +197,6 @@ impl EditState {
 
     pub(crate) fn cursor_line(&self) -> u32 {
         self.core.cursor_pos().line
-    }
-
-    fn caret_lsp_position(&self) -> LspPosition {
-        let head = self.core.primary().head;
-        let (line, char_col) = self.core.buffer.char_to_coords(head);
-        self.lsp_position_at_char(line as u32, char_col)
-    }
-
-    fn lsp_position_at_cell(&self, line: u32, cell: u32) -> LspPosition {
-        let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
-        let line_text = self.line_text(line);
-        let char_col = DisplayCells::char_at(&line_text, cell);
-        LspPosition::from_char_col(line, line_text, char_col)
-    }
-
-    fn lsp_position_at_char(&self, line: u32, char_col: usize) -> LspPosition {
-        let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
-        LspPosition::from_char_col(line, self.line_text(line), char_col)
-    }
-
-    fn line_text(&self, line: u32) -> String {
-        self.core
-            .buffer
-            .rope
-            .line(line as usize)
-            .chars()
-            .filter(|c| *c != '\n' && *c != '\r')
-            .collect()
     }
 
     pub(crate) fn indent_width(&self) -> u16 {
@@ -426,9 +333,6 @@ impl EditorKeymap {
     }
 }
 
-#[derive(Component)]
-struct LspEditDirty;
-
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
 
 #[derive(Event)]
@@ -436,9 +340,6 @@ pub(super) struct EditRequest {
     entity: Entity,
     commands: Vec<EditCommand>,
 }
-
-#[derive(Event)]
-struct WikiCompletionRequest(Entity);
 
 impl EditRequest {
     pub(super) fn new(entity: Entity, commands: Vec<EditCommand>) -> Self {
@@ -511,69 +412,6 @@ fn reapply_keymap_on_change(
     }
 }
 
-struct WikiCompletion {
-    line: u32,
-    replace_from_col: u32,
-    prefix: String,
-}
-
-impl WikiCompletion {
-    fn for_edit(edit: &EditState, index: &vmux_core::knowledge::KnowledgeIndex) -> Option<Self> {
-        if !index.loaded()
-            || !edit.core.buffer.path.starts_with(index.root())
-            || !crate::markdown::is_markdown_path(&edit.core.buffer.path)
-        {
-            return None;
-        }
-        let position = edit.caret_lsp_position();
-        let chars = position.line_text.chars().collect::<Vec<_>>();
-        let open = (0..position.char_col.saturating_sub(1))
-            .rev()
-            .find(|offset| chars[*offset] == '[' && chars[*offset + 1] == '[')?;
-        let prefix = chars[open + 2..position.char_col]
-            .iter()
-            .collect::<String>();
-        if prefix.contains("]]") || prefix.contains('|') || prefix.contains('#') {
-            return None;
-        }
-        Some(Self {
-            line: position.line,
-            replace_from_col: open as u32 + 2,
-            prefix,
-        })
-    }
-
-    fn emit(
-        self,
-        entity: Entity,
-        index: &vmux_core::knowledge::KnowledgeIndex,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        let items = index
-            .completions(&self.prefix, 32)
-            .into_iter()
-            .map(|(title, relative)| CompletionItem {
-                label: title.clone(),
-                insert_text: format!("{title}]]"),
-                detail: relative,
-                kind: "knowledge".to_string(),
-            })
-            .collect();
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileCompletionEvent {
-                items,
-                replace_from_col: self.replace_from_col,
-                line: self.line,
-            },
-        ));
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn apply_edit_request(
     trigger: On<EditRequest>,
@@ -585,7 +423,6 @@ fn apply_edit_request(
     )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -656,52 +493,19 @@ fn apply_edit_request(
         }
         match &cmd {
             EditCommand::Hover => {
-                let head = edit.core.primary().head;
-                let (line, ccol) = edit.core.buffer.char_to_coords(head);
-                let lt: String = edit
-                    .core
-                    .buffer
-                    .rope
-                    .line(line)
-                    .chars()
-                    .filter(|c| *c != '\n' && *c != '\r')
-                    .collect();
-                let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, ccol as u32);
-                manager.hover(
-                    entity,
-                    &edit.core.buffer.path,
-                    line as u32,
-                    utf16,
-                    ccol as u32,
-                );
+                commands.trigger(EditorLanguageRequest::Hover(entity));
                 continue;
             }
             EditCommand::GotoDefinition => {
-                let position = edit.caret_lsp_position();
-                let path = edit.core.buffer.path.clone();
-                manager.definition(entity, &path, position.line, position.utf16_col);
+                commands.trigger(EditorLanguageRequest::Definition(entity));
                 continue;
             }
             EditCommand::FindReferences => {
-                let position = edit.caret_lsp_position();
-                let path = edit.core.buffer.path.clone();
-                manager.references(entity, &path, position.line, position.utf16_col);
+                commands.trigger(EditorLanguageRequest::References(entity));
                 continue;
             }
             EditCommand::BeginRename => {
-                let position = edit.caret_lsp_position();
-                let current = position.word();
-                if current.is_empty() || !browsers.can_emit_to(&entity) {
-                    continue;
-                }
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &vmux_core::event::FileRenameBeginEvent {
-                        line: position.line,
-                        col: position.char_col as u32,
-                        current,
-                    },
-                ));
+                commands.trigger(EditorLanguageRequest::BeginRename(entity));
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
@@ -727,15 +531,7 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::TriggerCompletion => {
-                let position = edit.caret_lsp_position();
-                let path = edit.core.buffer.path.clone();
-                manager.completion(
-                    entity,
-                    &path,
-                    position.line,
-                    position.utf16_col,
-                    position.word_start_col(),
-                );
+                commands.trigger(EditorLanguageRequest::Completion(entity));
                 continue;
             }
             EditCommand::ScrollViewport(_) => unreachable!(),
@@ -1035,27 +831,7 @@ fn on_file_text_input(
         EditCommand::InsertText(text)
     };
     commands.trigger(EditRequest::new(entity, vec![command]));
-    commands.trigger(WikiCompletionRequest(entity));
-}
-
-fn on_wiki_completion_request(
-    trigger: On<WikiCompletionRequest>,
-    views: Query<&EditState>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let Some(index) = index.as_deref() else {
-        return;
-    };
-    let entity = trigger.event().0;
-    let Ok(edit) = views.get(entity) else {
-        return;
-    };
-    let Some(completion) = WikiCompletion::for_edit(edit, index) else {
-        return;
-    };
-    completion.emit(entity, index, &browsers, &mut commands);
+    commands.trigger(WikiCompletionRequest::new(entity));
 }
 
 fn on_file_property_edit(
@@ -1156,260 +932,6 @@ fn on_file_find_request(
     );
 }
 
-fn on_file_hover_request(
-    trigger: On<BinReceive<FileHoverRequest>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-) {
-    let entity = trigger.event().webview;
-    let req = trigger.event().payload;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let position = edit.lsp_position_at_cell(req.line, req.col);
-    manager.hover(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-        position.char_col as u32,
-    );
-}
-
-fn on_file_definition_request(
-    trigger: On<BinReceive<FileDefinitionRequest>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-) {
-    let entity = trigger.event().webview;
-    let req = trigger.event().payload;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let position = edit.lsp_position_at_cell(req.line, req.col);
-    let path = edit.core.buffer.path.clone();
-    manager.definition(entity, &path, position.line, position.utf16_col);
-}
-
-fn on_file_editor_action(
-    trigger: On<BinReceive<FileEditorAction>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
-    mut app_commands: MessageWriter<vmux_command::host::command::AppCommand>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let action = trigger.event().payload;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let position = edit.caret_lsp_position();
-    let path = edit.core.buffer.path.clone();
-
-    let cmds = match action.action {
-        EditorAction::CommandPalette => {
-            app_commands.write(vmux_command::host::command::AppCommand::Browser(
-                vmux_command::host::command::BrowserCommand::Bar(
-                    vmux_command::host::command::BrowserBarCommand::OpenCommandBar,
-                ),
-            ));
-            return;
-        }
-        EditorAction::CodeAction => {
-            let (from_line, to_line) = edit.core.selected_lines();
-            code_actions.write(crate::lsp::manager::LspCodeActionRequest {
-                entity,
-                path,
-                from_line,
-                to_line,
-            });
-            return;
-        }
-        EditorAction::GotoDeclaration => {
-            manager.declaration(entity, &path, position.line, position.utf16_col);
-            return;
-        }
-        EditorAction::GotoTypeDefinition => {
-            manager.type_definition(entity, &path, position.line, position.utf16_col);
-            return;
-        }
-        EditorAction::GotoImplementation => {
-            manager.implementation(entity, &path, position.line, position.utf16_col);
-            return;
-        }
-        EditorAction::FormatDocument => {
-            manager.format_document(entity, &path);
-            return;
-        }
-        EditorAction::FormatSelection => {
-            let (from, to) = edit.core.selected_lines();
-            manager.format_range(entity, &path, from, to);
-            return;
-        }
-        EditorAction::Rename => {
-            let current = position.word();
-            if !current.is_empty() && browsers.can_emit_to(&entity) {
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &vmux_core::event::FileRenameBeginEvent {
-                        line: position.line,
-                        col: position.char_col as u32,
-                        current,
-                    },
-                ));
-            }
-            return;
-        }
-        EditorAction::Copy => vec![EditCommand::Op {
-            operator: crate::edit::command::Operator::Yank,
-            target: crate::edit::command::Target::Selection,
-            register: None,
-        }],
-        EditorAction::Cut => vec![EditCommand::Op {
-            operator: crate::edit::command::Operator::Delete,
-            target: crate::edit::command::Target::Selection,
-            register: None,
-        }],
-        EditorAction::Paste => vec![EditCommand::Paste],
-        EditorAction::ChangeAllOccurrences => vec![EditCommand::SelectAllOccurrences],
-    };
-    commands.trigger(EditRequest::new(entity, cmds));
-}
-
-fn on_file_code_action_pick(
-    trigger: On<BinReceive<FileCodeActionPick>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
-) {
-    let entity = trigger.event().webview;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let path = edit.core.buffer.path.clone();
-    let Some((root, workspace_edit)) =
-        manager.run_code_action(entity, trigger.event().payload.index as usize, &path)
-    else {
-        return;
-    };
-    edits.write(crate::lsp::manager::LspRequestedEdit {
-        entity,
-        root,
-        result: Ok(workspace_edit),
-    });
-}
-
-fn on_file_rename_request(
-    trigger: On<BinReceive<FileRenameRequest>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-) {
-    let entity = trigger.event().webview;
-    let req = &trigger.event().payload;
-    if req.new_name.trim().is_empty() {
-        return;
-    }
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let position = edit.lsp_position_at_cell(req.line, req.col);
-    let path = edit.core.buffer.path.clone();
-    manager.rename(
-        entity,
-        &path,
-        position.line,
-        position.utf16_col,
-        &req.new_name,
-    );
-}
-
-fn on_file_references_request(
-    trigger: On<BinReceive<FileReferencesRequest>>,
-    q: Query<&EditState>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-) {
-    let entity = trigger.event().webview;
-    let req = trigger.event().payload;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    let position = edit.lsp_position_at_cell(req.line, req.col);
-    let path = edit.core.buffer.path.clone();
-    manager.references(entity, &path, position.line, position.utf16_col);
-}
-
-fn on_file_completion_request(
-    trigger: On<BinReceive<FileCompletionRequest>>,
-    q: Query<&EditState>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-) {
-    let entity = trigger.event().webview;
-    let req = trigger.event().payload;
-    let Ok(edit) = q.get(entity) else {
-        return;
-    };
-    if let Some(index) = index.as_deref()
-        && let Some(completion) = WikiCompletion::for_edit(edit, index)
-    {
-        completion.emit(entity, index, &browsers, &mut commands);
-        return;
-    }
-    let position = edit.lsp_position_at_cell(req.line, req.col);
-    let path = edit.core.buffer.path.clone();
-    manager.completion(
-        entity,
-        &path,
-        position.line,
-        position.utf16_col,
-        position.word_start_col(),
-    );
-}
-
-fn on_file_goto_request(
-    trigger: On<BinReceive<FileGotoRequest>>,
-    mut goto_w: MessageWriter<crate::lsp::manager::LspGoto>,
-) {
-    let entity = trigger.event().webview;
-    let req = &trigger.event().payload;
-    let path = PathBuf::from(&req.path);
-    let lt = crate::lsp::manager::disk_line(&path, req.line);
-    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, req.col);
-    goto_w.write(crate::lsp::manager::LspGoto {
-        entity,
-        path,
-        line: req.line,
-        utf16_col: utf16,
-    });
-}
-
-fn on_file_completion_commit(
-    trigger: On<BinReceive<FileCompletionCommit>>,
-    mut q: Query<&mut EditState>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let req = trigger.event().payload.clone();
-    let Ok(mut edit) = q.get_mut(entity) else {
-        return;
-    };
-    let start = edit
-        .core
-        .buffer
-        .coords_to_char(req.line as usize, req.replace_from_col as usize);
-    let head = edit.core.primary().head;
-    let (a, b) = (start.min(head), start.max(head));
-    edit.core.selections = vec![Selection { anchor: a, head: b }];
-    commands.trigger(EditRequest::new(
-        entity,
-        vec![EditCommand::InsertText(req.text)],
-    ));
-}
-
 fn on_file_pointer(
     trigger: On<BinReceive<FilePointerEvent>>,
     mut q: Query<(&mut EditState, &mut EditorKeymap, &FileViewport)>,
@@ -1445,58 +967,10 @@ fn on_file_pointer(
     );
 }
 
-fn flush_lsp_changes(
-    time: Res<Time>,
-    mut acc: Local<f32>,
-    q: Query<(Entity, &FileView, &EditState), With<LspEditDirty>>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    if q.is_empty() {
-        return;
-    }
-    *acc += time.delta_secs();
-    if *acc < 0.15 {
-        return;
-    }
-    *acc = 0.0;
-    for (entity, fv, edit) in &q {
-        manager.change_with_text(&fv.path, &edit.core.buffer.text());
-        manager.folding_range(entity, &fv.path);
-        manager.semantic_tokens(entity, &fv.path);
-        if !crate::explorer_model::is_markdown(&fv.path) {
-            manager.document_symbol(entity, &fv.path);
-        }
-        commands.entity(entity).remove::<LspEditDirty>();
-    }
-}
-
 #[cfg(test)]
 mod edit_flow_tests {
     use super::*;
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
-
-    #[test]
-    fn rename_prefill_is_the_identifier_around_the_caret() {
-        let text = "let some_name = 1;";
-
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 8).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 4).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 13).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 14).word(),
-            ""
-        );
-    }
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {
