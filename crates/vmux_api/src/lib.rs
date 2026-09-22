@@ -35,4 +35,4 @@ pub use terminal::{
     FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
     TermSpan,
 };
-pub use vmux_macro::{bidirectional_event, host_event, ui_event};
+pub use vmux_macro::{bidirectional_event, host_event, payload, ui_event};
