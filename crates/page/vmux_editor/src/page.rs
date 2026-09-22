@@ -22,11 +22,7 @@ use input::{
 };
 pub(crate) use input::{FIND_INPUT_ID, focus_file_input, focus_find_input};
 use menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
-use note::{
-    NoteBlankLine, NoteBlockView, NoteProperties, activate_note_cursor,
-    activate_note_cursor_centered, ensure_note_caret_visible, note_blank_line_slot,
-    note_block_index_for_line,
-};
+use note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
 pub(crate) use sidebar::ExplorerPane;
 use sidebar::{ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
@@ -110,9 +106,7 @@ pub fn Page() -> Element {
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
     let mut note_properties = use_signal(Vec::<KnowledgeProperty>::new);
     let mut note_references = use_signal(Vec::<KnowledgeReference>::new);
-    let mut note_active = use_signal(|| Option::<u32>::None);
-    let mut note_editing = use_signal(|| false);
-    let mut note_edit_line = use_signal(|| Option::<u32>::None);
+    let note_cursor = NoteCursor::new();
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
@@ -239,9 +233,7 @@ pub fn Page() -> Element {
         note_blocks.set(Vec::new());
         note_properties.set(Vec::new());
         note_references.set(Vec::new());
-        note_active.set(None);
-        note_editing.set(false);
-        note_edit_line.set(None);
+        note_cursor.reset();
         note_dragging.set(false);
         editor_dragging.set(false);
         editor_drag_origin.set(None);
@@ -316,34 +308,31 @@ pub fn Page() -> Element {
         let note_mode = *file_view_mode.peek() == FileViewMode::Note
             && is_markdown_file(git_path.peek().as_str());
         if note_mode {
-            let active = note_block_index_for_line(&note_blocks.peek(), c.source_primary.line);
+            let active = note_blocks
+                .peek()
+                .as_slice()
+                .block_index_for_line(c.source_primary.line);
             if *keymap.peek() == vmux_core::KeymapKind::Vim
-                && !*note_editing.peek()
+                && !note_cursor.editing()
                 && let Some(index) = active
             {
-                activate_note_cursor(
-                    index,
-                    c.source_primary.line,
-                    note_active,
-                    note_editing,
-                    note_edit_line,
-                );
+                note_cursor.activate(index, c.source_primary.line);
             }
-            if *note_editing.peek() {
+            if note_cursor.editing() {
                 let is_list = active.is_some_and(|index| {
                     matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
                 });
                 let edit_line = is_list.then_some(c.source_primary.line);
-                if *note_edit_line.peek() != edit_line {
-                    note_edit_line.set(edit_line);
+                if note_cursor.edit_line() != edit_line {
+                    note_cursor.set_edit_line(edit_line);
                 }
             }
             let active = active.map(|index| index as u32);
-            if *note_active.peek() != active {
-                note_active.set(active);
+            if note_cursor.active() != active {
+                note_cursor.set_active(active);
             }
             if moved && let Some(index) = active {
-                ensure_note_caret_visible(index as usize, c.source_primary.line);
+                note_cursor.reveal(index as usize, c.source_primary.line);
             }
         }
         if moved && !note_mode {
@@ -384,20 +373,14 @@ pub fn Page() -> Element {
 
     let _view_mode = use_listener::<FileViewModeEvent, _>(move |event| {
         if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
-            note_editing.set(false);
+            note_cursor.set_editing(false);
         }
         file_view_mode.set(event.mode);
         match event.mode {
             FileViewMode::Note if is_markdown_file(&git_path()) => {
                 let line = source_cursor().line;
-                if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                    activate_note_cursor_centered(
-                        index,
-                        line,
-                        note_active,
-                        note_editing,
-                        note_edit_line,
-                    );
+                if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                    note_cursor.activate_centered(index, line);
                 }
             }
             FileViewMode::Editor => {
@@ -414,14 +397,8 @@ pub fn Page() -> Element {
             && is_markdown_file(&git_path())
         {
             let line = source_cursor().line;
-            if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                activate_note_cursor_centered(
-                    index,
-                    line,
-                    note_active,
-                    note_editing,
-                    note_edit_line,
-                );
+            if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                note_cursor.activate_centered(index, line);
             }
         }
     });
@@ -451,24 +428,19 @@ pub fn Page() -> Element {
                 NoteCursorActivation::Center(line)
                 | NoteCursorActivation::PreserveViewport(line) => line,
             };
-            note_block_index_for_line(&blocks, line).map(|index| (activation, index, line))
+            blocks
+                .as_slice()
+                .block_index_for_line(line)
+                .map(|index| (activation, index, line))
         });
         note_blocks.set(blocks);
         note_properties.set(properties);
         note_references.set(references);
-        note_active.set(active);
+        note_cursor.set_active(active);
         if let Some((activation, index, line)) = activation {
             match activation {
-                NoteCursorActivation::Center(_) => activate_note_cursor_centered(
-                    index,
-                    line,
-                    note_active,
-                    note_editing,
-                    note_edit_line,
-                ),
-                NoteCursorActivation::PreserveViewport(_) => {
-                    activate_note_cursor(index, line, note_active, note_editing, note_edit_line)
-                }
+                NoteCursorActivation::Center(_) => note_cursor.activate_centered(index, line),
+                NoteCursorActivation::PreserveViewport(_) => note_cursor.activate(index, line),
             }
         }
     });
@@ -700,7 +672,7 @@ pub fn Page() -> Element {
 
     use_effect(move || match mode() {
         Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
-            if note_editing() {
+            if note_cursor.editing() {
                 focus_file_input();
             } else {
                 focus_container();
@@ -780,7 +752,7 @@ pub fn Page() -> Element {
                         if file_view_mode() == FileViewMode::Note
                             && is_markdown_file(&git_path())
                         {
-                            if note_editing() {
+                            if note_cursor.editing() {
                                 focus_file_input();
                             } else {
                                 focus_container();
@@ -806,7 +778,7 @@ pub fn Page() -> Element {
                 if current_mode == Mode::Text
                     && file_view_mode() == FileViewMode::Note
                     && is_markdown_file(&git_path())
-                    && !note_editing()
+                    && !note_cursor.editing()
                 {
                     let _ = forward_file_key(&e, ed_mode());
                     return;
@@ -992,14 +964,8 @@ pub fn Page() -> Element {
                                         file_view_mode.set(FileViewMode::Note);
                                         let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
                                         let line = source_cursor().line;
-                                        if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                                            activate_note_cursor_centered(
-                                                index,
-                                                line,
-                                                note_active,
-                                                note_editing,
-                                                note_edit_line,
-                                            );
+                                        if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                                            note_cursor.activate_centered(index, line);
                                         }
                                     },
                                     {translate("editor-note")}
@@ -1013,7 +979,7 @@ pub fn Page() -> Element {
                                 ),
                                 title: translate("editor-source-editor"),
                                 onclick: move |_| {
-                                    note_editing.set(false);
+                                    note_cursor.set_editing(false);
                                     file_view_mode.set(FileViewMode::Editor);
                                     viewport.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
@@ -1048,7 +1014,7 @@ pub fn Page() -> Element {
                                 let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
-                                    && !note_editing()
+                                    && !note_cursor.editing()
                                 {
                                     focus_container();
                                 } else {
@@ -1068,7 +1034,7 @@ pub fn Page() -> Element {
                                 let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
-                                    && !note_editing()
+                                    && !note_cursor.editing()
                                 {
                                     focus_container();
                                 } else {
@@ -1221,15 +1187,15 @@ pub fn Page() -> Element {
                     }
                     if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
                         {
-                            let active = note_active();
+                            let active = note_cursor.active();
                             let source_position = source_cursor();
                             let block_count = note_blocks.read().len();
-                            let blank_line_slot = note_editing()
+                            let blank_line_slot = note_cursor.editing()
                                 .then(|| {
-                                    note_blank_line_slot(
-                                        &note_blocks.read(),
-                                        source_position.line,
-                                    )
+                                    note_blocks
+                                        .read()
+                                        .as_slice()
+                                        .blank_line_slot(source_position.line)
                                 })
                                 .flatten();
                             rsx! {
@@ -1240,21 +1206,13 @@ pub fn Page() -> Element {
                                         if keymap() == vmux_core::KeymapKind::Vim {
                                             event.prevent_default();
                                             let line = source_cursor().line;
-                                            if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                                                activate_note_cursor(
-                                                    index,
-                                                    line,
-                                                    note_active,
-                                                    note_editing,
-                                                    note_edit_line,
-                                                );
+                                            if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                                                note_cursor.activate(index, line);
                                             }
                                             return;
                                         }
-                                        if note_editing() {
-                                            note_editing.set(false);
-                                            note_active.set(None);
-                                            note_edit_line.set(None);
+                                        if note_cursor.editing() {
+                                            note_cursor.reset();
                                             focus_container();
                                         }
                                     },
@@ -1288,7 +1246,7 @@ pub fn Page() -> Element {
                                                         block.start_line <= source_position.line
                                                             && source_position.line < block.end_line
                                                     });
-                                                let editing = note_editing()
+                                                let editing = note_cursor.editing()
                                                     && Some(index as u32) == active
                                                     && cursor_in_block;
                                                 rsx! {
@@ -1301,9 +1259,7 @@ pub fn Page() -> Element {
                                                         source_cursor,
                                                         source_selections: source_sel,
                                                         keymap: keymap(),
-                                                        note_active,
-                                                        note_editing,
-                                                        note_edit_line,
+                                                        note_cursor,
                                                         note_dragging,
                                                         comp_open: editing && comp_open(),
                                                         comp_filtered: if editing {
@@ -1356,7 +1312,7 @@ pub fn Page() -> Element {
                                                 if event.key() == Key::Escape {
                                                     event.prevent_default();
                                                     if keymap() != vmux_core::KeymapKind::Vim {
-                                                        note_editing.set(false);
+                                                        note_cursor.set_editing(false);
                                                     }
                                                     if let Some(stroke) = PressedKey::new(&event.data()).stroke() {
                                                         let _ = send(&stroke);

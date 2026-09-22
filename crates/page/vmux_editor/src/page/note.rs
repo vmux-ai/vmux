@@ -23,58 +23,86 @@ use crate::page_model::{
 
 const NOTE_CARET_ID: &str = "note-caret";
 
-pub(super) fn activate_note_cursor(
-    block_index: usize,
-    line: u32,
-    note_active: Signal<Option<u32>>,
-    note_editing: Signal<bool>,
-    note_edit_line: Signal<Option<u32>>,
-) {
-    set_note_cursor_active(
-        block_index,
-        line,
-        note_active,
-        note_editing,
-        note_edit_line,
-        false,
-    );
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct NoteCursor {
+    active: Signal<Option<u32>>,
+    editing: Signal<bool>,
+    edit_line: Signal<Option<u32>>,
 }
 
-pub(super) fn activate_note_cursor_centered(
-    block_index: usize,
-    line: u32,
-    note_active: Signal<Option<u32>>,
-    note_editing: Signal<bool>,
-    note_edit_line: Signal<Option<u32>>,
-) {
-    set_note_cursor_active(
-        block_index,
-        line,
-        note_active,
-        note_editing,
-        note_edit_line,
-        true,
-    );
-}
-
-fn set_note_cursor_active(
-    block_index: usize,
-    line: u32,
-    mut note_active: Signal<Option<u32>>,
-    mut note_editing: Signal<bool>,
-    mut note_edit_line: Signal<Option<u32>>,
-    center: bool,
-) {
-    note_active.set(Some(block_index as u32));
-    note_editing.set(true);
-    note_edit_line.set(Some(line));
-    spawn(async move {
-        sleep_ms(0).await;
-        focus_file_input();
-        if center {
-            center_note_caret(block_index, line);
+impl NoteCursor {
+    pub(super) fn new() -> Self {
+        Self {
+            active: use_signal(|| None),
+            editing: use_signal(|| false),
+            edit_line: use_signal(|| None),
         }
-    });
+    }
+
+    pub(super) fn active(self) -> Option<u32> {
+        (self.active)()
+    }
+
+    pub(super) fn editing(self) -> bool {
+        (self.editing)()
+    }
+
+    pub(super) fn edit_line(self) -> Option<u32> {
+        (self.edit_line)()
+    }
+
+    pub(super) fn reset(mut self) {
+        self.active.set(None);
+        self.editing.set(false);
+        self.edit_line.set(None);
+    }
+
+    pub(super) fn set_active(mut self, active: Option<u32>) {
+        self.active.set(active);
+    }
+
+    pub(super) fn set_editing(mut self, editing: bool) {
+        self.editing.set(editing);
+    }
+
+    pub(super) fn set_edit_line(mut self, line: Option<u32>) {
+        self.edit_line.set(line);
+    }
+
+    pub(super) fn activate(self, block_index: usize, line: u32) {
+        self.activate_with_scroll(block_index, line, false);
+    }
+
+    pub(super) fn activate_centered(self, block_index: usize, line: u32) {
+        self.activate_with_scroll(block_index, line, true);
+    }
+
+    pub(super) fn reveal(self, block_index: usize, line: u32) {
+        NoteCaretAnchor::new(block_index, line).reveal();
+    }
+
+    fn activate_inline(mut self, block_index: usize) {
+        self.active.set(Some(block_index as u32));
+        self.editing.set(true);
+        self.edit_line.set(None);
+    }
+
+    fn activate_line(mut self, block_index: usize, line: u32) {
+        self.active.set(Some(block_index as u32));
+        self.editing.set(true);
+        self.edit_line.set(Some(line));
+    }
+
+    fn activate_with_scroll(self, block_index: usize, line: u32, center: bool) {
+        self.activate_line(block_index, line);
+        spawn(async move {
+            sleep_ms(0).await;
+            focus_file_input();
+            if center {
+                NoteCaretAnchor::new(block_index, line).center();
+            }
+        });
+    }
 }
 
 fn note_pointer_line(
@@ -130,27 +158,32 @@ fn note_edit_overlay_class() -> &'static str {
     "visible absolute inset-0 z-10 cursor-text overflow-visible"
 }
 
-pub(super) fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
-    blocks
-        .iter()
-        .position(|block| block.start_line <= line && line < block.end_line)
-        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
-        .or_else(|| (!blocks.is_empty()).then_some(0))
+pub(super) trait NoteBlocks {
+    fn block_index_for_line(&self, line: u32) -> Option<usize>;
+    fn blank_line_slot(&self, line: u32) -> Option<usize>;
 }
 
-pub(super) fn note_blank_line_slot(blocks: &[NoteBlock], line: u32) -> Option<usize> {
-    if blocks
-        .iter()
-        .any(|block| block.start_line <= line && line < block.end_line)
-    {
-        return None;
+impl NoteBlocks for [NoteBlock] {
+    fn block_index_for_line(&self, line: u32) -> Option<usize> {
+        self.iter()
+            .position(|block| block.start_line <= line && line < block.end_line)
+            .or_else(|| self.iter().rposition(|block| block.start_line <= line))
+            .or_else(|| (!self.is_empty()).then_some(0))
     }
-    Some(
-        blocks
+
+    fn blank_line_slot(&self, line: u32) -> Option<usize> {
+        if self
             .iter()
-            .position(|block| line < block.start_line)
-            .unwrap_or(blocks.len()),
-    )
+            .any(|block| block.start_line <= line && line < block.end_line)
+        {
+            return None;
+        }
+        Some(
+            self.iter()
+                .position(|block| line < block.start_line)
+                .unwrap_or(self.len()),
+        )
+    }
 }
 
 #[component]
@@ -541,9 +574,7 @@ pub(super) fn NoteBlockView(
     source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
     note_diff_marker: Option<EditorDiffMarker>,
     keymap: vmux_core::KeymapKind,
-    mut note_active: Signal<Option<u32>>,
-    mut note_editing: Signal<bool>,
-    mut note_edit_line: Signal<Option<u32>>,
+    note_cursor: NoteCursor,
     mut note_dragging: Signal<bool>,
     comp_open: bool,
     comp_filtered: Vec<CompletionItem>,
@@ -563,7 +594,7 @@ pub(super) fn NoteBlockView(
         Vec::new()
     };
     let active_edit_line = if editing {
-        note_edit_line.read().unwrap_or(current.line)
+        note_cursor.edit_line().unwrap_or(current.line)
     } else {
         0
     };
@@ -699,9 +730,7 @@ pub(super) fn NoteBlockView(
                 }
                 let at = event.client_coordinates();
                 if is_live_inline {
-                    note_active.set(Some(index as u32));
-                    note_editing.set(true);
-                    note_edit_line.set(None);
+                    note_cursor.activate_inline(index);
                     place_note_block_caret(index, start, live_pointer_source.clone(), at);
                     return;
                 }
@@ -713,9 +742,7 @@ pub(super) fn NoteBlockView(
                     &pointer_block,
                     list_hit(),
                 );
-                note_active.set(Some(index as u32));
-                note_editing.set(true);
-                note_edit_line.set(Some(line));
+                note_cursor.activate_line(index, line);
                 place_note_caret(
                     format!("note-line-{line}"),
                     line,
@@ -1069,14 +1096,6 @@ impl NoteCaretAnchor {
     }
 }
 
-pub(super) fn ensure_note_caret_visible(block_index: usize, line: u32) {
-    NoteCaretAnchor::new(block_index, line).reveal();
-}
-
-fn center_note_caret(block_index: usize, line: u32) {
-    NoteCaretAnchor::new(block_index, line).center();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1096,10 +1115,10 @@ mod tests {
     fn a_blank_source_line_gets_its_own_visual_slot() {
         let blocks = vec![block(1, 2), block(4, 5)];
 
-        assert_eq!(note_blank_line_slot(&blocks, 0), Some(0));
-        assert_eq!(note_blank_line_slot(&blocks, 2), Some(1));
-        assert_eq!(note_blank_line_slot(&blocks, 5), Some(2));
-        assert_eq!(note_blank_line_slot(&blocks, 1), None);
-        assert_eq!(note_blank_line_slot(&blocks, 4), None);
+        assert_eq!(blocks.as_slice().blank_line_slot(0), Some(0));
+        assert_eq!(blocks.as_slice().blank_line_slot(2), Some(1));
+        assert_eq!(blocks.as_slice().blank_line_slot(5), Some(2));
+        assert_eq!(blocks.as_slice().blank_line_slot(1), None);
+        assert_eq!(blocks.as_slice().blank_line_slot(4), None);
     }
 }
