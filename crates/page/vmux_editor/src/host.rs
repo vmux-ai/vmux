@@ -21,6 +21,7 @@ pub(crate) mod explorer_panel;
 pub(crate) mod explorer_search;
 pub(crate) mod explorer_tabs;
 pub(crate) mod explorer_tree;
+pub(crate) mod file_lifecycle;
 pub(crate) mod history;
 pub(crate) mod media;
 pub(crate) mod navigation;
