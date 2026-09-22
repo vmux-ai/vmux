@@ -6,7 +6,8 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
 
 use super::panel::{ExplorerPanelDefaults, ExplorerPanelSent, StackExplorerVisibility};
-use crate::host::editing::{FileView, PendingGoto};
+use crate::host::editing::FileView;
+use crate::host::navigation::PendingGoto;
 use crate::host::viewport::FileViewport;
 
 pub(in crate::host) struct ExplorerSearchPlugin;
