@@ -17,6 +17,7 @@ pub(crate) mod explorer_fs;
 pub(crate) mod explorer_mutation;
 pub(crate) mod explorer_outline;
 pub(crate) mod explorer_panel;
+pub(crate) mod explorer_search;
 pub(crate) mod explorer_tabs;
 pub(crate) mod explorer_tree;
 pub(crate) mod history;
@@ -33,6 +34,7 @@ mod plugin;
 
 pub use contract::EditorContractPlugin;
 pub use explorer_panel::StackExplorerVisibility;
+pub use explorer_search::GlobalSearchRequest;
 pub use lsp::LspPlugin;
-pub use plugin::{EditorPlugin, FileView, GlobalSearchRequest, restore_file_view_bundle};
+pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
 pub use status::FileViewModeRequest;
