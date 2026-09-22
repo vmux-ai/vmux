@@ -346,85 +346,157 @@ pub enum AgentRunStatus {
     Errored(String),
 }
 
-pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentCommandValidationError {
+    EmptyAppCommandId,
+    EmptyShellCommand,
+    EmptyBrowserUrl,
+    EmptyExtensionSource,
+    EmptyTerminalText,
+    EmptyPaneId,
+    EmptyProfileName,
+    EmptySettingsPath,
+    EmptyHistoryQuery,
+    EmptyStackUrl,
+    EmptySpaceName,
+    InvalidSpaceRename,
+    EmptySpaceId,
+    EmptyBookmarkUrl,
+    EmptyBookmarkId,
+    EmptyBookmarkFolderName,
+    EmptyBesideUrl,
+    EmptyRunCommand,
+    EmptyFilePath,
+    EmptyBranch,
+    InvalidUserChoice,
+    EmptyWorkspacePath,
+    InvalidKnowledgeWrite,
+    InvalidKnowledgeSearch,
+    InvalidKnowledgeRead,
+    EmptyAgentPrompt,
+}
+
+impl std::fmt::Display for AgentCommandValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::EmptyAppCommandId => "app_command.id is empty",
+            Self::EmptyShellCommand => "run_shell.command is empty",
+            Self::EmptyBrowserUrl => "browser_navigate.url is empty",
+            Self::EmptyExtensionSource => "browser_install_extension.source is empty",
+            Self::EmptyTerminalText => "terminal_send.text is empty",
+            Self::EmptyPaneId => "focus_pane.pane is empty",
+            Self::EmptyProfileName => "rename_profile.name is empty",
+            Self::EmptySettingsPath => "update_settings.path is empty",
+            Self::EmptyHistoryQuery => "browser_history_search.query is empty",
+            Self::EmptyStackUrl => "open_in_new_stack.url is empty",
+            Self::EmptySpaceName => "space_command.name is empty",
+            Self::InvalidSpaceRename => "space_command rename fields are empty",
+            Self::EmptySpaceId => "space_command.space_id is empty",
+            Self::EmptyBookmarkUrl => "bookmark_command.url is empty",
+            Self::EmptyBookmarkId => "bookmark_command.uuid is empty",
+            Self::EmptyBookmarkFolderName => "bookmark_command.name is empty",
+            Self::EmptyBesideUrl => "open_beside_me.url is empty",
+            Self::EmptyRunCommand => "run.command is empty",
+            Self::EmptyFilePath => "file_touched.path is empty",
+            Self::EmptyBranch => "create_worktree.branch is empty",
+            Self::InvalidUserChoice => {
+                "request_user_choice requires a question and 2 to 9 non-empty options"
+            }
+            Self::EmptyWorkspacePath => "select_project.path is empty",
+            Self::InvalidKnowledgeWrite => "write_knowledge requires a non-empty title and content",
+            Self::InvalidKnowledgeSearch => {
+                "search_knowledge requires a query and limit between 1 and 100"
+            }
+            Self::InvalidKnowledgeRead => {
+                "read_knowledge requires a path and limit between 1 and 2000"
+            }
+            Self::EmptyAgentPrompt => "new_agent_chat.prompt is empty",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for AgentCommandValidationError {}
+
+pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommandValidationError> {
     match command {
         AgentCommand::AppCommand { id, .. } if id.trim().is_empty() => {
-            Err("app_command.id is empty")
+            Err(AgentCommandValidationError::EmptyAppCommandId)
         }
         AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
-            Err("run_shell.command is empty")
+            Err(AgentCommandValidationError::EmptyShellCommand)
         }
         AgentCommand::BrowserNavigate { url, .. } if url.trim().is_empty() => {
-            Err("browser_navigate.url is empty")
+            Err(AgentCommandValidationError::EmptyBrowserUrl)
         }
         AgentCommand::BrowserInstallExtension { source } if source.trim().is_empty() => {
-            Err("browser_install_extension.source is empty")
+            Err(AgentCommandValidationError::EmptyExtensionSource)
         }
         AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
-            Err("terminal_send.text is empty")
+            Err(AgentCommandValidationError::EmptyTerminalText)
         }
         AgentCommand::FocusPane { pane } if pane.trim().is_empty() => {
-            Err("focus_pane.pane is empty")
+            Err(AgentCommandValidationError::EmptyPaneId)
         }
         AgentCommand::RenameProfile { name } if name.trim().is_empty() => {
-            Err("rename_profile.name is empty")
+            Err(AgentCommandValidationError::EmptyProfileName)
         }
         AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
-            Err("update_settings.path is empty")
+            Err(AgentCommandValidationError::EmptySettingsPath)
         }
         AgentCommand::BrowserHistorySearch { query, .. } if query.trim().is_empty() => {
-            Err("browser_history_search.query is empty")
+            Err(AgentCommandValidationError::EmptyHistoryQuery)
         }
         AgentCommand::OpenInNewStack { url, .. } if url.trim().is_empty() => {
-            Err("open_in_new_stack.url is empty")
+            Err(AgentCommandValidationError::EmptyStackUrl)
         }
         AgentCommand::SpaceCommand(AgentSpaceCommand::Create { name: Some(name) })
             if name.trim().is_empty() =>
         {
-            Err("space_command.name is empty")
+            Err(AgentCommandValidationError::EmptySpaceName)
         }
         AgentCommand::SpaceCommand(AgentSpaceCommand::Rename { space_id, name })
             if space_id.trim().is_empty() || name.trim().is_empty() =>
         {
-            Err("space_command rename fields are empty")
+            Err(AgentCommandValidationError::InvalidSpaceRename)
         }
         AgentCommand::SpaceCommand(AgentSpaceCommand::Delete { space_id })
             if space_id.trim().is_empty() =>
         {
-            Err("space_command.space_id is empty")
+            Err(AgentCommandValidationError::EmptySpaceId)
         }
         AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add { page, .. })
         | AgentCommand::BookmarkCommand(AgentBookmarkCommand::PinUrl { page })
             if page.url.trim().is_empty() =>
         {
-            Err("bookmark_command.url is empty")
+            Err(AgentCommandValidationError::EmptyBookmarkUrl)
         }
         AgentCommand::BookmarkCommand(AgentBookmarkCommand::Remove { uuid })
         | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Pin { uuid })
         | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin { uuid })
             if uuid.trim().is_empty() =>
         {
-            Err("bookmark_command.uuid is empty")
+            Err(AgentCommandValidationError::EmptyBookmarkId)
         }
         AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name })
             if name.trim().is_empty() =>
         {
-            Err("bookmark_command.name is empty")
+            Err(AgentCommandValidationError::EmptyBookmarkFolderName)
         }
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
-            Err("open_beside_me.url is empty")
+            Err(AgentCommandValidationError::EmptyBesideUrl)
         }
         AgentCommand::Run { command, .. }
         | AgentCommand::RunWithPlacementOverride { command, .. }
             if command.trim().is_empty() =>
         {
-            Err("run.command is empty")
+            Err(AgentCommandValidationError::EmptyRunCommand)
         }
         AgentCommand::FileTouched { path, .. } if path.trim().is_empty() => {
-            Err("file_touched.path is empty")
+            Err(AgentCommandValidationError::EmptyFilePath)
         }
         AgentCommand::CreateWorktreeOnBranch { branch, .. } if branch.trim().is_empty() => {
-            Err("create_worktree.branch is empty")
+            Err(AgentCommandValidationError::EmptyBranch)
         }
         AgentCommand::RequestUserChoice {
             question, options, ..
@@ -433,10 +505,10 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
             || options.len() > 9
             || options.iter().any(|option| option.trim().is_empty()) =>
         {
-            Err("request_user_choice requires a question and 2 to 9 non-empty options")
+            Err(AgentCommandValidationError::InvalidUserChoice)
         }
         AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
-            Err("select_project.path is empty")
+            Err(AgentCommandValidationError::EmptyWorkspacePath)
         }
         AgentCommand::WriteKnowledge {
             path,
@@ -447,22 +519,22 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
             || title.trim().is_empty()
             || content.trim().is_empty() =>
         {
-            Err("write_knowledge requires a non-empty title and content")
+            Err(AgentCommandValidationError::InvalidKnowledgeWrite)
         }
         AgentCommand::SearchKnowledge { query, limit, .. }
             if query.trim().is_empty() || *limit == 0 || *limit > 100 =>
         {
-            Err("search_knowledge requires a query and limit between 1 and 100")
+            Err(AgentCommandValidationError::InvalidKnowledgeSearch)
         }
         AgentCommand::ReadKnowledge { path, limit, .. }
             if path.trim().is_empty() || *limit == 0 || *limit > 2_000 =>
         {
-            Err("read_knowledge requires a path and limit between 1 and 2000")
+            Err(AgentCommandValidationError::InvalidKnowledgeRead)
         }
         AgentCommand::Shared(SharedAgentCommand::NewAgentChat { prompt, .. })
             if prompt.trim().is_empty() =>
         {
-            Err("new_agent_chat.prompt is empty")
+            Err(AgentCommandValidationError::EmptyAgentPrompt)
         }
         _ => Ok(()),
     }

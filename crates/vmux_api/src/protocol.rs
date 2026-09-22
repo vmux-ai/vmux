@@ -1,7 +1,8 @@
 pub mod layout;
 pub mod shared;
 pub use layout::{
-    Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab, format_id, parse_id,
+    Focus, LayoutIdParseError, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab,
+    format_id, parse_id,
 };
 pub use shared::{
     AgentAction, SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse,
@@ -174,7 +175,7 @@ mod tests {
                 url: String::new(),
                 pane: None,
             }),
-            Err("browser_navigate.url is empty")
+            Err(AgentCommandValidationError::EmptyBrowserUrl)
         );
     }
 
@@ -186,7 +187,7 @@ mod tests {
                 cwd: String::new(),
                 mode: AgentShellMode::NewTab,
             }),
-            Err("run_shell.command is empty")
+            Err(AgentCommandValidationError::EmptyShellCommand)
         );
     }
 
@@ -197,7 +198,7 @@ mod tests {
                 text: String::new(),
                 terminal: None,
             }),
-            Err("terminal_send.text is empty")
+            Err(AgentCommandValidationError::EmptyTerminalText)
         );
     }
 
@@ -209,7 +210,7 @@ mod tests {
                 prompt: "  ".to_string(),
                 agent_url: None,
             })),
-            Err("new_agent_chat.prompt is empty")
+            Err(AgentCommandValidationError::EmptyAgentPrompt)
         );
         let command = AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
             client_op_id: ClientOpId::new("op"),
@@ -228,7 +229,7 @@ mod tests {
             validate_agent_command(&AgentCommand::RenameProfile {
                 name: "  ".to_string(),
             }),
-            Err("rename_profile.name is empty")
+            Err(AgentCommandValidationError::EmptyProfileName)
         );
     }
 

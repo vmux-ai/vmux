@@ -8,6 +8,46 @@ pub enum NodeKind {
     Stack,
 }
 
+#[derive(Debug)]
+pub enum LayoutIdParseError {
+    MissingSeparator {
+        input: String,
+    },
+    UnknownPrefix {
+        input: String,
+        prefix: String,
+    },
+    InvalidValue {
+        input: String,
+        source: std::num::ParseIntError,
+    },
+}
+
+impl std::fmt::Display for LayoutIdParseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSeparator { input } => {
+                write!(formatter, "id missing ':' separator: {input:?}")
+            }
+            Self::UnknownPrefix { input, prefix } => {
+                write!(formatter, "unknown id prefix {prefix:?} in {input:?}")
+            }
+            Self::InvalidValue { input, source } => {
+                write!(formatter, "id value not u64 in {input:?}: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LayoutIdParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidValue { source, .. } => Some(source),
+            Self::MissingSeparator { .. } | Self::UnknownPrefix { .. } => None,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -154,20 +194,31 @@ pub fn format_id(kind: NodeKind, value: u64) -> String {
     }
 }
 
-pub fn parse_id(s: &str) -> Result<(NodeKind, u64), String> {
-    let (prefix, rest) = s
-        .split_once(':')
-        .ok_or_else(|| format!("id missing ':' separator: {s:?}"))?;
+pub fn parse_id(input: &str) -> Result<(NodeKind, u64), LayoutIdParseError> {
+    let (prefix, rest) =
+        input
+            .split_once(':')
+            .ok_or_else(|| LayoutIdParseError::MissingSeparator {
+                input: input.to_string(),
+            })?;
     let kind = match prefix {
         "tab" => NodeKind::Tab,
         "pane" => NodeKind::Pane,
         "split" => NodeKind::Split,
         "stack" => NodeKind::Stack,
-        other => return Err(format!("unknown id prefix {other:?} in {s:?}")),
+        _ => {
+            return Err(LayoutIdParseError::UnknownPrefix {
+                input: input.to_string(),
+                prefix: prefix.to_string(),
+            });
+        }
     };
-    let value: u64 = rest
+    let value = rest
         .parse()
-        .map_err(|err| format!("id value not u64 in {s:?}: {err}"))?;
+        .map_err(|source| LayoutIdParseError::InvalidValue {
+            input: input.to_string(),
+            source,
+        })?;
     Ok((kind, value))
 }
 
@@ -192,17 +243,26 @@ mod tests {
 
     #[test]
     fn parse_id_rejects_missing_separator() {
-        assert!(parse_id("pane42").is_err());
+        assert!(matches!(
+            parse_id("pane42"),
+            Err(LayoutIdParseError::MissingSeparator { .. })
+        ));
     }
 
     #[test]
     fn parse_id_rejects_unknown_prefix() {
-        assert!(parse_id("window:1").is_err());
+        assert!(matches!(
+            parse_id("window:1"),
+            Err(LayoutIdParseError::UnknownPrefix { .. })
+        ));
     }
 
     #[test]
     fn parse_id_rejects_non_numeric_value() {
-        assert!(parse_id("pane:abc").is_err());
+        assert!(matches!(
+            parse_id("pane:abc"),
+            Err(LayoutIdParseError::InvalidValue { .. })
+        ));
     }
 
     #[test]
