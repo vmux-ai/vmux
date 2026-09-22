@@ -23,13 +23,16 @@ use crate::host::status::{
     EditorStatusPlugin, FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent,
     SharedFileViewMode,
 };
+use crate::host::viewport::{
+    EditorCursor, EditorViewportPlugin, EditorWindow, FileViewport, FoldsDirty,
+};
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 use crate::media::{EditorMediaPlugin, FileMedia};
 use crate::navigation::EditorNavigationPlugin;
 use crate::page_model::DisplayCells;
 use crate::wrap::WrapView;
-use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
+use vmux_core::scroll::clamp_top_line;
 use vmux_flex::prelude::*;
 
 pub struct EditorPlugin;
@@ -45,7 +48,7 @@ impl Plugin for EditorPlugin {
             crate::search::ProjectSearchPlugin,
             EditorFileLifecyclePlugin,
             EditorStatusPlugin,
-            EditorPresentationPlugin,
+            EditorViewportPlugin,
             EditorMediaPlugin,
             EditorNotePlugin,
             EditorEditingPlugin,
@@ -120,56 +123,31 @@ impl Plugin for EditorFileLifecyclePlugin {
     }
 }
 
-struct EditorPresentationPlugin;
-
-impl Plugin for EditorPresentationPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
-            .add_plugins(BinEventEmitterPlugin::<(
-                FileResizeEvent,
-                FileScrollEvent,
-                FileShapeSet,
-                FileEncodingSet,
-            )>::default())
-            .add_systems(
-                Update,
-                (
-                    sync_editor_wrap_settings.after(apply_loaded_file_buffers),
-                    rehighlight_on_color_scheme,
-                    apply_lsp_folds,
-                    persist_folds,
-                ),
-            )
-            .add_observer(on_file_resize)
-            .add_observer(on_file_scroll)
-            .add_observer(on_file_fold_toggle)
-            .add_observer(on_file_shape_set)
-            .add_observer(on_file_encoding_set);
-    }
-}
-
 struct EditorEditingPlugin;
 
 impl Plugin for EditorEditingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
-            FileOpenEvent,
-            FileTextInput,
-            FilePointerEvent,
-            FileHoverRequest,
-            FileDefinitionRequest,
-            FileReferencesRequest,
-            FileRenameRequest,
-            FileEditorAction,
-            FileCodeActionPick,
-            FileCompletionRequest,
-            FileGotoRequest,
-            FileCompletionCommit,
-        )>::default())
+        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+            .add_plugins(BinEventEmitterPlugin::<(
+                FileOpenEvent,
+                FileTextInput,
+                FilePointerEvent,
+                FileHoverRequest,
+                FileDefinitionRequest,
+                FileReferencesRequest,
+                FileRenameRequest,
+                FileEditorAction,
+                FileCodeActionPick,
+                FileCompletionRequest,
+                FileGotoRequest,
+                FileCompletionCommit,
+            )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,
+                FileShapeSet,
+                FileEncodingSet,
             )>::default())
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
@@ -185,7 +163,9 @@ impl Plugin for EditorEditingPlugin {
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
-            .add_observer(on_file_property_edit);
+            .add_observer(on_file_property_edit)
+            .add_observer(on_file_shape_set)
+            .add_observer(on_file_encoding_set);
     }
 }
 
@@ -370,40 +350,6 @@ impl LoadFailure {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug)]
-pub struct FileViewport {
-    pub top_row: u32,
-    pub rows: u16,
-    pub wrap_columns: u16,
-    pub word_wrap: vmux_core::editor::WordWrap,
-    pub word_wrap_column: u16,
-}
-
-impl FileViewport {
-    fn scroll_to(
-        &mut self,
-        top: u32,
-        entity: Entity,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        let was = self.top_row;
-        if top == was {
-            return;
-        }
-        self.top_row = top;
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &FileScrollByEvent {
-                lines: top as i32 - was as i32,
-            },
-        ));
-    }
-}
-
 #[derive(Component, Clone, Debug)]
 pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
@@ -555,6 +501,43 @@ impl EditState {
         self.core.cursor_pos().line
     }
 
+    pub(crate) fn indent_width(&self) -> u16 {
+        self.indent_width
+    }
+
+    pub(crate) fn wrapped_view<'a>(&'a mut self, viewport: &FileViewport) -> &'a WrapView {
+        let stale = self.wrap_cache.as_ref().is_none_or(|cache| {
+            cache.generation != self.wrap_generation
+                || cache.mode != viewport.word_wrap
+                || cache.viewport_columns != viewport.wrap_columns
+                || cache.word_wrap_column != viewport.word_wrap_column
+        });
+        if stale {
+            let total = self.core.buffer.len_lines() as u32;
+            let folds = self.folds.view(total);
+            self.wrap_cache = Some(CachedWrapView {
+                generation: self.wrap_generation,
+                mode: viewport.word_wrap,
+                viewport_columns: viewport.wrap_columns,
+                word_wrap_column: viewport.word_wrap_column,
+                view: WrapView::new(
+                    &self.core.buffer.rope,
+                    &folds,
+                    viewport.word_wrap,
+                    viewport.wrap_columns,
+                    viewport.word_wrap_column,
+                ),
+            });
+        }
+        &self.wrap_cache.as_ref().expect("wrap cache").view
+    }
+
+    pub(crate) fn sync_fold_view(&mut self) {
+        let total = self.core.buffer.len_lines() as u32;
+        self.core.fold_view = self.folds.view(total);
+        self.wrap_generation = self.wrap_generation.wrapping_add(1);
+    }
+
     fn refresh_parsed_note(&mut self) {
         self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
             .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
@@ -633,9 +616,6 @@ struct CachedWrapView {
     word_wrap_column: u16,
     view: WrapView,
 }
-
-#[derive(Component)]
-struct FoldsDirty;
 
 #[derive(Component)]
 pub struct EditorKeymap(pub Box<dyn Keymap>);
@@ -891,8 +871,6 @@ struct PendingGlobalSearchRequest {
 }
 
 const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
-const STICKY_SCROLL_DEPTH: usize = 5;
-
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -1283,7 +1261,7 @@ fn reapply_keymap_on_change(
             edit.core.mode = kind.initial_mode();
         }
         if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
-            emit_cursor(
+            EditorCursor::emit(
                 entity,
                 &mut edit,
                 keymap.0.as_ref(),
@@ -1291,360 +1269,6 @@ fn reapply_keymap_on_change(
                 browsers,
                 &mut commands,
             );
-        }
-    }
-}
-
-fn wrapped_view<'a>(edit: &'a mut EditState, vp: &FileViewport) -> &'a WrapView {
-    let stale = edit.wrap_cache.as_ref().is_none_or(|cache| {
-        cache.generation != edit.wrap_generation
-            || cache.mode != vp.word_wrap
-            || cache.viewport_columns != vp.wrap_columns
-            || cache.word_wrap_column != vp.word_wrap_column
-    });
-    if stale {
-        let total = edit.core.buffer.len_lines() as u32;
-        let folds = edit.folds.view(total);
-        edit.wrap_cache = Some(CachedWrapView {
-            generation: edit.wrap_generation,
-            mode: vp.word_wrap,
-            viewport_columns: vp.wrap_columns,
-            word_wrap_column: vp.word_wrap_column,
-            view: WrapView::new(
-                &edit.core.buffer.rope,
-                &folds,
-                vp.word_wrap,
-                vp.wrap_columns,
-                vp.word_wrap_column,
-            ),
-        });
-    }
-    &edit.wrap_cache.as_ref().expect("wrap cache").view
-}
-
-pub(crate) fn repaint_window(
-    entity: Entity,
-    edit: &mut EditState,
-    vp: &FileViewport,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    emit_window(entity, edit, vp, browsers, commands);
-}
-
-pub(crate) fn emit_window(
-    entity: Entity,
-    edit: &mut EditState,
-    vp: &FileViewport,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    if !browsers.can_emit_to(&entity) {
-        return;
-    }
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &EditorWindow::render(edit, vp),
-    ));
-}
-
-struct EditorWindow;
-
-impl EditorWindow {
-    fn render(edit: &mut EditState, vp: &FileViewport) -> FileViewportPatch {
-        let total = edit.core.buffer.len_lines() as u32;
-        let wrap = wrapped_view(edit, vp);
-        let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
-        let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
-        let overscan = vmux_core::scroll::overscan_for(
-            vp.rows,
-            vmux_core::scroll::EDITOR_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
-        );
-        let first_row = vis_first.saturating_sub(overscan);
-        let end_row = (vis_end + overscan).min(visible);
-        let visible_top = wrap.line_at(vis_first);
-        let layouts = wrap.window(first_row, end_row);
-        let first_row = layouts.first().map_or(first_row, |line| line.row);
-        let mut lines = Vec::with_capacity(layouts.len());
-        if let (Some(first_line), Some(last_line)) = (
-            layouts.first().map(|layout| layout.line_no),
-            layouts.last().map(|layout| layout.line_no),
-        ) {
-            let mut window = edit.hl.line_window(
-                &edit.core.buffer.rope,
-                first_line as usize,
-                last_line as usize + 1,
-            );
-            let guides = crate::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width);
-            for layout in &layouts {
-                let index = (layout.line_no - first_line) as usize;
-                let Some(line) = window.get_mut(index) else {
-                    continue;
-                };
-                let mut line = std::mem::take(line);
-                line.fold = edit.folds.gutter(layout.line_no);
-                line.indent_levels = guides.levels(layout.line_no as usize);
-                lines.push(line);
-            }
-        }
-        let mut sticky = Vec::new();
-        if let Some(top) = visible_top {
-            let guides = crate::fold::IndentGuides::new(&edit.core.buffer.rope, edit.indent_width);
-            for header in edit.folds.sticky(top, STICKY_SCROLL_DEPTH) {
-                let at = header as usize;
-                let mut window = edit.hl.line_window(&edit.core.buffer.rope, at, at + 1);
-                if window.is_empty() {
-                    continue;
-                }
-                let mut line = window.remove(0);
-                line.fold = edit.folds.gutter(header);
-                line.indent_levels = guides.levels(at);
-                sticky.push(line);
-            }
-        }
-        FileViewportPatch {
-            first_row,
-            total_rows: visible,
-            total_lines: total,
-            wrap_columns,
-            layouts,
-            lines,
-            sticky,
-        }
-    }
-}
-
-struct HighlightedLines;
-
-impl HighlightedLines {
-    fn window(edit: &mut EditState, vp: &FileViewport) -> (u32, u16) {
-        let wrap = wrapped_view(edit, vp);
-        let visible = wrap.total_rows();
-        let (first_row, end_row) = window_range(visible, vp.top_row, vp.rows);
-        let overscan = vmux_core::scroll::overscan_for(
-            vp.rows,
-            vmux_core::scroll::EDITOR_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
-        );
-        let from = first_row.saturating_sub(overscan);
-        let to = end_row.saturating_add(overscan).min(visible);
-        let first_line = wrap.line_at(from).unwrap_or(0);
-        let last_line = wrap.line_at(to.saturating_sub(1)).unwrap_or(first_line);
-        let rows = last_line.saturating_sub(first_line).saturating_add(1);
-        (first_line, rows.min(u16::MAX as u32) as u16)
-    }
-}
-
-pub(crate) fn emit_cursor(
-    entity: Entity,
-    edit: &mut EditState,
-    keymap: &dyn Keymap,
-    vp: &FileViewport,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    if !browsers.can_emit_to(&entity) {
-        return;
-    }
-    let total = edit.core.buffer.len_lines() as u32;
-    let view = edit.folds.view(total);
-    let source_primary = edit.core.cursor_pos();
-    let mut primary = source_primary;
-    let (span_first, span_rows) = HighlightedLines::window(edit, vp);
-    let raw_selections = edit
-        .core
-        .sel_spans(span_first, span_rows)
-        .into_iter()
-        .filter(|selection| !view.is_hidden(selection.line))
-        .collect::<Vec<_>>();
-    let raw_word_highlights = edit
-        .core
-        .word_highlight_spans(span_first, span_rows)
-        .into_iter()
-        .filter(|span| !view.is_hidden(span.line))
-        .collect::<Vec<_>>();
-    edit.core.refresh_search_matches();
-    let matches = edit.core.cached_search_matches();
-    let raw_search = edit
-        .core
-        .search_spans(matches, span_first, span_rows)
-        .into_iter()
-        .filter(|span| !view.is_hidden(span.line))
-        .collect::<Vec<_>>();
-    let caret = edit.core.primary().head;
-    let search_index = matches
-        .iter()
-        .position(|found| found.contains(&caret) || found.start == caret)
-        .map(|at| at as u32 + 1)
-        .unwrap_or_default();
-    let search_total = matches.len() as u32;
-    let raw_carets: Vec<_> = edit
-        .core
-        .cursor_positions()
-        .into_iter()
-        .filter(|caret| !view.is_hidden(caret.line))
-        .collect();
-    let wrap = wrapped_view(edit, vp);
-    (primary.row, primary.col) = wrap.position(primary.line, primary.col);
-    let mut carets = raw_carets;
-    for caret in &mut carets {
-        (caret.row, caret.col) = wrap.position(caret.line, caret.col);
-    }
-    let selections = wrap.selections(raw_selections.iter().copied());
-    let search = wrap.selections(raw_search.iter().copied());
-    let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    commands.trigger(BinHostEmitEvent::from_event(
-        entity,
-        &FileCursorEvent {
-            search_total,
-            search_index,
-            mode: keymap.mode(),
-            mode_label: keymap.mode_label(),
-            primary,
-            carets,
-            selections,
-            source_primary,
-            source_selections: raw_selections,
-            search,
-            word_highlights,
-        },
-    ));
-}
-
-struct DriftedWindow {
-    rows: u32,
-    overscan: u32,
-}
-
-impl DriftedWindow {
-    fn between(top_before: u32, vp: &FileViewport) -> Self {
-        Self {
-            rows: vp.top_row.abs_diff(top_before),
-            overscan: vmux_core::scroll::overscan_for(
-                vp.rows,
-                vmux_core::scroll::EDITOR_OVERSCAN_K,
-                vmux_core::scroll::OVERSCAN_FLOOR,
-                vmux_core::scroll::OVERSCAN_CAP,
-            ),
-        }
-    }
-
-    fn left_the_band(&self) -> bool {
-        self.rows > self.overscan / 2
-    }
-}
-
-struct ScrolledCursor;
-
-impl ScrolledCursor {
-    fn follow(edit: &mut EditState, vp: &FileViewport) -> bool {
-        if vp.rows == 0 {
-            return false;
-        }
-        let cursor = edit.core.cursor_pos();
-        let top = vp.top_row;
-        let bottom = top + vp.rows as u32 - 1;
-        let row = wrapped_view(edit, vp).position(cursor.line, cursor.col).0;
-        let wanted = if row < top {
-            top
-        } else if row > bottom {
-            bottom
-        } else {
-            return false;
-        };
-        let Some(line) = wrapped_view(edit, vp).line_at(wanted) else {
-            return false;
-        };
-        if line == cursor.line {
-            return false;
-        }
-        let col = edit.core.char_at_cell(line as usize, cursor.col);
-        let at = edit.core.buffer.coords_to_char(line as usize, col);
-        if edit.core.mode.is_visual() {
-            let anchor = edit.core.primary().anchor;
-            edit.core.selections = vec![Selection { anchor, head: at }];
-            return true;
-        }
-        edit.core.collapse_carets();
-        edit.core.set_caret(at);
-        true
-    }
-}
-
-fn wrapped_autoscroll(edit: &mut EditState, vp: &FileViewport) -> Option<u32> {
-    if vp.rows == 0 {
-        return None;
-    }
-    let cursor = edit.core.cursor_pos();
-    let row = wrapped_view(edit, vp).position(cursor.line, cursor.col).0;
-    if row < vp.top_row {
-        return Some(row);
-    }
-    if row >= vp.top_row + vp.rows as u32 {
-        return Some(row + 1 - vp.rows as u32);
-    }
-    None
-}
-
-fn rehighlight_on_color_scheme(
-    mut reader: bevy::ecs::message::MessageReader<vmux_setting::ColorSchemeChanged>,
-    mut views: Query<(Entity, &mut EditState, &FileViewport)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let Some(ev) = reader.read().last().copied() else {
-        return;
-    };
-    crate::highlight::set_dark_theme(matches!(ev.0, vmux_setting::ResolvedScheme::Dark));
-    for (entity, mut edit, vp) in &mut views {
-        let vpc = *vp;
-        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-    }
-}
-
-fn sync_editor_wrap_settings(
-    settings: Res<vmux_setting::AppSettings>,
-    mut views: Query<(
-        Entity,
-        &mut FileViewport,
-        Option<&mut EditState>,
-        Option<&EditorKeymap>,
-    )>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, mut viewport, edit, keymap) in &mut views {
-        let wanted_column = settings.editor.word_wrap_column.max(1);
-        if viewport.word_wrap == settings.editor.word_wrap
-            && viewport.word_wrap_column == wanted_column
-        {
-            continue;
-        }
-        let showing = viewport.top_row;
-        viewport.word_wrap = settings.editor.word_wrap;
-        viewport.word_wrap_column = wanted_column;
-        viewport.top_row = 0;
-        if let Some(mut edit) = edit {
-            let wanted = wrapped_autoscroll(&mut edit, &viewport);
-            viewport.top_row = showing;
-            if viewport.rows > 0 {
-                viewport.scroll_to(wanted.unwrap_or(0), entity, &browsers, &mut commands);
-                edit.core.top_row = viewport.top_row;
-            }
-            emit_window(entity, &mut edit, &viewport, &browsers, &mut commands);
-            if let Some(keymap) = keymap {
-                emit_cursor(
-                    entity,
-                    &mut edit,
-                    keymap.0.as_ref(),
-                    &viewport,
-                    &browsers,
-                    &mut commands,
-                );
-            }
         }
     }
 }
@@ -1783,151 +1407,6 @@ fn on_file_encoding_set(
             encoding: edit.core.buffer.encoding,
         },
     ));
-}
-
-fn on_file_resize(
-    trigger: On<BinReceive<FileResizeEvent>>,
-    mut q: Query<(
-        &mut FileViewport,
-        Option<&mut EditState>,
-        Option<&EditorKeymap>,
-    )>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let evt = &trigger.event().payload;
-    let Ok((mut vp, edit, keymap)) = q.get_mut(entity) else {
-        return;
-    };
-    let rows = rows_from_viewport(evt.char_height, evt.viewport_height);
-    if vp.rows == rows && vp.wrap_columns == evt.wrap_columns {
-        return;
-    }
-    vp.rows = rows;
-    vp.wrap_columns = evt.wrap_columns;
-    if let Some(mut edit) = edit {
-        edit.core.rows = vp.rows;
-        edit.core.top_row = vp.top_row;
-        let vpc = *vp;
-        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-        if let Some(keymap) = keymap {
-            emit_cursor(
-                entity,
-                &mut edit,
-                keymap.0.as_ref(),
-                &vpc,
-                &browsers,
-                &mut commands,
-            );
-        }
-    }
-}
-
-fn on_file_scroll(
-    trigger: On<BinReceive<FileScrollEvent>>,
-    mut q: Query<(&mut EditState, &mut FileViewport, &EditorKeymap)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let evt = &trigger.event().payload;
-    let Ok((mut edit, mut vp, keymap)) = q.get_mut(entity) else {
-        return;
-    };
-    let visible = wrapped_view(&mut edit, &vp).total_rows();
-    vp.top_row = clamp_top_line(evt.top_row, visible, vp.rows);
-    edit.core.top_row = vp.top_row;
-    if !evt.needs_rows {
-        return;
-    }
-    let vpc = *vp;
-    emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-    emit_cursor(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        &vpc,
-        &browsers,
-        &mut commands,
-    );
-}
-
-fn on_file_fold_toggle(
-    trigger: On<BinReceive<FileFoldToggle>>,
-    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let line = trigger.event().payload.line;
-    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
-        return;
-    };
-    edit.folds.toggle_header(line);
-    sync_fold_view(&mut edit);
-    let vpc = *vp;
-    emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-    emit_cursor(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        &vpc,
-        &browsers,
-        &mut commands,
-    );
-    commands.entity(entity).insert(FoldsDirty);
-}
-
-fn persist_folds(
-    q: Query<(Entity, &FileView, &EditState), With<FoldsDirty>>,
-    mut store: NonSendMut<crate::fold_store::FoldStore>,
-    mut commands: Commands,
-) {
-    let mut changed = false;
-    for (entity, fv, edit) in q.iter() {
-        let mut collapsed: Vec<u32> = edit.folds.collapsed.iter().copied().collect();
-        collapsed.sort_unstable();
-        store.set(&fv.path, &collapsed);
-        commands.entity(entity).remove::<FoldsDirty>();
-        changed = true;
-    }
-    if changed {
-        store.save();
-    }
-}
-
-fn apply_lsp_folds(
-    mut msgs: MessageReader<crate::lsp::manager::LspFolds>,
-    mut q: Query<(&mut EditState, &FileView, &EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for f in msgs.read() {
-        let Ok((mut edit, fv, keymap, vp)) = q.get_mut(f.entity) else {
-            continue;
-        };
-        if canon(&fv.path) != canon(&f.path) {
-            continue;
-        }
-        let regions = if f.regions.is_empty() {
-            crate::fold::indent_regions(&edit.core.buffer.rope)
-        } else {
-            f.regions.clone()
-        };
-        edit.folds.set_regions(regions);
-        sync_fold_view(&mut edit);
-        let vpc = *vp;
-        emit_window(f.entity, &mut edit, &vpc, &browsers, &mut commands);
-        emit_cursor(
-            f.entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            &vpc,
-            &browsers,
-            &mut commands,
-        );
-    }
 }
 
 #[derive(Component)]
@@ -2219,12 +1698,6 @@ fn emit_wiki_completions(
     true
 }
 
-fn sync_fold_view(edit: &mut EditState) {
-    let total = edit.core.buffer.len_lines() as u32;
-    edit.core.fold_view = edit.folds.view(total);
-    edit.wrap_generation = edit.wrap_generation.wrapping_add(1);
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run_commands(
     entity: Entity,
@@ -2246,12 +1719,12 @@ fn run_commands(
     let mut fold_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
-            let visible = wrapped_view(edit, vp).total_rows();
+            let visible = vp.visible_rows(edit);
             let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
             let target = clamp_top_line(target, visible, vp.rows);
             vp.scroll_to(target, entity, browsers, commands);
             edit.core.top_row = vp.top_row;
-            if ScrolledCursor::follow(edit, vp) {
+            if vp.follow_scrolled_cursor(edit) {
                 cursor_stale = true;
             }
             continue;
@@ -2290,7 +1763,7 @@ fn run_commands(
                 EditCommand::UnfoldAll => edit.folds.unfold_all(),
                 _ => {}
             }
-            sync_fold_view(edit);
+            edit.sync_fold_view();
             if let Some(header) = edit.folds.hiding_header(line) {
                 let at = edit.core.buffer.line_to_char(header as usize);
                 edit.core.set_caret(at);
@@ -2474,27 +1947,27 @@ fn run_commands(
     if text_changed {
         let regions = crate::fold::indent_regions(&edit.core.buffer.rope);
         edit.folds.set_regions(regions);
-        sync_fold_view(edit);
+        edit.sync_fold_view();
     }
     {
         let total = edit.core.buffer.len_lines() as u32;
         let caret_line = edit.core.cursor_pos().line;
         if edit.folds.view(total).is_hidden(caret_line) {
             edit.folds.reveal(caret_line);
-            sync_fold_view(edit);
+            edit.sync_fold_view();
             fold_changed = true;
         }
     }
-    if let Some(top) = wrapped_autoscroll(edit, vp) {
+    if let Some(top) = vp.autoscroll(edit) {
         vp.scroll_to(top, entity, browsers, commands);
         edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;
-    if text_changed || fold_changed || DriftedWindow::between(top_before, &vpc).left_the_band() {
-        emit_window(entity, edit, &vpc, browsers, commands);
+    if text_changed || fold_changed || vpc.left_render_band(top_before) {
+        EditorWindow::emit(entity, edit, &vpc, browsers, commands);
     }
     if text_changed || cursor_stale || fold_changed {
-        emit_cursor(entity, edit, keymap, &vpc, browsers, commands);
+        EditorCursor::emit(entity, edit, keymap, &vpc, browsers, commands);
     }
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
@@ -3029,7 +2502,7 @@ fn on_file_find_request(
             forward: request.forward,
         });
     }
-    emit_cursor(
+    EditorCursor::emit(
         entity,
         &mut edit,
         keymap.0.as_ref(),
@@ -3375,7 +2848,7 @@ fn goto_caret(
     let ccol = crate::lsp::manager::utf16_to_char_col(&lt, utf16_col);
     let at = edit.core.buffer.coords_to_char(line, ccol as usize);
     edit.core.set_caret(at);
-    if let Some(top) = wrapped_autoscroll(edit, vp) {
+    if let Some(top) = vp.autoscroll(edit) {
         vp.scroll_to(top, entity, browsers, commands);
         edit.core.top_row = vp.top_row;
     }
@@ -3410,8 +2883,8 @@ fn apply_goto(
                 &mut commands,
             );
             let vpc = *vp;
-            emit_window(g.entity, &mut edit, &vpc, &browsers, &mut commands);
-            emit_cursor(
+            EditorWindow::emit(g.entity, &mut edit, &vpc, &browsers, &mut commands);
+            EditorCursor::emit(
                 g.entity,
                 &mut edit,
                 keymap.0.as_ref(),
@@ -3490,8 +2963,8 @@ fn apply_pending_goto(
             edit.core.selections = vec![Selection { anchor: a, head: b }];
         }
         let vpc = *vp;
-        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-        emit_cursor(
+        EditorWindow::emit(entity, &mut edit, &vpc, &browsers, &mut commands);
+        EditorCursor::emit(
             entity,
             &mut edit,
             keymap.0.as_ref(),
@@ -3528,7 +3001,7 @@ fn on_file_pointer(
     if let Some(command) = keymap.0.pointer_selection_mode(p.extend) {
         edit.core.apply(command);
     }
-    emit_cursor(
+    EditorCursor::emit(
         entity,
         &mut edit,
         keymap.0.as_ref(),
@@ -5944,149 +5417,6 @@ mod page_open_tests {
 }
 
 #[cfg(test)]
-mod scrolled_cursor_tests {
-    use super::*;
-
-    impl ScrolledCursor {
-        fn at(cursor_line: usize, top_row: u32, rows: u16) -> (EditState, FileViewport) {
-            let text = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
-            let mut core = EditCore::new(
-                PathBuf::from("/tmp/scroll.rs"),
-                "Rust".into(),
-                &text,
-                crate::edit::EditMode::Normal,
-            );
-            core.set_caret(core.buffer.coords_to_char(cursor_line, 3));
-            let edit = EditState::new(
-                core,
-                HighlightCache::new(Path::new("/tmp/scroll.rs")),
-                crate::fold::FoldState::default(),
-            );
-            let viewport = FileViewport {
-                top_row,
-                rows,
-                wrap_columns: 0,
-                word_wrap: vmux_core::editor::WordWrap::Off,
-                word_wrap_column: 80,
-            };
-            (edit, viewport)
-        }
-
-        fn cursor_line(edit: &EditState) -> u32 {
-            edit.core.cursor_pos().line
-        }
-    }
-
-    #[test]
-    fn scrolling_past_the_caret_drags_it_to_the_top_edge() {
-        let (mut edit, vp) = ScrolledCursor::at(2, 10, 20);
-        assert!(ScrolledCursor::follow(&mut edit, &vp));
-        assert_eq!(ScrolledCursor::cursor_line(&edit), 10);
-    }
-
-    #[test]
-    fn scrolling_back_past_the_caret_drags_it_to_the_bottom_edge() {
-        let (mut edit, vp) = ScrolledCursor::at(30, 0, 20);
-        assert!(ScrolledCursor::follow(&mut edit, &vp));
-        assert_eq!(ScrolledCursor::cursor_line(&edit), 19);
-    }
-
-    #[test]
-    fn a_caret_still_on_screen_is_left_alone() {
-        let (mut edit, vp) = ScrolledCursor::at(12, 10, 20);
-        assert!(!ScrolledCursor::follow(&mut edit, &vp));
-        assert_eq!(ScrolledCursor::cursor_line(&edit), 12);
-    }
-
-    #[test]
-    fn a_dragged_caret_keeps_its_column() {
-        let (mut edit, vp) = ScrolledCursor::at(2, 10, 20);
-        ScrolledCursor::follow(&mut edit, &vp);
-        assert_eq!(edit.core.cursor_pos().col, 3);
-    }
-}
-
-#[cfg(test)]
-mod file_scroll_tests {
-    use super::*;
-
-    impl FileViewport {
-        fn scrolling(top_row: u32, rows: u16) -> (App, Entity) {
-            let text = (0..400).map(|i| format!("line {i}\n")).collect::<String>();
-            let path = PathBuf::from("/tmp/scroll-report.rs");
-            let core = EditCore::new(
-                path.clone(),
-                "Rust".into(),
-                &text,
-                crate::edit::EditMode::Normal,
-            );
-            let edit = EditState::new(
-                core,
-                HighlightCache::new(&path),
-                crate::fold::FoldState::default(),
-            );
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins).add_observer(on_file_scroll);
-            app.world_mut().insert_non_send(Browsers::default());
-            let entity = app
-                .world_mut()
-                .spawn((
-                    edit,
-                    FileViewport {
-                        top_row,
-                        rows,
-                        wrap_columns: 0,
-                        word_wrap: vmux_core::editor::WordWrap::Off,
-                        word_wrap_column: 80,
-                    },
-                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
-                ))
-                .id();
-            (app, entity)
-        }
-    }
-
-    #[test]
-    fn a_report_that_asks_for_no_rows_still_moves_the_host_viewport() {
-        let (mut app, entity) = FileViewport::scrolling(0, 40);
-        app.world_mut().trigger(BinReceive {
-            webview: entity,
-            payload: FileScrollEvent {
-                top_row: 120,
-                needs_rows: false,
-            },
-        });
-
-        assert_eq!(
-            app.world().get::<FileViewport>(entity).unwrap().top_row,
-            120
-        );
-        assert_eq!(
-            app.world().get::<EditState>(entity).unwrap().core.top_row,
-            120,
-            "screen-relative motions read core.top_row"
-        );
-    }
-
-    #[test]
-    fn a_report_past_the_end_is_clamped_to_the_last_screenful() {
-        let (mut app, entity) = FileViewport::scrolling(0, 40);
-        app.world_mut().trigger(BinReceive {
-            webview: entity,
-            payload: FileScrollEvent {
-                top_row: 9_000,
-                needs_rows: true,
-            },
-        });
-
-        assert_eq!(
-            app.world().get::<FileViewport>(entity).unwrap().top_row,
-            361
-        );
-    }
-}
-
-#[cfg(test)]
 mod parked_edit_tests {
     use super::*;
 
@@ -6822,102 +6152,6 @@ mod host_history_tests {
 
         assert_eq!(editor.showing(), "a.rs");
         assert_eq!(editor.top_row(), 120);
-    }
-}
-
-#[cfg(test)]
-mod editor_window_tests {
-    use super::*;
-
-    impl EditorWindow {
-        fn nested_file(lines: usize) -> EditState {
-            let mut text = String::new();
-            for i in 0..lines {
-                match i % 8 {
-                    0 => text.push_str(&format!("fn f{i}() {{\n")),
-                    7 => text.push_str("}\n"),
-                    _ => text.push_str(&format!("    let v{i} = {i};\n")),
-                }
-            }
-            let path = PathBuf::from("/tmp/window.rs");
-            let core = EditCore::new(
-                path.clone(),
-                "Rust".into(),
-                &text,
-                crate::edit::EditMode::Normal,
-            );
-            let mut folds = crate::fold::FoldState::default();
-            folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
-            let mut edit = EditState::new(core, HighlightCache::new(&path), folds);
-            sync_fold_view(&mut edit);
-            edit
-        }
-
-        fn scrolled(top_row: u32, wrap_columns: u16) -> FileViewport {
-            FileViewport {
-                top_row,
-                rows: 40,
-                wrap_columns,
-                word_wrap: vmux_core::editor::WordWrap::On,
-                word_wrap_column: 80,
-            }
-        }
-
-        fn paired(patch: &FileViewportPatch) -> bool {
-            patch.lines.len() == patch.layouts.len()
-                && std::iter::zip(&patch.lines, &patch.layouts)
-                    .all(|(line, layout)| line.line_no == layout.line_no)
-        }
-    }
-
-    #[test]
-    fn every_laid_out_row_carries_its_line_however_the_window_is_placed() {
-        for wrap_columns in [0u16, 12, 100] {
-            for collapsed in [false, true] {
-                let mut edit = EditorWindow::nested_file(400);
-                if collapsed {
-                    for header in (0..400).step_by(8) {
-                        edit.folds.close(header as u32);
-                    }
-                    sync_fold_view(&mut edit);
-                }
-                let rows =
-                    EditorWindow::render(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
-                        .total_rows;
-                for top in (0..rows + 40).step_by(11) {
-                    let patch =
-                        EditorWindow::render(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
-                    assert!(
-                        EditorWindow::paired(&patch),
-                        "cols {wrap_columns} collapsed {collapsed} top {top}: \
-                         {} layouts against {} lines",
-                        patch.layouts.len(),
-                        patch.lines.len()
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn opening_a_line_deep_in_the_file_keeps_the_window_whole() {
-        let mut edit = EditorWindow::nested_file(400);
-        let vp = EditorWindow::scrolled(300, 100);
-        let at = edit.core.buffer.coords_to_char(316, 0);
-        edit.core.set_caret(at);
-
-        for command in [
-            EditCommand::OpenLine { above: false },
-            EditCommand::InsertText("let inserted = 1;".into()),
-        ] {
-            edit.core.apply(command);
-            let (line, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
-            edit.hl.invalidate_from(line.saturating_sub(1));
-            edit.folds
-                .set_regions(crate::fold::indent_regions(&edit.core.buffer.rope));
-            sync_fold_view(&mut edit);
-            assert!(EditorWindow::paired(&EditorWindow::render(&mut edit, &vp)));
-        }
     }
 }
 

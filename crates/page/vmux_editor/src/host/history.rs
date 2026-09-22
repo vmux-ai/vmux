@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 
-use crate::host::plugin::{FileView, FileViewport};
+use crate::host::plugin::FileView;
+use crate::host::viewport::FileViewport;
 
 pub(crate) struct EditorHistoryPlugin;
 

@@ -5,9 +5,9 @@ use vmux_core::event::*;
 use crate::host::dir::parent_listing;
 use crate::host::note::{NoteRevealLine, NoteSent};
 use crate::host::plugin::{
-    EditState, EditorFileLoadedSet, EditorKeymap, FileBuffer, FileDir, FileView, FileViewport,
-    emit_cursor, emit_window,
+    EditState, EditorFileLoadedSet, EditorKeymap, FileBuffer, FileDir, FileView,
 };
+use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
 
 pub(crate) struct EditorStatusPlugin;
 
@@ -143,9 +143,9 @@ fn send_initial_text_meta(
             },
         ));
         if viewport.rows > 0 {
-            emit_window(entity, &mut edit, viewport, &browsers, &mut commands);
+            EditorWindow::emit(entity, &mut edit, viewport, &browsers, &mut commands);
         }
-        emit_cursor(
+        EditorCursor::emit(
             entity,
             &mut edit,
             keymap.0.as_ref(),

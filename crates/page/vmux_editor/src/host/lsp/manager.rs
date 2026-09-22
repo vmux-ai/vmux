@@ -947,7 +947,8 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::host::plugin::{EditState, FileView, FileViewport};
+use crate::host::plugin::{EditState, FileView};
+use crate::host::viewport::{EditorWindow, FileViewport};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -1195,13 +1196,7 @@ fn apply_semantic_tokens(
             .set_semantic(crate::lsp::semantic::SemanticHighlight::from(
                 message.tokens.clone(),
             ));
-        crate::host::plugin::repaint_window(
-            message.entity,
-            &mut edit,
-            vp,
-            &browsers,
-            &mut commands,
-        );
+        EditorWindow::emit(message.entity, &mut edit, vp, &browsers, &mut commands);
     }
 }
 

@@ -6,7 +6,8 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use crate::host::note::NoteRevealLine;
-use crate::host::plugin::{FileView, FileViewport};
+use crate::host::plugin::FileView;
+use crate::host::viewport::FileViewport;
 
 pub(crate) struct EditorNavigationPlugin;
 
