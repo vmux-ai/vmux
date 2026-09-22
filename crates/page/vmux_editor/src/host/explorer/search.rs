@@ -59,12 +59,6 @@ type GlobalSearchDirtyReady = (
     With<GlobalSearchDirty>,
     With<vmux_core::page::PageReady>,
 );
-type NavigableFileView = (
-    &'static mut FileView,
-    &'static mut FileViewport,
-    &'static mut PageMetadata,
-);
-
 fn on_explorer_goto(
     trigger: On<BinReceive<ExplorerGoto>>,
     views: Query<&FileView>,
@@ -155,7 +149,7 @@ fn emit_global_search(
 
 fn on_explorer_search_open(
     trigger: On<BinReceive<ExplorerSearchOpen>>,
-    mut views: Query<NavigableFileView>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {

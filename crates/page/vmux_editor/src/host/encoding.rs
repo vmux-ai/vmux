@@ -19,12 +19,10 @@ impl Plugin for EditorEncodingPlugin {
     }
 }
 
-type EncodingTarget = (&'static FileView, Option<&'static mut Editor>);
-
 #[allow(clippy::too_many_arguments)]
 fn on_file_encoding_set(
     trigger: On<BinReceive<FileEncodingSet>>,
-    mut views: Query<EncodingTarget>,
+    mut views: Query<(&FileView, Option<&mut Editor>)>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

@@ -261,15 +261,17 @@ type UnloadedFileView = (
     Without<FileLoadTask>,
 );
 
-type UnloadedFile = (
-    Entity,
-    &'static FileView,
-    Option<&'static mut ParkedEdits>,
-    Option<&'static ForcedEncoding>,
-);
-
+#[allow(clippy::type_complexity)]
 fn load_file_buffers(
-    mut files: Query<UnloadedFile, UnloadedFileView>,
+    mut files: Query<
+        (
+            Entity,
+            &FileView,
+            Option<&mut ParkedEdits>,
+            Option<&ForcedEncoding>,
+        ),
+        UnloadedFileView,
+    >,
     settings: Option<Res<vmux_setting::AppSettings>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
