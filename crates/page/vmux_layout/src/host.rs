@@ -35,6 +35,7 @@ pub mod worktree;
 mod header;
 mod swap;
 mod webview_reveal;
+mod zoom;
 
 pub use cef::{
     Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
