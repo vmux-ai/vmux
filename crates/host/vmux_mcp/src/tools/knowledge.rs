@@ -1,10 +1,10 @@
 use super::{
     DispatchTarget, ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution,
-    ToolManifest, ToolRegistrationSet,
+    ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
-use serde::Deserialize;
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 pub(super) struct KnowledgeToolsPlugin;
@@ -27,33 +27,20 @@ impl Plugin for KnowledgeToolsPlugin {
     }
 }
 
-#[derive(Component)]
-struct VaultStatus;
+#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum KnowledgeTool {
+    VaultStatus,
+    OpenVault,
+    SetConversationTitle,
+    SearchKnowledge,
+    ReadKnowledge,
+    WriteKnowledge,
+}
 
-#[derive(Component)]
-struct OpenVault;
-
-#[derive(Component)]
-struct SetConversationTitle;
-
-#[derive(Component)]
-struct SearchKnowledge;
-
-#[derive(Component)]
-struct ReadKnowledge;
-
-#[derive(Component)]
-struct WriteKnowledge;
-
-fn register(world: &mut World) {
-    let mut tools = ToolManifest::from_ron(include_str!("knowledge.ron"));
-    tools.system(world, "vault_status", VaultStatus);
-    tools.system(world, "open_vault", OpenVault);
-    tools.system(world, "set_conversation_title", SetConversationTitle);
-    tools.system(world, "search_knowledge", SearchKnowledge);
-    tools.system(world, "read_knowledge", ReadKnowledge);
-    tools.system(world, "write_knowledge", WriteKnowledge);
-    tools.finish();
+fn register(mut tools: ToolSpawner) {
+    let manifest = ToolManifest::<KnowledgeTool>::from_ron(include_str!("knowledge.ron"));
+    tools.spawn_manifest(manifest);
 }
 
 #[derive(Deserialize)]
@@ -94,8 +81,8 @@ struct WriteArgs {
     content: Option<String>,
 }
 
-fn vault_status(mut commands: Commands, calls: ToolCalls<VaultStatus>) {
-    for (request, call, _) in calls.iter() {
+fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
+    for (request, call, _) in calls.matching(KnowledgeTool::VaultStatus) {
         call.finish(
             request,
             &mut commands,
@@ -108,7 +95,7 @@ fn vault_status(mut commands: Commands, calls: ToolCalls<VaultStatus>) {
     }
 }
 
-fn open_vault(mut commands: Commands, calls: ToolCalls<OpenVault>) {
+fn open_vault(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_vault")?;
         let args: OpenVaultArgs = call.parse("open_vault")?;
@@ -125,12 +112,12 @@ fn open_vault(mut commands: Commands, calls: ToolCalls<OpenVault>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(KnowledgeTool::OpenVault) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn set_conversation_title(mut commands: Commands, calls: ToolCalls<SetConversationTitle>) {
+fn set_conversation_title(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("set_conversation_title")?;
         let args: SetConversationTitleArgs = call.parse("set_conversation_title")?;
@@ -143,12 +130,12 @@ fn set_conversation_title(mut commands: Commands, calls: ToolCalls<SetConversati
         ))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(KnowledgeTool::SetConversationTitle) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn search(mut commands: Commands, calls: ToolCalls<SearchKnowledge>) {
+fn search(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("search_knowledge")?;
         let args: SearchArgs = call.parse("search_knowledge")?;
@@ -164,12 +151,12 @@ fn search(mut commands: Commands, calls: ToolCalls<SearchKnowledge>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(KnowledgeTool::SearchKnowledge) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn read(mut commands: Commands, calls: ToolCalls<ReadKnowledge>) {
+fn read(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("read_knowledge")?;
         let args: ReadArgs = call.parse("read_knowledge")?;
@@ -190,12 +177,12 @@ fn read(mut commands: Commands, calls: ToolCalls<ReadKnowledge>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(KnowledgeTool::ReadKnowledge) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn write(mut commands: Commands, calls: ToolCalls<WriteKnowledge>) {
+fn write(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("write_knowledge")?;
         let args: WriteArgs = call.parse("write_knowledge")?;
@@ -210,7 +197,7 @@ fn write(mut commands: Commands, calls: ToolCalls<WriteKnowledge>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(KnowledgeTool::WriteKnowledge) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }

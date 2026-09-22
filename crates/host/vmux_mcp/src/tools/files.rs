@@ -1,8 +1,10 @@
 use super::{
     ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest, ToolRegistrationSet,
+    ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use serde::{Deserialize, Serialize};
 
 pub(super) struct FileToolsPlugin;
 
@@ -13,21 +15,20 @@ impl Plugin for FileToolsPlugin {
     }
 }
 
-#[derive(Component)]
-struct ReadFile;
-
-#[derive(Component)]
-struct Grep;
-
-fn register(world: &mut World) {
-    let mut tools = ToolManifest::from_ron(include_str!("files.ron"));
-    tools.system(world, "read_file", ReadFile);
-    tools.system(world, "grep", Grep);
-    tools.finish();
+#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FileTool {
+    ReadFile,
+    Grep,
 }
 
-fn read_file(mut commands: Commands, calls: ToolCalls<ReadFile>) {
-    for (request, call, _) in calls.iter() {
+fn register(mut tools: ToolSpawner) {
+    let manifest = ToolManifest::<FileTool>::from_ron(include_str!("files.ron"));
+    tools.spawn_manifest(manifest);
+}
+
+fn read_file(mut commands: Commands, calls: ToolCalls<FileTool>) {
+    for (request, call, _) in calls.matching(FileTool::ReadFile) {
         call.finish(
             request,
             &mut commands,
@@ -40,8 +41,8 @@ fn read_file(mut commands: Commands, calls: ToolCalls<ReadFile>) {
     }
 }
 
-fn grep(mut commands: Commands, calls: ToolCalls<Grep>) {
-    for (request, call, _) in calls.iter() {
+fn grep(mut commands: Commands, calls: ToolCalls<FileTool>) {
+    for (request, call, _) in calls.matching(FileTool::Grep) {
         call.finish(
             request,
             &mut commands,

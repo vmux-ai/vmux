@@ -1,9 +1,10 @@
 use super::{
     DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs, World};
-use serde::Deserialize;
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
 
 pub(super) struct VisualToolsPlugin;
@@ -31,53 +32,25 @@ impl Plugin for VisualToolsPlugin {
     }
 }
 
-#[derive(Component)]
-struct Screenshot;
+#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum VisualTool {
+    Screenshot,
+    SimulatorScreenshot,
+    SimulatorTap,
+    SimulatorSwipe,
+    SimulatorType,
+    SimulatorKey,
+    SimulatorButton,
+    BrowserSnapshot,
+    BrowserScroll,
+    RecordStart,
+    RecordStop,
+}
 
-#[derive(Component)]
-struct SimulatorScreenshot;
-
-#[derive(Component)]
-struct SimulatorTap;
-
-#[derive(Component)]
-struct SimulatorSwipe;
-
-#[derive(Component)]
-struct SimulatorType;
-
-#[derive(Component)]
-struct SimulatorKey;
-
-#[derive(Component)]
-struct SimulatorButtonTool;
-
-#[derive(Component)]
-struct BrowserSnapshot;
-
-#[derive(Component)]
-struct BrowserScroll;
-
-#[derive(Component)]
-struct RecordStart;
-
-#[derive(Component)]
-struct RecordStop;
-
-fn register(world: &mut World) {
-    let mut tools = ToolManifest::from_ron(include_str!("visual.ron"));
-    tools.system(world, "screenshot", Screenshot);
-    tools.system(world, "simulator_screenshot", SimulatorScreenshot);
-    tools.system(world, "simulator_tap", SimulatorTap);
-    tools.system(world, "simulator_swipe", SimulatorSwipe);
-    tools.system(world, "simulator_type", SimulatorType);
-    tools.system(world, "simulator_key", SimulatorKey);
-    tools.system(world, "simulator_button", SimulatorButtonTool);
-    tools.system(world, "browser_snapshot", BrowserSnapshot);
-    tools.system(world, "browser_scroll", BrowserScroll);
-    tools.system(world, "record_start", RecordStart);
-    tools.system(world, "record_stop", RecordStop);
-    tools.finish();
+fn register(mut tools: ToolSpawner) {
+    let manifest = ToolManifest::<VisualTool>::from_ron(include_str!("visual.ron"));
+    tools.spawn_manifest(manifest);
 }
 
 #[derive(Deserialize)]
@@ -175,7 +148,7 @@ struct RecordStopArgs {
     name: Option<String>,
 }
 
-fn screenshot(mut commands: Commands, calls: ToolCalls<Screenshot>) {
+fn screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: ScreenshotArgs = call.parse("screenshot")?;
         Ok(DispatchTarget::Query(AgentQuery::Screenshot {
@@ -183,13 +156,13 @@ fn screenshot(mut commands: Commands, calls: ToolCalls<Screenshot>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::Screenshot) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<SimulatorScreenshot>) {
-    for (request, call, _) in calls.iter() {
+fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorScreenshot) {
         call.finish_dispatch(
             request,
             &mut commands,
@@ -198,7 +171,7 @@ fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<SimulatorScreen
     }
 }
 
-fn simulator_tap(mut commands: Commands, calls: ToolCalls<SimulatorTap>) {
+fn simulator_tap(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorTapArgs = call.parse("simulator_tap")?;
         Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
@@ -209,12 +182,12 @@ fn simulator_tap(mut commands: Commands, calls: ToolCalls<SimulatorTap>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorTap) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn simulator_swipe(mut commands: Commands, calls: ToolCalls<SimulatorSwipe>) {
+fn simulator_swipe(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorSwipeArgs = call.parse("simulator_swipe")?;
         let duration_ms = args.duration_ms.unwrap_or(300);
@@ -232,12 +205,12 @@ fn simulator_swipe(mut commands: Commands, calls: ToolCalls<SimulatorSwipe>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorSwipe) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn simulator_type(mut commands: Commands, calls: ToolCalls<SimulatorType>) {
+fn simulator_type(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorTypeArgs = call.parse("simulator_type")?;
         let text = args
@@ -249,12 +222,12 @@ fn simulator_type(mut commands: Commands, calls: ToolCalls<SimulatorType>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorType) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn simulator_key(mut commands: Commands, calls: ToolCalls<SimulatorKey>) {
+fn simulator_key(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorKeyArgs = call.parse("simulator_key")?;
         let keycode = u8::try_from(args.keycode)
@@ -264,12 +237,12 @@ fn simulator_key(mut commands: Commands, calls: ToolCalls<SimulatorKey>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorKey) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn simulator_button(mut commands: Commands, calls: ToolCalls<SimulatorButtonTool>) {
+fn simulator_button(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorButtonArgs = call.parse("simulator_button")?;
         Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
@@ -277,12 +250,12 @@ fn simulator_button(mut commands: Commands, calls: ToolCalls<SimulatorButtonTool
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::SimulatorButton) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn browser_snapshot(mut commands: Commands, calls: ToolCalls<BrowserSnapshot>) {
+fn browser_snapshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         if call
             .arguments
@@ -298,12 +271,12 @@ fn browser_snapshot(mut commands: Commands, calls: ToolCalls<BrowserSnapshot>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::BrowserSnapshot) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn browser_scroll(mut commands: Commands, calls: ToolCalls<BrowserScroll>) {
+fn browser_scroll(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         if call
             .arguments
@@ -330,12 +303,12 @@ fn browser_scroll(mut commands: Commands, calls: ToolCalls<BrowserScroll>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::BrowserScroll) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn record_start(mut commands: Commands, calls: ToolCalls<RecordStart>) {
+fn record_start(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: RecordStartArgs = call.parse("record_start")?;
         Ok(DispatchTarget::Query(AgentQuery::RecordStart {
@@ -345,12 +318,12 @@ fn record_start(mut commands: Commands, calls: ToolCalls<RecordStart>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::RecordStart) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }
 
-fn record_stop(mut commands: Commands, calls: ToolCalls<RecordStop>) {
+fn record_stop(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: RecordStopArgs = call.parse("record_stop")?;
         Ok(DispatchTarget::Query(AgentQuery::RecordStop {
@@ -359,7 +332,7 @@ fn record_stop(mut commands: Commands, calls: ToolCalls<RecordStop>) {
         }))
     }
 
-    for (request, call, _) in calls.iter() {
+    for (request, call, _) in calls.matching(VisualTool::RecordStop) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }

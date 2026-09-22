@@ -308,12 +308,28 @@ impl<'w, 's, T: Component> ToolCalls<'w, 's, T> {
                 .map(|tool| (request, call, tool))
         })
     }
+
+    pub(super) fn matching(&self, kind: T) -> impl Iterator<Item = (Entity, &ToolCall, &T)>
+    where
+        T: Copy + PartialEq,
+    {
+        self.iter().filter(move |(_, _, tool)| **tool == kind)
+    }
+}
+
+pub(super) struct ToolSeed {
+    name: String,
+    aliases: Vec<String>,
+    description: String,
+    input_schema: Value,
+    availability: ToolAvailability,
+    shell_aware: bool,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ToolSeed {
-    name: String,
+struct ToolEntry<K> {
+    kind: K,
     #[serde(default)]
     aliases: Vec<String>,
     description: String,
@@ -322,6 +338,27 @@ pub(super) struct ToolSeed {
     availability: ToolAvailability,
     #[serde(default)]
     shell_aware: bool,
+}
+
+impl<K: Component + Serialize> ToolEntry<K> {
+    fn into_seed(self) -> (ToolSeed, K) {
+        let Value::String(name) =
+            serde_json::to_value(&self.kind).expect("MCP tool kind must serialize")
+        else {
+            panic!("MCP tool kind must serialize as a string")
+        };
+        (
+            ToolSeed {
+                name,
+                aliases: self.aliases,
+                description: self.description,
+                input_schema: self.input_schema,
+                availability: self.availability,
+                shell_aware: self.shell_aware,
+            },
+            self.kind,
+        )
+    }
 }
 
 impl ToolSeed {
@@ -339,64 +376,52 @@ impl ToolSeed {
             shell_aware: false,
         }
     }
-
-    pub(super) fn system<T: Component>(self, world: &mut World, marker: T) {
-        self.spawn(world).insert(marker);
-    }
-
-    fn spawn(self, world: &mut World) -> EntityWorldMut<'_> {
-        let order = {
-            let mut next = world.resource_mut::<NextToolOrder>();
-            let order = next.0;
-            next.0 += 1;
-            order
-        };
-        let mut entity = world.spawn((
-            McpTool,
-            Name::new(self.name),
-            ToolAliases(self.aliases),
-            ToolDescription(self.description),
-            ToolInputSchema(self.input_schema),
-            ToolAccess(self.availability),
-            ToolOrder(order),
-        ));
-        if self.shell_aware {
-            entity.insert(ShellAware);
-        }
-        entity
-    }
 }
 
-pub(super) struct ToolManifest(Vec<ToolSeed>);
+pub(super) struct ToolManifest<K>(Vec<ToolEntry<K>>);
 
-impl ToolManifest {
+impl<K> ToolManifest<K>
+where
+    K: Component + serde::de::DeserializeOwned + Serialize,
+{
     pub(super) fn from_ron(source: &str) -> Self {
         Self(ron::from_str(source).expect("embedded MCP tool definitions must be valid RON"))
     }
+}
 
-    pub(super) fn system<T: Component>(&mut self, world: &mut World, name: &str, marker: T) {
-        self.take(name).system(world, marker);
+#[derive(bevy_ecs::system::SystemParam)]
+pub(super) struct ToolSpawner<'w, 's> {
+    commands: Commands<'w, 's>,
+    next_order: ResMut<'w, NextToolOrder>,
+}
+
+impl ToolSpawner<'_, '_> {
+    pub(super) fn spawn_manifest<K>(&mut self, manifest: ToolManifest<K>)
+    where
+        K: Component + Serialize,
+    {
+        for entry in manifest.0 {
+            let (seed, kind) = entry.into_seed();
+            self.spawn(seed, kind);
+        }
     }
 
-    pub(super) fn finish(self) {
-        assert!(
-            self.0.is_empty(),
-            "MCP tool definitions without handlers: {}",
-            self.0
-                .iter()
-                .map(|tool| tool.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-
-    fn take(&mut self, name: &str) -> ToolSeed {
-        let index = self
-            .0
-            .iter()
-            .position(|tool| tool.name == name)
-            .unwrap_or_else(|| panic!("missing MCP tool definition: {name}"));
-        self.0.remove(index)
+    fn spawn<T: Component>(&mut self, seed: ToolSeed, marker: T) {
+        let order = self.next_order.0;
+        self.next_order.0 += 1;
+        let mut entity = self.commands.spawn((
+            McpTool,
+            Name::new(seed.name),
+            ToolAliases(seed.aliases),
+            ToolDescription(seed.description),
+            ToolInputSchema(seed.input_schema),
+            ToolAccess(seed.availability),
+            ToolOrder(order),
+            marker,
+        ));
+        if seed.shell_aware {
+            entity.insert(ShellAware);
+        }
     }
 }
 
@@ -409,12 +434,15 @@ struct GeneratedCommandTool;
 struct ParamTool;
 
 impl GeneratedTools {
-    fn register(world: &mut World) {
+    fn register(mut tools: ToolSpawner) {
         for (name, description, schema) in vmux_command_mcp::tool_entries() {
-            ToolSeed::new(name, description, schema).system(world, GeneratedCommandTool);
+            tools.spawn(
+                ToolSeed::new(name, description, schema),
+                GeneratedCommandTool,
+            );
         }
         for (name, description, schema) in McpParamTool::mcp_tool_entries() {
-            ToolSeed::new(name, description, schema).system(world, ParamTool);
+            tools.spawn(ToolSeed::new(name, description, schema), ParamTool);
         }
     }
 
