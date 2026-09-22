@@ -51,7 +51,7 @@ impl CommandBarQuery<'_> {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "path", name = "complete_request", targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteRequest {
     pub query: String,
 }
@@ -87,7 +87,7 @@ pub struct PathEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "path", name = "complete_response", targets = ["command-bar", "start", "layout"])]
+#[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
     pub truncated: bool,

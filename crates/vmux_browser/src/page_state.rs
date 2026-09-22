@@ -795,7 +795,7 @@ fn push_bookmarks_host_emit(
     }
 
     let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
-        vmux_layout::event::BookmarkRow {
+        vmux_api::bookmark::BookmarkRow {
             uuid: uuid.0.clone(),
             metadata: meta.clone(),
             bookmarked,
@@ -803,15 +803,15 @@ fn push_bookmarks_host_emit(
         }
     };
 
-    let mut pin_entries: Vec<(u32, vmux_layout::event::BookmarkRow)> = pins
+    let mut pin_entries: Vec<(u32, vmux_api::bookmark::BookmarkRow)> = pins
         .iter()
         .map(|(u, m, o, bookmarked)| (o.0, row(u, m, bookmarked, true)))
         .collect();
     pin_entries.sort_by_key(|(order, _)| *order);
-    let pin_rows: Vec<vmux_layout::event::BookmarkRow> =
+    let pin_rows: Vec<vmux_api::bookmark::BookmarkRow> =
         pin_entries.into_iter().map(|(_, r)| r).collect();
 
-    let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
+    let mut roots: Vec<(u32, vmux_api::bookmark::BookmarkNode)> = Vec::new();
     for (_, uuid, name, children, collapsed, smart, order, parent) in folders.iter() {
         if smart.is_some() {
             continue;
@@ -833,7 +833,7 @@ fn push_bookmarks_host_emit(
         });
         roots.push((
             order.0,
-            vmux_layout::event::BookmarkNode::Folder(vmux_layout::event::FolderRow {
+            vmux_api::bookmark::BookmarkNode::Folder(vmux_api::bookmark::BookmarkFolderRow {
                 uuid: uuid.0.clone(),
                 name: name.as_str().to_string(),
                 collapsed,
@@ -845,13 +845,13 @@ fn push_bookmarks_host_emit(
     for (uuid, meta, order, pinned) in top_bookmarks.iter() {
         roots.push((
             order.0,
-            vmux_layout::event::BookmarkNode::Entry(row(uuid, meta, true, pinned)),
+            vmux_api::bookmark::BookmarkNode::Entry(row(uuid, meta, true, pinned)),
         ));
     }
     roots.sort_by_key(|(o, _)| *o);
-    let roots: Vec<vmux_layout::event::BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
+    let roots: Vec<vmux_api::bookmark::BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
 
-    let payload = vmux_layout::event::BookmarksHostEvent {
+    let payload = vmux_api::bookmark::BookmarkStateEvent {
         pins: pin_rows,
         roots,
     };

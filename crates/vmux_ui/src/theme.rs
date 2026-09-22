@@ -9,7 +9,7 @@
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "theme", target = any)]
+#[vmux_api::host_event(target = any)]
 pub struct ThemeEvent {
     pub radius: f32,
     pub locale: String,

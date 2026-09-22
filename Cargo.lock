@@ -10647,6 +10647,7 @@ dependencies = [
 name = "vmux_macro"
 version = "0.0.34"
 dependencies = [
+ "heck 0.5.0",
  "muda 0.19.2",
  "proc-macro2",
  "quote",

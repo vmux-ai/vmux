@@ -1,86 +1,5 @@
 pub use vmux_api::command_bar::*;
 
-use vmux_core::PageMetadata;
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::ui_event(namespace = "bookmark", name = "request", target = "layout")]
-pub enum BookmarkRequest {
-    ToggleActive,
-    MenuRoot,
-    MenuPin {
-        uuid: String,
-    },
-    MenuBookmark {
-        uuid: String,
-    },
-    MenuFolder {
-        uuid: String,
-        active_page: Option<PageMetadata>,
-    },
-    Open {
-        url: String,
-    },
-    Add {
-        metadata: PageMetadata,
-        folder: Option<String>,
-    },
-    PinUrl {
-        metadata: PageMetadata,
-    },
-    Remove {
-        uuid: String,
-    },
-    Rename {
-        uuid: String,
-        name: String,
-    },
-    Move {
-        uuid: String,
-        folder: Option<String>,
-    },
-    MovePin {
-        uuid: String,
-        folder: Option<String>,
-    },
-    ReorderPin {
-        uuid: String,
-        target_uuid: String,
-    },
-    Pin {
-        uuid: String,
-    },
-    Unpin {
-        uuid: String,
-    },
-    ToggleFolder {
-        uuid: String,
-    },
-    CreateFolder {
-        name: String,
-        parent: Option<String>,
-    },
-    MoveFolder {
-        uuid: String,
-        parent: Option<String>,
-    },
-    RenameFolder {
-        uuid: String,
-        name: String,
-    },
-    RemoveFolder {
-        uuid: String,
-    },
-}
-
 #[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
@@ -98,7 +17,7 @@ pub struct SearchEngineSetting(pub SearchEngine);
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "command_bar", name = "panel_close", target = "layout")]
+#[vmux_api::host_event(target = "layout")]
 pub struct CommandBarPanelCloseEvent;
 
 #[derive(
@@ -157,7 +76,7 @@ pub fn clamp_panel_placement(
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "command_bar", name = "panel_request", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct CommandBarPanelRequest {
     pub active: bool,
 }

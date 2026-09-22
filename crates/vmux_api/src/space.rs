@@ -13,7 +13,7 @@ pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "space", name = "key", targets = ["spaces", "layout"])]
+#[vmux_api::host_event(targets = ["spaces", "layout"])]
 pub enum SpaceKey {
     Next,
     Previous,
@@ -33,7 +33,7 @@ pub enum SpaceKey {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "spaces", name = "list", targets = ["spaces", "layout"])]
+#[vmux_api::host_event(targets = ["spaces", "layout"])]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
 }
@@ -71,7 +71,7 @@ pub struct SpaceRow {
     rkyv::Deserialize,
 )]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
-#[vmux_api::ui_event(namespace = "space", name = "request", targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(targets = ["spaces", "layout"])]
 pub enum SpaceRequest {
     OpenPage,
     Attach { space_id: String },
@@ -90,7 +90,7 @@ pub enum SpaceRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "project", name = "request", targets = ["spaces", "layout", "git"])]
+#[vmux_api::ui_event(targets = ["spaces", "layout", "git"])]
 pub struct ProjectRequest {
     pub command: String,
     #[serde(default)]
@@ -166,7 +166,7 @@ impl ProjectRowKind {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "project", name = "tree_toggle", target = "layout")]
+#[vmux_api::ui_event(target = "layout")]
 pub struct ProjectTreeToggle {
     pub path: String,
     #[serde(default)]

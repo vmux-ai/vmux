@@ -60,7 +60,7 @@ fn set_capture_target(target: Option<ShortcutCaptureToken>) {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "shortcut", name = "capture", target = "shortcuts")]
+#[vmux_api::ui_event(target = "shortcuts")]
 pub struct ShortcutCaptureEvent {
     pub active: bool,
 }
@@ -78,7 +78,7 @@ pub struct ShortcutCaptureEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "shortcut-capture-state", target = "shortcuts")]
+#[vmux_api::host_event(target = "shortcuts")]
 pub struct ShortcutCaptureStateEvent {
     pub active: bool,
 }
@@ -95,7 +95,7 @@ pub struct ShortcutCaptureStateEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "shortcut-pressed", target = "shortcuts")]
+#[vmux_api::host_event(target = "shortcuts")]
 pub struct ShortcutPressedEvent {
     pub stroke: ShortcutStroke,
     pub pressed_at_ms: i64,
@@ -113,7 +113,7 @@ pub struct ShortcutPressedEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "shortcuts", target = "shortcuts")]
+#[vmux_api::host_event(target = "shortcuts")]
 pub struct ShortcutsEvent {
     pub groups: Vec<ShortcutGroup>,
     pub chord_timeout_ms: u64,

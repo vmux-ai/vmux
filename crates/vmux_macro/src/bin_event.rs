@@ -1,12 +1,11 @@
+use heck::{ToSnakeCase, ToUpperCamelCase};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{DeriveInput, Ident, LitInt, LitStr, Token, bracketed};
 
 mod keyword {
     syn::custom_keyword!(any);
-    syn::custom_keyword!(name);
-    syn::custom_keyword!(namespace);
     syn::custom_keyword!(target);
     syn::custom_keyword!(targets);
     syn::custom_keyword!(version);
@@ -25,35 +24,17 @@ enum Target {
 }
 
 struct Args {
-    namespace: Option<LitStr>,
-    name: LitStr,
     version: Option<LitInt>,
     target: Target,
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut name: Option<LitStr> = None;
-        let mut namespace: Option<LitStr> = None;
         let mut version: Option<LitInt> = None;
         let mut target: Option<Target> = None;
 
         while !input.is_empty() {
-            if input.peek(keyword::namespace) {
-                let key: keyword::namespace = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if namespace.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate namespace"));
-                }
-                namespace = Some(input.parse()?);
-            } else if input.peek(keyword::name) {
-                let key: keyword::name = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if name.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate name"));
-                }
-                name = Some(input.parse()?);
-            } else if input.peek(keyword::version) {
+            if input.peek(keyword::version) {
                 let key: keyword::version = input.parse()?;
                 input.parse::<Token![=]>()?;
                 if version.is_some() {
@@ -94,29 +75,22 @@ impl Parse for Args {
             }
         }
 
-        let name = name.ok_or_else(|| input.error("missing name"))?;
-        let target = target.ok_or_else(|| syn::Error::new(name.span(), "missing target"))?;
-        Ok(Self {
-            namespace,
-            name,
-            version,
-            target,
-        })
+        let target = target.ok_or_else(|| input.error("missing target"))?;
+        Ok(Self { version, target })
     }
 }
 
-fn validate_id_component(label: &str, value: &LitStr) -> syn::Result<()> {
-    let component = value.value();
-    if component.is_empty() {
-        return Err(syn::Error::new(value.span(), format!("empty {label}")));
-    }
-    if component.contains('.') || component.contains('@') {
-        return Err(syn::Error::new(
-            value.span(),
-            format!("{label} cannot contain `.` or `@`"),
-        ));
-    }
-    Ok(())
+fn inferred_event_parts(ident: &Ident) -> (LitStr, LitStr) {
+    let snake = ident.to_string().to_snake_case();
+    let stem = snake
+        .strip_suffix("_request")
+        .or_else(|| snake.strip_suffix("_event"))
+        .unwrap_or(&snake);
+    let family = stem.split_once('_').map_or(stem, |(family, _)| family);
+    (
+        LitStr::new(family, ident.span()),
+        LitStr::new(stem, ident.span()),
+    )
 }
 
 pub(crate) fn expand(
@@ -124,17 +98,9 @@ pub(crate) fn expand(
     input: DeriveInput,
     direction: Direction,
 ) -> syn::Result<TokenStream> {
-    let Args {
-        namespace,
-        name,
-        version,
-        target,
-    } = syn::parse2(args)?;
-    validate_id_component("name", &name)?;
-    if let Some(namespace) = &namespace {
-        validate_id_component("namespace", namespace)?;
-    }
+    let Args { version, target } = syn::parse2(args)?;
     let ident = &input.ident;
+    let (_, name) = inferred_event_parts(ident);
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let version_value = version
@@ -142,16 +108,10 @@ pub(crate) fn expand(
         .map(LitInt::base10_parse::<u16>)
         .transpose()?
         .unwrap_or(1);
-    let id = match &namespace {
-        Some(namespace) => format!("{}.{}@{version_value}", namespace.value(), name.value()),
-        None => format!("{}@{version_value}", name.value()),
-    };
+    let id = format!("{}@{version_value}", name.value());
     let id = LitStr::new(&id, name.span());
     let version = version
         .map(|version| quote! { const VERSION: u16 = #version; })
-        .unwrap_or_default();
-    let namespace = namespace
-        .map(|namespace| quote! { const NAMESPACE: &'static str = #namespace; })
         .unwrap_or_default();
     let target = match target {
         Target::Any => quote! { ::vmux_api::BinEventTarget::Any },
@@ -176,7 +136,6 @@ pub(crate) fn expand(
 
         impl #impl_generics ::vmux_api::BinEvent for #ident #type_generics #where_clause {
             const ID: &'static str = #id;
-            #namespace
             const NAME: &'static str = #name;
             #version
             const TARGET: ::vmux_api::BinEventTarget = #target;
@@ -184,4 +143,58 @@ pub(crate) fn expand(
 
         #direction_impl
     })
+}
+
+pub(crate) fn derive(input: DeriveInput, direction: Direction) -> syn::Result<TokenStream> {
+    let ident = &input.ident;
+    let generics = &input.generics;
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let (family_name, name) = inferred_event_parts(ident);
+    let family = format_ident!("{}Events", family_name.value().to_upper_camel_case());
+    let id = LitStr::new(&format!("{}@1", name.value()), ident.span());
+    let direction_impl = match direction {
+        Direction::Host => quote! {
+            impl #impl_generics ::vmux_api::HostEvent for #ident #type_generics #where_clause {}
+        },
+        Direction::Ui => quote! {
+            impl #impl_generics ::vmux_api::UiEvent for #ident #type_generics #where_clause {}
+        },
+        Direction::Both => quote! {
+            impl #impl_generics ::vmux_api::HostEvent for #ident #type_generics #where_clause {}
+            impl #impl_generics ::vmux_api::UiEvent for #ident #type_generics #where_clause {}
+        },
+    };
+
+    Ok(quote! {
+        impl #impl_generics ::vmux_api::BinEvent for #ident #type_generics #where_clause {
+            const ID: &'static str = #id;
+            const NAME: &'static str = #name;
+            const TARGET: ::vmux_api::BinEventTarget =
+                <#family as ::vmux_api::BinEventFamily>::TARGET;
+        }
+
+        #direction_impl
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proc_macro2::Span;
+
+    #[test]
+    fn request_type_infers_family_and_name() {
+        let ident = Ident::new("BookmarkMenuPinRequest", Span::call_site());
+        let (family, name) = inferred_event_parts(&ident);
+        assert_eq!(family.value(), "bookmark");
+        assert_eq!(name.value(), "bookmark_menu_pin");
+    }
+
+    #[test]
+    fn event_type_infers_family_and_name() {
+        let ident = Ident::new("EditorPageEvent", Span::call_site());
+        let (family, name) = inferred_event_parts(&ident);
+        assert_eq!(family.value(), "editor");
+        assert_eq!(name.value(), "editor_page");
+    }
 }

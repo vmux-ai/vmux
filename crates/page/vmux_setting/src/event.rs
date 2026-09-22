@@ -12,7 +12,7 @@ pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(name = "check_for_updates", target = "settings")]
+#[vmux_api::ui_event(target = "settings")]
 pub struct CheckForUpdatesEvent;
 
 #[derive(
@@ -57,7 +57,7 @@ pub enum UpdateCheckStatus {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "update", name = "check_status", target = "settings")]
+#[vmux_api::host_event(target = "settings")]
 pub struct UpdateCheckStatusEvent {
     pub status: UpdateCheckStatus,
 }
@@ -82,12 +82,7 @@ pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(
-    namespace = "settings",
-    name = "list",
-    version = 2,
-    target = "settings"
-)]
+#[vmux_api::host_event(version = 2, target = "settings")]
 pub struct SettingsListEvent {
     pub value: vmux_api::json::JsonValue,
 }
@@ -104,12 +99,7 @@ pub struct SettingsListEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(
-    namespace = "settings",
-    name = "request",
-    version = 2,
-    target = "settings"
-)]
+#[vmux_api::ui_event(version = 2, target = "settings")]
 pub struct SettingsRequest {
     pub path: String,
     pub value: vmux_api::json::JsonValue,
@@ -126,12 +116,7 @@ pub struct SettingsRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(
-    namespace = "settings",
-    name = "schema",
-    version = 2,
-    target = "settings"
-)]
+#[vmux_api::host_event(version = 2, target = "settings")]
 pub struct SettingsSchemaEvent {
     pub schema: crate::schema::SettingsSchema,
 }

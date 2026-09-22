@@ -181,19 +181,19 @@ mod tests {
     use vmux_api::BinEvent;
 
     #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(name = "alpha", target = any)]
+    #[vmux_api::ui_event(target = any)]
     struct AlphaEvent {
         value: u32,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(name = "beta", target = any)]
+    #[vmux_api::ui_event(target = any)]
     struct BetaEvent {
         value: u32,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(name = "restricted", target = "allowed")]
+    #[vmux_api::ui_event(target = "allowed")]
     struct RestrictedEvent {
         value: u32,
     }

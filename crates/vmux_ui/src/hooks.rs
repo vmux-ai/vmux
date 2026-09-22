@@ -1,16 +1,16 @@
-mod use_event;
 #[cfg(ui)]
 mod use_key_claim;
 mod use_listener;
 mod use_selector;
 mod use_theme;
+mod use_ui_state;
 
-pub use use_event::use_event;
 #[cfg(ui)]
 pub use use_key_claim::{KeyClaim, use_key_claim};
 pub use use_listener::{BevyState, use_listener};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
+pub use use_ui_state::use_ui_state;
 
 pub use crate::transport;
 #[allow(unused_imports)]

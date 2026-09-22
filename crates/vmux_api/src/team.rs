@@ -12,7 +12,7 @@ pub const TEAM_PAGE_URL: &str = "vmux://team/";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(name = "team", targets = ["team", "layout", "spaces"])]
+#[vmux_api::host_event(targets = ["team", "layout", "spaces"])]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -80,7 +80,7 @@ pub struct TeamMemberRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "team", name = "request", targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(targets = ["team", "layout", "spaces"])]
 pub struct TeamRequest {
     pub command: String,
     #[serde(default)]

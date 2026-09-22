@@ -11,7 +11,7 @@ use super::CommandBarPick;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "command_bar", name = "request", targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
 pub enum CommandBarRequest {
     Prompt {
         text: String,
@@ -110,7 +110,7 @@ impl ExCommandName {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "start", name = "select_workspace", target = "start")]
+#[vmux_api::ui_event(target = "start")]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
 }
@@ -125,7 +125,7 @@ pub struct StartSelectWorkspace {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "start", name = "branches_request", target = "start")]
+#[vmux_api::ui_event(target = "start")]
 pub struct StartBranchesRequest {
     pub project: String,
 }
@@ -140,7 +140,7 @@ pub struct StartBranchesRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "start", name = "project_branches", target = "start")]
+#[vmux_api::host_event(target = "start")]
 pub struct StartProjectBranches {
     pub project: String,
     pub branches: Vec<crate::space::ProjectBranch>,
@@ -156,7 +156,7 @@ pub struct StartProjectBranches {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "start", name = "go_to_branch", target = "start")]
+#[vmux_api::ui_event(target = "start")]
 pub struct StartGoToBranch {
     pub project: String,
     pub branch: String,
@@ -210,7 +210,7 @@ pub struct AgentModes {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "start", name = "select_model", target = "start")]
+#[vmux_api::ui_event(target = "start")]
 pub struct StartSelectModel {
     pub agent_key: String,
     pub model_id: String,
@@ -226,7 +226,7 @@ pub struct StartSelectModel {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "start", name = "select_mode", target = "start")]
+#[vmux_api::ui_event(target = "start")]
 pub struct StartSelectMode {
     pub agent_key: String,
     pub mode_id: String,

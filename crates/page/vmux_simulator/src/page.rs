@@ -11,7 +11,7 @@ use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_event, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::script::PageScript;
@@ -19,7 +19,7 @@ use vmux_ui::script::PageScript;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_event::<SimulatorReady>(SimulatorReady::default);
+    let ready = use_ui_state::<SimulatorReady>();
     let route = try_consume_context::<vmux_core::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 

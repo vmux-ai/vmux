@@ -8,7 +8,7 @@
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "agent", name = "install_run_request", targets = ["agent", "agents"])]
+#[vmux_api::ui_event(targets = ["agent", "agents"])]
 pub struct AgentInstallRunRequest {
     pub agent: String,
 }
@@ -23,7 +23,7 @@ pub struct AgentInstallRunRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "agent", name = "setup_prereq_request", targets = ["agent", "agents"])]
+#[vmux_api::ui_event(targets = ["agent", "agents"])]
 pub struct AgentSetupPrereqRequest {
     pub agent: String,
 }
@@ -38,7 +38,7 @@ pub struct AgentSetupPrereqRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "agent", name = "setup_prereq", targets = ["agent", "agents"])]
+#[vmux_api::host_event(targets = ["agent", "agents"])]
 pub struct AgentSetupPrereqStatus {
     pub needs_homebrew: bool,
 }
@@ -53,7 +53,7 @@ pub struct AgentSetupPrereqStatus {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "agent", name = "setup_result", targets = ["agent", "agents"])]
+#[vmux_api::host_event(targets = ["agent", "agents"])]
 pub struct AgentSetupResult {
     pub agent: String,
     pub ok: bool,

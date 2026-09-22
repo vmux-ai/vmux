@@ -52,8 +52,6 @@ pub struct McpServerEntry {
     rkyv::Deserialize,
 )]
 #[vmux_api::host_event(
-    namespace = "mcp",
-    name = "servers",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServers {
@@ -73,8 +71,6 @@ pub struct McpServers {
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(
-    namespace = "mcp",
-    name = "servers_request",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServersRequest;
@@ -111,8 +107,6 @@ pub enum McpServerAction {
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(
-    namespace = "mcp",
-    name = "server_request",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServerRequest {
@@ -133,8 +127,6 @@ pub struct McpServerRequest {
     rkyv::Deserialize,
 )]
 #[vmux_api::host_event(
-    namespace = "mcp",
-    name = "server_result",
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServerResult {

@@ -9,7 +9,7 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
-use vmux_ui::hooks::{MenuDirection, send, use_event, use_key_claim, use_listener, use_theme};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
@@ -18,7 +18,7 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
-    let team = use_event::<TeamEvent>(TeamEvent::default);
+    let team = use_ui_state::<TeamEvent>();
 
     let _listener = use_listener::<SpacesListEvent, _>(move |data| {
         let active = data

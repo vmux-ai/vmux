@@ -10,7 +10,7 @@
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "vault", name = "snapshot", target = "vault")]
+#[vmux_api::host_event(target = "vault")]
 pub struct VaultSnapshot {
     pub root: String,
     pub initialized: bool,
@@ -61,7 +61,7 @@ pub struct VaultRepository {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "vault", name = "refresh_request", target = "vault")]
+#[vmux_api::ui_event(target = "vault")]
 pub struct VaultRefreshRequest {
     #[serde(default)]
     pub load_repositories: bool,
@@ -104,7 +104,7 @@ pub enum VaultAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::ui_event(namespace = "vault", name = "request", target = "vault")]
+#[vmux_api::ui_event(target = "vault")]
 pub struct VaultRequest {
     pub action: VaultAction,
     pub repository: String,
@@ -124,7 +124,7 @@ pub struct VaultRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "vault", name = "result", target = "vault")]
+#[vmux_api::host_event(target = "vault")]
 pub struct VaultResult {
     pub action: VaultAction,
     pub success: bool,
@@ -143,7 +143,7 @@ pub struct VaultResult {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(namespace = "vault", name = "auth_progress", target = "vault")]
+#[vmux_api::host_event(target = "vault")]
 pub struct VaultAuthProgress {
     pub code: String,
     pub url: String,
