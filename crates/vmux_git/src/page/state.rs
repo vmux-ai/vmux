@@ -5,8 +5,9 @@ use vmux_core::event::FileDirEntry;
 use vmux_core::event::{PageContextEvent, TabWorkspaceEvent};
 use vmux_ui::hooks::use_listener;
 
+use super::model::{BranchCollection, BranchPrompt, GitCommandLogEntry, GitPanel};
+use super::workspace::GitWorkspace;
 use crate::event::*;
-use crate::page::{BranchCollection, BranchPrompt, GitCommandLogEntry, GitPanel, GitWorkspace};
 use crate::view::EditorDiffMarker;
 
 #[derive(Clone, Copy)]
@@ -44,45 +45,45 @@ pub(super) struct GitPageState {
     pub(super) diff_viewport: Signal<Option<GitDiffViewportEvent>>,
 }
 
-pub(super) fn use_git_page_state() -> GitPageState {
-    let state = GitPageState {
-        workspace: use_signal(String::new),
-        repository: use_signal(|| None),
-        directory: use_signal(|| None),
-        directory_selected: use_signal(|| 0),
-        directory_children: use_signal(|| None),
-        directory_preview_path: use_signal(String::new),
-        directory_came_from: use_signal(String::new),
-        directory_show_hidden: use_signal(|| true),
-        selected_path: use_signal(String::new),
-        selected_path_bytes: use_signal(Vec::new),
-        selected_abs_path: use_signal(String::new),
-        selected_commit: use_signal(String::new),
-        selected_branch: use_signal(String::new),
-        branch_collection: use_signal(BranchCollection::default),
-        branch_prompt: use_signal(|| None),
-        branch_draft: use_signal(String::new),
-        pending_branch_checkout: use_signal(String::new),
-        selected_stash: use_signal(String::new),
-        confirm_discard: use_signal(Vec::new),
-        commit_message: use_signal(String::new),
-        pending_commit_message: use_signal(String::new),
-        fetching: use_signal(|| false),
-        loading: use_signal(|| true),
-        message: use_signal(String::new),
-        focused_panel: use_signal(GitPanel::default),
-        command_log: use_signal(Vec::new),
-        branch_log: use_signal(|| None),
-        shortcut_help: use_signal(|| false),
-        nonce: use_signal(|| 0),
-        markers: use_signal(HashMap::new),
-        diff_viewport: use_signal(|| None),
-    };
-    state.subscribe();
-    state
-}
-
 impl GitPageState {
+    pub(super) fn use_state() -> Self {
+        let state = Self {
+            workspace: use_signal(String::new),
+            repository: use_signal(|| None),
+            directory: use_signal(|| None),
+            directory_selected: use_signal(|| 0),
+            directory_children: use_signal(|| None),
+            directory_preview_path: use_signal(String::new),
+            directory_came_from: use_signal(String::new),
+            directory_show_hidden: use_signal(|| true),
+            selected_path: use_signal(String::new),
+            selected_path_bytes: use_signal(Vec::new),
+            selected_abs_path: use_signal(String::new),
+            selected_commit: use_signal(String::new),
+            selected_branch: use_signal(String::new),
+            branch_collection: use_signal(BranchCollection::default),
+            branch_prompt: use_signal(|| None),
+            branch_draft: use_signal(String::new),
+            pending_branch_checkout: use_signal(String::new),
+            selected_stash: use_signal(String::new),
+            confirm_discard: use_signal(Vec::new),
+            commit_message: use_signal(String::new),
+            pending_commit_message: use_signal(String::new),
+            fetching: use_signal(|| false),
+            loading: use_signal(|| true),
+            message: use_signal(String::new),
+            focused_panel: use_signal(GitPanel::default),
+            command_log: use_signal(Vec::new),
+            branch_log: use_signal(|| None),
+            shortcut_help: use_signal(|| false),
+            nonce: use_signal(|| 0),
+            markers: use_signal(HashMap::new),
+            diff_viewport: use_signal(|| None),
+        };
+        state.subscribe();
+        state
+    }
+
     fn subscribe(self) {
         let Self {
             mut workspace,
