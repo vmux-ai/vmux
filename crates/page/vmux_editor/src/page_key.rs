@@ -6,15 +6,18 @@ use vmux_core::event::{
 };
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim, use_listener};
+use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_handler};
 use vmux_ui::platform::sleep_ms;
 
 pub(crate) fn use_file_keys(page: FilePage) -> FileKeys {
+    let actions = FileKeyActions(page);
     let keys = FileKeys {
-        page,
-        claim: use_key_claim(Unclaimed::Types, move || page.key_context()),
+        claim: use_key_handler::<FileKey, _>(
+            Unclaimed::Types,
+            move || page.key_context(),
+            move |key| actions.apply(key),
+        ),
     };
-    keys.listen();
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
     });
@@ -23,7 +26,6 @@ pub(crate) fn use_file_keys(page: FilePage) -> FileKeys {
 
 #[derive(Clone, Copy)]
 pub struct FileKeys {
-    page: FilePage,
     claim: KeyClaim,
 }
 
@@ -32,45 +34,45 @@ impl FileKeys {
         self.claim.on_keydown(event, |_| false);
         !event.default_action_enabled()
     }
+}
 
-    fn listen(&self) {
-        let keys = *self;
-        let _resolved = use_listener::<FileKey, _>(move |key| keys.apply(key));
-    }
+#[derive(Clone, Copy)]
+struct FileKeyActions(FilePage);
 
+impl FileKeyActions {
     fn apply(&self, key: FileKey) {
         match key {
-            FileKey::ToggleExplorer => self.page.toggle_explorer(),
-            FileKey::RevealInExplorer => self.page.reveal_in_explorer(),
+            FileKey::ToggleExplorer => self.0.toggle_explorer(),
+            FileKey::RevealInExplorer => self.0.reveal_in_explorer(),
             FileKey::PanelNext => self.move_panel(MenuDirection::Next),
             FileKey::PanelPrevious => self.move_panel(MenuDirection::Previous),
             FileKey::PanelChoose => self.choose(),
             FileKey::PanelDismiss => self.dismiss(),
-            FileKey::Find { forward } => self.page.open_find(forward),
-            FileKey::FindClose => self.page.close_find(),
-            FileKey::FindInFiles => self.page.open_find_in_files(),
+            FileKey::Find { forward } => self.0.open_find(forward),
+            FileKey::FindClose => self.0.close_find(),
+            FileKey::FindInFiles => self.0.open_find_in_files(),
         }
     }
 
     fn move_panel(&self, direction: MenuDirection) {
-        let Some(panel) = FilePanel::current(self.page) else {
+        let Some(panel) = FilePanel::current(self.0) else {
             return;
         };
-        panel.move_by(self.page, direction);
+        panel.move_by(self.0, direction);
     }
 
     fn choose(&self) {
-        let Some(panel) = FilePanel::current(self.page) else {
+        let Some(panel) = FilePanel::current(self.0) else {
             return;
         };
-        panel.choose(self.page);
+        panel.choose(self.0);
     }
 
     fn dismiss(&self) {
-        let Some(panel) = FilePanel::current(self.page) else {
+        let Some(panel) = FilePanel::current(self.0) else {
             return;
         };
-        panel.dismiss(self.page);
+        panel.dismiss(self.0);
     }
 }
 

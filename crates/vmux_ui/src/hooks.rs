@@ -6,7 +6,7 @@ mod use_theme;
 mod use_ui_state;
 
 #[cfg(ui)]
-pub use use_key_claim::{KeyClaim, use_key_claim};
+pub use use_key_claim::{KeyClaim, use_key_claim, use_key_handler};
 pub use use_listener::{BevyState, use_listener};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;

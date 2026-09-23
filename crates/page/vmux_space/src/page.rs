@@ -9,7 +9,7 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener, use_theme, use_ui_state};
+use vmux_ui::hooks::{MenuDirection, send, use_key_handler, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
@@ -30,8 +30,12 @@ pub fn Page() -> Element {
         selected.set(active);
     });
 
-    let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
-    SpaceKeys { state, selected }.listen();
+    let mut space_keys = SpaceKeys { state, selected };
+    let keys = use_key_handler::<SpaceKey, _>(
+        Unclaimed::Types,
+        || vec!["spaces".to_string()],
+        move |key| space_keys.apply(key),
+    );
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
     });
@@ -127,11 +131,6 @@ struct SpaceKeys {
 }
 
 impl SpaceKeys {
-    fn listen(self) {
-        let mut keys = self;
-        let _resolved = use_listener::<SpaceKey, _>(move |key| keys.apply(key));
-    }
-
     fn apply(&mut self, key: SpaceKey) {
         match key {
             SpaceKey::Next => self.move_selection(MenuDirection::Next),

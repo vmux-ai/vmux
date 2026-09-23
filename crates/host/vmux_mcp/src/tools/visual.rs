@@ -22,8 +22,6 @@ impl Plugin for VisualToolPlugin {
                     simulator_type,
                     simulator_key,
                     simulator_button,
-                    browser_snapshot,
-                    browser_scroll,
                     record_start,
                     record_stop,
                 )
@@ -42,8 +40,6 @@ enum VisualTool {
     SimulatorType,
     SimulatorKey,
     SimulatorButton,
-    BrowserSnapshot,
-    BrowserScroll,
     RecordStart,
     RecordStop,
 }
@@ -110,49 +106,6 @@ impl From<SimulatorButtonArg> for SimulatorButton {
 #[serde(deny_unknown_fields)]
 struct SimulatorButtonArgs {
     button: SimulatorButtonArg,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserSnapshotArgs {
-    target: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum ScrollTarget {
-    Top,
-    Bottom,
-}
-
-impl ScrollTarget {
-    fn into_string(self) -> String {
-        match self {
-            Self::Top => "top".to_string(),
-            Self::Bottom => "bottom".to_string(),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserScrollPositionArgs {
-    to: ScrollTarget,
-    target: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserScrollDeltaArgs {
-    delta: i32,
-    target: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum BrowserScrollArgs {
-    Position(BrowserScrollPositionArgs),
-    Delta(BrowserScrollDeltaArgs),
 }
 
 #[derive(Deserialize)]
@@ -271,47 +224,6 @@ fn simulator_button(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     }
 
     for (request, call, _) in calls.matching(VisualTool::SimulatorButton) {
-        call.finish_dispatch(request, &mut commands, target(call));
-    }
-}
-
-fn browser_snapshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        if call
-            .arguments
-            .get("target")
-            .is_some_and(|value| !value.is_null() && !value.is_string())
-        {
-            return Err("browser_snapshot.target must be a string".to_string());
-        }
-        let args: BrowserSnapshotArgs = call.parse("browser_snapshot")?;
-        Ok(DispatchTarget::Query(AgentQuery::BrowserSnapshot {
-            pane: OptionalText::trim(args.target),
-            anchor: call.anchor,
-        }))
-    }
-
-    for (request, call, _) in calls.matching(VisualTool::BrowserSnapshot) {
-        call.finish_dispatch(request, &mut commands, target(call));
-    }
-}
-
-fn browser_scroll(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: BrowserScrollArgs = call.parse("browser_scroll")?;
-        let (to, delta, target) = match args {
-            BrowserScrollArgs::Position(args) => (Some(args.to.into_string()), None, args.target),
-            BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target),
-        };
-        Ok(DispatchTarget::Query(AgentQuery::BrowserScroll {
-            pane: OptionalText::trim(target),
-            to,
-            delta,
-            anchor: call.anchor,
-        }))
-    }
-
-    for (request, call, _) in calls.matching(VisualTool::BrowserScroll) {
         call.finish_dispatch(request, &mut commands, target(call));
     }
 }

@@ -48,4 +48,56 @@
             properties: {"source": (type: String)},
         ),
     ),
+    (
+        kind: browser_snapshot,
+        description: r#"Read the current page's DOM as a compact semantic snapshot. Returns JSON with the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, `value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a specific page; defaults to the focused page."#,
+        input_schema: (
+            type: Object,
+            properties: {
+                "target": (
+                    type: String,
+                    description: Some("Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."),
+                ),
+            },
+        ),
+    ),
+    (
+        kind: browser_scroll,
+        description: r#"Scroll the visible browser page so the user can watch, then return the post-scroll snapshot (same shape as browser_snapshot, including viewport + inViewport flags). Pass exactly one of `to` ("top" or "bottom") or `delta` (pixels; positive = down, e.g. one screen is about the snapshot's viewport.height). Pass `target` = pane:<id> or stack:<id> to pick a page; defaults to the focused page. Prefer scrolling to read long pages instead of assuming off-screen content."#,
+        input_schema: (
+            one_of: [
+                (
+                    type: Object,
+                    required: ["to"],
+                    properties: {
+                        "to": (
+                            type: String,
+                            description: Some("Scroll to page top or bottom."),
+                            values: ["top", "bottom"],
+                        ),
+                        "target": (
+                            type: String,
+                            description: Some("Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."),
+                        ),
+                    },
+                ),
+                (
+                    type: Object,
+                    required: ["delta"],
+                    properties: {
+                        "delta": (
+                            type: Integer,
+                            description: Some("Scroll by pixels; positive = down."),
+                            minimum: Some(-2147483648),
+                            maximum: Some(2147483647),
+                        ),
+                        "target": (
+                            type: String,
+                            description: Some("Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."),
+                        ),
+                    },
+                ),
+            ],
+        ),
+    ),
 ]
