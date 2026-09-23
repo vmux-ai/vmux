@@ -17,8 +17,8 @@ pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::tools::ToolsPlugin>() {
-            app.add_plugins(crate::tools::ToolsPlugin);
+        if !app.is_plugin_added::<crate::tools::ToolPlugin>() {
+            app.add_plugins(crate::tools::ToolPlugin);
         }
         app.init_resource::<NextRequestSequence>()
             .configure_sets(

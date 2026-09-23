@@ -7,9 +7,9 @@ use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
 
-pub(super) struct VisualToolsPlugin;
+pub(super) struct VisualToolPlugin;
 
-impl Plugin for VisualToolsPlugin {
+impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Visual))
             .add_systems(

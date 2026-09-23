@@ -10660,7 +10660,6 @@ dependencies = [
  "tokio",
  "vmux_api",
  "vmux_client",
- "vmux_macro",
 ]
 
 [[package]]

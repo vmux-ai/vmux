@@ -7,9 +7,9 @@ use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
 
-pub(super) struct BookmarkToolsPlugin;
+pub(super) struct BookmarkToolPlugin;
 
-impl Plugin for BookmarkToolsPlugin {
+impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Bookmark))
             .add_systems(

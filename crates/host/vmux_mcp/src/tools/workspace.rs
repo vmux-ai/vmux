@@ -9,9 +9,9 @@ use vmux_client::protocol::{
     AgentCommand, AgentPaneDirection, AgentQuery, PlacementMode, ProcessId,
 };
 
-pub(super) struct WorkspaceToolsPlugin;
+pub(super) struct WorkspaceToolPlugin;
 
-impl Plugin for WorkspaceToolsPlugin {
+impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Workspace))
             .add_systems(

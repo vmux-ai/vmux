@@ -7,9 +7,9 @@ use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
-pub(super) struct KnowledgeToolsPlugin;
+pub(super) struct KnowledgeToolPlugin;
 
-impl Plugin for KnowledgeToolsPlugin {
+impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Knowledge))
             .add_systems(

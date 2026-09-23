@@ -21,6 +21,7 @@ pub(crate) mod link;
 pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
 pub use contract::TerminalContractPlugin;
 pub use plugin::*;
+pub use prompt::{BufferedAgentPrompt, PromptCapture};
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
 pub use theme::{TerminalFontSizeCommand, TerminalThemePlugin};
 

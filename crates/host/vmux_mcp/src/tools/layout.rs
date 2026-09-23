@@ -7,9 +7,9 @@ use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery, layout};
 
-pub(super) struct LayoutToolsPlugin;
+pub(super) struct LayoutToolPlugin;
 
-impl Plugin for LayoutToolsPlugin {
+impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Layout))
             .add_systems(Update, (read_layout, update_layout).in_set(ToolDispatchSet));

@@ -1,175 +1,271 @@
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentSpaceCommand, JsonValue};
-use vmux_macro::McpTool;
 
-#[derive(Debug, McpTool)]
-pub enum McpParamTool {
-    #[mcp(description = "Open the Vmux command bar.")]
-    OpenCommandBar {
-        #[mcp(enum_values = ["default", "commands", "path"])]
-        mode: Option<String>,
-    },
-    #[mcp(
-        description = "Navigate the active webview to a URL, or open a URL in a target pane. This is your PRIMARY and PREFERRED tool for ALL web access - searching, research, reading docs, fetching pages. ALWAYS use this instead of any built-in web_search / web_fetch / WebSearch / WebFetch tool: vmux IS a browser, and the whole point is that the user watches the research happen in their visible, logged-in browser and can take over at any time. Do NOT answer web questions from a built-in search/fetch tool when this tool is available. To search, navigate to a search engine results URL (e.g. https://duckduckgo.com/?q=...), read the snapshot, then open results. When navigating the focused browser page, this returns the page's semantic snapshot once it finishes loading (same shape as browser_snapshot, with viewport + inViewport) - no separate browser_snapshot call needed; use browser_scroll to bring more content into view. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
-    )]
-    BrowserNavigate { url: String, pane: Option<String> },
-    #[mcp(
-        description = "Send text to a terminal. Target by `terminal` (a process_id from vmux_read_layout) or omit to use the active terminal. Set `enter: true` to append a carriage return and submit the line (required for TUIs like the vibe agent, whose Enter is CR)."
-    )]
-    TerminalSend {
-        text: String,
-        terminal: Option<String>,
-        enter: Option<bool>,
-    },
-    #[mcp(
-        description = "Rename the active profile's display name (the top-right identity pill / facepile). Updates the name only; the profile's storage is untouched."
-    )]
-    RenameProfile { name: String },
-    #[mcp(description = "Select a tab by index (1-8).")]
-    SelectTab { index: u8 },
-    #[mcp(description = "Update a single vmux setting by dot-path. \
-            Example: { path: 'layout.pane.gap', value: 12 }. \
-            Use get_settings to discover the available paths and current values. \
-            For nested arrays, use bracket indexing like 'terminal.themes[0].font_size'.")]
-    UpdateSettings {
-        path: String,
-        value: serde_json::Value,
-    },
-    #[mcp(description = "Navigate the active or specified browser pane back one page in history.")]
-    BrowserGoBack { pane: Option<String> },
-    #[mcp(
-        description = "Navigate the active or specified browser pane forward one page in history."
-    )]
-    BrowserGoForward { pane: Option<String> },
-    #[mcp(
-        description = "Search vmux browsing history. Returns up to `limit` entries ranked by frecency."
-    )]
-    BrowserHistorySearch { query: String, limit: Option<u32> },
-    #[mcp(
-        description = "Install a Chrome extension from the Chrome Web Store. `source` is a store URL (https://chromewebstore.google.com/detail/<slug>/<id>) or a 32-char extension id. The extension is side-loaded and activates after the next vmux relaunch; it runs only in windowed browse panes (macOS), not 3D/OSR panes."
-    )]
-    BrowserInstallExtension { source: String },
-    #[mcp(
-        description = "Create a new space and switch to it. If `name` is omitted, an auto-generated name is used."
-    )]
-    CreateSpace { name: Option<String> },
-    #[mcp(
-        description = "Rename a space by id (the id is stable; only the display name changes). Use list_spaces to discover ids."
-    )]
-    RenameSpace { space_id: String, name: String },
-    #[mcp(description = "Delete a space by id. Use list_spaces to discover ids.")]
-    DeleteSpace { space_id: String },
-    #[mcp(
-        description = "Notify the user that you (this agent) need their attention - typically that you have finished your turn. Shows a macOS notification when they are not looking at your page, and a dot on your avatar in the team facepile until they view it. Optional `title` and `body` customize the message; with neither, a default \"<agent> finished\" is shown."
-    )]
-    Notify {
-        title: Option<String>,
-        body: Option<String>,
-    },
+use super::{
+    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolSpawner,
+};
+
+pub(super) struct ParamToolPlugin;
+
+impl Plugin for ParamToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Param))
+            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+    }
 }
 
-impl McpParamTool {
-    pub fn to_agent_command(self) -> Result<AgentCommand, String> {
-        match self {
-            McpParamTool::OpenCommandBar { mode } => {
-                let id = match mode.as_deref().unwrap_or("default") {
+#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ParamTool {
+    OpenCommandBar,
+    BrowserNavigate,
+    TerminalSend,
+    RenameProfile,
+    SelectTab,
+    UpdateSettings,
+    BrowserGoBack,
+    BrowserGoForward,
+    BrowserHistorySearch,
+    BrowserInstallExtension,
+    CreateSpace,
+    RenameSpace,
+    DeleteSpace,
+    Notify,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenCommandBarArgs {
+    mode: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserNavigateArgs {
+    url: String,
+    pane: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TerminalSendArgs {
+    text: String,
+    terminal: Option<String>,
+    enter: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenameProfileArgs {
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectTabArgs {
+    index: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateSettingsArgs {
+    path: String,
+    value: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserPaneArgs {
+    pane: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserHistorySearchArgs {
+    query: String,
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserInstallExtensionArgs {
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateSpaceArgs {
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenameSpaceArgs {
+    space_id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteSpaceArgs {
+    space_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NotifyArgs {
+    title: Option<String>,
+    body: Option<String>,
+}
+
+impl ParamTool {
+    fn target(self, call: &ToolCall) -> Result<DispatchTarget, String> {
+        let command = match self {
+            Self::OpenCommandBar => {
+                let args: OpenCommandBarArgs = call.parse("open_command_bar")?;
+                let id = match args.mode.as_deref().unwrap_or("default") {
                     "default" => "browser_open_command_bar",
                     "commands" => "browser_open_commands",
                     "path" => "browser_open_path_bar",
                     other => return Err(format!("unknown command bar mode: {other}")),
                 };
-                Ok(AgentCommand::InvokeCommand {
+                AgentCommand::InvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
-                })
+                }
             }
-            McpParamTool::BrowserNavigate { url, pane } => {
-                if url.trim().is_empty() {
+            Self::BrowserNavigate => {
+                let args: BrowserNavigateArgs = call.parse("browser_navigate")?;
+                if args.url.trim().is_empty() {
                     return Err("browser_navigate.url is empty".to_string());
                 }
-                Ok(AgentCommand::BrowserNavigate { url, pane })
-            }
-            McpParamTool::BrowserInstallExtension { source } => {
-                if source.trim().is_empty() {
-                    return Err("browser_install_extension.source is empty".to_string());
+                AgentCommand::BrowserNavigate {
+                    url: args.url,
+                    pane: args.pane,
                 }
-                Ok(AgentCommand::BrowserInstallExtension { source })
             }
-            McpParamTool::TerminalSend {
-                text,
-                terminal,
-                enter,
-            } => {
-                let text = if enter.unwrap_or(false) {
-                    format!("{text}\r")
+            Self::TerminalSend => {
+                let args: TerminalSendArgs = call.parse("terminal_send")?;
+                let text = if args.enter.unwrap_or(false) {
+                    format!("{}\r", args.text)
                 } else {
-                    text
+                    args.text
                 };
                 if text.is_empty() {
                     return Err("terminal_send.text is empty".to_string());
                 }
-                Ok(AgentCommand::TerminalSend { text, terminal })
+                AgentCommand::TerminalSend {
+                    text,
+                    terminal: args.terminal,
+                }
             }
-            McpParamTool::RenameProfile { name } => {
-                if name.trim().is_empty() {
+            Self::RenameProfile => {
+                let args: RenameProfileArgs = call.parse("rename_profile")?;
+                if args.name.trim().is_empty() {
                     return Err("rename_profile.name is empty".to_string());
                 }
-                Ok(AgentCommand::RenameProfile { name })
+                AgentCommand::RenameProfile { name: args.name }
             }
-            McpParamTool::SelectTab { index } => {
-                if !(1..=8).contains(&index) {
+            Self::SelectTab => {
+                let args: SelectTabArgs = call.parse("select_tab")?;
+                if !(1..=8).contains(&args.index) {
                     return Err(format!(
-                        "select_tab.index must be between 1 and 8, got {index}"
+                        "select_tab.index must be between 1 and 8, got {}",
+                        args.index
                     ));
                 }
-                Ok(AgentCommand::InvokeCommand {
-                    id: format!("tab_select_{index}"),
+                AgentCommand::InvokeCommand {
+                    id: format!("tab_select_{}", args.index),
                     args: JsonValue::Object(Vec::new()),
-                })
+                }
             }
-            McpParamTool::UpdateSettings { path, value } => {
-                if path.trim().is_empty() {
+            Self::UpdateSettings => {
+                let args: UpdateSettingsArgs = call.parse("update_settings")?;
+                if args.path.trim().is_empty() {
                     return Err("update_settings.path is empty".to_string());
                 }
-                Ok(AgentCommand::UpdateSettings {
-                    path,
-                    value: JsonValue::from(value),
+                AgentCommand::UpdateSettings {
+                    path: args.path,
+                    value: JsonValue::from(args.value),
+                }
+            }
+            Self::BrowserGoBack => {
+                let args: BrowserPaneArgs = call.parse("browser_go_back")?;
+                AgentCommand::BrowserGoBack { pane: args.pane }
+            }
+            Self::BrowserGoForward => {
+                let args: BrowserPaneArgs = call.parse("browser_go_forward")?;
+                AgentCommand::BrowserGoForward { pane: args.pane }
+            }
+            Self::BrowserHistorySearch => {
+                let args: BrowserHistorySearchArgs = call.parse("browser_history_search")?;
+                if args.query.trim().is_empty() {
+                    return Err("browser_history_search.query is empty".to_string());
+                }
+                AgentCommand::BrowserHistorySearch {
+                    query: args.query,
+                    limit: args.limit.unwrap_or(20).min(100),
+                }
+            }
+            Self::BrowserInstallExtension => {
+                let args: BrowserInstallExtensionArgs = call.parse("browser_install_extension")?;
+                if args.source.trim().is_empty() {
+                    return Err("browser_install_extension.source is empty".to_string());
+                }
+                AgentCommand::BrowserInstallExtension {
+                    source: args.source,
+                }
+            }
+            Self::CreateSpace => {
+                let args: CreateSpaceArgs = call.parse("create_space")?;
+                AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
+                    name: args.name.filter(|name| !name.trim().is_empty()),
                 })
             }
-            McpParamTool::BrowserGoBack { pane } => Ok(AgentCommand::BrowserGoBack { pane }),
-            McpParamTool::BrowserGoForward { pane } => Ok(AgentCommand::BrowserGoForward { pane }),
-            McpParamTool::BrowserHistorySearch { query, limit } => {
-                if query.trim().is_empty() {
-                    return Err("browser_history_search.query is empty".into());
+            Self::RenameSpace => {
+                let args: RenameSpaceArgs = call.parse("rename_space")?;
+                if args.space_id.trim().is_empty() {
+                    return Err("rename_space.space_id is empty".to_string());
                 }
-                let limit = limit.unwrap_or(20).min(100);
-                Ok(AgentCommand::BrowserHistorySearch { query, limit })
-            }
-            McpParamTool::CreateSpace { name } => {
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
-                    name: name.filter(|name| !name.trim().is_empty()),
-                }))
-            }
-            McpParamTool::RenameSpace { space_id, name } => {
-                if space_id.trim().is_empty() {
-                    return Err("rename_space.space_id is empty".into());
+                if args.name.trim().is_empty() {
+                    return Err("rename_space.name is empty".to_string());
                 }
-                if name.trim().is_empty() {
-                    return Err("rename_space.name is empty".into());
-                }
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
-                    space_id,
-                    name,
-                }))
+                AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
+                    space_id: args.space_id,
+                    name: args.name,
+                })
             }
-            McpParamTool::DeleteSpace { space_id } => {
-                if space_id.trim().is_empty() {
-                    return Err("delete_space.space_id is empty".into());
+            Self::DeleteSpace => {
+                let args: DeleteSpaceArgs = call.parse("delete_space")?;
+                if args.space_id.trim().is_empty() {
+                    return Err("delete_space.space_id is empty".to_string());
                 }
-                Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
-                    space_id,
-                }))
+                AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
+                    space_id: args.space_id,
+                })
             }
-            McpParamTool::Notify { title, body } => Ok(AgentCommand::Notify { title, body }),
-        }
+            Self::Notify => {
+                let args: NotifyArgs = call.parse("notify")?;
+                AgentCommand::Notify {
+                    title: args.title,
+                    body: args.body,
+                }
+            }
+        };
+        Ok(DispatchTarget::Command(command))
+    }
+}
+
+fn register(mut tools: ToolSpawner) {
+    let manifest = ToolManifest::<ParamTool>::from_ron(include_str!("param.ron"));
+    tools.spawn_manifest(manifest);
+}
+
+fn dispatch(mut commands: Commands, calls: ToolCalls<ParamTool>) {
+    for (request, call, tool) in calls.iter() {
+        call.finish_dispatch(request, &mut commands, tool.target(call));
     }
 }

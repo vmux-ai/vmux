@@ -77,7 +77,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
 #[test]
 fn owning_world_dispatches_tool_entities() {
     let mut app = App::new();
-    app.add_plugins(ToolsPlugin);
+    app.add_plugins(ToolPlugin);
     app.update();
 
     let call = app
@@ -253,7 +253,7 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     assert_eq!(definitions, expected);
 
     let anchor = Some(vmux_client::protocol::ProcessId::new());
-    let mut app = ToolsPlugin::app();
+    let mut app = ToolPlugin::app();
     for name in expected {
         match ToolCall::dispatch(
             &mut app,
@@ -275,7 +275,7 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
 
 #[test]
 fn aliases_resolve_to_the_same_tool_entity() {
-    let mut app = ToolsPlugin::app();
+    let mut app = ToolPlugin::app();
     let select = ToolCall::find(app.world_mut(), "select_project").unwrap().0;
     assert_eq!(
         ToolCall::find(app.world_mut(), "select_workspace")
@@ -1105,28 +1105,31 @@ fn screenshot_dispatches_to_query_with_and_without_pane() {
 }
 
 #[test]
-fn mcp_param_tool_entries_includes_all_param_tools() {
-    let names: Vec<&'static str> = McpParamTool::mcp_tool_entries()
+fn param_manifest_registers_all_param_tools() {
+    let names = tool_definitions()
         .into_iter()
-        .map(|(name, _, _)| name)
-        .collect();
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
     for expected in [
         "open_command_bar",
         "browser_navigate",
         "terminal_send",
         "select_tab",
     ] {
-        assert!(names.contains(&expected), "missing param tool {expected}");
+        assert!(
+            names.iter().any(|name| name == expected),
+            "missing param tool {expected}"
+        );
     }
 }
 
 #[test]
-fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
-    let entry = McpParamTool::mcp_tool_entries()
+fn param_manifest_browser_navigate_schema_marks_url_required() {
+    let definition = tool_definitions()
         .into_iter()
-        .find(|(name, _, _)| *name == "browser_navigate")
+        .find(|definition| definition.name == "browser_navigate")
         .expect("browser_navigate present");
-    let schema = entry.2;
+    let schema = definition.input_schema;
     let required = schema.get("required").expect("required key");
     assert_eq!(required, &serde_json::json!(["url"]));
     let properties = schema.get("properties").expect("properties key");
@@ -1135,30 +1138,28 @@ fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
 }
 
 #[test]
-fn mcp_param_tool_from_mcp_call_browser_navigate() {
-    let parsed = McpParamTool::from_mcp_call(
+fn param_manifest_dispatches_browser_navigate() {
+    let target = dispatch_from_tool_call(
         "browser_navigate",
         serde_json::json!({"url": "https://example.com", "pane": "12345"}),
     )
-    .expect("recognized")
-    .expect("parsed");
+    .unwrap();
     assert!(matches!(
-        parsed,
-        McpParamTool::BrowserNavigate { url, pane: Some(p) }
+        target,
+        DispatchTarget::Command(AgentCommand::BrowserNavigate { url, pane: Some(p) })
             if url == "https://example.com" && p == "12345"
     ));
 }
 
 #[test]
-fn mcp_param_tool_from_mcp_call_browser_navigate_missing_url_errors() {
-    let result =
-        McpParamTool::from_mcp_call("browser_navigate", serde_json::json!({})).expect("recognized");
+fn param_manifest_browser_navigate_missing_url_errors() {
+    let result = dispatch_from_tool_call("browser_navigate", serde_json::json!({}));
     assert!(result.is_err());
 }
 
 #[test]
-fn mcp_param_tool_from_mcp_call_unknown_returns_none() {
-    assert!(McpParamTool::from_mcp_call("nope", serde_json::json!({})).is_none());
+fn param_manifest_unknown_tool_returns_error() {
+    assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
 }
 
 #[test]
@@ -1724,48 +1725,55 @@ fn runtime_command_fallback_preserves_open_command_names() {
 
 #[test]
 fn go_back_dispatches() {
-    let r = McpParamTool::BrowserGoBack { pane: None }.to_agent_command();
-    assert!(matches!(r, Ok(AgentCommand::BrowserGoBack { .. })));
+    let target = dispatch_from_tool_call("browser_go_back", serde_json::json!({}));
+    assert!(matches!(
+        target,
+        Ok(DispatchTarget::Command(AgentCommand::BrowserGoBack {
+            pane: None
+        }))
+    ));
 }
 
 #[test]
 fn go_forward_dispatches() {
-    let r = McpParamTool::BrowserGoForward { pane: None }.to_agent_command();
-    assert!(matches!(r, Ok(AgentCommand::BrowserGoForward { .. })));
+    let target = dispatch_from_tool_call("browser_go_forward", serde_json::json!({}));
+    assert!(matches!(
+        target,
+        Ok(DispatchTarget::Command(AgentCommand::BrowserGoForward {
+            pane: None
+        }))
+    ));
 }
 
 #[test]
 fn history_search_rejects_empty_query() {
-    let r = McpParamTool::BrowserHistorySearch {
-        query: "  ".into(),
-        limit: None,
-    }
-    .to_agent_command();
-    assert!(r.is_err());
+    let target =
+        dispatch_from_tool_call("browser_history_search", serde_json::json!({"query": "  "}));
+    assert!(target.is_err());
 }
 
 #[test]
 fn history_search_clamps_limit() {
-    let r = McpParamTool::BrowserHistorySearch {
-        query: "x".into(),
-        limit: Some(500),
-    }
-    .to_agent_command();
-    match r {
-        Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 100),
+    let target = dispatch_from_tool_call(
+        "browser_history_search",
+        serde_json::json!({"query": "x", "limit": 500}),
+    );
+    match target {
+        Ok(DispatchTarget::Command(AgentCommand::BrowserHistorySearch { limit, .. })) => {
+            assert_eq!(limit, 100)
+        }
         _ => panic!(),
     }
 }
 
 #[test]
 fn history_search_default_limit() {
-    let r = McpParamTool::BrowserHistorySearch {
-        query: "x".into(),
-        limit: None,
-    }
-    .to_agent_command();
-    match r {
-        Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 20),
+    let target =
+        dispatch_from_tool_call("browser_history_search", serde_json::json!({"query": "x"}));
+    match target {
+        Ok(DispatchTarget::Command(AgentCommand::BrowserHistorySearch { limit, .. })) => {
+            assert_eq!(limit, 20)
+        }
         _ => panic!(),
     }
 }
