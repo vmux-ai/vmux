@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, JsonValue};
 
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 
 pub(super) struct ApplicationToolPlugin;
@@ -44,38 +43,36 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
-impl ApplicationTool {
-    fn target(self, call: &ToolCall) -> Result<DispatchTarget, String> {
-        let command = match self {
-            Self::OpenCommandBar => {
-                let args: OpenCommandBarArgs = call.parse("open_command_bar")?;
-                let id = match args.mode.as_deref().unwrap_or("default") {
-                    "default" => "browser_open_command_bar",
-                    "commands" => "browser_open_commands",
-                    "path" => "browser_open_path_bar",
-                    other => return Err(format!("unknown command bar mode: {other}")),
-                };
-                AgentCommand::InvokeCommand {
-                    id: id.to_string(),
-                    args: JsonValue::Object(Vec::new()),
-                }
-            }
-            Self::RenameProfile => {
-                let args: RenameProfileArgs = call.parse("rename_profile")?;
-                if args.name.trim().is_empty() {
-                    return Err("rename_profile.name is empty".to_string());
-                }
-                AgentCommand::RenameProfile { name: args.name }
-            }
-            Self::Notify => {
-                let args: NotifyArgs = call.parse("notify")?;
-                AgentCommand::Notify {
-                    title: args.title,
-                    body: args.body,
-                }
-            }
+impl OpenCommandBarArgs {
+    fn command(self) -> Result<AgentCommand, String> {
+        let id = match self.mode.as_deref().unwrap_or("default") {
+            "default" => "browser_open_command_bar",
+            "commands" => "browser_open_commands",
+            "path" => "browser_open_path_bar",
+            other => return Err(format!("unknown command bar mode: {other}")),
         };
-        Ok(DispatchTarget::Command(command))
+        Ok(AgentCommand::InvokeCommand {
+            id: id.to_string(),
+            args: JsonValue::Object(Vec::new()),
+        })
+    }
+}
+
+impl RenameProfileArgs {
+    fn command(self) -> Result<AgentCommand, String> {
+        if self.name.trim().is_empty() {
+            return Err("rename_profile.name is empty".to_string());
+        }
+        Ok(AgentCommand::RenameProfile { name: self.name })
+    }
+}
+
+impl From<NotifyArgs> for AgentCommand {
+    fn from(args: NotifyArgs) -> Self {
+        Self::Notify {
+            title: args.title,
+            body: args.body,
+        }
     }
 }
 
@@ -86,6 +83,15 @@ fn register(mut tools: ToolSpawner) {
 
 fn dispatch(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
     for (request, call, tool) in calls.iter() {
-        call.finish_dispatch(request, &mut commands, tool.target(call));
+        let command = match tool {
+            ApplicationTool::OpenCommandBar => call
+                .parse::<OpenCommandBarArgs>("open_command_bar")
+                .and_then(OpenCommandBarArgs::command),
+            ApplicationTool::RenameProfile => call
+                .parse::<RenameProfileArgs>("rename_profile")
+                .and_then(RenameProfileArgs::command),
+            ApplicationTool::Notify => call.parse::<NotifyArgs>("notify").map(AgentCommand::from),
+        };
+        call.finish_dispatch(request, &mut commands, command.map(DispatchTarget::Command));
     }
 }

@@ -1,6 +1,5 @@
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -34,18 +33,17 @@ struct SelectTabArgs {
 }
 
 impl SelectTabArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("select_tab")?;
-        if !(1..=8).contains(&args.index) {
+    fn command(self) -> Result<AgentCommand, String> {
+        if !(1..=8).contains(&self.index) {
             return Err(format!(
                 "select_tab.index must be between 1 and 8, got {}",
-                args.index
+                self.index
             ));
         }
-        Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
-            id: format!("tab_select_{}", args.index),
+        Ok(AgentCommand::InvokeCommand {
+            id: format!("tab_select_{}", self.index),
             args: JsonValue::Object(Vec::new()),
-        }))
+        })
     }
 }
 
@@ -77,6 +75,10 @@ fn update_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
 
 fn select_tab(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
     for (request, call, _) in calls.matching(LayoutTool::SelectTab) {
-        call.finish_dispatch(request, &mut commands, SelectTabArgs::target(call));
+        let target = call
+            .parse::<SelectTabArgs>("select_tab")
+            .and_then(SelectTabArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }

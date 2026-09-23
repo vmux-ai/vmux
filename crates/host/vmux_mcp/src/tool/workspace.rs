@@ -1,6 +1,5 @@
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -97,19 +96,17 @@ struct OpenPageArgs {
 }
 
 impl OpenPageArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("open_page")?;
-        let args: Self = call.parse("open_page")?;
-        let url = args.url;
+    fn command(self, anchor: ProcessId) -> Result<AgentCommand, String> {
+        let url = self.url;
         if url.trim().is_empty() {
             return Err("open_page.url is empty".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+        Ok(AgentCommand::OpenBeside {
             anchor,
-            direction: args.direction.map(Into::into),
+            direction: self.direction.map(Into::into),
             url,
-            focus: args.focus,
-        }))
+            focus: self.focus,
+        })
     }
 }
 
@@ -123,10 +120,8 @@ struct OpenFileArgs {
 }
 
 impl OpenFileArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("open_file")?;
-        let args: Self = call.parse("open_file")?;
-        let path = args.path.trim().to_string();
+    fn command(self, anchor: ProcessId) -> Result<AgentCommand, String> {
+        let path = self.path.trim().to_string();
         if path.is_empty() {
             return Err("open_file.path is empty".to_string());
         }
@@ -135,12 +130,12 @@ impl OpenFileArgs {
         } else {
             format!("file://{path}")
         };
-        Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+        Ok(AgentCommand::OpenBeside {
             anchor,
-            direction: args.direction.map(Into::into),
+            direction: self.direction.map(Into::into),
             url,
-            focus: args.focus,
-        }))
+            focus: self.focus,
+        })
     }
 }
 
@@ -158,36 +153,33 @@ struct RunArgs {
 }
 
 impl RunArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("run")?;
-        let args: Self = call.parse("run")?;
+    fn command(self, anchor: ProcessId, host_shell: &str) -> Result<AgentCommand, String> {
         let placement_override =
-            args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
-        let mut command = args.command;
+            self.mode.is_some() || self.direction.is_some() || self.beside.is_some();
+        let mut command = self.command;
         if command.trim().is_empty() {
             return Err("run.command is empty".to_string());
         }
-        if let Some(interpreter) = args.shell.filter(|value| !value.trim().is_empty()) {
-            command =
-                crate::host_quote::HostQuote::handing_to(&call.host_shell, &interpreter, &command)?;
+        if let Some(interpreter) = self.shell.filter(|value| !value.trim().is_empty()) {
+            command = crate::host_quote::HostQuote::handing_to(host_shell, &interpreter, &command)?;
         }
-        let direction = args
+        let direction = self
             .direction
             .map(Into::into)
             .unwrap_or(AgentPaneDirection::Right);
-        let terminal = ProcessTarget::parse(args.terminal, "run.terminal", "terminal")?;
+        let terminal = ProcessTarget::parse(self.terminal, "run.terminal", "terminal")?;
         let beside = ProcessTarget::parse(
-            args.beside.filter(|value| value != "self"),
+            self.beside.filter(|value| value != "self"),
             "run.beside",
             "page",
         )?;
-        let mode = args.mode.map(Into::into).unwrap_or(PlacementMode::Auto);
+        let mode = self.mode.map(Into::into).unwrap_or(PlacementMode::Auto);
         let command = if placement_override {
             AgentCommand::RunWithPlacementOverride {
                 anchor,
                 command,
                 direction,
-                focus: args.focus,
+                focus: self.focus,
                 beside,
                 mode,
                 terminal,
@@ -198,14 +190,14 @@ impl RunArgs {
                 anchor,
                 command,
                 direction,
-                focus: args.focus,
+                focus: self.focus,
                 beside,
                 mode,
                 terminal,
                 done_marker: None,
             }
         };
-        Ok(DispatchTarget::Command(command))
+        Ok(command)
     }
 }
 
@@ -220,24 +212,20 @@ struct CreateWorktreeArgs {
 }
 
 impl CreateWorktreeArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("create_worktree")?;
-        let args: Self = call.parse("create_worktree")?;
-        if let Some(branch) = args.branch.and_then(Trimmed::into_option) {
-            return Ok(DispatchTarget::Command(
-                AgentCommand::CreateWorktreeOnBranch {
-                    anchor,
-                    branch,
-                    project: None,
-                },
-            ));
+    fn command(self, anchor: ProcessId) -> AgentCommand {
+        if let Some(branch) = self.branch.and_then(Trimmed::into_option) {
+            return AgentCommand::CreateWorktreeOnBranch {
+                anchor,
+                branch,
+                project: None,
+            };
         }
-        Ok(DispatchTarget::Command(AgentCommand::PrepareWorktree {
+        AgentCommand::PrepareWorktree {
             anchor,
-            path: args.path.and_then(Trimmed::into_option),
-            task: args.task.and_then(Trimmed::into_option),
-            create: args.create,
-        }))
+            path: self.path.and_then(Trimmed::into_option),
+            task: self.task.and_then(Trimmed::into_option),
+            create: self.create,
+        }
     }
 }
 
@@ -249,12 +237,10 @@ struct RequestUserChoiceArgs {
 }
 
 impl RequestUserChoiceArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("request_user_choice")?;
-        let args: Self = call.parse("request_user_choice")?;
+    fn command(self, anchor: ProcessId) -> Result<AgentCommand, String> {
         let question =
-            Trimmed::into_option(args.question).ok_or("request_user_choice.question is empty")?;
-        let options = args
+            Trimmed::into_option(self.question).ok_or("request_user_choice.question is empty")?;
+        let options = self
             .options
             .into_iter()
             .map(Trimmed::into_option)
@@ -263,11 +249,11 @@ impl RequestUserChoiceArgs {
         if !(2..=9).contains(&options.len()) {
             return Err("request_user_choice requires 2 to 9 options".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
+        Ok(AgentCommand::RequestUserChoice {
             anchor,
             question,
             options,
-        }))
+        })
     }
 }
 
@@ -278,17 +264,11 @@ struct SelectProjectArgs {
 }
 
 impl SelectProjectArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("select_project")?;
-        let args: Self = call.parse("select_project")?;
-        let Some(path) = args.path.and_then(Trimmed::into_option) else {
-            return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
-                anchor,
-            }));
+    fn command(self, anchor: ProcessId) -> AgentCommand {
+        let Some(path) = self.path.and_then(Trimmed::into_option) else {
+            return AgentCommand::ChooseWorkspace { anchor };
         };
-        Ok(DispatchTarget::Command(
-            AgentCommand::ChooseWorkspaceAtPath { anchor, path },
-        ))
+        AgentCommand::ChooseWorkspaceAtPath { anchor, path }
     }
 }
 
@@ -299,15 +279,12 @@ struct ReadTerminalArgs {
 }
 
 impl ReadTerminalArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("read_terminal")?;
-        let process_id = args
+    fn query(self) -> Result<AgentQuery, String> {
+        let process_id = self
             .terminal
             .parse()
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
-        Ok(DispatchTarget::Query(AgentQuery::ReadTerminal {
-            process_id,
-        }))
+        Ok(AgentQuery::ReadTerminal { process_id })
     }
 }
 
@@ -322,19 +299,40 @@ fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
 
 fn open_page(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::OpenPage) {
-        call.finish_dispatch(request, &mut commands, OpenPageArgs::target(call));
+        let target = call
+            .require_anchor("open_page")
+            .and_then(|anchor| {
+                call.parse::<OpenPageArgs>("open_page")
+                    .and_then(|args| args.command(anchor))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::OpenFile) {
-        call.finish_dispatch(request, &mut commands, OpenFileArgs::target(call));
+        let target = call
+            .require_anchor("open_file")
+            .and_then(|anchor| {
+                call.parse::<OpenFileArgs>("open_file")
+                    .and_then(|args| args.command(anchor))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn run(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::Run) {
-        call.finish_dispatch(request, &mut commands, RunArgs::target(call));
+        let target = call
+            .require_anchor("run")
+            .and_then(|anchor| {
+                call.parse::<RunArgs>("run")
+                    .and_then(|args| args.command(anchor, &call.host_shell))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
@@ -358,7 +356,14 @@ impl ProcessTarget {
 
 fn create_worktree(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::CreateWorktree) {
-        call.finish_dispatch(request, &mut commands, CreateWorktreeArgs::target(call));
+        let target = call
+            .require_anchor("create_worktree")
+            .and_then(|anchor| {
+                call.parse::<CreateWorktreeArgs>("create_worktree")
+                    .map(|args| args.command(anchor))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
@@ -373,18 +378,36 @@ impl Trimmed {
 
 fn request_user_choice(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::RequestUserChoice) {
-        call.finish_dispatch(request, &mut commands, RequestUserChoiceArgs::target(call));
+        let target = call
+            .require_anchor("request_user_choice")
+            .and_then(|anchor| {
+                call.parse::<RequestUserChoiceArgs>("request_user_choice")
+                    .and_then(|args| args.command(anchor))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn select_project(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::SelectProject) {
-        call.finish_dispatch(request, &mut commands, SelectProjectArgs::target(call));
+        let target = call
+            .require_anchor("select_project")
+            .and_then(|anchor| {
+                call.parse::<SelectProjectArgs>("select_project")
+                    .map(|args| args.command(anchor))
+            })
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn read_terminal(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::ReadTerminal) {
-        call.finish_dispatch(request, &mut commands, ReadTerminalArgs::target(call));
+        let target = call
+            .parse::<ReadTerminalArgs>("read_terminal")
+            .and_then(ReadTerminalArgs::query)
+            .map(DispatchTarget::Query);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }

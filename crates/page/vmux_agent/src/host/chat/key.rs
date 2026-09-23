@@ -2,8 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_chat::event::ChatKey;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, CommandSpawner,
-    RegisterCommandDefinitions,
+    CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
 pub(crate) struct ChatKeyPlugin;
@@ -21,7 +20,7 @@ impl Plugin for ChatKeyPlugin {
 #[derive(Component)]
 struct ChatKeyCommand(ChatKey);
 
-fn spawn_commands(mut commands: CommandSpawner) {
+fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
         (
             CommandDefinition::new("chat_list_next", "Next Option", "Chat")
@@ -84,7 +83,7 @@ fn spawn_commands(mut commands: CommandSpawner) {
             ChatKey::Cancel,
         ),
     ] {
-        commands.spawn(definition, ChatKeyCommand(key));
+        commands.spawn((definition, ChatKeyCommand(key)));
     }
 }
 

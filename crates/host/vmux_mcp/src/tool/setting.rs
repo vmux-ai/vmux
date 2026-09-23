@@ -1,6 +1,5 @@
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -34,15 +33,14 @@ struct UpdateSettingsArgs {
 }
 
 impl UpdateSettingsArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("update_settings")?;
-        if args.path.trim().is_empty() {
+    fn command(self) -> Result<AgentCommand, String> {
+        if self.path.trim().is_empty() {
             return Err("update_settings.path is empty".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::UpdateSettings {
-            path: args.path,
-            value: JsonValue::from(args.value),
-        }))
+        Ok(AgentCommand::UpdateSettings {
+            path: self.path,
+            value: JsonValue::from(self.value),
+        })
     }
 }
 
@@ -63,6 +61,10 @@ fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
 
 fn update_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
     for (request, call, _) in calls.matching(SettingTool::UpdateSettings) {
-        call.finish_dispatch(request, &mut commands, UpdateSettingsArgs::target(call));
+        let target = call
+            .parse::<UpdateSettingsArgs>("update_settings")
+            .and_then(UpdateSettingsArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }

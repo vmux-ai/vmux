@@ -1,8 +1,5 @@
 use crate::event::CommandBarKey;
-use crate::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, CommandSpawner,
-    RegisterCommandDefinitions,
-};
+use crate::{CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions};
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 
@@ -21,7 +18,7 @@ impl Plugin for KeyPlugin {
 #[derive(Component)]
 struct CommandBarKeyCommand(CommandBarKey);
 
-fn spawn_commands(mut commands: CommandSpawner) {
+fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
         (
             CommandDefinition::new("command_bar_next", "Next Result", "Command Bar")
@@ -53,7 +50,7 @@ fn spawn_commands(mut commands: CommandSpawner) {
             CommandBarKey::Dismiss,
         ),
     ] {
-        commands.spawn(definition, CommandBarKeyCommand(key));
+        commands.spawn((definition, CommandBarKeyCommand(key)));
     }
 }
 
