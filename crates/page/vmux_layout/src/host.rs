@@ -13,6 +13,7 @@ pub mod overlay;
 pub mod overlay_adopt;
 pub mod page_context;
 pub mod pane;
+mod pane_arrangement;
 mod pane_close;
 mod pane_focus;
 mod pane_identity;

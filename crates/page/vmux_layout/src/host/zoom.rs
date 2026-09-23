@@ -9,10 +9,12 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::{
-    pane::{Pane, PaneOpenSet, PaneSplit},
+    pane::{Pane, PaneSplit},
     stack::{ActiveTabParam, Stack, focused_stack},
     tab::Tab,
 };
+
+use super::pane_arrangement::ArrangementSet;
 
 pub(crate) struct PaneZoomPlugin;
 
@@ -22,7 +24,7 @@ impl Plugin for PaneZoomPlugin {
             Update,
             handle_zoom_command
                 .in_set(ReadAppCommands)
-                .before(PaneOpenSet),
+                .before(ArrangementSet),
         )
         .add_systems(
             PostUpdate,
