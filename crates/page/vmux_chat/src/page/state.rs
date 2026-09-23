@@ -62,7 +62,7 @@ pub fn use_chat() -> Chat {
     let transcript = use_transcript();
     let items = transcript.items;
     let chat = Chat {
-        agent: use_signal(current_agent),
+        agent: use_signal(CurrentAgent::read),
         transcript,
         run: use_run_state(),
         identity: use_agent_identity(),
@@ -1264,19 +1264,23 @@ fn merge_transcript_page(
     incoming_start
 }
 
-fn current_agent() -> String {
+struct CurrentAgent;
+
+impl CurrentAgent {
+    fn read() -> String {
+        if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+            && let Some(rest) = meta
+                .url
+                .strip_prefix("vmux://sessions/")
+                .or_else(|| meta.url.strip_prefix("vmux://agent/"))
+            && let Some(agent) = Self::provider(rest)
+        {
+            return agent;
+        }
+        "agent".to_string()
+    }
+
     fn provider(path: &str) -> Option<String> {
         Some(path.split('/').find(|part| !part.is_empty())?.to_string())
     }
-
-    if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
-        && let Some(rest) = meta
-            .url
-            .strip_prefix("vmux://sessions/")
-            .or_else(|| meta.url.strip_prefix("vmux://agent/"))
-        && let Some(agent) = provider(rest)
-    {
-        return agent;
-    }
-    "agent".to_string()
 }

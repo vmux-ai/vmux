@@ -3,6 +3,7 @@ pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
 pub mod acp_install;
 pub mod acp_registry;
+pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
 pub mod browser_pane;
@@ -34,11 +35,6 @@ pub mod strategy;
 pub mod toast;
 pub mod url;
 pub mod workspace;
-
-pub mod systems {
-    pub mod approval;
-    pub mod surface_errors;
-}
 
 #[cfg(test)]
 pub mod test_support;

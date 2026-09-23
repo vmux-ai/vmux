@@ -25,6 +25,7 @@ impl Plugin for McpPlugin {
                 Update,
                 (
                     McpSet::Route,
+                    crate::tools::ToolRequestSet,
                     crate::tools::ToolDispatchSet,
                     crate::tools::ToolDispatchFlush,
                     McpSet::StartTasks,

@@ -19,7 +19,7 @@ use vmux_api::mcp::{
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
-use vmux_tools::{McpServerManifest, McpTransport, load_manifest, write_manifest};
+use vmux_tool::{McpServerManifest, McpTransport, load_manifest, write_manifest};
 
 pub struct McpConnectionPlugin;
 

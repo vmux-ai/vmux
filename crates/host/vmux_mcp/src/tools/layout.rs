@@ -33,6 +33,22 @@ struct SelectTabArgs {
     index: u8,
 }
 
+impl SelectTabArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let args: Self = call.parse("select_tab")?;
+        if !(1..=8).contains(&args.index) {
+            return Err(format!(
+                "select_tab.index must be between 1 and 8, got {}",
+                args.index
+            ));
+        }
+        Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
+            id: format!("tab_select_{}", args.index),
+            args: JsonValue::Object(Vec::new()),
+        }))
+    }
+}
+
 fn register(mut tools: ToolSpawner) {
     let manifest = ToolManifest::<LayoutTool>::from_ron(include_str!("layout.ron"));
     tools.spawn_manifest(manifest);
@@ -51,34 +67,16 @@ fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
 }
 
 fn update_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let layout = call.parse::<layout::LayoutSnapshot>("update_layout")?;
-        Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
-            layout,
-        }))
-    }
-
     for (request, call, _) in calls.matching(LayoutTool::UpdateLayout) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        let target = call
+            .parse::<layout::LayoutSnapshot>("update_layout")
+            .map(|layout| DispatchTarget::Command(AgentCommand::UpdateLayout { layout }));
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn select_tab(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: SelectTabArgs = call.parse("select_tab")?;
-        if !(1..=8).contains(&args.index) {
-            return Err(format!(
-                "select_tab.index must be between 1 and 8, got {}",
-                args.index
-            ));
-        }
-        Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
-            id: format!("tab_select_{}", args.index),
-            args: JsonValue::Object(Vec::new()),
-        }))
-    }
-
     for (request, call, _) in calls.matching(LayoutTool::SelectTab) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, SelectTabArgs::target(call));
     }
 }

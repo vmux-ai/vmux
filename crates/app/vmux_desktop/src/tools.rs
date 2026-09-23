@@ -23,7 +23,7 @@ use vmux_core::vault::{
 };
 use vmux_editor::lsp::package_path::PackageName;
 use vmux_layout::LayoutCef;
-use vmux_tools::{self as manifest_store, ToolsManifest};
+use vmux_tool::{self as manifest_store, ToolsManifest};
 
 pub struct ToolPlugin;
 

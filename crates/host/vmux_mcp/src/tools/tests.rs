@@ -4,7 +4,7 @@ use vmux_client::protocol::{
     SimulatorButton,
 };
 
-#[derive(Component, Deserialize, Serialize)]
+#[derive(Clone, Component, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ExtensionTool {
     Echo,
@@ -13,16 +13,6 @@ enum ExtensionTool {
 #[derive(Deserialize)]
 struct EchoArgs {
     text: String,
-}
-
-impl McpToolHandler for ExtensionTool {
-    fn dispatch(&self, request: McpToolRequest<'_>) -> Result<DispatchTarget, String> {
-        let EchoArgs { text } = request.parse()?;
-        Ok(DispatchTarget::Command(AgentCommand::Notify {
-            title: Some("Extension".to_string()),
-            body: Some(text),
-        }))
-    }
 }
 
 const EXTENSION_TOOLS: &str = r#"
@@ -39,10 +29,36 @@ const EXTENSION_TOOLS: &str = r#"
 ]
 "#;
 
+struct ExtensionToolPlugin;
+
+impl Plugin for ExtensionToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(McpToolPlugin::<ExtensionTool>::new(EXTENSION_TOOLS))
+            .add_systems(Update, dispatch_extension_tools.in_set(ToolDispatchSet));
+    }
+}
+
+fn dispatch_extension_tools(
+    mut commands: Commands,
+    mut requests: MessageReader<McpToolRequest<ExtensionTool>>,
+) {
+    for request in requests.read() {
+        let result = match request.tool() {
+            ExtensionTool::Echo => request.parse::<EchoArgs>().map(|args| {
+                DispatchTarget::Command(AgentCommand::Notify {
+                    title: Some("Extension".to_string()),
+                    body: Some(args.text),
+                })
+            }),
+        };
+        request.finish(&mut commands, result);
+    }
+}
+
 #[test]
 fn extension_plugin_registers_and_dispatches_its_manifest() {
     let mut app = App::new();
-    app.add_plugins(McpToolPlugin::<ExtensionTool>::new(EXTENSION_TOOLS));
+    app.add_plugins(ExtensionToolPlugin);
     app.update();
 
     let definitions = ToolDefinition::all(app.world_mut(), false, false, "");

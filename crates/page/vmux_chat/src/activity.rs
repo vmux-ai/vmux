@@ -129,7 +129,9 @@ impl ToolPresentation {
         let icon = ActivityIcon::for_tool(name, args);
         let label = match ToolActivity::classify(name) {
             ToolActivity::Guardian => translate("agent-tool-guardian-review"),
-            ToolActivity::ReadFile if tool_args_read_skill(args) => "Read skill".into(),
+            ToolActivity::ReadFile if ToolActivity::arguments_read_skill(args) => {
+                "Read skill".into()
+            }
             ToolActivity::ReadFile => translate("agent-tool-read-files"),
             ToolActivity::WriteFile => translate("agent-edited"),
             ToolActivity::Layout => translate("schema-layout"),
@@ -244,10 +246,25 @@ impl ToolActivity {
             Self::Other => ActivityIcon::Tool,
         }
     }
-}
 
-fn tool_args_read_skill(args: &str) -> bool {
-    fn skill_path(value: &serde_json::Value) -> bool {
+    fn arguments_read_skill(args: &str) -> bool {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(args) else {
+            return false;
+        };
+        while let serde_json::Value::Object(map) = &value {
+            let Some(arguments) = map.get("arguments") else {
+                break;
+            };
+            if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
+                value = arguments.clone();
+            } else {
+                break;
+            }
+        }
+        Self::contains_skill_path(&value)
+    }
+
+    fn contains_skill_path(value: &serde_json::Value) -> bool {
         match value {
             serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
                 matches!(key.as_str(), "path" | "file" | "file_path" | "filename")
@@ -257,27 +274,12 @@ fn tool_args_read_skill(args: &str) -> bool {
                             .and_then(|name| name.to_str())
                             .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
                     })
-                    || skill_path(value)
+                    || Self::contains_skill_path(value)
             }),
-            serde_json::Value::Array(values) => values.iter().any(skill_path),
+            serde_json::Value::Array(values) => values.iter().any(Self::contains_skill_path),
             _ => false,
         }
     }
-
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(args) else {
-        return false;
-    };
-    while let serde_json::Value::Object(map) = &value {
-        let Some(arguments) = map.get("arguments") else {
-            break;
-        };
-        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
-            value = arguments.clone();
-        } else {
-            break;
-        }
-    }
-    skill_path(&value)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -529,10 +531,10 @@ mod tests {
 
     #[test]
     fn skill_reads_are_identified_from_nested_tool_arguments() {
-        assert!(tool_args_read_skill(
+        assert!(ToolActivity::arguments_read_skill(
             r#"{"arguments":{"path":"/tmp/skills/caveman/SKILL.md"},"server":"vmux","tool":"read_file"}"#
         ));
-        assert!(!tool_args_read_skill(
+        assert!(!ToolActivity::arguments_read_skill(
             r#"{"arguments":{"path":"/tmp/src/lib.rs"},"server":"vmux","tool":"read_file"}"#
         ));
     }

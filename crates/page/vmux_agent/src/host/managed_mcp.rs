@@ -5,11 +5,11 @@ use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 #[cfg(not(test))]
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
 use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
-use vmux_tools::{McpServerManifest, McpTransport};
+use vmux_tool::{McpServerManifest, McpTransport};
 
 #[cfg(not(test))]
 pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_tools::load_manifest() {
+    match vmux_tool::load_manifest() {
         Ok(manifest) => manifest.mcp.servers,
         Err(error) => {
             bevy::log::warn!("managed MCP servers unavailable: {error}");

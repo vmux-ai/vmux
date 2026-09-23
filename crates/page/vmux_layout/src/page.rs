@@ -511,7 +511,7 @@ fn SideSheetView(
         .and_then(|pane| pane.stacks.iter().find(|stack| stack.is_active))
         .filter(|stack| !stack.url.is_empty())
         .cloned();
-    let folders = bookmark_folder_choices(&bookmarks.roots);
+    let folders = BookmarkFolderChoice::all(&bookmarks.roots);
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);
     let drag_state = use_signal(|| None::<BookmarkDragState>);
@@ -1589,7 +1589,7 @@ fn BookmarksSection(
             begin_new_folder(creating_folder, new_folder_draft);
         }
     });
-    let folders = bookmark_folder_choices(&roots);
+    let folders = BookmarkFolderChoice::all(&roots);
     let folder_rows = bookmark_folder_rows(&roots);
     let host_pin_order = pins.iter().map(|pin| pin.uuid.clone()).collect::<Vec<_>>();
     let observed_host_pin_order = host_pin_order.clone();
@@ -2098,7 +2098,21 @@ fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderRow> {
         .collect()
 }
 
-fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> {
+impl BookmarkFolderChoice {
+    fn all(nodes: &[BookmarkNode]) -> Vec<Self> {
+        let folders = bookmark_folder_rows(nodes);
+        let mut output = Vec::new();
+        Self::collect(
+            &folders,
+            None,
+            "",
+            &[],
+            &mut std::collections::HashSet::new(),
+            &mut output,
+        );
+        output
+    }
+
     fn collect(
         folders: &[BookmarkFolderRow],
         parent: Option<&str>,
@@ -2126,7 +2140,7 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
             });
             let mut child_ancestors = ancestors.to_vec();
             child_ancestors.push(folder.uuid.clone());
-            collect(
+            Self::collect(
                 folders,
                 Some(&folder.uuid),
                 &label,
@@ -2136,18 +2150,6 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
             );
         }
     }
-
-    let folders = bookmark_folder_rows(nodes);
-    let mut output = Vec::new();
-    collect(
-        &folders,
-        None,
-        "",
-        &[],
-        &mut std::collections::HashSet::new(),
-        &mut output,
-    );
-    output
 }
 
 #[component]

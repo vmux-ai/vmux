@@ -96,70 +96,10 @@ struct OpenPageArgs {
     focus: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OpenFileArgs {
-    path: String,
-    direction: Option<PaneDirection>,
-    #[serde(default)]
-    focus: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RunArgs {
-    command: String,
-    shell: Option<String>,
-    direction: Option<PaneDirection>,
-    #[serde(default)]
-    focus: bool,
-    terminal: Option<String>,
-    beside: Option<String>,
-    mode: Option<RunMode>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CreateWorktreeArgs {
-    branch: Option<String>,
-    path: Option<String>,
-    task: Option<String>,
-    #[serde(default)]
-    create: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RequestUserChoiceArgs {
-    question: String,
-    options: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SelectProjectArgs {
-    path: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadTerminalArgs {
-    terminal: String,
-}
-
-fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    for (request, call, _) in calls.matching(WorkspaceTool::ResumeInAcp) {
-        let result = call
-            .require_anchor("resume_in_acp")
-            .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
-        call.finish_dispatch(request, &mut commands, result);
-    }
-}
-
-fn open_page(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+impl OpenPageArgs {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_page")?;
-        let args: OpenPageArgs = call.parse("open_page")?;
+        let args: Self = call.parse("open_page")?;
         let url = args.url;
         if url.trim().is_empty() {
             return Err("open_page.url is empty".to_string());
@@ -171,16 +111,21 @@ fn open_page(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
             focus: args.focus,
         }))
     }
-
-    for (request, call, _) in calls.matching(WorkspaceTool::OpenPage) {
-        call.finish_dispatch(request, &mut commands, target(call));
-    }
 }
 
-fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenFileArgs {
+    path: String,
+    direction: Option<PaneDirection>,
+    #[serde(default)]
+    focus: bool,
+}
+
+impl OpenFileArgs {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_file")?;
-        let args: OpenFileArgs = call.parse("open_file")?;
+        let args: Self = call.parse("open_file")?;
         let path = args.path.trim().to_string();
         if path.is_empty() {
             return Err("open_file.path is empty".to_string());
@@ -197,16 +142,25 @@ fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
             focus: args.focus,
         }))
     }
-
-    for (request, call, _) in calls.matching(WorkspaceTool::OpenFile) {
-        call.finish_dispatch(request, &mut commands, target(call));
-    }
 }
 
-fn run(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunArgs {
+    command: String,
+    shell: Option<String>,
+    direction: Option<PaneDirection>,
+    #[serde(default)]
+    focus: bool,
+    terminal: Option<String>,
+    beside: Option<String>,
+    mode: Option<RunMode>,
+}
+
+impl RunArgs {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("run")?;
-        let args: RunArgs = call.parse("run")?;
+        let args: Self = call.parse("run")?;
         let placement_override =
             args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
         let mut command = args.command;
@@ -253,9 +207,134 @@ fn run(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
         };
         Ok(DispatchTarget::Command(command))
     }
+}
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateWorktreeArgs {
+    branch: Option<String>,
+    path: Option<String>,
+    task: Option<String>,
+    #[serde(default)]
+    create: bool,
+}
+
+impl CreateWorktreeArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let anchor = call.require_anchor("create_worktree")?;
+        let args: Self = call.parse("create_worktree")?;
+        if let Some(branch) = args.branch.and_then(Trimmed::into_option) {
+            return Ok(DispatchTarget::Command(
+                AgentCommand::CreateWorktreeOnBranch {
+                    anchor,
+                    branch,
+                    project: None,
+                },
+            ));
+        }
+        Ok(DispatchTarget::Command(AgentCommand::PrepareWorktree {
+            anchor,
+            path: args.path.and_then(Trimmed::into_option),
+            task: args.task.and_then(Trimmed::into_option),
+            create: args.create,
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequestUserChoiceArgs {
+    question: String,
+    options: Vec<String>,
+}
+
+impl RequestUserChoiceArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let anchor = call.require_anchor("request_user_choice")?;
+        let args: Self = call.parse("request_user_choice")?;
+        let question =
+            Trimmed::into_option(args.question).ok_or("request_user_choice.question is empty")?;
+        let options = args
+            .options
+            .into_iter()
+            .map(Trimmed::into_option)
+            .collect::<Option<Vec<_>>>()
+            .ok_or("request_user_choice options must be non-empty strings")?;
+        if !(2..=9).contains(&options.len()) {
+            return Err("request_user_choice requires 2 to 9 options".to_string());
+        }
+        Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
+            anchor,
+            question,
+            options,
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectProjectArgs {
+    path: Option<String>,
+}
+
+impl SelectProjectArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let anchor = call.require_anchor("select_project")?;
+        let args: Self = call.parse("select_project")?;
+        let Some(path) = args.path.and_then(Trimmed::into_option) else {
+            return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
+                anchor,
+            }));
+        };
+        Ok(DispatchTarget::Command(
+            AgentCommand::ChooseWorkspaceAtPath { anchor, path },
+        ))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadTerminalArgs {
+    terminal: String,
+}
+
+impl ReadTerminalArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let args: Self = call.parse("read_terminal")?;
+        let process_id = args
+            .terminal
+            .parse()
+            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
+        Ok(DispatchTarget::Query(AgentQuery::ReadTerminal {
+            process_id,
+        }))
+    }
+}
+
+fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+    for (request, call, _) in calls.matching(WorkspaceTool::ResumeInAcp) {
+        let result = call
+            .require_anchor("resume_in_acp")
+            .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
+        call.finish_dispatch(request, &mut commands, result);
+    }
+}
+
+fn open_page(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+    for (request, call, _) in calls.matching(WorkspaceTool::OpenPage) {
+        call.finish_dispatch(request, &mut commands, OpenPageArgs::target(call));
+    }
+}
+
+fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
+    for (request, call, _) in calls.matching(WorkspaceTool::OpenFile) {
+        call.finish_dispatch(request, &mut commands, OpenFileArgs::target(call));
+    }
+}
+
+fn run(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::Run) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, RunArgs::target(call));
     }
 }
 
@@ -278,28 +357,8 @@ impl ProcessTarget {
 }
 
 fn create_worktree(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("create_worktree")?;
-        let args: CreateWorktreeArgs = call.parse("create_worktree")?;
-        if let Some(branch) = args.branch.and_then(Trimmed::into_option) {
-            return Ok(DispatchTarget::Command(
-                AgentCommand::CreateWorktreeOnBranch {
-                    anchor,
-                    branch,
-                    project: None,
-                },
-            ));
-        }
-        Ok(DispatchTarget::Command(AgentCommand::PrepareWorktree {
-            anchor,
-            path: args.path.and_then(Trimmed::into_option),
-            task: args.task.and_then(Trimmed::into_option),
-            create: args.create,
-        }))
-    }
-
     for (request, call, _) in calls.matching(WorkspaceTool::CreateWorktree) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, CreateWorktreeArgs::target(call));
     }
 }
 
@@ -313,64 +372,19 @@ impl Trimmed {
 }
 
 fn request_user_choice(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("request_user_choice")?;
-        let args: RequestUserChoiceArgs = call.parse("request_user_choice")?;
-        let question =
-            Trimmed::into_option(args.question).ok_or("request_user_choice.question is empty")?;
-        let options = args
-            .options
-            .into_iter()
-            .map(Trimmed::into_option)
-            .collect::<Option<Vec<_>>>()
-            .ok_or("request_user_choice options must be non-empty strings")?;
-        if !(2..=9).contains(&options.len()) {
-            return Err("request_user_choice requires 2 to 9 options".to_string());
-        }
-        Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
-            anchor,
-            question,
-            options,
-        }))
-    }
-
     for (request, call, _) in calls.matching(WorkspaceTool::RequestUserChoice) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, RequestUserChoiceArgs::target(call));
     }
 }
 
 fn select_project(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let anchor = call.require_anchor("select_project")?;
-        let args: SelectProjectArgs = call.parse("select_project")?;
-        let Some(path) = args.path.and_then(Trimmed::into_option) else {
-            return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
-                anchor,
-            }));
-        };
-        Ok(DispatchTarget::Command(
-            AgentCommand::ChooseWorkspaceAtPath { anchor, path },
-        ))
-    }
-
     for (request, call, _) in calls.matching(WorkspaceTool::SelectProject) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, SelectProjectArgs::target(call));
     }
 }
 
 fn read_terminal(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: ReadTerminalArgs = call.parse("read_terminal")?;
-        let process_id = args
-            .terminal
-            .parse()
-            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
-        Ok(DispatchTarget::Query(AgentQuery::ReadTerminal {
-            process_id,
-        }))
-    }
-
     for (request, call, _) in calls.matching(WorkspaceTool::ReadTerminal) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, ReadTerminalArgs::target(call));
     }
 }

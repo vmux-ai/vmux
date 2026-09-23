@@ -704,7 +704,7 @@ crates/
 ├── vmux_path               canonical and scoped path identities
 ├── vmux_profile
 ├── vmux_session
-├── vmux_tools              tool manifests, imports, and dotfile state
+├── vmux_tool               tool manifests, imports, and dotfile state
 ├── vmux_ui
 └── vmux_api
 ```
@@ -720,7 +720,7 @@ And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated co
 staying flat.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
-capability in `vmux_tools`; consumers depend on it directly instead of reaching through a
+capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
 `vmux_core` re-export. `vmux_path` gives filesystem boundaries one shared identity rule and
 rejects scoped paths that traverse or resolve outside their root.
 
