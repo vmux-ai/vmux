@@ -22,7 +22,9 @@ mod page_state;
 mod scroll;
 mod snapshot;
 mod window_drag;
+pub use command::{NavigationRequest, OpenRequest, ViewRequest};
 pub use host_focus::HostFocusIntent;
+pub use navigation::OpenHistoryRequest;
 pub use window_drag::WindowDragRegion;
 
 pub use native_bridge::NativeBridge;
@@ -35,7 +37,7 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
-use vmux_command::ReadAppCommands;
+use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
     CefPageAttachRequest, HostSpawnRegistry, PageIdentity, PageMetadata, PageOpenRequest,
@@ -161,7 +163,10 @@ impl Plugin for BrowserPlugin {
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
-            .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
+            .configure_sets(
+                Update,
+                CefSystems::CreateAndResize.after(ReadCommandRequests),
+            )
             .configure_sets(
                 Update,
                 (
@@ -171,7 +176,7 @@ impl Plugin for BrowserPlugin {
                     PageOpenSet::Respond,
                 )
                     .chain()
-                    .after(ReadAppCommands),
+                    .after(ReadCommandRequests),
             )
             .add_plugins((
                 CefPlugin {
@@ -1878,11 +1883,10 @@ mod tests {
     }
 
     mod open_in_place_flow {
+        use crate::{OpenRequest, ViewRequest};
         use bevy::ecs::message::Messages;
         use bevy::prelude::*;
         use bevy_cef::prelude::RequestNavigate;
-        use vmux_command::open::OpenCommand;
-        use vmux_command::{AppCommand, BrowserCommand, BrowserViewCommand};
         use vmux_core::{PageOpenRequest, PageOpenTarget};
         use vmux_history::LastActivatedAt;
         use vmux_layout::Browser;
@@ -1909,7 +1913,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_systems(
                 Update,
-                capture_page_open_requests.after(vmux_command::ReadAppCommands),
+                capture_page_open_requests.after(vmux_command::ReadCommandRequests),
             )
             .init_resource::<CapturedNavigateUrls>()
             .init_resource::<CapturedPageOpenRequests>()
@@ -2002,12 +2006,10 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://example.com".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://example.com".into()),
+                });
 
             app.update();
 
@@ -2021,12 +2023,10 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://sessions/vibe".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://sessions/vibe".into()),
+                });
 
             app.update();
 
@@ -2044,12 +2044,10 @@ mod tests {
             build_focused_native_stack(&mut app, "vmux://history/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://mistral.ai".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://mistral.ai".into()),
+                });
 
             app.update();
 
@@ -2065,12 +2063,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://history/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://history/".into()),
+                });
 
             app.update();
 
@@ -2086,12 +2082,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://settings/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://settings/".into()),
+                });
 
             app.update();
 
@@ -2109,12 +2103,10 @@ mod tests {
             build_focused_native_stack(&mut app, "vmux://settings/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://terminal/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://terminal/".into()),
+                });
 
             app.update();
 
@@ -2132,12 +2124,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("file:///tmp/x".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("file:///tmp/x".into()),
+                });
 
             app.update();
 
@@ -2155,12 +2145,10 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://google.com".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://google.com".into()),
+                });
 
             app.update();
 
@@ -2180,10 +2168,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::View(
-                    BrowserViewCommand::ZoomIn,
-                )));
+                .resource_mut::<Messages<ViewRequest>>()
+                .write(ViewRequest::ZoomIn);
 
             app.update();
 
@@ -2203,10 +2189,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::View(
-                    BrowserViewCommand::ZoomReset,
-                )));
+                .resource_mut::<Messages<ViewRequest>>()
+                .write(ViewRequest::ZoomReset);
 
             app.update();
 
@@ -2227,10 +2211,8 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace { url: None },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest { url: None });
 
             app.update();
 
@@ -2244,10 +2226,8 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace { url: None },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest { url: None });
 
             app.update();
 

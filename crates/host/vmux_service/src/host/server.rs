@@ -273,8 +273,19 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
             false,
         ),
         AgentQueryResult::Text(text) => (text, false),
-        AgentQueryResult::Settings(json) => (json, false),
-        AgentQueryResult::Spaces(json) => (json, false),
+        AgentQueryResult::Settings(settings) => {
+            let value = serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
+            (serde_json::to_string(&value).unwrap_or_default(), false)
+        }
+        AgentQueryResult::Spaces(spaces) => {
+            (serde_json::to_string(&spaces).unwrap_or_default(), false)
+        }
+        AgentQueryResult::Bookmarks(bookmarks) => {
+            (serde_json::to_string(&bookmarks).unwrap_or_default(), false)
+        }
+        AgentQueryResult::Commands(commands) => {
+            (serde_json::to_string(&commands).unwrap_or_default(), false)
+        }
         AgentQueryResult::CommandExit { seq, exit } => {
             let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
             (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
@@ -1183,7 +1194,7 @@ mod tests {
         let (tx, rx) = oneshot::channel::<AgentQueryResult>();
         pending.lock().await.insert(request_id, tx);
 
-        let result = AgentQueryResult::Settings("{}".into());
+        let result = AgentQueryResult::Settings(crate::protocol::JsonValue::Object(Vec::new()));
         let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
         resp_tx.send(result.clone()).expect("send");
 

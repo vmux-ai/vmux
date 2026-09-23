@@ -34,6 +34,7 @@ vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_macro = { path = "../../vmux_macro" }
 vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

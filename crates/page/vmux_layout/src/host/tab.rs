@@ -7,14 +7,11 @@ use crate::{
 };
 #[cfg(test)]
 use bevy::window::PrimaryWindow;
-use bevy::{
-    ecs::{message::Messages, relationship::Relationship},
-    prelude::*,
-};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::time::Instant;
-use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
+use vmux_command::{CommandDefinition, CommandInvocation, CommandMcp, InputSchema};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
@@ -26,6 +23,7 @@ pub struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
+        TabRequest::register(app);
         app.register_type::<Tab>()
             .register_type::<Option<String>>()
             .register_type::<TabWorkspace>()
@@ -33,7 +31,6 @@ impl Plugin for TabPlugin {
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .init_resource::<crate::window::FocusedWindow>()
-            .add_message::<TabRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_plugins(UiEventPlugin::<(TabsRequest,)>::default())
@@ -87,6 +84,88 @@ pub enum TabRequest {
     Close,
     Focus(TabFocus),
     Move(SiblingDirection),
+}
+
+impl TabRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("close_tab", "Close Tab", "Layout > Tab").chord("Ctrl+b, &"),
+            CommandDefinition::new("new_task", "New Task…", "Layout > Tab"),
+            CommandDefinition::new("next_tab", "Next Tab", "Layout > Tab")
+                .accelerator("super+shift+]")
+                .direct("Super+Shift+L")
+                .direct("Super+Alt+ArrowRight")
+                .direct("Super+Shift+BracketRight")
+                .chord("Ctrl+b, n"),
+            CommandDefinition::new("prev_tab", "Previous Tab", "Layout > Tab")
+                .accelerator("super+shift+[")
+                .direct("Super+Shift+H")
+                .direct("Super+Alt+ArrowLeft")
+                .direct("Super+Shift+BracketLeft")
+                .chord("Ctrl+b, p"),
+            CommandDefinition::new("tab_select_1", "Select Tab 1", "Layout > Tab")
+                .accelerator("super+1"),
+            CommandDefinition::new("tab_select_2", "Select Tab 2", "Layout > Tab")
+                .accelerator("super+2"),
+            CommandDefinition::new("tab_select_3", "Select Tab 3", "Layout > Tab")
+                .accelerator("super+3"),
+            CommandDefinition::new("tab_select_4", "Select Tab 4", "Layout > Tab")
+                .accelerator("super+4"),
+            CommandDefinition::new("tab_select_5", "Select Tab 5", "Layout > Tab")
+                .accelerator("super+5"),
+            CommandDefinition::new("tab_select_6", "Select Tab 6", "Layout > Tab")
+                .accelerator("super+6"),
+            CommandDefinition::new("tab_select_7", "Select Tab 7", "Layout > Tab")
+                .accelerator("super+7"),
+            CommandDefinition::new("tab_select_8", "Select Tab 8", "Layout > Tab")
+                .accelerator("super+8"),
+            CommandDefinition::new("tab_select_last", "Select Last Tab", "Layout > Tab")
+                .accelerator("super+9"),
+            CommandDefinition::new("swap_tab_prev", "Move Tab Left", "Layout > Tab").hidden(),
+            CommandDefinition::new("swap_tab_next", "Move Tab Right", "Layout > Tab").hidden(),
+            CommandDefinition::new("open_in_new_tab", "Open in New Tab", "Browser > Open")
+                .accelerator("super+t")
+                .chord("Ctrl+b, c")
+                .mcp(CommandMcp::new(
+                    "Open a page in a brand-new Tab within the current Space. Tabs are the workspace-tab strip (one level above panes); creating one gives the user a fresh layout container.",
+                    InputSchema::object().optional(
+                        "url",
+                        InputSchema::string().description(
+                            "Absolute URL to open in the new Tab. If omitted, opens the startup URL.",
+                        ),
+                    ),
+                )),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "close_tab" => Self::Close,
+            "new_task" => Self::Create,
+            "next_tab" => Self::Focus(TabFocus::Sibling(SiblingDirection::Next)),
+            "prev_tab" => Self::Focus(TabFocus::Sibling(SiblingDirection::Previous)),
+            "tab_select_1" => Self::Focus(TabFocus::Index(0)),
+            "tab_select_2" => Self::Focus(TabFocus::Index(1)),
+            "tab_select_3" => Self::Focus(TabFocus::Index(2)),
+            "tab_select_4" => Self::Focus(TabFocus::Index(3)),
+            "tab_select_5" => Self::Focus(TabFocus::Index(4)),
+            "tab_select_6" => Self::Focus(TabFocus::Index(5)),
+            "tab_select_7" => Self::Focus(TabFocus::Index(6)),
+            "tab_select_8" => Self::Focus(TabFocus::Index(7)),
+            "tab_select_last" => Self::Focus(TabFocus::Last),
+            "swap_tab_prev" => Self::Move(SiblingDirection::Previous),
+            "swap_tab_next" => Self::Move(SiblingDirection::Next),
+            "open_in_new_tab" => Self::Open {
+                url: invocation.argument("url"),
+            },
+            _ => return None,
+        };
+        Some(request)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -426,36 +505,24 @@ fn on_tabs_request(
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
     active_tab_param: crate::stack::ActiveTabParam,
-    mut messages: ResMut<Messages<AppCommand>>,
-    mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
+    mut tab_requests: MessageWriter<TabRequest>,
     mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
     let active_tab = active_tab_param.get();
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    match evt.command.as_str() {
-        "new" => {
-            let cmd =
-                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url: None }));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            messages.write(cmd);
+    match evt {
+        TabsRequest::New => {
+            tab_requests.write(TabRequest::Open { url: None });
         }
-        "close" => {
-            let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
-                .or(active_tab);
+        TabsRequest::Close { tab_id } => {
+            let target =
+                tab_target(tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity)).or(active_tab);
             let Some(target) = target else { return };
             close_requests.write(CloseTabRequest { tab: target });
         }
-        "switch" => {
-            let Some(id_str) = evt.tab_id.as_deref() else {
-                return;
-            };
-            let Ok(bits) = id_str.parse::<u64>() else {
+        TabsRequest::Switch { tab_id } => {
+            let Ok(bits) = tab_id.parse::<u64>() else {
                 return;
             };
             let Some((target, _)) = tabs.iter().find(|(e, _)| e.to_bits() == bits) else {
@@ -463,14 +530,18 @@ fn on_tabs_request(
             };
             commands.entity(target).insert(LastActivatedAt::now());
         }
-        "reorder" => {
+        TabsRequest::Reorder {
+            tab_id,
+            target_tab_id,
+            drop_placement,
+        } => {
             let Some(source) =
-                tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
+                tab_target(Some(tab_id.as_str()), tabs.iter().map(|(entity, _)| entity))
             else {
                 return;
             };
             let Some(target) = tab_target(
-                evt.target_tab_id.as_deref(),
+                Some(target_tab_id.as_str()),
                 tabs.iter().map(|(entity, _)| entity),
             ) else {
                 return;
@@ -503,10 +574,7 @@ fn on_tabs_request(
             let Some(to) = find_kind_index(target, siblings, &kind_positions) else {
                 return;
             };
-            let destination = evt
-                .drop_placement
-                .map(|placement| placement.destination(from, to, kind_positions.len()))
-                .unwrap_or(to);
+            let destination = drop_placement.destination(from, to, kind_positions.len());
             move_sibling(
                 &mut commands,
                 parent,
@@ -516,7 +584,6 @@ fn on_tabs_request(
                 destination,
             );
         }
-        _ => {}
     }
 }
 
@@ -536,6 +603,25 @@ mod tests {
     use serde::de::DeserializeSeed;
     use vmux_command::CommandPlugin;
     use vmux_core::PageOpenRequest;
+
+    #[test]
+    fn tab_mcp_definition_dispatches_to_the_typed_request() {
+        let definitions = TabRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["open_in_new_tab"],
+        );
+        let invocation = CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_tab")
+            .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
+        assert!(TabRequest::from_invocation(&invocation).is_some());
+    }
 
     #[test]
     fn tab_worktree_deserializes_legacy_metadata_without_checkout_dir() {
@@ -1084,11 +1170,8 @@ mod tests {
 
         app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsRequest {
-                command: "close".to_string(),
+            payload: TabsRequest::Close {
                 tab_id: Some(tab.to_bits().to_string()),
-                target_tab_id: None,
-                drop_placement: None,
             },
         });
         app.update();
@@ -1109,12 +1192,7 @@ mod tests {
 
         app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsRequest {
-                command: "close".to_string(),
-                tab_id: None,
-                target_tab_id: None,
-                drop_placement: None,
-            },
+            payload: TabsRequest::Close { tab_id: None },
         });
         app.update();
 
@@ -1144,11 +1222,10 @@ mod tests {
 
         app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsRequest {
-                command: "reorder".to_string(),
-                tab_id: Some(first.to_bits().to_string()),
-                target_tab_id: Some(third.to_bits().to_string()),
-                drop_placement: Some(TabDropPlacement::After),
+            payload: TabsRequest::Reorder {
+                tab_id: first.to_bits().to_string(),
+                target_tab_id: third.to_bits().to_string(),
+                drop_placement: TabDropPlacement::After,
             },
         });
         app.update();
@@ -1232,6 +1309,7 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<TabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<CloseTabRequest>()
             .init_resource::<LastTabCloseAt>()
@@ -1266,11 +1344,8 @@ mod tests {
 
         app.world_mut().trigger(BinReceive::<TabsRequest> {
             webview,
-            payload: TabsRequest {
-                command: "close".to_string(),
+            payload: TabsRequest::Close {
                 tab_id: Some(d.to_bits().to_string()),
-                target_tab_id: None,
-                drop_placement: None,
             },
         });
         app.update();
@@ -1295,7 +1370,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
-            crate::host::command::LayoutCommandPlugin,
+            crate::host::command::LayoutRequestPlugin,
             crate::space::SpaceLayoutPlugin,
             TabPlugin,
         ))

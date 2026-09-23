@@ -17,19 +17,20 @@ pub(crate) struct PaneZoomPlugin;
 
 impl Plugin for PaneZoomPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_zoom_command
-                .in_set(LayoutRequestSet::Prepare)
-                .before(ArrangementSet),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                sync_zoom_visibility.before(LayoutSystems::Layout),
-                clear_zoom_on_pane_removal,
-            ),
-        );
+        app.add_message::<PaneRequest>()
+            .add_systems(
+                Update,
+                handle_zoom_command
+                    .in_set(LayoutRequestSet::Prepare)
+                    .before(ArrangementSet),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_zoom_visibility.before(LayoutSystems::Layout),
+                    clear_zoom_on_pane_removal,
+                ),
+            );
         Zoomed::register_hooks(app);
     }
 }

@@ -10,6 +10,7 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
+use vmux_command::{CommandDefinition, CommandInvocation, CommandMcp, InputSchema};
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -21,9 +22,9 @@ pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
+        StackRequest::register(app);
         app.register_type::<Stack>()
             .init_resource::<FocusedStack>()
-            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,
@@ -56,6 +57,59 @@ pub enum StackRequest {
     Close,
     Focus(SiblingDirection),
     Move(SiblingDirection),
+}
+
+impl StackRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("stack_close", "Close Stack", "Layout > Stack")
+                .accelerator("super+w")
+                .chord("Ctrl+b, Shift+x"),
+            CommandDefinition::new("stack_next", "Next Stack", "Layout > Stack")
+                .accelerator("super+shift+n")
+                .direct("Super+Shift+J"),
+            CommandDefinition::new("stack_previous", "Previous Stack", "Layout > Stack")
+                .accelerator("super+shift+p")
+                .direct("Super+Shift+K"),
+            CommandDefinition::new("stack_swap_prev", "Move Stack Left", "Layout > Stack")
+                .chord("Ctrl+b, <"),
+            CommandDefinition::new("stack_swap_next", "Move Stack Right", "Layout > Stack")
+                .chord("Ctrl+b, >"),
+            CommandDefinition::new("open_in_new_stack", "Open in New Stack", "Browser > Open")
+                .accelerator("super+n")
+                .mcp(CommandMcp::new(
+                    "Open the URL as a new stack inside the currently focused pane. Stacks are the in-pane tab strip: the current stack stays alive and a new one is added next to it, becoming active. Use when the user wants to preserve the current page and view a new one alongside, in the same pane.",
+                    InputSchema::object().optional(
+                        "url",
+                        InputSchema::string().description(
+                            "Absolute URL to open in the new stack. If omitted, opens the startup URL.",
+                        ),
+                    ),
+                )),
+            CommandDefinition::new("service_open", "Open Service Monitor", "Service")
+                .expose_to_mcp(),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "stack_close" => Self::Close,
+            "stack_next" => Self::Focus(SiblingDirection::Next),
+            "stack_previous" => Self::Focus(SiblingDirection::Previous),
+            "stack_swap_prev" => Self::Move(SiblingDirection::Previous),
+            "stack_swap_next" => Self::Move(SiblingDirection::Next),
+            "open_in_new_stack" => Self::Open {
+                url: invocation.argument("url"),
+            },
+            "service_open" => Self::OpenServices,
+            _ => return None,
+        };
+        Some(request)
+    }
 }
 
 #[derive(Resource, Default)]
@@ -626,6 +680,26 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use bevy::ecs::relationship::Relationship;
+
+    #[test]
+    fn stack_mcp_definitions_are_the_dispatchable_command_set() {
+        let definitions = StackRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["open_in_new_stack", "service_open"],
+        );
+        for tool in tools {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
+            assert!(StackRequest::from_invocation(&invocation).is_some());
+        }
+    }
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {

@@ -13,6 +13,10 @@ impl BinEventTarget {
             Self::Hosts(targets) => targets.contains(&host),
         }
     }
+
+    pub fn accepts_any(self, hosts: &[&str]) -> bool {
+        hosts.iter().any(|host| self.accepts(host))
+    }
 }
 
 pub trait BinEvent: 'static {
@@ -81,6 +85,8 @@ mod tests {
         assert!(TestEvent::TARGET.accepts("one"));
         assert!(TestEvent::TARGET.accepts("two"));
         assert!(!TestEvent::TARGET.accepts("three"));
+        assert!(TestEvent::TARGET.accepts_any(&["zero", "two"]));
+        assert!(!TestEvent::TARGET.accepts_any(&["zero", "three"]));
     }
 
     #[test]

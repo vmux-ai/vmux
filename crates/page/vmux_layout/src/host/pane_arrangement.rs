@@ -17,7 +17,7 @@ pub(super) struct ArrangementSet;
 
 impl Plugin for ArrangementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_message::<PaneRequest>().add_systems(
             Update,
             arrange_from_commands
                 .in_set(LayoutRequestSet::Handle)

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
 use vmux_core::page::{PageReady, mark_webview_page_ready};
 
-use super::command::LayoutCommandPlugin;
+use super::command::LayoutRequestPlugin;
 use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
@@ -29,7 +29,7 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((LayoutContractPlugin, LayoutCommandPlugin))
+        app.add_plugins((LayoutContractPlugin, LayoutRequestPlugin))
             .register_type::<Open>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()

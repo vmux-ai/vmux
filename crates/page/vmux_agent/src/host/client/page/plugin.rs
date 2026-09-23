@@ -8,7 +8,6 @@ use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
 use crate::systems::{approval, surface_errors};
 use crate::toast::AgentToast;
-use crate::tools::mcp_tool_defs;
 use vmux_service::agent_events::{
     PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
     PageAgentSnapshot,
@@ -83,6 +82,8 @@ fn attach_last_run_state_kind(
 fn spawn_page_session_on_add(
     q: Query<(&AgentSession, Option<&AgentApprovalPolicy>), Added<AgentSession>>,
     service: Option<Res<ServiceClient>>,
+    tools: vmux_mcp::tools::ToolCatalog,
+    commands: Query<&vmux_command::CommandDefinition>,
 ) {
     let Some(service) = service else {
         return;
@@ -94,8 +95,30 @@ fn spawn_page_session_on_add(
         let auto_tools: Vec<String> = policy
             .map(|p| p.auto.iter().cloned().collect())
             .unwrap_or_default();
-        let tools_json =
-            serde_json::to_string(&mcp_tool_defs()).unwrap_or_else(|_| "[]".to_string());
+        let command_tools = commands
+            .iter()
+            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .collect();
+        let definitions = match vmux_mcp::tools::ToolDefinition::merge_commands(
+            tools.definitions(false, false, ""),
+            command_tools,
+        ) {
+            Ok(definitions) => definitions,
+            Err(error) => {
+                bevy::log::error!("page agent tool catalog is invalid: {error}");
+                continue;
+            }
+        };
+        let definitions = definitions
+            .into_iter()
+            .map(|definition| crate::stream::ToolDef {
+                name: definition.name,
+                description: definition.description,
+                input_schema: definition.input_schema,
+                read_only: false,
+            })
+            .collect::<Vec<_>>();
+        let tools_json = serde_json::to_string(&definitions).unwrap_or_else(|_| "[]".to_string());
         service.0.send(ClientMessage::SpawnPageAgent {
             sid: session.sid.clone(),
             provider: session.provider.clone(),

@@ -8,7 +8,7 @@ impl Plugin for ScreenshotsDisabledPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            reject_screenshots.after(vmux_command::WriteAppCommands),
+            reject_screenshots.after(vmux_command::WriteCommandRequests),
         );
     }
 }
@@ -21,7 +21,8 @@ impl Plugin for RecordingDisabledPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (reject_recording_starts, reject_recording_stops).after(vmux_command::WriteAppCommands),
+            (reject_recording_starts, reject_recording_stops)
+                .after(vmux_command::WriteCommandRequests),
         );
     }
 }

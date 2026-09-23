@@ -6,7 +6,6 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ChromeError,
     ExtensionCallerContext,
@@ -134,7 +133,7 @@ pub fn drain_bridge_requests(
     mut response_cache: ResMut<BridgeResponseCache>,
     mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
-    mut app_commands: MessageWriter<AppCommand>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
@@ -235,8 +234,8 @@ pub fn drain_bridge_requests(
                     authorization,
                     extension_conformance_enabled(),
                 );
-                for command in dispatched.commands {
-                    app_commands.write(command);
+                for request in dispatched.requests {
+                    stack_requests.write(request);
                 }
                 for effect in dispatched.effects {
                     match effect {
@@ -258,9 +257,8 @@ pub fn drain_bridge_requests(
                                 });
                             }
                             for url in urls {
-                                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                                    OpenCommand::InNewStack { url },
-                                )));
+                                stack_requests
+                                    .write(vmux_layout::stack::StackRequest::Open { url });
                             }
                         }
                         WindowEffect::Close { tab_ids, urls } => {
@@ -796,7 +794,7 @@ pub fn fire_conformance_wake_timer(
 
 struct DispatchedApiRequest {
     response: BridgeServerMessage,
-    commands: Vec<AppCommand>,
+    requests: Vec<vmux_layout::stack::StackRequest>,
     effects: Vec<WindowEffect>,
     events: Vec<ChromeModelEvent>,
 }
@@ -804,13 +802,15 @@ struct DispatchedApiRequest {
 fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
     DispatchedApiRequest {
         response,
-        commands: Vec::new(),
+        requests: Vec::new(),
         effects: Vec::new(),
         events: Vec::new(),
     }
 }
 
-fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> {
+fn create_page_request(
+    request: &ApiRequest,
+) -> Result<vmux_layout::stack::StackRequest, ChromeError> {
     let create_info = request
         .arguments
         .as_array()
@@ -825,9 +825,7 @@ fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> 
         })
         .filter(|url| !url.is_empty());
     let Some(url) = url else {
-        return Ok(AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InNewStack { url: None },
-        )));
+        return Ok(vmux_layout::stack::StackRequest::Open { url: None });
     };
     let parsed = url::Url::parse(url)
         .map_err(|_| ChromeError::new("invalid_url", "extension page URL is invalid"))?;
@@ -841,11 +839,9 @@ fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> 
             ));
         }
     }
-    Ok(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(url.to_string()),
-        },
-    )))
+    Ok(vmux_layout::stack::StackRequest::Open {
+        url: Some(url.to_string()),
+    })
 }
 
 fn dispatch_api_request(
@@ -881,7 +877,7 @@ fn dispatch_api_request(
                     request.request_id,
                     dispatched.result,
                 )),
-                commands: Vec::new(),
+                requests: Vec::new(),
                 effects: dispatched.effects,
                 events: dispatched.events,
             },
@@ -910,13 +906,13 @@ fn dispatch_api_request(
         (request.namespace.as_str(), request.method.as_str()),
         ("tabs", "create")
     ) {
-        return match create_page_command(&request) {
-            Ok(command) => DispatchedApiRequest {
+        return match create_page_request(&request) {
+            Ok(stack_request) => DispatchedApiRequest {
                 response: BridgeServerMessage::Response(ApiResponse::success(
                     request.request_id,
                     serde_json::Value::Null,
                 )),
-                commands: vec![command],
+                requests: vec![stack_request],
                 effects: Vec::new(),
                 events: Vec::new(),
             },
@@ -1219,7 +1215,7 @@ mod tests {
             false,
         );
 
-        assert!(dispatched.commands.is_empty());
+        assert!(dispatched.requests.is_empty());
         assert_eq!(
             dispatched.response,
             BridgeServerMessage::Response(ApiResponse::failure(
@@ -1274,7 +1270,7 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1356,7 +1352,7 @@ mod tests {
             &BridgeAuthorization::default(),
             true,
         );
-        assert!(enabled.commands.is_empty());
+        assert!(enabled.requests.is_empty());
         assert_eq!(
             enabled.response,
             BridgeServerMessage::Response(ApiResponse::success(
@@ -1372,7 +1368,7 @@ mod tests {
             &BridgeAuthorization::default(),
             false,
         );
-        assert!(disabled.commands.is_empty());
+        assert!(disabled.requests.is_empty());
         assert_eq!(
             disabled.response,
             BridgeServerMessage::Response(ApiResponse::failure(
@@ -1529,7 +1525,7 @@ mod tests {
             .init_resource::<ChromeModel>()
             .init_resource::<ConformanceWakeTimer>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1598,7 +1594,7 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1653,7 +1649,7 @@ mod tests {
                 ..Default::default()
             })
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()

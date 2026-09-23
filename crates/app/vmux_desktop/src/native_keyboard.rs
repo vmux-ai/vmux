@@ -18,7 +18,7 @@ impl Plugin for NativeKeyboardPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            install_native_key_monitor.after(crate::shortcut::init_shortcuts),
+            install_native_key_monitor.after(crate::shortcut::ShortcutInit),
         )
         .add_systems(
             Update,
@@ -29,7 +29,7 @@ impl Plugin for NativeKeyboardPlugin {
         .add_systems(
             Update,
             process_monitored_keys
-                .in_set(vmux_command::WriteAppCommands)
+                .in_set(vmux_command::WriteCommandRequests)
                 .before(vmux_simulator::SimulatorInputSet),
         );
     }
@@ -612,7 +612,14 @@ mod tests {
     use super::*;
 
     fn map() -> Keymap {
-        Keymap::defaults()
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
+            .add_plugins(vmux_command::command_bar::CommandBarPlugin);
+        vmux_layout::pane::PaneRequest::register(&mut app);
+        app.world_mut().run_schedule(Startup);
+        let mut query = app.world_mut().query::<&vmux_command::CommandDefinition>();
+        let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
+        Keymap::defaults_with(&definitions)
     }
 
     fn combo(key: KeyCode, ctrl: bool) -> KeyCombo {

@@ -13,8 +13,8 @@ pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
+        ToggleLayoutRequest::register(app);
         app.init_resource::<LayoutHidden>()
-            .add_plugins(vmux_command::CommandRequestPlugin::<ToggleRequest>::default())
             .add_systems(
                 Update,
                 handle_visibility_requests.in_set(LayoutRequestSet::Handle),
@@ -26,15 +26,9 @@ impl Plugin for TogglePlugin {
     }
 }
 
-#[derive(Message, vmux_macro::CommandBarRequest, Clone, Copy, Debug, PartialEq, Eq)]
-#[command_bar(
-    id = "toggle_layout",
-    label = "Toggle Layout",
-    group = "Layout",
-    accel = "super+shift+s"
-)]
+#[derive(vmux_macro::CommandBar)]
 #[shortcut(direct = "Super+Shift+S")]
-pub struct ToggleRequest;
+struct ToggleLayoutRequest;
 
 #[derive(Resource, Default, Debug)]
 pub struct LayoutHidden(std::collections::HashSet<Entity>);
@@ -75,7 +69,7 @@ fn sync_window_padding_to_layout_hidden(
 }
 
 fn handle_visibility_requests(
-    mut reader: MessageReader<ToggleRequest>,
+    mut reader: MessageReader<ToggleLayoutRequest>,
     mut hidden: ResMut<LayoutHidden>,
     focused_window: Res<crate::window::FocusedWindow>,
     header_q: Query<Entity, With<Header>>,
@@ -238,7 +232,7 @@ mod tests {
     fn toggle_changes_only_the_focused_window() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<ToggleRequest>()
+            .add_message::<ToggleLayoutRequest>()
             .init_resource::<LayoutHidden>()
             .add_systems(Update, handle_visibility_requests);
         let first_window = app.world_mut().spawn_empty().id();
@@ -263,8 +257,8 @@ mod tests {
             .spawn((SideSheet, Open, ChildOf(second_root)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<ToggleRequest>>()
-            .write(ToggleRequest);
+            .resource_mut::<Messages<ToggleLayoutRequest>>()
+            .write(ToggleLayoutRequest);
 
         app.update();
 

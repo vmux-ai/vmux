@@ -77,7 +77,7 @@ impl McpParamTool {
                     "path" => "browser_open_path_bar",
                     other => return Err(format!("unknown command bar mode: {other}")),
                 };
-                Ok(AgentCommand::AppCommand {
+                Ok(AgentCommand::InvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
                 })
@@ -121,7 +121,7 @@ impl McpParamTool {
                         "select_tab.index must be between 1 and 8, got {index}"
                     ));
                 }
-                Ok(AgentCommand::AppCommand {
+                Ok(AgentCommand::InvokeCommand {
                     id: format!("tab_select_{index}"),
                     args: JsonValue::Object(Vec::new()),
                 })

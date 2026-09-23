@@ -17,7 +17,7 @@ impl Plugin for ScreenshotPlugin {
             Update,
             (start_screenshots, drain_screenshots)
                 .chain()
-                .after(vmux_command::WriteAppCommands),
+                .after(vmux_command::WriteCommandRequests),
         );
     }
 }

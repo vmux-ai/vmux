@@ -22,11 +22,11 @@ pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
+        MinimizeWindowRequest::register(app);
         app.register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .init_resource::<FocusedWindow>()
-            .add_plugins(vmux_command::CommandRequestPlugin::<MinimizeRequest>::default())
             .add_systems(
                 Startup,
                 setup_window_shells
@@ -86,14 +86,9 @@ impl Plugin for WindowLayoutPlugin {
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusedWindow(pub Option<Entity>);
 
-#[derive(Message, vmux_macro::CommandBarRequest, Clone, Copy, Debug, PartialEq, Eq)]
-#[command_bar(
-    id = "minimize_window",
-    label = "Minimize",
-    group = "Layout > Window",
-    accel = "super+m"
-)]
-pub struct MinimizeRequest;
+#[derive(vmux_macro::CommandBar)]
+#[shortcut(direct = "Super+m")]
+struct MinimizeWindowRequest;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFocusSet;
@@ -140,7 +135,7 @@ impl Default for WindowBackground {
 }
 
 fn minimize_focused_window(
-    mut reader: MessageReader<MinimizeRequest>,
+    mut reader: MessageReader<MinimizeWindowRequest>,
     focused_window: Res<FocusedWindow>,
 ) {
     for _ in reader.read() {

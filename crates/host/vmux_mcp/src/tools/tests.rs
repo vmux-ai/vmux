@@ -30,14 +30,11 @@ const EXTENSION_TOOLS: &str = r#"
     (
         kind: echo,
         description: "Echo through an extension tool",
-        input_schema: {
-            "type": "object",
-            "required": ["text"],
-            "properties": {
-                "text": {"type": "string"},
-            },
-            "additionalProperties": false,
-        },
+        input_schema: (
+            type: Object,
+            required: ["text"],
+            properties: {"text": (type: String)},
+        ),
     ),
 ]
 "#;
@@ -75,6 +72,121 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
             ..
         } if title == "Extension" && body == "hello"
     ));
+}
+
+#[test]
+fn owning_world_dispatches_tool_entities() {
+    let mut app = App::new();
+    app.add_plugins(ToolsPlugin);
+    app.update();
+
+    let call = app
+        .world_mut()
+        .run_system_once(|tools: ToolCatalog| {
+            tools.call(
+                "notify",
+                serde_json::json!({"body": "hello"}),
+                None,
+                "",
+                ToolCallPolicy::strict(false, false),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    let request = app.world_mut().spawn(call).id();
+    app.update();
+
+    let result = app
+        .world()
+        .get::<ToolDispatchResult>(request)
+        .unwrap()
+        .result()
+        .unwrap();
+    assert!(matches!(
+        result,
+        DispatchTarget::Command(AgentCommand::Notify {
+            title: None,
+            body: Some(body),
+        }) if body == "hello"
+    ));
+}
+
+#[test]
+fn typed_input_schema_serializes_to_mcp_json() {
+    let manifest = ToolManifest::<ExtensionTool>::from_ron(EXTENSION_TOOLS);
+    let (seed, _) = manifest.0.into_iter().next().unwrap().into_seed();
+    assert_eq!(
+        seed.input_schema.to_json(),
+        serde_json::json!({
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}},
+            "additionalProperties": false,
+        })
+    );
+}
+
+#[test]
+#[should_panic(expected = "array input schema must define items")]
+fn typed_input_schema_rejects_an_array_without_items() {
+    ToolManifest::<ExtensionTool>::from_ron(
+        r#"
+        [(
+            kind: echo,
+            description: "Invalid",
+            input_schema: (type: Array),
+        )]
+        "#,
+    );
+}
+
+#[test]
+fn runtime_commands_merge_into_the_local_tool_catalog() {
+    let local = vec![ToolDefinition {
+        name: "read_file".to_string(),
+        description: "Read file".to_string(),
+        input_schema: serde_json::json!({"type": "object"}),
+    }];
+    let commands = vec![vmux_client::protocol::AgentCommandTool {
+        name: "terminal_clear".to_string(),
+        description: "Clear Terminal".to_string(),
+        input_schema: vmux_client::protocol::JsonValue::from(
+            serde_json::json!({"type": "object", "additionalProperties": false}),
+        ),
+    }];
+
+    let definitions = ToolDefinition::merge_commands(local, commands).unwrap();
+
+    assert_eq!(
+        definitions
+            .iter()
+            .map(|definition| definition.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read_file", "terminal_clear"],
+    );
+    assert_eq!(
+        definitions[1].input_schema,
+        serde_json::json!({"type": "object", "additionalProperties": false}),
+    );
+}
+
+#[test]
+fn runtime_commands_cannot_shadow_local_tools() {
+    let local = vec![ToolDefinition {
+        name: "read_file".to_string(),
+        description: "Read file".to_string(),
+        input_schema: serde_json::json!({"type": "object"}),
+    }];
+    let commands = vec![vmux_client::protocol::AgentCommandTool {
+        name: "read_file".to_string(),
+        description: "Command".to_string(),
+        input_schema: vmux_client::protocol::JsonValue::from(serde_json::json!({"type": "object"})),
+    }];
+
+    assert_eq!(
+        ToolDefinition::merge_commands(local, commands).unwrap_err(),
+        "duplicate tool name: read_file",
+    );
 }
 
 #[test]
@@ -180,7 +292,7 @@ fn aliases_resolve_to_the_same_tool_entity() {
     let execution = ToolCall::dispatch(
         &mut app,
         "vmux_read_file",
-        serde_json::json!({}),
+        serde_json::json!({"path": "/tmp/example"}),
         None,
         "",
         false,
@@ -373,13 +485,13 @@ fn browser_scroll_requires_exactly_one_of_to_or_delta() {
 #[test]
 fn browser_scroll_rejects_non_integer_or_out_of_range_delta() {
     let err = dispatch_query("browser_scroll", serde_json::json!({ "delta": "600" })).unwrap_err();
-    assert!(err.contains("delta must be an integer"));
+    assert!(err.contains("invalid arguments"));
     let err = dispatch_query(
         "browser_scroll",
         serde_json::json!({ "delta": 5_000_000_000i64 }),
     )
     .unwrap_err();
-    assert!(err.contains("out of range"));
+    assert!(err.contains("invalid arguments"));
 }
 
 #[test]
@@ -472,7 +584,7 @@ fn record_stop_dispatch_args() {
 }
 
 #[test]
-fn list_tools_includes_auto_generated_and_handwritten() {
+fn local_tool_registry_includes_handwritten_tools() {
     let names = tool_names();
 
     for hand in [
@@ -504,12 +616,6 @@ fn list_tools_includes_auto_generated_and_handwritten() {
             "superseded tool {removed_tool} should no longer appear in MCP tools"
         );
     }
-    for auto in ["terminal_clear", "browser_reload"] {
-        assert!(
-            names.contains(&auto.to_string()),
-            "missing auto-generated {auto}"
-        );
-    }
     assert!(
         names.iter().all(|n| !n.starts_with("vmux_")),
         "MCP tool names must not be vmux_-prefixed (server is already named vmux): {names:?}"
@@ -535,15 +641,19 @@ fn pane_open_tool_descriptions_prefer_auto_placement() {
 }
 
 #[test]
-fn auto_generated_tool_dispatches_as_app_command() {
-    let command = dispatch_command("terminal_clear", serde_json::json!({})).unwrap();
-    assert_eq!(
-        command,
-        AgentCommand::AppCommand {
-            id: "terminal_clear".to_string(),
-            args: vmux_client::protocol::JsonValue::Object(Vec::new()),
-        }
-    );
+fn agent_tool_dispatch_preserves_runtime_command_name_and_arguments() {
+    let target =
+        dispatch_agent_tool_call("terminal_clear", serde_json::json!({"unexpected": true}))
+            .unwrap();
+    assert!(matches!(
+        target,
+        DispatchTarget::Command(AgentCommand::InvokeCommand { id, args })
+            if id == "terminal_clear"
+                && args == vmux_client::protocol::JsonValue::Object(vec![(
+                    "unexpected".to_string(),
+                    vmux_client::protocol::JsonValue::Bool(true),
+                )])
+    ));
 }
 
 #[test]
@@ -943,7 +1053,7 @@ fn select_tab_dispatches_to_tab_select_id() {
     let command = dispatch_command("select_tab", serde_json::json!({"index": 3})).unwrap();
     assert_eq!(
         command,
-        AgentCommand::AppCommand {
+        AgentCommand::InvokeCommand {
             id: "tab_select_3".to_string(),
             args: vmux_client::protocol::JsonValue::Object(Vec::new()),
         }
@@ -1053,10 +1163,10 @@ fn mcp_param_tool_from_mcp_call_unknown_returns_none() {
 
 #[test]
 fn dispatch_from_tool_call_routes_command() {
-    let target = dispatch_from_tool_call("terminal_clear", serde_json::json!({})).unwrap();
+    let target = dispatch_agent_tool_call("terminal_clear", serde_json::json!({})).unwrap();
     assert!(matches!(
         target,
-        DispatchTarget::Command(AgentCommand::AppCommand { id, .. }) if id == "terminal_clear"
+        DispatchTarget::Command(AgentCommand::InvokeCommand { id, .. }) if id == "terminal_clear"
     ));
 }
 
@@ -1389,20 +1499,40 @@ fn read_terminal_dispatch_routes_to_query() {
 
 #[test]
 fn dispatch_update_layout_parses_payload() {
-    let payload = serde_json::json!({
-        "tabs": [{
-            "id": "tab:1",
-            "name": "Work",
-            "is_active": true,
-            "root": { "kind": "pane", "id": "pane:2", "stacks": [{ "id": "stack:3" }] }
+    let layout = vmux_client::protocol::layout::LayoutSnapshot {
+        tabs: vec![vmux_client::protocol::layout::Tab {
+            id: Some("tab:1".to_string()),
+            name: "Work".to_string(),
+            is_active: true,
+            root: vmux_client::protocol::layout::LayoutNode::Pane {
+                id: Some("pane:2".to_string()),
+                is_zoomed: true,
+                stacks: vec![vmux_client::protocol::layout::Stack {
+                    id: Some("stack:3".to_string()),
+                    title: "Terminal".to_string(),
+                    url: "vmux://terminal/".to_string(),
+                    kind: "terminal".to_string(),
+                    is_loading: false,
+                    icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Terminal),
+                    is_self: true,
+                    process_id: Some("process:4".to_string()),
+                }],
+            },
         }],
-        "focused": { "tab": "tab:1", "pane": "pane:2", "stack": "stack:3" }
-    });
-    let target = dispatch_from_tool_call("update_layout", payload).unwrap();
-    assert!(matches!(
-        target,
-        DispatchTarget::Command(AgentCommand::UpdateLayout { .. })
-    ));
+        focused: vmux_client::protocol::layout::Focus {
+            tab: Some("tab:1".to_string()),
+            pane: Some("pane:2".to_string()),
+            stack: Some("stack:3".to_string()),
+        },
+    };
+    let target =
+        dispatch_from_tool_call("update_layout", serde_json::to_value(&layout).unwrap()).unwrap();
+    match target {
+        DispatchTarget::Command(AgentCommand::UpdateLayout { layout: actual }) => {
+            assert_eq!(actual, layout);
+        }
+        other => panic!("expected UpdateLayout command, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1508,6 +1638,26 @@ fn bookmark_add_dispatches_to_command() {
 }
 
 #[test]
+fn bookmark_schemas_preserve_the_typed_manifest_contract() {
+    let definitions = tool_definitions();
+    let add = definitions
+        .iter()
+        .find(|definition| definition.name == "bookmark_add")
+        .unwrap();
+    assert_eq!(add.input_schema["additionalProperties"], false);
+    assert_eq!(add.input_schema["required"], serde_json::json!(["url"]));
+
+    let pin = definitions
+        .iter()
+        .find(|definition| definition.name == "bookmark_pin")
+        .unwrap();
+    let variants = pin.input_schema["oneOf"].as_array().unwrap();
+    assert_eq!(variants.len(), 2);
+    assert_eq!(variants[0]["required"], serde_json::json!(["uuid"]));
+    assert_eq!(variants[1]["required"], serde_json::json!(["url"]));
+}
+
+#[test]
 fn bookmark_folder_create_dispatches_to_command() {
     let cmd =
         dispatch_command("bookmark_folder_create", serde_json::json!({"name": "PRs"})).unwrap();
@@ -1557,18 +1707,19 @@ fn delete_space_empty_id_returns_error() {
 }
 
 #[test]
-fn open_command_tools_are_exposed() {
-    let names = tool_names();
-    for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
-        assert!(
-            names.contains(&expected.to_string()),
-            "missing OpenCommand tool: {expected}"
-        );
+fn runtime_command_fallback_preserves_open_command_names() {
+    for expected in [
+        "open_in_place",
+        "open_in_new_stack",
+        "open_in_new_tab",
+        "open_in_new_space",
+    ] {
+        let target = dispatch_agent_tool_call(expected, serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::InvokeCommand { id, .. }) if id == expected
+        ));
     }
-    assert!(
-        !names.contains(&"in_pane".to_string()),
-        "in_pane is hidden, superseded by open_page"
-    );
 }
 
 #[test]

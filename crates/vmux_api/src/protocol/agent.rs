@@ -137,7 +137,7 @@ pub enum AgentBookmarkCommand {
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
-    AppCommand {
+    InvokeCommand {
         id: String,
         #[rkyv(attr(allow(dead_code)))]
         args: JsonValue,
@@ -348,7 +348,7 @@ pub enum AgentRunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentCommandValidationError {
-    EmptyAppCommandId,
+    EmptyCommandId,
     EmptyShellCommand,
     EmptyBrowserUrl,
     EmptyExtensionSource,
@@ -379,7 +379,7 @@ pub enum AgentCommandValidationError {
 impl std::fmt::Display for AgentCommandValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            Self::EmptyAppCommandId => "app_command.id is empty",
+            Self::EmptyCommandId => "invoke_command.id is empty",
             Self::EmptyShellCommand => "run_shell.command is empty",
             Self::EmptyBrowserUrl => "browser_navigate.url is empty",
             Self::EmptyExtensionSource => "browser_install_extension.source is empty",
@@ -420,8 +420,8 @@ impl std::error::Error for AgentCommandValidationError {}
 
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommandValidationError> {
     match command {
-        AgentCommand::AppCommand { id, .. } if id.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyAppCommandId)
+        AgentCommand::InvokeCommand { id, .. } if id.trim().is_empty() => {
+            Err(AgentCommandValidationError::EmptyCommandId)
         }
         AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyShellCommand)

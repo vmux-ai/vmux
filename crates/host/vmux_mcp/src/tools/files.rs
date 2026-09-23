@@ -1,6 +1,6 @@
 use super::{
-    ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
+    ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -27,30 +27,45 @@ fn register(mut tools: ToolSpawner) {
     tools.spawn_manifest(manifest);
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ReadFileArgs {
+    path: String,
+    offset: Option<std::num::NonZeroU32>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct GrepArgs {
+    query: String,
+    path: Option<String>,
+}
+
 fn read_file(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, _) in calls.matching(FileTool::ReadFile) {
-        call.finish(
-            request,
-            &mut commands,
-            Ok(ToolExecution::Protocol {
+        let result = call
+            .parse::<ReadFileArgs>("read_file")
+            .and_then(ToolCall::arguments)
+            .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::ReadFile,
-                arguments: call.arguments.clone(),
+                arguments,
                 anchor: call.anchor,
-            }),
-        );
+            });
+        call.finish(request, &mut commands, result);
     }
 }
 
 fn grep(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, _) in calls.matching(FileTool::Grep) {
-        call.finish(
-            request,
-            &mut commands,
-            Ok(ToolExecution::Protocol {
+        let result = call
+            .parse::<GrepArgs>("grep")
+            .and_then(ToolCall::arguments)
+            .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::Grep,
-                arguments: call.arguments.clone(),
+                arguments,
                 anchor: call.anchor,
-            }),
-        );
+            });
+        call.finish(request, &mut commands, result);
     }
 }

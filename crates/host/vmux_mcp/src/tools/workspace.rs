@@ -88,24 +88,27 @@ impl From<RunMode> for PlacementMode {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OpenPageArgs {
-    url: Option<String>,
+    url: String,
     direction: Option<PaneDirection>,
     #[serde(default)]
     focus: bool,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OpenFileArgs {
-    path: Option<String>,
+    path: String,
     direction: Option<PaneDirection>,
     #[serde(default)]
     focus: bool,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RunArgs {
-    command: Option<String>,
+    command: String,
     shell: Option<String>,
     direction: Option<PaneDirection>,
     #[serde(default)]
@@ -116,6 +119,7 @@ struct RunArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreateWorktreeArgs {
     branch: Option<String>,
     path: Option<String>,
@@ -125,19 +129,22 @@ struct CreateWorktreeArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RequestUserChoiceArgs {
-    question: Option<String>,
-    options: Option<Vec<String>>,
+    question: String,
+    options: Vec<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SelectProjectArgs {
     path: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReadTerminalArgs {
-    terminal: Option<String>,
+    terminal: String,
 }
 
 fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
@@ -153,7 +160,7 @@ fn open_page(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_page")?;
         let args: OpenPageArgs = call.parse("open_page")?;
-        let url = args.url.unwrap_or_default();
+        let url = args.url;
         if url.trim().is_empty() {
             return Err("open_page.url is empty".to_string());
         }
@@ -174,7 +181,7 @@ fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("open_file")?;
         let args: OpenFileArgs = call.parse("open_file")?;
-        let path = args.path.unwrap_or_default().trim().to_string();
+        let path = args.path.trim().to_string();
         if path.is_empty() {
             return Err("open_file.path is empty".to_string());
         }
@@ -199,13 +206,10 @@ fn open_file(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
 fn run(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("run")?;
-        let placement_override = ["mode", "direction", "beside"].iter().any(|key| {
-            call.arguments
-                .get(*key)
-                .is_some_and(|value| !value.is_null())
-        });
         let args: RunArgs = call.parse("run")?;
-        let mut command = args.command.unwrap_or_default();
+        let placement_override =
+            args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
+        let mut command = args.command;
         if command.trim().is_empty() {
             return Err("run.command is empty".to_string());
         }
@@ -312,13 +316,10 @@ fn request_user_choice(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) 
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("request_user_choice")?;
         let args: RequestUserChoiceArgs = call.parse("request_user_choice")?;
-        let question = args
-            .question
-            .and_then(Trimmed::into_option)
-            .ok_or("request_user_choice.question is empty")?;
+        let question =
+            Trimmed::into_option(args.question).ok_or("request_user_choice.question is empty")?;
         let options = args
             .options
-            .ok_or("request_user_choice.options must be an array")?
             .into_iter()
             .map(Trimmed::into_option)
             .collect::<Option<Vec<_>>>()
@@ -362,7 +363,6 @@ fn read_terminal(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
         let args: ReadTerminalArgs = call.parse("read_terminal")?;
         let process_id = args
             .terminal
-            .unwrap_or_default()
             .parse()
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
         Ok(DispatchTarget::Query(AgentQuery::ReadTerminal {

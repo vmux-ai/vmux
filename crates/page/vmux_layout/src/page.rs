@@ -743,19 +743,19 @@ fn HeaderView(
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    NavButton { label: translate("layout-back"), command: "prev_page", disabled: !can_go_back,
+                    NavButton { label: translate("layout-back"), command: HeaderRequest::PreviousPage, disabled: !can_go_back,
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: translate("layout-forward"), command: "next_page", disabled: !can_go_forward,
+                    NavButton { label: translate("layout-forward"), command: HeaderRequest::NextPage, disabled: !can_go_forward,
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), command: "reload", disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
+                    NavButton { label: translate("layout-reload"), command: HeaderRequest::Reload, disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
                         span {
                             key: "{reload_key}",
                             class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
@@ -1287,11 +1287,8 @@ fn ActiveWorkspaceProjectRow(project: vmux_core::event::ProjectRow, pane_id: u64
                             pane_id: pane_id.to_string(),
                         });
                     } else {
-                        let _ = send(&crate::event::SideSheetRequest {
-                            command: "open_project_path".to_string(),
-                            pane_id: pane_id.to_string(),
-                            stack_id: 0,
-                            line: 0,
+                        let _ = send(&crate::event::SideSheetRequest::OpenProjectPath {
+                            pane_id,
                             path: path.clone(),
                         });
                     }
@@ -1771,17 +1768,18 @@ fn BookmarksSection(
 }
 
 fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
-    let _ = send(&crate::event::SideSheetRequest {
-        command: if expanded {
-            "expand_section".to_string()
-        } else {
-            "collapse_section".to_string()
-        },
-        pane_id: pane_id.to_string(),
-        stack_id: 0,
-        line: 0,
-        path: section.to_string(),
-    });
+    let request = if expanded {
+        crate::event::SideSheetRequest::ExpandSection {
+            pane_id,
+            path: section.to_string(),
+        }
+    } else {
+        crate::event::SideSheetRequest::CollapseSection {
+            pane_id,
+            path: section.to_string(),
+        }
+    };
+    let _ = send(&request);
 }
 
 #[component]
@@ -2354,15 +2352,14 @@ impl TabDrag {
             .cloned()
             .unwrap_or_else(|| state.source_id.clone());
         if state.source_index != state.target_index {
-            let _ = send(&TabsRequest {
-                command: "reorder".to_string(),
-                tab_id: Some(state.source_id.clone()),
-                target_tab_id: Some(target_id.clone()),
-                drop_placement: Some(if state.target_index < state.source_index {
+            let _ = send(&TabsRequest::Reorder {
+                tab_id: state.source_id.clone(),
+                target_tab_id: target_id.clone(),
+                drop_placement: if state.target_index < state.source_index {
                     TabDropPlacement::Before
                 } else {
                     TabDropPlacement::After
-                }),
+                },
             });
             let mut order = state.order.clone();
             if let Some(source_index) = order.iter().position(|id| id == &state.source_id)
@@ -2427,12 +2424,7 @@ impl TabDrag {
                 }
             });
         }
-        let _ = send(&TabsRequest {
-            command: "switch".to_string(),
-            tab_id: Some(tab_id),
-            target_tab_id: None,
-            drop_placement: None,
-        });
+        let _ = send(&TabsRequest::Switch { tab_id });
     }
 
     fn acknowledge_host(&mut self, host_active_tab_id: Option<String>, host_order: Vec<String>) {
@@ -2609,11 +2601,8 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
-                        let _ = send(&TabsRequest {
-                            command: "close".to_string(),
+                        let _ = send(&TabsRequest::Close {
                             tab_id: Some(id_close.clone()),
-                            target_tab_id: None,
-                            drop_placement: None,
                         });
                     },
                     Icon { class: "h-2.5 w-2.5",
@@ -2705,12 +2694,7 @@ fn NewTabButton() -> Element {
                 title: translate("layout-new-tab"),
                 class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
                 onclick: move |_| {
-                    let _ = send(&TabsRequest {
-                        command: "new".to_string(),
-                        tab_id: None,
-                        target_tab_id: None,
-                        drop_placement: None,
-                    });
+                    let _ = send(&TabsRequest::New);
                 },
                 Icon { class: "h-3.5 w-3.5",
                     path { d: "M12 5v14" }
@@ -2804,7 +2788,7 @@ impl WindowDragReporter {
 #[component]
 fn NavButton(
     label: String,
-    command: &'static str,
+    command: HeaderRequest,
     #[props(default)] disabled: bool,
     children: Element,
 ) -> Element {
@@ -2822,9 +2806,7 @@ fn NavButton(
             class,
             onclick: move |_| {
                 if !disabled {
-                    let _ = send(&HeaderRequest {
-                        header_command: command.to_string(),
-                    });
+                    let _ = send(&command);
                 }
             },
             {children}
@@ -2846,9 +2828,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
-                let _ = send(&HeaderRequest {
-                    header_command: "focus_address_bar".to_string(),
-                });
+                let _ = send(&HeaderRequest::FocusAddressBar);
             },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
@@ -4325,13 +4305,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = send(&crate::event::SideSheetRequest {
-                    command: "new_stack".to_string(),
-                    pane_id: pane_id.to_string(),
-                    stack_id: 0,
-                    line: 0,
-                    path: String::new(),
-                });
+                let _ = send(&crate::event::SideSheetRequest::NewStack { pane_id });
             },
         }
     }
@@ -4376,20 +4350,16 @@ impl StackCommand {
     }
 
     fn activate(self) {
-        self.dispatch("activate_stack");
+        let _ = send(&crate::event::SideSheetRequest::ActivateStack {
+            pane_id: self.pane_id,
+            stack_id: self.stack_id,
+        });
     }
 
     fn close(self) {
-        self.dispatch("close_stack");
-    }
-
-    fn dispatch(self, command: &str) {
-        let _ = send(&crate::event::SideSheetRequest {
-            command: command.to_string(),
-            pane_id: self.pane_id.to_string(),
+        let _ = send(&crate::event::SideSheetRequest::CloseStack {
+            pane_id: self.pane_id,
             stack_id: self.stack_id,
-            line: 0,
-            path: String::new(),
         });
     }
 }

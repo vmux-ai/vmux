@@ -12,7 +12,7 @@ impl Plugin for TerminalThemePlugin {
         app.add_plugins(crate::contract::TerminalContractPlugin)
             .add_systems(
                 Update,
-                handle_terminal_font_size.after(vmux_command::ReadAppCommands),
+                handle_terminal_font_size.after(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
     }

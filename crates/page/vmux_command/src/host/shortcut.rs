@@ -1,4 +1,3 @@
-use crate::{AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget};
 use bevy::ecs::component::Component;
 use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
@@ -29,13 +28,11 @@ const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
 
 impl Keymap {
     pub fn defaults() -> Self {
-        let mut keymap = Self {
+        Self {
             bindings: Vec::new(),
             registered: std::collections::BTreeSet::new(),
             chord_timeout_ms: DEFAULT_CHORD_TIMEOUT_MS,
-        };
-        keymap.extend(Source::Default, AppCommand::default_shortcuts());
-        keymap
+        }
     }
 
     pub fn defaults_with(definitions: &[crate::definition::CommandDefinition]) -> Self {
@@ -89,7 +86,7 @@ impl Keymap {
     }
 
     fn recognizes(&self, id: &str) -> bool {
-        self.registered.contains(id) || AppCommand::from_shortcut_id(id).is_some()
+        self.registered.contains(id)
     }
 }
 
@@ -196,26 +193,6 @@ impl KeymapView<'_> {
             keys.push(claimed);
         }
         KeyClaims { keys }
-    }
-}
-
-impl AppCommand {
-    pub fn from_shortcut_id(id: &str) -> Option<Self> {
-        let split = |direction| {
-            Some(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                },
-            )))
-        };
-        match id {
-            "split_v" => split(PaneDirection::Right),
-            "split_h" => split(PaneDirection::Bottom),
-            _ => AppCommand::from_menu_id(id),
-        }
     }
 }
 
@@ -743,6 +720,7 @@ mod tests {
     #[test]
     fn a_configured_binding_outranks_the_default_on_the_same_key() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
         keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
 
@@ -755,6 +733,7 @@ mod tests {
     #[test]
     fn the_default_still_loses_when_it_arrives_last() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
         keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
 
@@ -767,6 +746,7 @@ mod tests {
     #[test]
     fn a_scoped_binding_wins_only_inside_its_context() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
@@ -792,6 +772,7 @@ mod tests {
     #[test]
     fn a_scoped_binding_never_matches_an_absent_context() {
         let mut keymap = Keymap::default();
+        keymap.register([PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [binding(PANE_CLOSE, Some("chat.selector"))],
@@ -802,7 +783,29 @@ mod tests {
 
     #[test]
     fn an_explicit_second_stroke_modifier_wins_before_inherited_modifier_normalization() {
-        let keymap = Keymap::defaults();
+        let mut keymap = Keymap::default();
+        keymap.register(["resize_pane_left", "select_pane_left"]);
+        keymap.extend(
+            Source::Default,
+            [
+                Binding {
+                    shortcut: Shortcut::Chord(
+                        modified(KeyCode::KeyB, CTRL),
+                        modified(KeyCode::ArrowLeft, CTRL),
+                    ),
+                    command: "resize_pane_left".to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Chord(
+                        modified(KeyCode::KeyB, CTRL),
+                        modified(KeyCode::KeyH, CTRL),
+                    ),
+                    command: "select_pane_left".to_string(),
+                    when: None,
+                },
+            ],
+        );
         let prefix = modified(KeyCode::KeyB, CTRL);
 
         assert_eq!(
@@ -913,6 +916,7 @@ mod tests {
     #[test]
     fn the_claimed_set_follows_the_context() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
@@ -990,9 +994,36 @@ mod tests {
         })));
     }
 
+    fn space_keymap() -> Keymap {
+        let definitions = vec![
+            crate::CommandDefinition::new("space_next", "Next Space", "Layout > Space")
+                .hidden()
+                .direct_when("ArrowDown", Some("spaces"))
+                .direct_when("Ctrl+n", Some("spaces"))
+                .direct_when("Ctrl+j", Some("spaces")),
+            crate::CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
+                .hidden()
+                .direct_when("ArrowUp", Some("spaces"))
+                .direct_when("Ctrl+p", Some("spaces"))
+                .direct_when("Ctrl+k", Some("spaces")),
+            crate::CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
+                .hidden()
+                .direct_when("Enter", Some("spaces")),
+            crate::CommandDefinition::new(
+                "space_delete",
+                "Delete Selected Space",
+                "Layout > Space",
+            )
+            .hidden()
+            .direct_when("Delete", Some("spaces"))
+            .direct_when("Backspace", Some("spaces")),
+        ];
+        Keymap::defaults_with(&definitions)
+    }
+
     #[test]
     fn the_spaces_page_resolves_every_chord_it_hands_over() {
-        let keymap = Keymap::defaults();
+        let keymap = space_keymap();
         let on_spaces = context(&["spaces"]);
         let table = [
             (combo(KeyCode::ArrowDown), "space_next"),
@@ -1026,7 +1057,7 @@ mod tests {
 
     #[test]
     fn a_spaces_chord_means_nothing_off_the_spaces_page() {
-        let keymap = Keymap::defaults();
+        let keymap = space_keymap();
 
         for pressed in [
             combo(KeyCode::Backspace),

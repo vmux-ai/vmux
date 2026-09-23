@@ -29,7 +29,8 @@ pub(super) struct ClosePlugin;
 
 impl Plugin for ClosePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CloseDialog>()
+        app.add_message::<PaneRequest>()
+            .init_resource::<CloseDialog>()
             .add_message::<PaneCloseRequest>()
             .add_systems(
                 Update,

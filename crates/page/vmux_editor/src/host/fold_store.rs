@@ -44,14 +44,8 @@ impl FoldStore {
 
     pub fn save(&self) {
         let path = store_path();
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(text) = ron::ser::to_string(self) {
-            let tmp = path.with_extension("ron.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
-            }
+            let _ = vmux_path::AtomicFile::write(path, text.as_bytes());
         }
     }
 }

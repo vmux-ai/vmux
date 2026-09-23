@@ -570,6 +570,7 @@ fn reload_changed_files(
             .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
+            .remove::<FileLoadTask>()
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
         manager.change(&file.path);

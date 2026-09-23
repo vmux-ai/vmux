@@ -221,8 +221,8 @@ impl AgentPane {
 
     pub(crate) fn direction(
         d: &vmux_service::protocol::AgentPaneDirection,
-    ) -> vmux_command::open::PaneDirection {
-        use vmux_command::open::PaneDirection;
+    ) -> vmux_command::open_target::PaneDirection {
+        use vmux_command::open_target::PaneDirection;
         use vmux_service::protocol::AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,

@@ -11,7 +11,6 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
-use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tools::{
@@ -311,7 +310,7 @@ struct InventoryItem {
 
 fn on_open_request(
     trigger: On<BinReceive<ToolOpenRequest>>,
-    mut commands: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
 ) {
     let path = Path::new(trigger.event().payload.path.trim());
     if path == manifest_store::brewfile_path() && !path.exists() {
@@ -323,11 +322,9 @@ fn on_open_request(
     let Ok(url) = url::Url::from_file_path(path) else {
         return;
     };
-    commands.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(url.to_string()),
-        },
-    )));
+    requests.write(vmux_layout::stack::StackRequest::Open {
+        url: Some(url.to_string()),
+    });
 }
 
 fn on_navigate_request(
@@ -683,17 +680,15 @@ fn drain_vault_actions(
     mut state: ResMut<ToolsState>,
     mut recovery: ResMut<VaultRecoveryState>,
     browsers: NonSend<Browsers>,
-    mut app_commands: MessageWriter<AppCommand>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(progress) = task.progress.get_mut().try_recv() {
             if browsers.can_emit_to(&task.target) {
-                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InNewStack {
-                        url: Some(progress.url.clone()),
-                    },
-                )));
+                stack_requests.write(vmux_layout::stack::StackRequest::Open {
+                    url: Some(progress.url.clone()),
+                });
                 commands.trigger(BinHostEmitEvent::from_event(task.target, &progress));
             }
         }

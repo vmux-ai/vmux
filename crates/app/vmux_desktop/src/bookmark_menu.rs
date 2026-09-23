@@ -45,7 +45,6 @@ mod macos {
     use std::sync::LazyLock;
     use std::sync::atomic::{AtomicU64, Ordering};
     use vmux_api::bookmark::BookmarkMenuActionEvent;
-    use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid};
     use vmux_layout::bookmark::{BookmarkMenuTarget, BookmarkMutation, ShowBookmarkMenuRequest};
     use vmux_ui::i18n::{Locale, TranslationValue};
@@ -540,7 +539,7 @@ mod macos {
     pub(super) fn apply_bookmark_menu_selection(
         mut reader: MessageReader<BookmarkMenuSelection>,
         mut bookmark_mutations: MessageWriter<BookmarkMutation>,
-        mut app_commands: MessageWriter<AppCommand>,
+        mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
         mut sequence: ResMut<BookmarkMenuActionSequence>,
         browsers: Option<NonSend<Browsers>>,
         mut commands: Commands,
@@ -548,11 +547,9 @@ mod macos {
         for selection in reader.read() {
             match &selection.action {
                 BookmarkMenuAction::Open(url) => {
-                    app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                        OpenCommand::InNewStack {
-                            url: Some(url.clone()),
-                        },
-                    )));
+                    stack_requests.write(vmux_layout::stack::StackRequest::Open {
+                        url: Some(url.clone()),
+                    });
                 }
                 BookmarkMenuAction::Apply(operation) => {
                     bookmark_mutations.write(operation.clone());

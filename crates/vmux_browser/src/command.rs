@@ -6,8 +6,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 use vmux_command::{
-    AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    ReadAppCommands, open::OpenCommand,
+    CommandDefinition, CommandInvocation, CommandMcp, InputSchema, ReadCommandRequests,
 };
 use vmux_core::{
     HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
@@ -33,17 +32,189 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_header_request)
+        BrowserRequest::register(app);
+        app.add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ViewRequest>()
+            .add_observer(on_header_request)
             .add_observer(on_side_sheet_request)
             .add_observer(on_side_sheet_resize)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
-            .add_systems(Update, handle_browser_commands.in_set(ReadAppCommands));
+            .add_systems(Update, handle_browser_commands.in_set(ReadCommandRequests));
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavigationRequest {
+    Back,
+    Forward,
+    Reload,
+    HardReload,
+    Stop,
+}
+
+impl NavigationRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("browser_prev_page", "Back", "Browser > Navigation")
+                .accelerator("super+[")
+                .mcp(CommandMcp::new("Back", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_next_page", "Forward", "Browser > Navigation")
+                .accelerator("super+]")
+                .mcp(CommandMcp::new("Forward", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_reload", "Reload", "Browser > Navigation")
+                .accelerator("super+r")
+                .direct("Super+r")
+                .mcp(CommandMcp::new("Reload", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_hard_reload", "Hard Reload", "Browser > Navigation")
+                .accelerator("super+shift+r")
+                .direct("Super+Shift+R")
+                .mcp(CommandMcp::new("Hard Reload", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_stop", "Stop Loading", "Browser > Navigation")
+                .accelerator("super+.")
+                .hidden()
+                .mcp(CommandMcp::new("Stop Loading", InputSchema::object()).allow_agent()),
+        ]
+    }
+
+    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "browser_prev_page" => Self::Back,
+            "browser_next_page" => Self::Forward,
+            "browser_reload" => Self::Reload,
+            "browser_hard_reload" => Self::HardReload,
+            "browser_stop" => Self::Stop,
+            _ => return None,
+        };
+        Some(request)
+    }
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub url: Option<String>,
+}
+
+impl OpenRequest {
+    fn resolved_url(&self, startup_url: Option<&str>) -> String {
+        for candidate in [self.url.as_deref(), startup_url] {
+            if let Some(url) = candidate.filter(|url| !url.is_empty()) {
+                return url.to_string();
+            }
+        }
+        String::new()
+    }
+}
+
+impl OpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("open_in_place", "Open Here", "Browser > Open").mcp(
+                CommandMcp::new(
+                    "Navigate the currently focused stack to the given URL. Equivalent to the user typing a URL in the address bar. Use when the user asks to 'go to', 'navigate to', or 'open' a URL without specifying placement; the current page is replaced. If url is omitted, opens the configured startup URL.",
+                    InputSchema::object().optional(
+                        "url",
+                        InputSchema::string().description(
+                            "Absolute URL to open. If omitted, opens the startup URL.",
+                        ),
+                    ),
+                ),
+            ),
+        ]
+    }
+
+    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        (invocation.id == "open_in_place").then(|| Self {
+            url: invocation.argument("url"),
+        })
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewRequest {
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    DevTools,
+    ViewSource,
+    Print,
+}
+
+impl ViewRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("browser_zoom_in", "Zoom In", "Browser > View")
+                .accelerator("super+=")
+                .mcp(CommandMcp::new("Zoom In", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_zoom_out", "Zoom Out", "Browser > View")
+                .accelerator("super+-")
+                .mcp(CommandMcp::new("Zoom Out", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_zoom_reset", "Actual Size", "Browser > View")
+                .accelerator("super+0")
+                .mcp(CommandMcp::new("Actual Size", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_dev_tools", "Developer Tools", "Browser > View")
+                .accelerator("super+alt+i")
+                .mcp(CommandMcp::new("Developer Tools", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_view_source", "View Source", "Browser > View")
+                .accelerator("super+alt+u")
+                .hidden()
+                .mcp(CommandMcp::new("View Source", InputSchema::object()).allow_agent()),
+            CommandDefinition::new("browser_print", "Print", "Browser > View")
+                .hidden()
+                .mcp(CommandMcp::new("Print", InputSchema::object()).allow_agent()),
+        ]
+    }
+
+    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "browser_zoom_in" => Self::ZoomIn,
+            "browser_zoom_out" => Self::ZoomOut,
+            "browser_zoom_reset" => Self::ZoomReset,
+            "browser_dev_tools" => Self::DevTools,
+            "browser_view_source" => Self::ViewSource,
+            "browser_print" => Self::Print,
+            _ => return None,
+        };
+        Some(request)
+    }
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+enum BrowserRequest {
+    Navigate(NavigationRequest),
+    Open(OpenRequest),
+    View(ViewRequest),
+}
+
+impl BrowserRequest {
+    fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    fn definitions() -> Vec<CommandDefinition> {
+        let mut definitions = NavigationRequest::definitions();
+        definitions.extend(OpenRequest::definitions());
+        definitions.extend(ViewRequest::definitions());
+        definitions
+    }
+
+    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        if let Some(request) = NavigationRequest::from_invocation(invocation) {
+            return Some(Self::Navigate(request));
+        }
+        if let Some(request) = OpenRequest::from_invocation(invocation) {
+            return Some(Self::Open(request));
+        }
+        ViewRequest::from_invocation(invocation).map(Self::View)
     }
 }
 
 fn handle_browser_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut command_requests: MessageReader<BrowserRequest>,
+    mut navigation_requests: MessageReader<NavigationRequest>,
+    mut open_requests: MessageReader<OpenRequest>,
+    mut view_requests: MessageReader<ViewRequest>,
     active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
@@ -56,10 +227,17 @@ fn handle_browser_commands(
     mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
-        let AppCommand::Browser(browser_cmd) = cmd else {
-            continue;
-        };
+    let mut requests = command_requests.read().cloned().collect::<Vec<_>>();
+    requests.extend(
+        navigation_requests
+            .read()
+            .copied()
+            .map(BrowserRequest::Navigate),
+    );
+    requests.extend(open_requests.read().cloned().map(BrowserRequest::Open));
+    requests.extend(view_requests.read().copied().map(BrowserRequest::View));
+
+    for request in requests {
         let Some(active) = active_stack.get() else {
             continue;
         };
@@ -72,107 +250,103 @@ fn handle_browser_commands(
         };
         let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
         let is_text_grid = is_terminal || is_file;
-        match browser_cmd {
-            BrowserCommand::Navigation(nav) => match nav {
-                BrowserNavigationCommand::PrevPage => {
+        match request {
+            BrowserRequest::Navigate(request) => match request {
+                NavigationRequest::Back => {
                     if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
                         continue;
                     }
                     commands.trigger(RequestGoBack { webview });
                 }
-                BrowserNavigationCommand::NextPage => {
+                NavigationRequest::Forward => {
                     if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
                         continue;
                     }
                     commands.trigger(RequestGoForward { webview });
                 }
-                BrowserNavigationCommand::Reload => {
+                NavigationRequest::Reload => {
                     if is_terminal {
                         commands.trigger(RestartPty { entity: webview });
                     } else {
                         commands.trigger(RequestReload { webview });
                     }
                 }
-                BrowserNavigationCommand::HardReload => {
+                NavigationRequest::HardReload => {
                     if is_terminal {
                         commands.trigger(RestartPty { entity: webview });
                     } else {
                         commands.trigger(RequestReloadIgnoreCache { webview });
                     }
                 }
-                BrowserNavigationCommand::Stop => {}
+                NavigationRequest::Stop => {}
             },
-            #[allow(clippy::single_match)]
-            BrowserCommand::Open(open_cmd) => match open_cmd {
-                OpenCommand::InPlace { .. } => {
-                    let resolved = vmux_command::open::OpenUrl::from_command(
-                        open_cmd,
-                        effective_startup_url.as_ref().map(|s| s.0.as_str()),
-                    );
-                    if resolved.is_empty() {
-                        continue;
-                    }
-                    let resolved = VmuxRoute::canonical(resolved.as_str())
-                        .unwrap_or_else(|| resolved.as_str().trim().to_string());
-                    let current_url = meta_q
-                        .get(webview)
-                        .map(|m| m.url.clone())
-                        .unwrap_or_default();
-                    if is_terminal
-                        || host_spawn.needs_host_spawn(&current_url)
-                        || host_spawn.needs_host_spawn(&resolved)
-                    {
-                        page_open_requests.write(PageOpenRequest {
-                            target: PageOpenTarget::Stack(active),
-                            url: resolved,
-                            request_id: None,
-                        });
-                        continue;
-                    }
-                    if let Ok(mut meta) = meta_q.get_mut(webview) {
-                        meta.url = resolved.clone();
-                        meta.title = resolved.clone();
-                        meta.icon = vmux_core::PageIcon::None;
-                    }
-                    commands
-                        .entity(webview)
-                        .insert(WebviewSource::new(&resolved));
-                    commands.trigger(RequestNavigate {
-                        webview,
-                        url: resolved,
-                    });
+            BrowserRequest::Open(request) => {
+                let resolved = request.resolved_url(
+                    effective_startup_url
+                        .as_ref()
+                        .map(|startup| startup.0.as_str()),
+                );
+                if resolved.is_empty() {
+                    continue;
                 }
-                _ => {}
-            },
-            BrowserCommand::View(view) => match view {
-                BrowserViewCommand::ZoomIn => {
+                let resolved =
+                    VmuxRoute::canonical(&resolved).unwrap_or_else(|| resolved.trim().to_string());
+                let current_url = meta_q
+                    .get(webview)
+                    .map(|metadata| metadata.url.clone())
+                    .unwrap_or_default();
+                if is_terminal
+                    || host_spawn.needs_host_spawn(&current_url)
+                    || host_spawn.needs_host_spawn(&resolved)
+                {
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(active),
+                        url: resolved,
+                        request_id: None,
+                    });
+                    continue;
+                }
+                if let Ok(mut metadata) = meta_q.get_mut(webview) {
+                    metadata.url = resolved.clone();
+                    metadata.title = resolved.clone();
+                    metadata.icon = vmux_core::PageIcon::None;
+                }
+                commands
+                    .entity(webview)
+                    .insert(WebviewSource::new(&resolved));
+                commands.trigger(RequestNavigate {
+                    webview,
+                    url: resolved,
+                });
+            }
+            BrowserRequest::View(request) => match request {
+                ViewRequest::ZoomIn => {
                     if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 += 0.5;
                     }
                 }
-                BrowserViewCommand::ZoomOut => {
+                ViewRequest::ZoomOut => {
                     if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 -= 0.5;
                     }
                 }
-                BrowserViewCommand::ZoomReset => {
+                ViewRequest::ZoomReset => {
                     if is_text_grid {
                         font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 = 0.0;
                     }
                 }
-                BrowserViewCommand::DevTools => {
+                ViewRequest::DevTools => {
                     commands.trigger(RequestShowDevTool { webview });
                 }
-                BrowserViewCommand::ViewSource => {}
-                BrowserViewCommand::Print => {}
+                ViewRequest::ViewSource => {}
+                ViewRequest::Print => {}
             },
-            BrowserCommand::Bar(_) => {}
         }
     }
 }
@@ -203,24 +377,15 @@ impl ActiveStack<'_, '_> {
 
 fn on_header_request(
     trigger: On<BinReceive<HeaderRequest>>,
-    mut messages: ResMut<Messages<AppCommand>>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
-    let cmd = match trigger.event().payload.header_command.as_str() {
-        "prev_page" => BrowserCommand::Navigation(BrowserNavigationCommand::PrevPage),
-        "next_page" => BrowserCommand::Navigation(BrowserNavigationCommand::NextPage),
-        "reload" => BrowserCommand::Navigation(BrowserNavigationCommand::Reload),
-        "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar),
-        _ => return,
+    let id = match trigger.event().payload {
+        HeaderRequest::PreviousPage => "browser_prev_page",
+        HeaderRequest::NextPage => "browser_next_page",
+        HeaderRequest::Reload => "browser_reload",
+        HeaderRequest::FocusAddressBar => "browser_open_page_in_command_bar",
     };
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    let cmd = AppCommand::Browser(cmd);
-    issued.write(vmux_command::CommandIssued {
-        caller,
-        command: cmd.clone(),
-    });
-    messages.write(cmd);
+    command_invocations.write(CommandInvocation::new(trigger.event().webview, id));
 }
 
 fn on_reload_notify_header(
@@ -294,16 +459,21 @@ fn on_side_sheet_request(
     sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut messages: ResMut<Messages<AppCommand>>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     mut close_stack_requests: MessageWriter<CloseStackRequest>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    let Ok(pane_id) = evt.pane_id.parse::<u64>() else {
-        return;
+    let pane_id = match evt {
+        SideSheetRequest::ActivateStack { pane_id, .. }
+        | SideSheetRequest::CloseStack { pane_id, .. }
+        | SideSheetRequest::NewStack { pane_id }
+        | SideSheetRequest::OpenProjectPath { pane_id, .. }
+        | SideSheetRequest::CollapseCard { pane_id }
+        | SideSheetRequest::ExpandCard { pane_id }
+        | SideSheetRequest::CollapseSection { pane_id, .. }
+        | SideSheetRequest::ExpandSection { pane_id, .. } => *pane_id,
     };
     let Some(target_pane) = leaf_panes.iter().find(|e| e.to_bits() == pane_id) else {
         return;
@@ -311,13 +481,12 @@ fn on_side_sheet_request(
     let Ok(children) = pane_children.get(target_pane) else {
         return;
     };
-    let named_stack = children
-        .iter()
-        .find(|&e| stack_q.contains(e) && e.to_bits() == evt.stack_id);
-
-    match evt.command.as_str() {
-        "activate_stack" => {
-            let Some(target_stack) = named_stack else {
+    match evt {
+        SideSheetRequest::ActivateStack { stack_id, .. } => {
+            let target_stack = children
+                .iter()
+                .find(|&entity| stack_q.contains(entity) && entity.to_bits() == *stack_id);
+            let Some(target_stack) = target_stack else {
                 return;
             };
             activation.activate(target_pane, target_stack, &mut commands);
@@ -328,39 +497,47 @@ fn on_side_sheet_request(
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }
         }
-        "close_stack" => {
-            let Some(target_stack) = named_stack else {
+        SideSheetRequest::CloseStack { stack_id, .. } => {
+            let target_stack = children
+                .iter()
+                .find(|&entity| stack_q.contains(entity) && entity.to_bits() == *stack_id);
+            let Some(target_stack) = target_stack else {
                 return;
             };
             close_stack_requests.write(CloseStackRequest::by_user(target_stack));
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
-        "new_stack" => {
+        SideSheetRequest::NewStack { .. } => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
-            let cmd =
-                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url: None }));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            messages.write(cmd);
+            stack_requests.write(vmux_layout::stack::StackRequest::Open { url: None });
         }
-        "collapse_card" => {
+        SideSheetRequest::OpenProjectPath { path, .. } => {
+            let Ok(url) = url::Url::from_file_path(path) else {
+                return;
+            };
+            page_open_requests.write(PageOpenRequest {
+                target: PageOpenTarget::ActiveStackInPane(target_pane),
+                url: url.to_string(),
+                request_id: None,
+            });
+        }
+        SideSheetRequest::CollapseCard { .. } => {
             commands
                 .entity(target_pane)
                 .insert(SideSheetCardCollapsed)
                 .remove::<SideSheetPaneExpanded>();
         }
-        "expand_card" => {
+        SideSheetRequest::ExpandCard { .. } => {
             commands
                 .entity(target_pane)
                 .remove::<SideSheetCardCollapsed>()
                 .remove::<SideSheetPaneExpanded>();
         }
-        "collapse_section" | "expand_section" => {
-            let expanded = evt.command == "expand_section";
-            if evt.path == "pane" {
+        SideSheetRequest::CollapseSection { path, .. }
+        | SideSheetRequest::ExpandSection { path, .. } => {
+            let expanded = matches!(evt, SideSheetRequest::ExpandSection { .. });
+            if path == "pane" {
                 let mut pane = commands.entity(target_pane);
                 if expanded {
                     pane.remove::<SideSheetCardCollapsed>()
@@ -375,7 +552,7 @@ fn on_side_sheet_request(
                 return;
             };
             let mut state = sections_of.under(target_pane);
-            if !state.set(&evt.path, expanded) {
+            if !state.set(path, expanded) {
                 return;
             }
             if state.is_empty() {
@@ -384,7 +561,6 @@ fn on_side_sheet_request(
                 commands.entity(space).insert(state);
             }
         }
-        _ => {}
     }
 }
 
@@ -430,6 +606,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn browser_mcp_definitions_are_the_dispatchable_command_set() {
+        let definitions = BrowserRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "browser_prev_page",
+                "browser_next_page",
+                "browser_reload",
+                "browser_hard_reload",
+                "browser_stop",
+                "open_in_place",
+                "browser_zoom_in",
+                "browser_zoom_out",
+                "browser_zoom_reset",
+                "browser_dev_tools",
+                "browser_view_source",
+                "browser_print",
+            ],
+        );
+        for tool in tools {
+            let arguments = match tool.name.as_str() {
+                "open_in_place" => serde_json::json!({"url": "https://vmux.ai"}),
+                _ => serde_json::json!({}),
+            };
+            let invocation =
+                CommandInvocation::new(Entity::PLACEHOLDER, tool.name).with_arguments(arguments);
+            assert!(BrowserRequest::from_invocation(&invocation).is_some());
+        }
+    }
+
     struct NavArrow {
         app: App,
         view: Entity,
@@ -439,8 +653,6 @@ mod tests {
         fn over(page: impl Bundle) -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_core::CorePlugin, CommandPlugin))
-                .add_message::<AppCommand>()
-                .add_message::<vmux_command::CommandIssued>()
                 .add_message::<PageOpenRequest>()
                 .add_message::<vmux_terminal::TerminalFontSizeCommand>()
                 .init_resource::<HostSpawnRegistry>()
@@ -471,12 +683,10 @@ mod tests {
             Self::over(history)
         }
 
-        fn pressed(&mut self, button: &str) {
+        fn pressed(&mut self, request: HeaderRequest) {
             self.app.world_mut().trigger(BinReceive::<HeaderRequest> {
                 webview: Entity::PLACEHOLDER,
-                payload: HeaderRequest {
-                    header_command: button.to_string(),
-                },
+                payload: request,
             });
             self.app.update();
             self.app.update();
@@ -495,10 +705,41 @@ mod tests {
     }
 
     #[test]
+    fn command_invocations_keep_their_original_order() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        BrowserRequest::register(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write_batch([
+                CommandInvocation::new(Entity::PLACEHOLDER, "open_in_place")
+                    .with_arguments(serde_json::json!({"url": "https://vmux.ai"})),
+                CommandInvocation::new(Entity::PLACEHOLDER, "browser_reload"),
+            ]);
+
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<BrowserRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            [
+                BrowserRequest::Open(OpenRequest {
+                    url: Some("https://vmux.ai".to_string()),
+                }),
+                BrowserRequest::Navigate(NavigationRequest::Reload),
+            ]
+        );
+    }
+
+    #[test]
     fn the_back_arrow_walks_host_history_instead_of_asking_chromium() {
         let mut arrow = NavArrow::over_a_natively_hosted_page();
 
-        arrow.pressed("prev_page");
+        arrow.pressed(HeaderRequest::PreviousPage);
 
         assert!(
             arrow.walked_back(),
@@ -514,7 +755,7 @@ mod tests {
     fn the_back_arrow_still_asks_chromium_for_a_page_chromium_renders() {
         let mut arrow = NavArrow::over(());
 
-        arrow.pressed("prev_page");
+        arrow.pressed(HeaderRequest::PreviousPage);
 
         assert_eq!(arrow.cef_navigations(), vec![arrow.view]);
     }
@@ -523,8 +764,8 @@ mod tests {
     fn the_side_sheet_close_button_names_the_stack_it_sits_on() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<AppCommand>()
-            .add_message::<vmux_command::CommandIssued>()
+            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<PageOpenRequest>()
             .init_resource::<PaneHoverIntent>()
             .add_observer(on_side_sheet_request);
 
@@ -544,12 +785,9 @@ mod tests {
 
         app.world_mut().trigger(BinReceive::<SideSheetRequest> {
             webview: Entity::PLACEHOLDER,
-            payload: SideSheetRequest {
-                command: "close_stack".to_string(),
-                pane_id: pane.to_bits().to_string(),
+            payload: SideSheetRequest::CloseStack {
+                pane_id: pane.to_bits(),
                 stack_id: middle.to_bits(),
-                line: 0,
-                path: String::new(),
             },
         });
         app.world_mut().flush();
@@ -652,8 +890,8 @@ mod tests {
         fn start() -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-                .add_message::<AppCommand>()
-                .add_message::<vmux_command::CommandIssued>()
+                .add_message::<vmux_layout::stack::StackRequest>()
+                .add_message::<PageOpenRequest>()
                 .init_resource::<PaneHoverIntent>()
                 .add_observer(on_side_sheet_request);
 
@@ -688,11 +926,8 @@ mod tests {
                 .world_mut()
                 .trigger(BinReceive::<SideSheetRequest> {
                     webview: Entity::PLACEHOLDER,
-                    payload: SideSheetRequest {
-                        command: "expand_section".to_string(),
-                        pane_id: self.pane_in_first_tab.to_bits().to_string(),
-                        stack_id: 0,
-                        line: 0,
+                    payload: SideSheetRequest::ExpandSection {
+                        pane_id: self.pane_in_first_tab.to_bits(),
                         path: section.to_string(),
                     },
                 });

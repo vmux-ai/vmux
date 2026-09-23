@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -41,7 +41,7 @@ impl Plugin for SpawnPlugin {
             .add_systems(
                 Update,
                 detect_agent_session_process_exit
-                    .in_set(WriteAppCommands)
+                    .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet)
                     .after(super::query::QuerySet),
             )

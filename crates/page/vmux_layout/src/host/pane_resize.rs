@@ -19,7 +19,8 @@ pub(super) struct ResizePlugin;
 
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<PaneSize>()
+        app.add_message::<PaneRequest>()
+            .register_type::<PaneSize>()
             .add_systems(
                 Update,
                 resize_from_commands.in_set(LayoutRequestSet::Handle),

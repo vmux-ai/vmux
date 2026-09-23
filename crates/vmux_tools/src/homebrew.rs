@@ -21,8 +21,8 @@ pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
     let source_path = expand_user_path(path)?;
     let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
     let imported = import_brewfile_to(&source_path, &manifest_path())?;
-    std::fs::create_dir_all(root_dir()).map_err(|error| error.to_string())?;
-    std::fs::write(brewfile_path(), source).map_err(|error| error.to_string())?;
+    vmux_path::AtomicFile::write(brewfile_path(), source.as_bytes())
+        .map_err(|error| error.to_string())?;
     let manifest = load_manifest_from(&manifest_path())?;
     write_managed_brewfile(&manifest)?;
     Ok(imported)
@@ -96,12 +96,7 @@ pub(crate) fn write_brewfile_to(path: &Path, manifest: &ToolsManifest) -> Result
     }
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let source = merge_brewfile(&existing, &formulae, &casks);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, source).map_err(|error| error.to_string())?;
-    std::fs::rename(temporary, path).map_err(|error| error.to_string())
+    vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn merge_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {

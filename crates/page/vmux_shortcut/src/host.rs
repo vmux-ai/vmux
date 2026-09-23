@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEventPlugin};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
-use vmux_command::{AppCommand, ResolvedLocale, localized_command_name};
+use vmux_command::{CommandDefinition, ResolvedLocale, localized_command_name};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
@@ -142,23 +142,27 @@ impl HostedPage for Shortcuts {
 
 fn send_shortcuts(
     trigger: On<BinReceive<PageReady>>,
-    views: Query<(), With<Shortcuts>>,
+    views: Query<Option<&KeyContext>, With<Shortcuts>>,
     keymap: Res<Keymap>,
-    contexts: Query<&KeyContext>,
+    definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !views.contains(webview) || !browsers.can_emit_to(&webview) {
+    let Ok(context) = views.get(webview) else {
+        return;
+    };
+    if !browsers.can_emit_to(&webview) {
         return;
     }
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let context = contexts.get(webview).unwrap_or(KeyContext::NONE);
-    let payload = ShortcutsEvent::build(&keymap, context, &locale);
+    let context = context.unwrap_or(KeyContext::NONE);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
+    let payload = ShortcutsEvent::build(&keymap, context, &locale, &definitions);
     commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
 }
 
@@ -208,19 +212,28 @@ fn normalize_shortcut_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpen
 }
 
 impl ShortcutsEvent {
-    fn build(keymap: &Keymap, context: &KeyContext, locale: &Locale) -> Self {
+    fn build(
+        keymap: &Keymap,
+        context: &KeyContext,
+        locale: &Locale,
+        definitions: &[CommandDefinition],
+    ) -> Self {
         let mut labels = HashMap::new();
-        for (id, fallback) in AppCommand::shortcut_labels() {
-            labels.insert(id, localized_command_name(locale.as_str(), id, fallback));
+        for definition in definitions {
+            labels.insert(
+                definition.id.as_str(),
+                localized_command_name(
+                    locale.as_str(),
+                    &definition.id,
+                    definition.command_bar_name(),
+                ),
+            );
         }
 
         let mut grouped: BTreeMap<String, BTreeMap<(String, String), Vec<ShortcutBinding>>> =
             BTreeMap::new();
         let view = keymap.in_context(context);
         for binding in keymap.bindings() {
-            if AppCommand::from_shortcut_id(&binding.command).is_none() {
-                continue;
-            }
             let Some(label) = labels.get(binding.command.as_str()) else {
                 continue;
             };
@@ -317,10 +330,16 @@ mod tests {
 
     #[test]
     fn event_lists_hidden_and_visible_shortcuts() {
+        let definitions = [
+            vmux_layout::pane::PaneRequest::definitions(),
+            vmux_layout::tab::TabRequest::definitions(),
+        ]
+        .concat();
         let event = ShortcutsEvent::build(
-            &Keymap::defaults(),
+            &Keymap::defaults_with(&definitions),
             KeyContext::NONE,
             &Locale::from("en-US"),
+            &definitions,
         );
         let names = event
             .groups
@@ -339,10 +358,12 @@ mod tests {
 
     #[test]
     fn event_exposes_chords_as_individual_strokes() {
+        let definitions = vmux_layout::pane::PaneRequest::definitions();
         let event = ShortcutsEvent::build(
-            &Keymap::defaults(),
+            &Keymap::defaults_with(&definitions),
             KeyContext::NONE,
             &Locale::from("en-US"),
+            &definitions,
         );
         let shortcut = event
             .bindings()
@@ -378,8 +399,18 @@ mod tests {
                 },
             ],
         );
+        let definitions = vec![
+            CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane"),
+            CommandDefinition::new("stack_close", "Close Stack", "Layout > Stack"),
+        ];
+        keymap.register(definitions.iter().map(|definition| definition.id.as_str()));
 
-        let event = ShortcutsEvent::build(&keymap, KeyContext::NONE, &Locale::from("en-US"));
+        let event = ShortcutsEvent::build(
+            &keymap,
+            KeyContext::NONE,
+            &Locale::from("en-US"),
+            &definitions,
+        );
         let resolving = event
             .resolutions()
             .map(|(entry, _)| entry.id.as_str())

@@ -344,17 +344,10 @@ fn save_agent_model_selections(mut models: ResMut<AgentModelSelections>) {
         return;
     }
     let path = agent_model_selections_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
     let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
         return;
     };
-    let temp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok()
-        && std::fs::write(&temp, bytes).is_ok()
-        && std::fs::rename(&temp, &path).is_ok()
-    {
+    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
         models.dirty = false;
     }
 }
@@ -364,17 +357,10 @@ fn save_agent_mode_selections(mut modes: ResMut<AgentModeSelections>) {
         return;
     }
     let path = agent_mode_selections_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
     let Ok(bytes) = serde_json::to_vec_pretty(&modes.by_agent) else {
         return;
     };
-    let temp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok()
-        && std::fs::write(&temp, bytes).is_ok()
-        && std::fs::rename(&temp, &path).is_ok()
-    {
+    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
         modes.dirty = false;
     }
 }

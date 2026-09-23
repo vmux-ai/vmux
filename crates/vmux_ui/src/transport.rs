@@ -2,11 +2,22 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::transport::event_listener::EventListenerError;
+pub use vmux_api::BinEventTarget;
 
 pub trait PageHost {
-    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
+    fn send(
+        &self,
+        target: BinEventTarget,
+        id: &str,
+        bytes: &[u8],
+    ) -> Result<(), EventListenerError>;
 
-    fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
+    fn listen(
+        &self,
+        target: BinEventTarget,
+        id: &str,
+        on_bytes: BytesListener,
+    ) -> Result<(), EventListenerError>;
 
     fn focus_element(&self, _element_id: &str) {}
 
@@ -73,12 +84,20 @@ impl Drop for HostScope {
 pub(crate) struct Host;
 
 impl Host {
-    pub(crate) fn emit(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-        Self::with_installed(|host| host.send(id, bytes))?
+    pub(crate) fn emit(
+        target: BinEventTarget,
+        id: &str,
+        bytes: &[u8],
+    ) -> Result<(), EventListenerError> {
+        Self::with_installed(|host| host.send(target, id, bytes))?
     }
 
-    pub(crate) fn listen(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
-        Self::with_installed(|host| host.listen(id, on_bytes))?
+    pub(crate) fn listen(
+        target: BinEventTarget,
+        id: &str,
+        on_bytes: BytesListener,
+    ) -> Result<(), EventListenerError> {
+        Self::with_installed(|host| host.listen(target, id, on_bytes))?
     }
 
     pub(crate) fn focus_element(id: &str) {
@@ -199,7 +218,12 @@ mod tests {
     }
 
     impl PageHost for LoopbackHost {
-        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        fn send(
+            &self,
+            _target: BinEventTarget,
+            id: &str,
+            bytes: &[u8],
+        ) -> Result<(), EventListenerError> {
             for (registered, on_bytes) in self.listeners.borrow_mut().iter_mut() {
                 if registered == id {
                     on_bytes(bytes);
@@ -208,7 +232,12 @@ mod tests {
             Ok(())
         }
 
-        fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
+        fn listen(
+            &self,
+            _target: BinEventTarget,
+            id: &str,
+            on_bytes: BytesListener,
+        ) -> Result<(), EventListenerError> {
             self.listeners.borrow_mut().push((id.to_string(), on_bytes));
             Ok(())
         }
@@ -221,6 +250,7 @@ mod tests {
         let seen = Rc::new(RefCell::new(Vec::<Ping>::new()));
         let sink = seen.clone();
         Host::listen(
+            BinEventTarget::Any,
             "ping",
             Box::new(move |bytes| {
                 if let Some(ping) = HostPayload::new(bytes).decode::<Ping>() {
@@ -231,8 +261,8 @@ mod tests {
         .unwrap();
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&Ping { value: 7 }).unwrap();
-        Host::emit("ping", &bytes).unwrap();
-        Host::emit("other", &bytes).unwrap();
+        Host::emit(BinEventTarget::Any, "ping", &bytes).unwrap();
+        Host::emit(BinEventTarget::Any, "other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
     }
@@ -243,12 +273,22 @@ mod tests {
     }
 
     impl PageHost for CountingHost {
-        fn send(&self, _id: &str, _bytes: &[u8]) -> Result<(), EventListenerError> {
+        fn send(
+            &self,
+            _target: BinEventTarget,
+            _id: &str,
+            _bytes: &[u8],
+        ) -> Result<(), EventListenerError> {
             *self.sent.borrow_mut() += 1;
             Ok(())
         }
 
-        fn listen(&self, _id: &str, _on_bytes: BytesListener) -> Result<(), EventListenerError> {
+        fn listen(
+            &self,
+            _target: BinEventTarget,
+            _id: &str,
+            _on_bytes: BytesListener,
+        ) -> Result<(), EventListenerError> {
             Ok(())
         }
     }
@@ -259,19 +299,22 @@ mod tests {
         let second = Rc::new(CountingHost::default());
 
         let outer = HostScope::enter(first.clone());
-        Host::emit("a", &[]).unwrap();
+        Host::emit(BinEventTarget::Any, "a", &[]).unwrap();
         {
             let _inner = HostScope::enter(second.clone());
-            Host::emit("b", &[]).unwrap();
-            Host::emit("c", &[]).unwrap();
+            Host::emit(BinEventTarget::Any, "b", &[]).unwrap();
+            Host::emit(BinEventTarget::Any, "c", &[]).unwrap();
         }
-        Host::emit("d", &[]).unwrap();
+        Host::emit(BinEventTarget::Any, "d", &[]).unwrap();
         drop(outer);
 
         assert_eq!(*first.sent.borrow(), 2, "the outer page sent 'a' and 'd'");
         assert_eq!(*second.sent.borrow(), 2, "the inner page sent 'b' and 'c'");
         assert!(
-            matches!(Host::emit("e", &[]), Err(EventListenerError::NoHost)),
+            matches!(
+                Host::emit(BinEventTarget::Any, "e", &[]),
+                Err(EventListenerError::NoHost)
+            ),
             "leaving the last scope leaves no host installed, rather than the first one"
         );
     }

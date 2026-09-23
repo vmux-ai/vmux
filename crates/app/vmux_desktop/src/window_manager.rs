@@ -1,18 +1,18 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_layout::window::{FocusedWindow, NewWindowWorkspace, VmuxWindow};
 
 pub(crate) struct WindowManagerPlugin;
 
 impl Plugin for WindowManagerPlugin {
     fn build(&self, app: &mut App) {
+        WindowRequest::register(app);
         app.add_message::<CloseVmuxWindow>()
             .add_systems(
                 Update,
                 handle_window_commands
-                    .in_set(ReadAppCommands)
+                    .in_set(vmux_command::ReadCommandRequests)
                     .after(vmux_layout::window::WindowFocusSet),
             )
             .add_systems(Update, close_windows.after(handle_window_commands));
@@ -22,29 +22,57 @@ impl Plugin for WindowManagerPlugin {
 #[derive(Message, Clone, Copy)]
 pub(crate) struct CloseVmuxWindow(pub Entity);
 
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowRequest {
+    New,
+    Close,
+}
+
+impl WindowRequest {
+    pub fn register(app: &mut App) {
+        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vec![
+            vmux_command::CommandDefinition::new("new_window", "New Window", "Layout > Window")
+                .accelerator("super+n")
+                .hidden()
+                .direct("Super+N"),
+            vmux_command::CommandDefinition::new("close_window", "Close Window", "Layout > Window")
+                .accelerator("super+shift+w")
+                .hidden(),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
+        match invocation.id.as_str() {
+            "new_window" => Some(Self::New),
+            "close_window" => Some(Self::Close),
+            _ => None,
+        }
+    }
+}
+
 fn handle_window_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<WindowRequest>,
     mut focused: ResMut<FocusedWindow>,
     mut close: MessageWriter<CloseVmuxWindow>,
     mut commands: Commands,
 ) {
-    for command in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Window(command)) = command else {
-            continue;
-        };
-        match command {
-            WindowCommand::NewWindow => {
+    for request in reader.read() {
+        match request {
+            WindowRequest::New => {
                 let window = commands
                     .spawn((crate::window_config(true), NewWindowWorkspace))
                     .id();
                 focused.0 = Some(window);
             }
-            WindowCommand::CloseWindow => {
+            WindowRequest::Close => {
                 if let Some(window) = focused.0 {
                     close.write(CloseVmuxWindow(window));
                 }
             }
-            _ => {}
         }
     }
 }
@@ -91,15 +119,13 @@ mod tests {
     #[test]
     fn new_window_command_spawns_a_full_window_request() {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
+        app.add_message::<WindowRequest>()
             .add_message::<CloseVmuxWindow>()
             .init_resource::<FocusedWindow>()
             .add_systems(Update, handle_window_commands);
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Window(
-                WindowCommand::NewWindow,
-            )));
+            .resource_mut::<Messages<WindowRequest>>()
+            .write(WindowRequest::New);
 
         app.update();
 
