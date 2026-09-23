@@ -30,6 +30,7 @@ use vmux_service::{
 use vmux_setting::AppSettings;
 
 use super::loading::AgentLoading;
+use super::mouse::MouseSelectionState;
 use super::prompt::PromptCapture;
 use crate::event::*;
 use crate::pid::{self, Pid};
@@ -102,8 +103,7 @@ struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MouseSelectionState>()
-            .init_resource::<TerminalModeMap>()
+        app.init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
             .add_systems(
@@ -115,13 +115,12 @@ impl Plugin for TerminalInputPlugin {
             )
             .add_plugins(UiEventPlugin::<(
                 TermResizeEvent,
-                TermMouseEvent,
                 TermScrollEvent,
                 TermLinkOpenRequest,
             )>::default())
+            .add_plugins(super::mouse::MousePlugin)
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
-            .add_observer(on_term_mouse)
             .add_observer(on_term_scroll)
             .add_observer(on_term_key)
             .add_observer(on_term_link_open);
@@ -176,8 +175,6 @@ impl Plugin for TerminalUpdatePlugin {
     }
 }
 
-const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
-const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
 const CTRL_V: u8 = 0x16;
 
 pub fn should_confirm_close(settings: &AppSettings) -> bool {
@@ -215,9 +212,20 @@ impl TerminalModeMap {
 }
 
 #[derive(Resource, Default)]
-struct LocalCopyModeState {
+pub(super) struct LocalCopyModeState {
     active: std::collections::HashSet<ProcessId>,
     input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
+}
+
+impl LocalCopyModeState {
+    pub(super) fn set(&mut self, process_id: ProcessId, active: bool) {
+        if active {
+            self.active.insert(process_id);
+        } else {
+            self.active.remove(&process_id);
+            self.input_states.remove(&process_id);
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -1317,8 +1325,8 @@ fn poll_service_messages(
                     .process_exited
                     .write(ProcessExitedEvent { process_id });
                 state.mode_map.modes.remove(&process_id);
-                set_local_copy_mode(&mut state.local_copy_mode, process_id, false);
-                state.mouse_state.per_process.remove(&process_id);
+                state.local_copy_mode.set(process_id, false);
+                state.mouse_state.remove(&process_id);
                 let Some(entity) = state.process_index.get(&process_id) else {
                     continue;
                 };
@@ -1406,7 +1414,7 @@ fn poll_service_messages(
                         focus_reporting,
                     },
                 );
-                set_local_copy_mode(&mut state.local_copy_mode, process_id, copy_mode);
+                state.local_copy_mode.set(process_id, copy_mode);
             }
             ServiceMessage::SelectionText {
                 process_id: _,
@@ -2240,241 +2248,6 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
-    let mut cb = button as u32;
-    if modifiers & MOD_SHIFT != 0 {
-        cb += 4;
-    }
-    if modifiers & MOD_ALT != 0 {
-        cb += 8;
-    }
-    if modifiers & MOD_CTRL != 0 {
-        cb += 16;
-    }
-    let suffix = if pressed { 'M' } else { 'm' };
-    format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
-}
-
-#[derive(Resource, Default)]
-struct MouseSelectionState {
-    per_process: std::collections::HashMap<ProcessId, MouseSessionState>,
-}
-
-#[derive(Default, Clone, Debug)]
-struct MouseSessionState {
-    last_click: Option<MouseClickRecord>,
-    drag_active: bool,
-    drag_visual_active: bool,
-    last_extend_cell: Option<(u16, u16)>,
-    pending_anchor: Option<(u16, u16)>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct MouseClickRecord {
-    when: std::time::Instant,
-    col: u16,
-    row: u16,
-    count: u8,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum MouseTerminalAction {
-    ForwardInput(Vec<u8>),
-    EnterCopyMode,
-    ExitCopyMode,
-    SetSelection(Option<TermSelectionRange>),
-    ExtendSelectionTo { col: u16, row: u16 },
-    SelectWordAt { col: u16, row: u16 },
-    SelectLineAt { row: u16 },
-}
-
-fn mouse_terminal_actions(
-    entry: &mut MouseSessionState,
-    event: &TermMouseEvent,
-    mouse_capture: bool,
-    now: std::time::Instant,
-) -> Vec<MouseTerminalAction> {
-    let shift = event.modifiers & MOD_SHIFT != 0;
-    let is_left = event.button == 0;
-    let select_mode = is_left && (!mouse_capture || shift);
-
-    if !select_mode {
-        if !mouse_capture {
-            return Vec::new();
-        }
-        let button = if event.moving {
-            event.button + 32
-        } else {
-            event.button
-        };
-        return vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-            button,
-            event.col,
-            event.row,
-            event.modifiers,
-            event.pressed,
-        ))];
-    }
-
-    if event.pressed && !event.moving {
-        let count = match entry.last_click {
-            Some(prev)
-                if now.duration_since(prev.when) <= MULTI_CLICK_WINDOW
-                    && (prev.col as i32 - event.col as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE
-                    && (prev.row as i32 - event.row as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE =>
-            {
-                if prev.count >= 3 {
-                    1
-                } else {
-                    prev.count + 1
-                }
-            }
-            _ => 1,
-        };
-        entry.last_click = Some(MouseClickRecord {
-            when: now,
-            col: event.col,
-            row: event.row,
-            count,
-        });
-        entry.drag_active = count == 1;
-        entry.drag_visual_active = false;
-        entry.last_extend_cell = Some((event.col, event.row));
-
-        match count {
-            1 if shift => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::ExtendSelectionTo {
-                    col: event.col,
-                    row: event.row,
-                }]
-            }
-            1 => {
-                entry.pending_anchor = Some((event.col, event.row));
-                vec![MouseTerminalAction::SetSelection(None)]
-            }
-            2 => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::SelectWordAt {
-                    col: event.col,
-                    row: event.row,
-                }]
-            }
-            _ => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::SelectLineAt { row: event.row }]
-            }
-        }
-    } else if event.moving && entry.drag_active {
-        if entry.last_extend_cell == Some((event.col, event.row)) {
-            return Vec::new();
-        }
-        entry.last_extend_cell = Some((event.col, event.row));
-        if let Some((ac, ar)) = entry.pending_anchor.take() {
-            entry.drag_visual_active = true;
-            vec![
-                MouseTerminalAction::EnterCopyMode,
-                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
-                    start_col: ac,
-                    start_row: ar,
-                    end_col: event.col,
-                    end_row: event.row,
-                    is_block: false,
-                })),
-            ]
-        } else {
-            vec![MouseTerminalAction::ExtendSelectionTo {
-                col: event.col,
-                row: event.row,
-            }]
-        }
-    } else if !event.pressed {
-        let actions = if entry.drag_visual_active {
-            vec![MouseTerminalAction::ExitCopyMode]
-        } else {
-            Vec::new()
-        };
-        entry.drag_active = false;
-        entry.drag_visual_active = false;
-        entry.last_extend_cell = None;
-        entry.pending_anchor = None;
-        actions
-    } else {
-        Vec::new()
-    }
-}
-
-fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: MouseTerminalAction) {
-    match action {
-        MouseTerminalAction::ForwardInput(data) => {
-            service.send(ClientMessage::ProcessInput { process_id, data });
-        }
-        MouseTerminalAction::EnterCopyMode => {
-            service.send(ClientMessage::EnterCopyMode { process_id });
-        }
-        MouseTerminalAction::ExitCopyMode => {
-            service.send(ClientMessage::ExitCopyMode { process_id });
-        }
-        MouseTerminalAction::SetSelection(range) => {
-            service.send(ClientMessage::SetSelection { process_id, range });
-        }
-        MouseTerminalAction::ExtendSelectionTo { col, row } => {
-            service.send(ClientMessage::ExtendSelectionTo {
-                process_id,
-                col,
-                row,
-            });
-        }
-        MouseTerminalAction::SelectWordAt { col, row } => {
-            service.send(ClientMessage::SelectWordAt {
-                process_id,
-                col,
-                row,
-            });
-        }
-        MouseTerminalAction::SelectLineAt { row } => {
-            service.send(ClientMessage::SelectLineAt { process_id, row });
-        }
-    }
-}
-
-fn on_term_mouse(
-    trigger: On<BinReceive<TermMouseEvent>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-    mode_map: Res<TerminalModeMap>,
-    mut state: ResMut<MouseSelectionState>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-    let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
-    let process_id = *pid;
-
-    if event.button == 64 || event.button == 65 {
-        service.0.send(ClientMessage::MouseWheel {
-            process_id,
-            up: event.button == 64,
-            col: event.col,
-            row: event.row,
-            modifiers: event.modifiers,
-        });
-        return;
-    }
-
-    let mouse_capture = mode_map
-        .modes
-        .get(&process_id)
-        .map(|m| m.mouse_capture)
-        .unwrap_or(false);
-    let entry = state.per_process.entry(process_id).or_default();
-    for action in mouse_terminal_actions(entry, event, mouse_capture, std::time::Instant::now()) {
-        update_local_copy_mode_for_mouse_action(&mut local_copy_mode, process_id, &action);
-        send_mouse_action(&service.0, process_id, action);
-    }
-}
-
 fn on_term_scroll(
     trigger: On<BinReceive<TermScrollEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -2609,7 +2382,7 @@ fn on_term_key(
         );
         for k in mapped {
             if copy_mode_key_exits(k) {
-                set_local_copy_mode(&mut local_copy_mode, process_id, false);
+                local_copy_mode.set(process_id, false);
             }
             service
                 .0
@@ -2812,7 +2585,7 @@ fn handle_terminal_copy_mode_command(
     let active_process_id = target_processes.first().copied();
     for _ in requests.read() {
         if let Some(process_id) = active_process_id {
-            set_local_copy_mode(&mut local_copy_mode, process_id, true);
+            local_copy_mode.set(process_id, true);
             service.0.send(ClientMessage::EnterCopyMode { process_id });
         }
     }
@@ -2885,19 +2658,6 @@ fn is_copy_mode_active(
         || local_copy_mode.active.contains(&process_id)
 }
 
-fn set_local_copy_mode(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
-    active: bool,
-) {
-    if active {
-        local_copy_mode.active.insert(process_id);
-    } else {
-        local_copy_mode.active.remove(&process_id);
-        local_copy_mode.input_states.remove(&process_id);
-    }
-}
-
 fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
     use vmux_service::protocol::CopyModeKey as K;
     matches!(key, K::Copy | K::Exit)
@@ -2964,22 +2724,6 @@ fn clear_osc_title_on_exit(
         {
             commands.entity(entity).remove::<PageIdentity>();
         }
-    }
-}
-
-fn update_local_copy_mode_for_mouse_action(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
-    action: &MouseTerminalAction,
-) {
-    match action {
-        MouseTerminalAction::EnterCopyMode => {
-            set_local_copy_mode(local_copy_mode, process_id, true)
-        }
-        MouseTerminalAction::ExitCopyMode => {
-            set_local_copy_mode(local_copy_mode, process_id, false)
-        }
-        _ => {}
     }
 }
 
@@ -3718,121 +3462,6 @@ mod tests {
         );
     }
 
-    fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {
-        TermMouseEvent {
-            button,
-            col,
-            row,
-            modifiers: 0,
-            pressed,
-            moving,
-        }
-    }
-
-    #[test]
-    fn drag_enters_visual_mode_on_first_motion_and_exits_on_release() {
-        let mut state = MouseSessionState::default();
-        let now = std::time::Instant::now();
-
-        let down = mouse_event(0, 2, 3, true, false);
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
-        );
-
-        let drag = mouse_event(0, 5, 3, true, true);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &drag,
-                false,
-                now + std::time::Duration::from_millis(10),
-            ),
-            vec![
-                MouseTerminalAction::EnterCopyMode,
-                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
-                    start_col: 2,
-                    start_row: 3,
-                    end_col: 5,
-                    end_row: 3,
-                    is_block: false,
-                })),
-            ]
-        );
-
-        let release = mouse_event(0, 5, 3, false, false);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &release,
-                false,
-                now + std::time::Duration::from_millis(20),
-            ),
-            vec![MouseTerminalAction::ExitCopyMode]
-        );
-    }
-
-    #[test]
-    fn single_click_never_enters_visual_mode() {
-        let mut state = MouseSessionState::default();
-        let now = std::time::Instant::now();
-
-        let down = mouse_event(0, 2, 3, true, false);
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
-        );
-
-        let release = mouse_event(0, 2, 3, false, false);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &release,
-                false,
-                now + std::time::Duration::from_millis(20),
-            ),
-            Vec::<MouseTerminalAction>::new()
-        );
-    }
-
-    #[test]
-    fn captured_mouse_without_shift_still_forwards_drag_motion() {
-        let mut state = MouseSessionState::default();
-        let event = mouse_event(0, 4, 5, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &event, true, std::time::Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-                32, 4, 5, 0, true,
-            ))]
-        );
-    }
-
-    #[test]
-    fn hover_motion_without_app_capture_is_not_forwarded() {
-        let mut state = MouseSessionState::default();
-        let hover = mouse_event(3, 9, 4, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &hover, false, std::time::Instant::now()),
-            Vec::<MouseTerminalAction>::new(),
-            "bare hover with no app mouse capture must not be echoed into the PTY"
-        );
-    }
-
-    #[test]
-    fn hover_motion_with_app_capture_is_forwarded() {
-        let mut state = MouseSessionState::default();
-        let hover = mouse_event(3, 9, 4, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &hover, true, std::time::Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-                35, 9, 4, 0, true,
-            ))]
-        );
-    }
-
     #[test]
     fn shell_prompt_ready_only_once_cursor_is_past_column_zero() {
         assert!(!shell_prompt_ready(false, 0), "no output yet");
@@ -4019,7 +3648,7 @@ mod tests {
             process_id
         ));
 
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        local_copy_mode.set(process_id, true);
 
         assert!(is_copy_mode_active(&mode_map, &local_copy_mode, process_id));
     }
@@ -4030,7 +3659,7 @@ mod tests {
         let mut mode_map = TerminalModeMap::default();
         let mut local_copy_mode = LocalCopyModeState::default();
 
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        local_copy_mode.set(process_id, true);
         mode_map.modes.insert(
             process_id,
             TerminalModeFlags {
@@ -4040,7 +3669,7 @@ mod tests {
                 focus_reporting: false,
             },
         );
-        set_local_copy_mode(&mut local_copy_mode, process_id, false);
+        local_copy_mode.set(process_id, false);
 
         assert!(!is_copy_mode_active(
             &mode_map,
@@ -4055,10 +3684,10 @@ mod tests {
 
         let process_id = ProcessId::new();
         let mut local_copy_mode = LocalCopyModeState::default();
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        local_copy_mode.set(process_id, true);
 
         if copy_mode_key_exits(K::Exit) {
-            set_local_copy_mode(&mut local_copy_mode, process_id, false);
+            local_copy_mode.set(process_id, false);
         }
 
         assert!(!local_copy_mode.active.contains(&process_id));
