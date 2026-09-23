@@ -13,6 +13,7 @@ use vmux_api::git::{
 };
 
 #[vmux_api::payload]
+#[derive(vmux_api::UiStatePatch)]
 pub enum FileUiStatePatch {
     Meta(FileMetaEvent),
     Viewport(FileViewportPatch),
@@ -57,77 +58,11 @@ pub enum FileUiStatePatch {
 
 #[vmux_api::payload(Default)]
 #[vmux_api::host_event(target = "files")]
+#[derive(vmux_api::UiState)]
 pub struct FileUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<FileUiStatePatch>,
 }
-
-pub trait FileUiStatePayload: Clone + 'static {
-    fn from_patch(patch: &FileUiStatePatch) -> Option<&Self>;
-}
-
-macro_rules! impl_patch_from {
-    ($($variant:ident: $event:ty),* $(,)?) => {
-        $(
-            impl From<$event> for FileUiStatePatch {
-                fn from(event: $event) -> Self {
-                    Self::$variant(event)
-                }
-            }
-
-            impl FileUiStatePayload for $event {
-                fn from_patch(patch: &FileUiStatePatch) -> Option<&Self> {
-                    let FileUiStatePatch::$variant(event) = patch else {
-                        return None;
-                    };
-                    Some(event)
-                }
-            }
-        )*
-    };
-}
-
-impl_patch_from!(
-    Meta: FileMetaEvent,
-    Viewport: FileViewportPatch,
-    Note: FileNoteEvent,
-    Error: FileErrorEvent,
-    ScrollBy: FileScrollByEvent,
-    Directory: FileDirEvent,
-    Theme: FileThemeEvent,
-    Preview: FilePreviewEvent,
-    Media: FileMediaEvent,
-    Cursor: FileCursorEvent,
-    Dirty: FileDirtyEvent,
-    ViewMode: FileViewModeEvent,
-    Keymap: FileKeymapEvent,
-    Shape: FileShapeEvent,
-    Encoding: FileEncodingEvent,
-    TidyPrompt: FileTidyPromptEvent,
-    ExplorerTree: ExplorerTreeEvent,
-    ExplorerFocus: ExplorerFocusEvent,
-    ExplorerFsResult: ExplorerFsResult,
-    OpenEditors: OpenEditorsEvent,
-    Outline: OutlineEvent,
-    ExplorerPanel: ExplorerPanelEvent,
-    ExplorerSearch: ExplorerSearchEvent,
-    Diagnostics: FileDiagnosticsEvent,
-    LspStatus: FileLspStatusEvent,
-    LspInstallProgress: LspInstallProgress,
-    LspPackageStatus: LspPkgStatusEvent,
-    Hover: FileHoverEvent,
-    CodeActions: FileCodeActionsEvent,
-    EditFailed: FileEditFailedEvent,
-    RenameBegin: FileRenameBeginEvent,
-    References: FileReferencesEvent,
-    Completion: FileCompletionEvent,
-    GitStatus: GitStatusEvent,
-    GitDiffMeta: GitDiffMetaEvent,
-    GitDiffViewport: GitDiffViewportEvent,
-    GitResult: GitResultEvent,
-    GitError: GitErrorEvent,
-    GitChanged: GitChangedEvent,
-);
 
 #[cfg(test)]
 mod tests {
