@@ -6,6 +6,7 @@ pub mod apply;
 pub mod archive;
 pub mod bookmark;
 pub mod cef;
+mod command;
 pub mod contract;
 pub mod native_open;
 pub mod native_pointer;

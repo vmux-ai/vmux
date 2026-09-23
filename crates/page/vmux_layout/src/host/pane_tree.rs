@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::open::PaneDirection;
+use vmux_api::open_target::PaneDirection;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 

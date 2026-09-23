@@ -3,7 +3,6 @@ use bevy::{
     prelude::*,
     tasks::{IoTaskPool, Task, futures_lite::future},
 };
-use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -19,7 +18,12 @@ use crate::{
 
 #[cfg(test)]
 use super::pane::PaneSplitDirection;
-use super::pane::{Pane, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle};
+use super::{
+    command::LayoutRequestSet,
+    pane::{
+        Pane, PaneRequest, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
+    },
+};
 
 pub(super) struct ClosePlugin;
 
@@ -31,9 +35,13 @@ impl Plugin for ClosePlugin {
                 Update,
                 (request_pane_close, close_panes)
                     .chain()
-                    .in_set(ReadAppCommands),
+                    .in_set(LayoutRequestSet::Handle),
             )
-            .add_systems(Update, (process_close_dialogs, process_force_pane_closes));
+            .add_systems(
+                Update,
+                (process_close_dialogs, process_force_pane_closes)
+                    .in_set(LayoutRequestSet::Dispatch),
+            );
     }
 }
 
@@ -79,8 +87,8 @@ impl CloseTarget {
                     }
                 }
                 world
-                    .resource_mut::<Messages<AppCommand>>()
-                    .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+                    .resource_mut::<Messages<PaneRequest>>()
+                    .write(PaneRequest::Close);
             }
             Self::Stack(stack) => {
                 let Some(parent_pane) = world.get::<ChildOf>(stack).map(|child| child.get()) else {
@@ -198,7 +206,7 @@ impl CloseDialog {
 }
 
 fn request_pane_close(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -212,11 +220,8 @@ fn request_pane_close(
     mut requests: MessageWriter<PaneCloseRequest>,
     mut commands: Commands,
 ) {
-    for command in reader.read() {
-        if !matches!(
-            command,
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
-        ) {
+    for request in reader.read() {
+        if !matches!(request, PaneRequest::Close) {
             continue;
         }
         let (_, Some(active), _) = focused_stack(
@@ -458,8 +463,8 @@ fn process_force_pane_closes(world: &mut World) {
             }
         }
         world
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Close);
     }
 }
 
@@ -467,7 +472,6 @@ fn process_force_pane_closes(world: &mut World) {
 mod tests {
     use super::*;
     use bevy::window::{ClosingWindow, PrimaryWindow};
-    use vmux_command::CommandPlugin;
 
     fn place_pane(app: &mut App, parent: Entity, center: Vec2, size: Vec2) -> Entity {
         let pane = app
@@ -491,7 +495,8 @@ mod tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, ClosePlugin))
+        app.add_plugins((MinimalPlugins, ClosePlugin))
+            .add_message::<PaneRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .add_message::<PageOpenRequest>();
         app
@@ -500,7 +505,7 @@ mod tests {
     #[test]
     fn force_pane_close_dispatches_pane_close_without_dialog() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_plugins(MinimalPlugins).add_message::<PaneRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -516,14 +521,9 @@ mod tests {
         assert!(app.world().get::<CloseConfirmed>(pane).is_some());
         let closes: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
-            .filter(|command| {
-                matches!(
-                    command,
-                    AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
-                )
-            })
+            .filter(|request| matches!(request, PaneRequest::Close))
             .collect();
         assert_eq!(closes.len(), 1);
     }
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn confirmed_close_dialog_dispatches_pane_close() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_plugins(MinimalPlugins).add_message::<PaneRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -548,14 +548,9 @@ mod tests {
         assert!(app.world().get::<CloseConfirmed>(pane).is_some());
         let closes: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
-            .filter(|command| {
-                matches!(
-                    command,
-                    AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
-                )
-            })
+            .filter(|request| matches!(request, PaneRequest::Close))
             .collect();
         assert_eq!(closes.len(), 1);
     }
@@ -575,8 +570,8 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Close);
 
         app.update();
 
@@ -647,8 +642,8 @@ mod tests {
             .entity_mut(right)
             .insert(LastActivatedAt::now());
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Close);
 
         app.update();
 
@@ -708,8 +703,8 @@ mod tests {
         app.world_mut().entity_mut(c).insert(LastActivatedAt(20));
         app.world_mut().entity_mut(b).insert(LastActivatedAt(30));
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Close);
 
         app.update();
 

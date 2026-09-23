@@ -3,16 +3,14 @@ use crate::{
     tab::Tab,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_command::{
-    AppCommand, BrowserCommand, OpenCommand, ReadAppCommands,
-    open::{PaneDirection, PaneOpenMode, PaneTarget},
-};
+use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{
-    pane::first_stack_in_pane,
+    command::LayoutRequestSet,
+    pane::{PaneOpenRequest, PaneRequest, first_stack_in_pane},
     pane_focus::PendingCursorWarp,
     pane_identity::{SpawnCounter, SpawnSeq},
     pane_tree::{
@@ -33,8 +31,10 @@ pub(super) struct BesideOpenPlugin;
 
 impl Plugin for BesideOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<OpenBesideRequest>()
-            .add_systems(Update, handle_open_beside_requests);
+        app.add_message::<OpenBesideRequest>().add_systems(
+            Update,
+            handle_open_beside_requests.in_set(LayoutRequestSet::Handle),
+        );
     }
 }
 
@@ -42,7 +42,7 @@ pub(super) struct DirectionalOpenPlugin;
 
 impl Plugin for DirectionalOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands));
+        app.add_systems(Update, handle_open_in_pane.in_set(LayoutRequestSet::Handle));
     }
 }
 
@@ -857,7 +857,7 @@ fn find_sibling_pane(
 }
 
 fn handle_open_in_pane(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -872,13 +872,13 @@ fn handle_open_in_pane(
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
-    for cmd in reader.read() {
-        let AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane {
+    for request in reader.read() {
+        let PaneRequest::Open(PaneOpenRequest {
             direction,
             target,
             mode,
             url,
-        })) = cmd
+        }) = request
         else {
             continue;
         };
