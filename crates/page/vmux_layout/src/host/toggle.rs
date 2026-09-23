@@ -5,20 +5,30 @@ use crate::side_sheet::SideSheet;
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 use vmux_flex::prelude::*;
+
+use super::command::LayoutRequestSet;
 
 pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LayoutHidden>()
-            .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
+            .add_message::<LayoutVisibilityRequest>()
+            .add_systems(
+                Update,
+                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+            )
             .add_systems(
                 PostUpdate,
                 sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
             );
     }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutVisibilityRequest {
+    Toggle,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -59,8 +69,8 @@ fn sync_window_padding_to_layout_hidden(
     }
 }
 
-fn handle_toggle(
-    mut reader: MessageReader<AppCommand>,
+fn handle_visibility_requests(
+    mut reader: MessageReader<LayoutVisibilityRequest>,
     mut hidden: ResMut<LayoutHidden>,
     focused_window: Res<crate::window::FocusedWindow>,
     header_q: Query<Entity, With<Header>>,
@@ -69,13 +79,7 @@ fn handle_toggle(
     host_windows: Query<&HostWindow>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
-        if !matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::ToggleLayout(ToggleLayoutCommand::Toggle))
-        ) {
-            continue;
-        }
+    for _ in reader.read() {
         let Some(window) = focused_window.0 else {
             continue;
         };
@@ -229,9 +233,9 @@ mod tests {
     fn toggle_changes_only_the_focused_window() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<AppCommand>()
+            .add_message::<LayoutVisibilityRequest>()
             .init_resource::<LayoutHidden>()
-            .add_systems(Update, handle_toggle);
+            .add_systems(Update, handle_visibility_requests);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(crate::window::FocusedWindow(Some(first_window)));
@@ -254,10 +258,8 @@ mod tests {
             .spawn((SideSheet, Open, ChildOf(second_root)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::ToggleLayout(
-                ToggleLayoutCommand::Toggle,
-            )));
+            .resource_mut::<Messages<LayoutVisibilityRequest>>()
+            .write(LayoutVisibilityRequest::Toggle);
 
         app.update();
 
