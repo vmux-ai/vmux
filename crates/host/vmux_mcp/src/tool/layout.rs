@@ -1,8 +1,9 @@
 use super::{
-    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolRequestSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
 
@@ -11,6 +12,7 @@ pub(super) struct LayoutToolPlugin;
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Layout))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
                 (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
@@ -26,30 +28,29 @@ enum LayoutTool {
     SelectTab,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SelectTabArgs {
     index: u8,
 }
 
-impl SelectTabArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        if !(1..=8).contains(&self.index) {
-            return Err(format!(
-                "select_tab.index must be between 1 and 8, got {}",
-                self.index
-            ));
-        }
-        Ok(AgentCommand::InvokeCommand {
-            id: format!("tab_select_{}", self.index),
-            args: JsonValue::Object(Vec::new()),
-        })
-    }
-}
+#[derive(Component, Deserialize)]
+#[serde(transparent)]
+struct UpdateLayoutArgs(layout::LayoutSnapshot);
 
 fn register(mut tools: ToolSpawner) {
     let manifest = ToolManifest::<LayoutTool>::from_ron(include_str!("layout.ron"));
     tools.spawn_manifest(manifest);
+}
+
+fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            LayoutTool::ReadLayout => {}
+            LayoutTool::UpdateLayout => call.parse_into::<UpdateLayoutArgs>(request, &mut commands),
+            LayoutTool::SelectTab => call.parse_into::<SelectTabArgs>(request, &mut commands),
+        }
+    }
 }
 
 fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
@@ -64,21 +65,40 @@ fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
     }
 }
 
-fn update_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    for (request, call, _) in calls.matching(LayoutTool::UpdateLayout) {
-        let target = call
-            .parse::<layout::LayoutSnapshot>("update_layout")
-            .map(|layout| DispatchTarget::Command(AgentCommand::UpdateLayout { layout }));
-        call.finish_dispatch(request, &mut commands, target);
+fn update_layout(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<UpdateLayoutArgs>),
+        Added<ParsedToolCall<UpdateLayoutArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
+                layout: request.args().0.clone(),
+            })),
+        );
     }
 }
 
-fn select_tab(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    for (request, call, _) in calls.matching(LayoutTool::SelectTab) {
-        let target = call
-            .parse::<SelectTabArgs>("select_tab")
-            .and_then(SelectTabArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn select_tab(
+    mut commands: Commands,
+    requests: Query<(Entity, &ParsedToolCall<SelectTabArgs>), Added<ParsedToolCall<SelectTabArgs>>>,
+) {
+    for (entity, request) in &requests {
+        let index = request.args().index;
+        let target = if (1..=8).contains(&index) {
+            Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
+                id: format!("tab_select_{index}"),
+                args: JsonValue::Object(Vec::new()),
+            }))
+        } else {
+            Err(format!(
+                "select_tab.index must be between 1 and 8, got {index}"
+            ))
+        };
+        request.finish(entity, &mut commands, target);
     }
 }

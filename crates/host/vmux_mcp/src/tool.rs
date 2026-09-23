@@ -106,6 +106,25 @@ impl<T: Component> ParsedToolCall<T> {
         &self.args
     }
 
+    pub(super) fn anchor(&self) -> Option<ProcessId> {
+        self.call.anchor
+    }
+
+    pub(super) fn host_shell(&self) -> &str {
+        &self.call.host_shell
+    }
+
+    pub(super) fn require_anchor(&self) -> Result<ProcessId, String> {
+        self.call.require_anchor(&self.call.name)
+    }
+
+    pub(super) fn serialized_args(&self) -> Result<Value, String>
+    where
+        T: Serialize,
+    {
+        ToolCall::serialize_arguments(&self.args)
+    }
+
     pub(super) fn finish(
         &self,
         request: Entity,
@@ -114,6 +133,16 @@ impl<T: Component> ParsedToolCall<T> {
     ) {
         commands.entity(request).remove::<Self>();
         self.call.finish_dispatch(request, commands, result);
+    }
+
+    pub(super) fn finish_execution(
+        &self,
+        request: Entity,
+        commands: &mut Commands,
+        result: Result<ToolExecution, String>,
+    ) {
+        commands.entity(request).remove::<Self>();
+        self.call.finish(request, commands, result);
     }
 }
 
