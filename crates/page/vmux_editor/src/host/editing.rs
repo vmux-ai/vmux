@@ -18,9 +18,9 @@ use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty
 use crate::keymap::{KeyInput, Mods};
 use vmux_core::scroll::clamp_top_line;
 
-pub(super) struct EditingPlugin;
+pub(super) struct EditorPlugin;
 
-impl Plugin for EditingPlugin {
+impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EditExecutionPlugin)
             .add_plugins(UiEventPlugin::<(

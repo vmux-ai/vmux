@@ -20,7 +20,7 @@ impl Plugin for EditorPlugin {
             viewport::ViewportPlugin,
             media::MediaPlugin,
             note::NotePlugin,
-            editing::EditingPlugin,
+            editing::EditorPlugin,
             language::LanguagePlugin,
             shape::ShapePlugin,
             encoding::EncodingPlugin,
