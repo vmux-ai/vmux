@@ -77,7 +77,6 @@ impl OutlineRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct ExplorerTreeEvent {
     pub root_name: String,
     pub root_path: String,
@@ -98,7 +97,6 @@ pub struct ExplorerTreeEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct ExplorerFocusEvent {
     pub path: String,
     pub reveal: ExplorerReveal,
@@ -132,7 +130,6 @@ pub enum ExplorerReveal {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct ExplorerFsResult {
     pub ok: bool,
     pub message: String,
@@ -150,7 +147,6 @@ pub struct ExplorerFsResult {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct OpenEditorsEvent {
     pub items: Vec<OpenEditorItem>,
 }
@@ -166,7 +162,6 @@ pub struct OpenEditorsEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct OutlineEvent {
     pub items: Vec<OutlineRow>,
 }
@@ -183,7 +178,6 @@ pub struct OutlineEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct ExplorerPanelEvent {
     pub visible: bool,
     pub width: u32,
@@ -438,7 +432,6 @@ pub struct ExplorerSearchFile {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "files")]
 pub struct ExplorerSearchEvent {
     pub root: String,
     pub query: String,

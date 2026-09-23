@@ -76,7 +76,7 @@ fn send_initial_media(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileMediaEvent {
                 kind: media.kind,
@@ -173,7 +173,7 @@ fn on_file_preview_request(
         return;
     }
     let kind = preview::build_preview_sync(&path);
-    commands.trigger(BinHostEmitEvent::from_event(
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
         entity,
         &FilePreviewEvent {
             path: request.path,
@@ -197,7 +197,7 @@ fn drain_thumb_tasks(
         if let Ok(bytes) = result
             && browsers.can_emit_to(&webview)
         {
-            commands.trigger(BinHostEmitEvent::from_event(
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 webview,
                 &FilePreviewEvent {
                     path,

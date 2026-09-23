@@ -4,10 +4,11 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::explorer::OutlineGlyph;
+use crate::ui_state::use_file_ui_state;
 
 const PATH_CRUMBS_MAX: usize = 4;
 
@@ -24,7 +25,7 @@ pub fn EditorBreadcrumbs(
         siblings: use_signal(Vec::<FileDirEntry>::new),
         pending: use_signal(|| false),
     };
-    let _listing = use_listener::<FilePreviewEvent, _>(move |event| {
+    use_file_ui_state::<FilePreviewEvent, _>(move |event| {
         menus.receive(event);
     });
 

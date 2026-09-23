@@ -82,7 +82,7 @@ fn send_note(
             })
             .unwrap_or_default();
         let active = active_note_block(&note.blocks, edit.cursor_line());
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileNoteEvent {
                 title: note.title,

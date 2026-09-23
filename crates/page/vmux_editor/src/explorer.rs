@@ -5,6 +5,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::page_model::merge_tree_motion_rows;
+use crate::ui_state::use_file_ui_state;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -14,7 +15,7 @@ use vmux_ui::components::tree_row::{
 };
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
@@ -947,10 +948,10 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let mut query = search.query;
     let ime = use_ime_guard();
 
-    let _results = use_listener::<ExplorerSearchEvent, _>(move |event| {
+    use_file_ui_state::<ExplorerSearchEvent, _>(move |event| {
         search.arrived(event);
     });
-    let _showing = use_listener::<ExplorerFocusEvent, _>(move |event| {
+    use_file_ui_state::<ExplorerFocusEvent, _>(move |event| {
         search.showing(&event.path);
     });
 
@@ -1307,7 +1308,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         }
     });
 
-    let _tree = use_listener::<ExplorerTreeEvent, _>(move |e| {
+    use_file_ui_state::<ExplorerTreeEvent, _>(move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
@@ -1318,7 +1319,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
         }
     });
-    let _focus = use_listener::<ExplorerFocusEvent, _>(move |e| {
+    use_file_ui_state::<ExplorerFocusEvent, _>(move |e| {
         if current_path() != e.path {
             current_path.set(e.path.clone());
         }
@@ -1327,13 +1328,13 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.path, focus_generation, e.reveal);
         }
     });
-    let _open = use_listener::<OpenEditorsEvent, _>(move |e| {
+    use_file_ui_state::<OpenEditorsEvent, _>(move |e| {
         open_editors.set(e.items);
     });
-    let _outline = use_listener::<OutlineEvent, _>(move |e| {
+    use_file_ui_state::<OutlineEvent, _>(move |e| {
         outline.set(e.items);
     });
-    let _fs_result = use_listener::<ExplorerFsResult, _>(move |e| {
+    use_file_ui_state::<ExplorerFsResult, _>(move |e| {
         if e.ok && !e.open_path.is_empty() {
             open_file(e.open_path);
         }

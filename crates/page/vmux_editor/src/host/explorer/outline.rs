@@ -25,7 +25,7 @@ fn emit_markdown_outline(
             continue;
         }
         let items = crate::explorer_model::markdown_outline(&edit.core.buffer.text());
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &OutlineEvent { items },
         ));
@@ -40,7 +40,7 @@ fn clear_on_file_change(
 ) {
     for entity in &query {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_event(
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 entity,
                 &OutlineEvent { items: Vec::new() },
             ));

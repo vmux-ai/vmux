@@ -10,6 +10,8 @@ pub mod lsp_page;
 pub mod page;
 #[cfg(ui)]
 pub mod page_key;
+#[cfg(ui)]
+mod ui_state;
 
 #[cfg(ui)]
 mod note;

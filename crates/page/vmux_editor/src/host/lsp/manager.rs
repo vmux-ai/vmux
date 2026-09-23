@@ -1019,7 +1019,7 @@ fn drain_lsp_requests(
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
                         &FileHoverEvent { line, col, blocks },
                     ));
@@ -1063,7 +1063,7 @@ fn drain_lsp_requests(
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
                         &vmux_core::event::FileEditFailedEvent {
                             reason: "no code actions here".to_string(),
@@ -1071,7 +1071,7 @@ fn drain_lsp_requests(
                     ));
                     continue;
                 }
-                commands.trigger(BinHostEmitEvent::from_event(
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                     f.entity,
                     &vmux_core::event::FileCodeActionsEvent { titles },
                 ));
@@ -1105,7 +1105,7 @@ fn drain_lsp_requests(
                     })
                     .collect();
                 if !items.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
                         &FileReferencesEvent { items },
                     ));
@@ -1117,7 +1117,7 @@ fn drain_lsp_requests(
             } => {
                 let items = parse_completion(&value);
                 if ready {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
                         &FileCompletionEvent {
                             items,
@@ -1137,7 +1137,7 @@ fn drain_lsp_requests(
             ReqKind::DocumentSymbol => {
                 let items = crate::explorer_model::flatten_symbols(&value);
                 if ready {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
                         &OutlineEvent { items },
                     ));
@@ -1229,7 +1229,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         );
 }
 
-use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
+use bevy_cef::prelude::Browsers;
 use vmux_core::event::FileDiagnosticsEvent;
 
 use crate::lsp::LintOutbox;
@@ -1271,7 +1271,7 @@ fn emit_diagnostics_system(
             None if merged.is_empty() => continue,
             _ => {}
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileDiagnosticsEvent {
                 path: fv.path.to_string_lossy().into_owned(),
@@ -1409,7 +1409,7 @@ fn lsp_status_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileLspStatusEvent {
                 path: fv.path.to_string_lossy().into_owned(),
