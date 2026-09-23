@@ -1,10 +1,11 @@
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, JsonValue};
 
 use super::{
-    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolRequestSet, ToolSpawner,
 };
 
 pub(super) struct ApplicationToolPlugin;
@@ -12,7 +13,11 @@ pub(super) struct ApplicationToolPlugin;
 impl Plugin for ApplicationToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Application))
-            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+            .add_systems(Update, parse.in_set(ToolRequestSet))
+            .add_systems(
+                Update,
+                (open_command_bar, rename_profile, notify).in_set(ToolDispatchSet),
+            );
     }
 }
 
@@ -24,56 +29,23 @@ enum ApplicationTool {
     Notify,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenCommandBarArgs {
     mode: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RenameProfileArgs {
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NotifyArgs {
     title: Option<String>,
     body: Option<String>,
-}
-
-impl OpenCommandBarArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let id = match self.mode.as_deref().unwrap_or("default") {
-            "default" => "browser_open_command_bar",
-            "commands" => "browser_open_commands",
-            "path" => "browser_open_path_bar",
-            other => return Err(format!("unknown command bar mode: {other}")),
-        };
-        Ok(AgentCommand::InvokeCommand {
-            id: id.to_string(),
-            args: JsonValue::Object(Vec::new()),
-        })
-    }
-}
-
-impl RenameProfileArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        if self.name.trim().is_empty() {
-            return Err("rename_profile.name is empty".to_string());
-        }
-        Ok(AgentCommand::RenameProfile { name: self.name })
-    }
-}
-
-impl From<NotifyArgs> for AgentCommand {
-    fn from(args: NotifyArgs) -> Self {
-        Self::Notify {
-            title: args.title,
-            body: args.body,
-        }
-    }
 }
 
 fn register(mut tools: ToolSpawner) {
@@ -81,17 +53,76 @@ fn register(mut tools: ToolSpawner) {
     tools.spawn_manifest(manifest);
 }
 
-fn dispatch(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
+fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
     for (request, call, tool) in calls.iter() {
-        let command = match tool {
-            ApplicationTool::OpenCommandBar => call
-                .parse::<OpenCommandBarArgs>("open_command_bar")
-                .and_then(OpenCommandBarArgs::command),
-            ApplicationTool::RenameProfile => call
-                .parse::<RenameProfileArgs>("rename_profile")
-                .and_then(RenameProfileArgs::command),
-            ApplicationTool::Notify => call.parse::<NotifyArgs>("notify").map(AgentCommand::from),
+        match tool {
+            ApplicationTool::OpenCommandBar => {
+                call.parse_into::<OpenCommandBarArgs>(request, &mut commands)
+            }
+            ApplicationTool::RenameProfile => {
+                call.parse_into::<RenameProfileArgs>(request, &mut commands)
+            }
+            ApplicationTool::Notify => call.parse_into::<NotifyArgs>(request, &mut commands),
+        }
+    }
+}
+
+fn open_command_bar(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<OpenCommandBarArgs>),
+        Added<ParsedToolCall<OpenCommandBarArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let result = match request.args().mode.as_deref().unwrap_or("default") {
+            "default" => Ok("browser_open_command_bar"),
+            "commands" => Ok("browser_open_commands"),
+            "path" => Ok("browser_open_path_bar"),
+            other => Err(format!("unknown command bar mode: {other}")),
         };
-        call.finish_dispatch(request, &mut commands, command.map(DispatchTarget::Command));
+        let target = result.map(|id| {
+            DispatchTarget::Command(AgentCommand::InvokeCommand {
+                id: id.to_string(),
+                args: JsonValue::Object(Vec::new()),
+            })
+        });
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn rename_profile(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<RenameProfileArgs>),
+        Added<ParsedToolCall<RenameProfileArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let name = request.args().name.trim();
+        let target = if name.is_empty() {
+            Err("rename_profile.name is empty".to_string())
+        } else {
+            Ok(DispatchTarget::Command(AgentCommand::RenameProfile {
+                name: request.args().name.clone(),
+            }))
+        };
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn notify(
+    mut commands: Commands,
+    requests: Query<(Entity, &ParsedToolCall<NotifyArgs>), Added<ParsedToolCall<NotifyArgs>>>,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Command(AgentCommand::Notify {
+                title: request.args().title.clone(),
+                body: request.args().body.clone(),
+            })),
+        );
     }
 }

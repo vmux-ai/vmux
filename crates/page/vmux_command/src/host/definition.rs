@@ -11,16 +11,75 @@ pub struct WriteCommandRequests;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReadCommandRequests;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum ShortcutDefinition {
     Direct(String),
     Chord(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct CommandShortcut {
     pub shortcut: ShortcutDefinition,
     pub when: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandManifestEntry<K> {
+    kind: K,
+    id: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    label: String,
+    group: String,
+    #[serde(default)]
+    accelerator: Option<String>,
+    #[serde(default)]
+    hidden: bool,
+    #[serde(default = "CommandManifestEntry::<K>::native_menu_default")]
+    native_menu: bool,
+    #[serde(default)]
+    shortcut_label: Option<String>,
+    #[serde(default)]
+    shortcuts: Vec<CommandShortcut>,
+}
+
+impl<K> CommandManifestEntry<K> {
+    fn native_menu_default() -> bool {
+        true
+    }
+
+    fn into_command(self) -> (CommandDefinition, K) {
+        (
+            CommandDefinition {
+                id: self.id,
+                aliases: self.aliases,
+                label: self.label,
+                group: self.group,
+                accelerator: self.accelerator,
+                hidden: self.hidden,
+                native_menu: self.native_menu,
+                shortcut_label: self.shortcut_label,
+                shortcuts: self.shortcuts,
+                mcp: None,
+            },
+            self.kind,
+        )
+    }
+}
+
+pub struct CommandManifest<K>(Vec<CommandManifestEntry<K>>);
+
+impl<K: serde::de::DeserializeOwned> CommandManifest<K> {
+    pub fn from_ron(source: &str) -> Self {
+        let entries =
+            ron::from_str(source).expect("embedded command definitions must be valid RON");
+        Self(entries)
+    }
+
+    pub fn into_commands(self) -> impl Iterator<Item = (CommandDefinition, K)> {
+        self.0.into_iter().map(CommandManifestEntry::into_command)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

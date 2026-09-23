@@ -29,7 +29,13 @@ impl Plugin for ToolPlugin {
         app.init_resource::<NextToolOrder>()
             .configure_sets(
                 Update,
-                (ToolRequestSet, ToolDispatchSet, ToolDispatchFlush).chain(),
+                (
+                    ToolRequestSet,
+                    ToolRequestFlush,
+                    ToolDispatchSet,
+                    ToolDispatchFlush,
+                )
+                    .chain(),
             )
             .configure_sets(
                 Startup,
@@ -47,6 +53,10 @@ impl Plugin for ToolPlugin {
                     ToolRegistrationSet::Bookmark,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
             )
             .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
             .add_systems(
@@ -79,14 +89,35 @@ impl ToolPlugin {
     }
 }
 
-#[derive(Message)]
+#[derive(Component)]
 pub struct McpToolRequest<T> {
-    request: Entity,
     tool: T,
     call: ToolCall,
 }
 
-impl<T> McpToolRequest<T> {
+#[derive(Component)]
+pub(super) struct ParsedToolCall<T> {
+    call: ToolCall,
+    args: T,
+}
+
+impl<T: Component> ParsedToolCall<T> {
+    pub(super) fn args(&self) -> &T {
+        &self.args
+    }
+
+    pub(super) fn finish(
+        &self,
+        request: Entity,
+        commands: &mut Commands,
+        result: Result<DispatchTarget, String>,
+    ) {
+        commands.entity(request).remove::<Self>();
+        self.call.finish_dispatch(request, commands, result);
+    }
+}
+
+impl<T: Component> McpToolRequest<T> {
     pub fn tool(&self) -> &T {
         &self.tool
     }
@@ -108,21 +139,21 @@ impl<T> McpToolRequest<T> {
     }
 
     pub fn parse<A: serde::de::DeserializeOwned>(&self) -> Result<A, String> {
-        serde_json::from_value(self.call.arguments.clone())
-            .map_err(|error| format!("{}: invalid arguments: {error}", self.call.name))
+        self.call.parse(&self.call.name)
     }
 
     pub fn require_anchor(&self) -> Result<ProcessId, String> {
-        self.call.anchor.ok_or_else(|| {
-            format!(
-                "{} requires an agent anchor (not available to this client)",
-                self.call.name
-            )
-        })
+        self.call.require_anchor(&self.call.name)
     }
 
-    pub fn finish(&self, commands: &mut Commands, result: Result<DispatchTarget, String>) {
-        self.call.finish_dispatch(self.request, commands, result);
+    pub fn finish(
+        &self,
+        request: Entity,
+        commands: &mut Commands,
+        result: Result<DispatchTarget, String>,
+    ) {
+        commands.entity(request).remove::<Self>();
+        self.call.finish_dispatch(request, commands, result);
     }
 }
 
@@ -149,7 +180,6 @@ where
             app.add_plugins(ToolPlugin);
         }
         app.insert_resource(McpToolManifest::<T>::new(self.manifest))
-            .add_message::<McpToolRequest<T>>()
             .add_systems(
                 Startup,
                 register_mcp_tools::<T>.after(ToolRegistrationSet::Bookmark),
@@ -180,21 +210,26 @@ where
     tools.spawn_manifest(ToolManifest::<T>::from_ron(manifest.source));
 }
 
-fn route_mcp_tools<T>(calls: ToolCalls<T>, mut requests: MessageWriter<McpToolRequest<T>>)
+fn route_mcp_tools<T>(mut commands: Commands, calls: ToolCalls<T>)
 where
     T: Component + Clone,
 {
     for (request, call, tool) in calls.iter() {
-        requests.write(McpToolRequest {
-            request,
-            tool: tool.clone(),
-            call: call.clone(),
-        });
+        commands
+            .entity(request)
+            .remove::<ToolCall>()
+            .insert(McpToolRequest {
+                tool: tool.clone(),
+                call: call.clone(),
+            });
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub(crate) struct ToolRequestSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolRequestFlush;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub(super) enum ToolRegistrationSet {
@@ -512,7 +547,25 @@ impl ToolCall {
             .map_err(|error| format!("{name}: invalid arguments: {error}"))
     }
 
-    fn arguments<T: Serialize>(arguments: T) -> Result<Value, String> {
+    pub(super) fn parse_into<T>(&self, request: Entity, commands: &mut Commands)
+    where
+        T: Component + serde::de::DeserializeOwned,
+    {
+        match self.parse::<T>(&self.name) {
+            Ok(args) => {
+                commands
+                    .entity(request)
+                    .remove::<Self>()
+                    .insert(ParsedToolCall {
+                        call: self.clone(),
+                        args,
+                    });
+            }
+            Err(message) => self.finish_dispatch(request, commands, Err(message)),
+        }
+    }
+
+    fn serialize_arguments<T: Serialize>(arguments: T) -> Result<Value, String> {
         serde_json::to_value(arguments)
             .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
     }

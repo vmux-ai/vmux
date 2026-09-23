@@ -9,7 +9,7 @@ pub mod protocol;
 pub mod reconcile;
 
 #[cfg(ui)]
-pub mod tools_page;
+pub mod tool_page;
 
 #[cfg(ui)]
 pub mod page;

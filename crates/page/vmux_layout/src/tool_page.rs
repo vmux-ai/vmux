@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
-use vmux_core::tools::{
+use vmux_core::tool::{
     ToolAction, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult, ToolStatus,
     ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };

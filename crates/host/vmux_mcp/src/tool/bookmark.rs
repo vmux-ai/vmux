@@ -1,8 +1,9 @@
 use super::{
-    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolRequestSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
 
@@ -11,6 +12,7 @@ pub(super) struct BookmarkToolPlugin;
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Bookmark))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
                 (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
@@ -35,7 +37,7 @@ fn register(mut tools: ToolSpawner) {
     tools.spawn_manifest(manifest);
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkAddArgs {
     url: String,
@@ -44,36 +46,13 @@ struct BookmarkAddArgs {
     folder: Option<String>,
 }
 
-impl BookmarkAddArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let url = RequiredText::get(self.url, "bookmark_add.url is required")?;
-        Ok(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
-            page: AgentBookmarkPage {
-                url,
-                title: self.title,
-                favicon_url: self.favicon_url,
-            },
-            folder: self.folder,
-        }))
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkRemoveArgs {
     uuid: String,
 }
 
-impl BookmarkRemoveArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let uuid = RequiredText::get(self.uuid, "bookmark_remove.uuid is required")?;
-        Ok(AgentCommand::BookmarkCommand(
-            AgentBookmarkCommand::Remove { uuid },
-        ))
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkUnpinArgs {
     uuid: String,
@@ -93,53 +72,17 @@ struct PagePinArgs {
     favicon_url: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(untagged)]
 enum BookmarkPinArgs {
     Existing(ExistingPinArgs),
     Page(PagePinArgs),
 }
 
-impl BookmarkPinArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let command = match self {
-            Self::Existing(args) => AgentBookmarkCommand::Pin {
-                uuid: RequiredText::get(args.uuid, "bookmark_pin.uuid is required")?,
-            },
-            Self::Page(args) => AgentBookmarkCommand::PinUrl {
-                page: AgentBookmarkPage {
-                    url: RequiredText::get(args.url, "bookmark_pin.url is required")?,
-                    title: args.title,
-                    favicon_url: args.favicon_url,
-                },
-            },
-        };
-        Ok(AgentCommand::BookmarkCommand(command))
-    }
-}
-
-impl BookmarkUnpinArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let uuid = RequiredText::get(self.uuid, "bookmark_unpin.uuid is required")?;
-        Ok(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin {
-            uuid,
-        }))
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkFolderCreateArgs {
     name: String,
-}
-
-impl BookmarkFolderCreateArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        let name = RequiredText::get(self.name, "bookmark_folder_create.name is required")?;
-        Ok(AgentCommand::BookmarkCommand(
-            AgentBookmarkCommand::CreateFolder { name },
-        ))
-    }
 }
 
 fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
@@ -152,53 +95,139 @@ fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     }
 }
 
-fn add(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, _) in calls.matching(BookmarkTool::BookmarkAdd) {
-        let target = call
-            .parse::<BookmarkAddArgs>("bookmark_add")
-            .and_then(BookmarkAddArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn parse(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            BookmarkTool::BookmarkList => {}
+            BookmarkTool::BookmarkAdd => call.parse_into::<BookmarkAddArgs>(request, &mut commands),
+            BookmarkTool::BookmarkRemove => {
+                call.parse_into::<BookmarkRemoveArgs>(request, &mut commands)
+            }
+            BookmarkTool::BookmarkPin => call.parse_into::<BookmarkPinArgs>(request, &mut commands),
+            BookmarkTool::BookmarkUnpin => {
+                call.parse_into::<BookmarkUnpinArgs>(request, &mut commands)
+            }
+            BookmarkTool::BookmarkFolderCreate => {
+                call.parse_into::<BookmarkFolderCreateArgs>(request, &mut commands)
+            }
+        }
     }
 }
 
-fn remove(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, _) in calls.matching(BookmarkTool::BookmarkRemove) {
-        let target = call
-            .parse::<BookmarkRemoveArgs>("bookmark_remove")
-            .and_then(BookmarkRemoveArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn add(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BookmarkAddArgs>),
+        Added<ParsedToolCall<BookmarkAddArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        let target =
+            RequiredText::get(args.url.clone(), "bookmark_add.url is required").map(|url| {
+                DispatchTarget::Command(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
+                    page: AgentBookmarkPage {
+                        url,
+                        title: args.title.clone(),
+                        favicon_url: args.favicon_url.clone(),
+                    },
+                    folder: args.folder.clone(),
+                }))
+            });
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn pin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, _) in calls.matching(BookmarkTool::BookmarkPin) {
-        let target = call
-            .parse::<BookmarkPinArgs>("bookmark_pin")
-            .and_then(BookmarkPinArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn remove(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BookmarkRemoveArgs>),
+        Added<ParsedToolCall<BookmarkRemoveArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = RequiredText::get(
+            request.args().uuid.clone(),
+            "bookmark_remove.uuid is required",
+        )
+        .map(|uuid| {
+            DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                AgentBookmarkCommand::Remove { uuid },
+            ))
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn unpin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, _) in calls.matching(BookmarkTool::BookmarkUnpin) {
-        let target = call
-            .parse::<BookmarkUnpinArgs>("bookmark_unpin")
-            .and_then(BookmarkUnpinArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn pin(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BookmarkPinArgs>),
+        Added<ParsedToolCall<BookmarkPinArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = match request.args() {
+            BookmarkPinArgs::Existing(args) => {
+                RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
+                    .map(|uuid| AgentBookmarkCommand::Pin { uuid })
+            }
+            BookmarkPinArgs::Page(args) => {
+                RequiredText::get(args.url.clone(), "bookmark_pin.url is required").map(|url| {
+                    AgentBookmarkCommand::PinUrl {
+                        page: AgentBookmarkPage {
+                            url,
+                            title: args.title.clone(),
+                            favicon_url: args.favicon_url.clone(),
+                        },
+                    }
+                })
+            }
+        }
+        .map(|command| DispatchTarget::Command(AgentCommand::BookmarkCommand(command)));
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn create_folder(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, _) in calls.matching(BookmarkTool::BookmarkFolderCreate) {
-        let target = call
-            .parse::<BookmarkFolderCreateArgs>("bookmark_folder_create")
-            .and_then(BookmarkFolderCreateArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn unpin(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BookmarkUnpinArgs>),
+        Added<ParsedToolCall<BookmarkUnpinArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = RequiredText::get(
+            request.args().uuid.clone(),
+            "bookmark_unpin.uuid is required",
+        )
+        .map(|uuid| {
+            DispatchTarget::Command(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin {
+                uuid,
+            }))
+        });
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn create_folder(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BookmarkFolderCreateArgs>),
+        Added<ParsedToolCall<BookmarkFolderCreateArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = RequiredText::get(
+            request.args().name.clone(),
+            "bookmark_folder_create.name is required",
+        )
+        .map(|name| {
+            DispatchTarget::Command(AgentCommand::BookmarkCommand(
+                AgentBookmarkCommand::CreateFolder { name },
+            ))
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 

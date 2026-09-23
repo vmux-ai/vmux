@@ -13,7 +13,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_core::page::{PageManifest, PageReady};
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
-use vmux_core::tools::{
+use vmux_core::tool::{
     ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult,
     ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
 };

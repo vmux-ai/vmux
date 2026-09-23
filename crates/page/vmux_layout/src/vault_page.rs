@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::tools::ToolsSnapshot;
+use vmux_core::tool::ToolsSnapshot;
 use vmux_core::vault::{
     VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRequest, VaultResult, VaultSnapshot,
 };
