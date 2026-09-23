@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
@@ -79,38 +79,8 @@ pub struct GitStatusFeed {
 }
 
 impl GitStatusFeed {
-    pub fn subscribe(self) {
-        let Self {
-            path,
-            mut nonce,
-            mut repo_root,
-            mut has_diff,
-            mut branch,
-            mut ahead,
-            mut behind,
-            mut staged_count,
-            mut message,
-        } = self;
-
-        let _status = use_listener::<GitStatusEvent, _>(move |s| {
-            if s.path != path() {
-                return;
-            }
-            message.set(String::new());
-            repo_root.set(s.repo_root);
-            branch.set(s.branch);
-            ahead.set(s.ahead);
-            behind.set(s.behind);
-            staged_count.set(s.staged_count);
-            has_diff.set(status_has_diff(s.file_status));
-        });
-        let _result = use_listener::<GitResultEvent, _>(move |r| {
-            message.set(if r.ok { String::new() } else { r.message });
-            nonce.set(nonce() + 1);
-        });
-        let _error = use_listener::<GitErrorEvent, _>(move |e| {
-            message.set(e.message);
-        });
+    pub fn request(self) {
+        let Self { path, nonce, .. } = self;
 
         use_effect(move || {
             let p = path();
@@ -119,6 +89,46 @@ impl GitStatusFeed {
                 let _ = send(&GitStatusRequest { path: p });
             }
         });
+    }
+
+    pub fn apply_status(self, status: GitStatusEvent) {
+        let Self {
+            path,
+            mut repo_root,
+            mut has_diff,
+            mut branch,
+            mut ahead,
+            mut behind,
+            mut staged_count,
+            mut message,
+            ..
+        } = self;
+        if status.path != path() {
+            return;
+        }
+        message.set(String::new());
+        repo_root.set(status.repo_root);
+        branch.set(status.branch);
+        ahead.set(status.ahead);
+        behind.set(status.behind);
+        staged_count.set(status.staged_count);
+        has_diff.set(status_has_diff(status.file_status));
+    }
+
+    pub fn apply_result(self, result: GitResultEvent) {
+        let mut nonce = self.nonce;
+        let mut message = self.message;
+        message.set(if result.ok {
+            String::new()
+        } else {
+            result.message
+        });
+        nonce.set(nonce() + 1);
+    }
+
+    pub fn apply_error(self, error: GitErrorEvent) {
+        let mut message = self.message;
+        message.set(error.message);
     }
 }
 
@@ -130,13 +140,17 @@ pub fn GitFooter(
     behind: ReadSignal<u32>,
     staged_count: ReadSignal<u32>,
     message: ReadSignal<String>,
+    result: ReadSignal<Option<GitResultEvent>>,
     leading: Element,
     always_visible: bool,
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
     let mut pending_commit_msg = use_signal(String::new);
-    let _commit_result = use_listener::<GitResultEvent, _>(move |result| {
+    use_effect(move || {
+        let Some(result) = result() else {
+            return;
+        };
         if result.action != "commit" {
             return;
         }
@@ -242,6 +256,7 @@ pub fn DiffView(
     #[props(default)] path_bytes: Vec<u8>,
     #[props(default)] reference: String,
     nonce: ReadSignal<u32>,
+    viewport: ReadSignal<Option<GitDiffViewportEvent>>,
     visible: bool,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
@@ -256,7 +271,10 @@ pub fn DiffView(
     let mut requested_path = use_signal(String::new);
     let mut request_generation = use_signal(|| 0u64);
 
-    let _vp = use_listener::<GitDiffViewportEvent, _>(move |p| {
+    use_effect(move || {
+        let Some(p) = viewport() else {
+            return;
+        };
         if p.generation != request_generation() {
             return;
         }

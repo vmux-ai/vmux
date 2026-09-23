@@ -14,7 +14,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::host::page::NativelyHosted;
+use vmux_core::host::{FileUiStateUpdates, page::NativelyHosted};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{
@@ -1065,6 +1065,7 @@ fn dispatch_status_jobs(mut jobs: ResMut<GitStatusJobs>, outbox: Res<GitOutbox>)
 fn drain_git_watch(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: ResMut<RepoInfoCache>,
+    file_pages: Query<(), With<FileUiStateUpdates>>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -1105,7 +1106,7 @@ fn drain_git_watch(
         .map(|(entity, _)| *entity)
         .collect();
     for entity in affected {
-        commands.trigger(BinHostEmitEvent::from_event(entity, &GitChangedEvent {}));
+        FileUiStateUpdates::deliver(&file_pages, &mut commands, entity, &GitChangedEvent {});
     }
     let affected_repo_info: Vec<PathBuf> = watch
         .repo_info_subscriptions
@@ -1297,32 +1298,45 @@ fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbo
     );
 }
 
-fn emit_events(
-    commands: &mut Commands,
-    pages: &mut Query<&mut vmux_core::PageMetadata>,
-    webview: Entity,
-    emits: Vec<Emit>,
-) {
-    for emit in emits {
-        match emit {
-            Emit::Repository(ev) => {
+impl Emit {
+    fn deliver(
+        self,
+        commands: &mut Commands,
+        pages: &mut Query<&mut vmux_core::PageMetadata>,
+        file_pages: &Query<(), With<FileUiStateUpdates>>,
+        webview: Entity,
+    ) {
+        match self {
+            Self::Repository(event) => {
                 if let Ok(mut page) = pages.get_mut(webview) {
-                    if let Some(url) = crate::GitUrl::from_path(Path::new(&ev.repo_root)) {
+                    if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
                         page.url = url;
                     }
-                    page.title = match ev.branch.is_empty() {
-                        true => ev.repo_name.clone(),
-                        false => format!("{} · {}", ev.repo_name, ev.branch),
+                    page.title = match event.branch.is_empty() {
+                        true => event.repo_name.clone(),
+                        false => format!("{} · {}", event.repo_name, event.branch),
                     };
                 }
-                commands.trigger(BinHostEmitEvent::from_event(webview, &ev))
+                commands.trigger(BinHostEmitEvent::from_event(webview, &event));
             }
-            Emit::BranchLog(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
-            Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
-            Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
-            Emit::DiffViewport(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
-            Emit::Result(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
-            Emit::Error(ev) => commands.trigger(BinHostEmitEvent::from_event(webview, &ev)),
+            Self::BranchLog(event) => {
+                commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+            }
+            Self::Status(event) => {
+                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+            }
+            Self::DiffMeta(event) => {
+                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+            }
+            Self::DiffViewport(event) => {
+                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+            }
+            Self::Result(event) => {
+                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+            }
+            Self::Error(event) => {
+                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+            }
         }
     }
 }
@@ -1331,6 +1345,7 @@ fn drain_git_outbox(
     outbox: Res<GitOutbox>,
     mut jobs: ResMut<GitStatusJobs>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
+    file_pages: Query<(), With<FileUiStateUpdates>>,
     mut commands: Commands,
 ) {
     let drained: OutboxQueue = {
@@ -1340,12 +1355,16 @@ fn drain_git_outbox(
     for item in drained {
         match item {
             GitOutboxItem::Events { webview, emits } => {
-                emit_events(&mut commands, &mut pages, webview, emits);
+                for emit in emits {
+                    emit.deliver(&mut commands, &mut pages, &file_pages, webview);
+                }
             }
             GitOutboxItem::StatusBatch { repo_root, results } => {
                 jobs.complete(&repo_root);
                 for (webview, emits) in results {
-                    emit_events(&mut commands, &mut pages, webview, emits);
+                    for emit in emits {
+                        emit.deliver(&mut commands, &mut pages, &file_pages, webview);
+                    }
                 }
             }
         }

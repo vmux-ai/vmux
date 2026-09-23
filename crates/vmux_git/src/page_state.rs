@@ -41,6 +41,7 @@ pub(super) struct GitPageState {
     pub(super) shortcut_help: Signal<bool>,
     pub(super) nonce: Signal<u32>,
     pub(super) markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    pub(super) diff_viewport: Signal<Option<GitDiffViewportEvent>>,
 }
 
 pub(super) fn use_git_page_state() -> GitPageState {
@@ -75,6 +76,7 @@ pub(super) fn use_git_page_state() -> GitPageState {
         shortcut_help: use_signal(|| false),
         nonce: use_signal(|| 0),
         markers: use_signal(HashMap::new),
+        diff_viewport: use_signal(|| None),
     };
     state.subscribe();
     state
@@ -109,6 +111,7 @@ impl GitPageState {
             mut focused_panel,
             mut command_log,
             mut branch_log,
+            mut diff_viewport,
             mut nonce,
             ..
         } = self;
@@ -228,6 +231,9 @@ impl GitPageState {
             if event.repo_root == workspace() && event.branch == selected_branch() {
                 branch_log.set(Some(event));
             }
+        });
+        let _diff_viewport = use_listener::<GitDiffViewportEvent, _>(move |event| {
+            diff_viewport.set(Some(event));
         });
         let _repository_picked = use_listener::<GitRepositoryPickedEvent, _>(move |event| {
             if event.path.is_empty() {

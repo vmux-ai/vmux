@@ -23,7 +23,7 @@ pub mod workspace;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-pub use file_ui_state::FileUiStateWrite;
+pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn, register_scheme_spawn};
 pub use launcher::{
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, PendingLaunch,

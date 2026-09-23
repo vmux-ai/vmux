@@ -7,6 +7,10 @@ use super::{
     FileScrollByEvent, FileShapeEvent, FileThemeEvent, FileTidyPromptEvent, FileViewModeEvent,
     FileViewportPatch, LspInstallProgress, LspPkgStatusEvent, OpenEditorsEvent, OutlineEvent,
 };
+use vmux_api::git::{
+    GitChangedEvent, GitDiffMetaEvent, GitDiffViewportEvent, GitErrorEvent, GitResultEvent,
+    GitStatusEvent,
+};
 
 #[vmux_api::payload]
 pub enum FileUiStatePatch {
@@ -43,6 +47,12 @@ pub enum FileUiStatePatch {
     RenameBegin(FileRenameBeginEvent),
     References(FileReferencesEvent),
     Completion(FileCompletionEvent),
+    GitStatus(GitStatusEvent),
+    GitDiffMeta(GitDiffMetaEvent),
+    GitDiffViewport(GitDiffViewportEvent),
+    GitResult(GitResultEvent),
+    GitError(GitErrorEvent),
+    GitChanged(GitChangedEvent),
 }
 
 #[vmux_api::payload(Default)]
@@ -111,6 +121,12 @@ impl_patch_from!(
     RenameBegin: FileRenameBeginEvent,
     References: FileReferencesEvent,
     Completion: FileCompletionEvent,
+    GitStatus: GitStatusEvent,
+    GitDiffMeta: GitDiffMetaEvent,
+    GitDiffViewport: GitDiffViewportEvent,
+    GitResult: GitResultEvent,
+    GitError: GitErrorEvent,
+    GitChanged: GitChangedEvent,
 );
 
 #[cfg(test)]
