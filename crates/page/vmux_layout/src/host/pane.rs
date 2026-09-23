@@ -1,7 +1,6 @@
 use crate::host::zoom::PaneZoomPlugin;
 pub use crate::host::zoom::Zoomed;
 use crate::{
-    host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     stack::{ActiveTabParam, Stack, active_stack_in_pane, focused_stack, stack_bundle},
     tab::Tab,
 };
@@ -12,13 +11,16 @@ use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use moonshine_save::prelude::*;
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
+    AppCommand, BrowserCommand, OpenCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
 };
+#[cfg(test)]
+use vmux_command::{LayoutCommand, PaneCommand};
 use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
+use super::pane_arrangement::ArrangementPlugin;
 use super::pane_close::ClosePlugin;
 pub use super::pane_close::{ForcePaneClose, PendingPaneClose};
 use super::pane_focus::FocusPlugin;
@@ -40,7 +42,8 @@ impl Plugin for PanePlugin {
             .register_type::<PaneSplitDirection>()
             .add_plugins((
                 IdentityPlugin,
-                PaneOpenPlugin,
+                ArrangementPlugin,
+                OpenPlugin,
                 PaneZoomPlugin,
                 FocusPlugin,
                 ResizePlugin,
@@ -49,22 +52,13 @@ impl Plugin for PanePlugin {
     }
 }
 
-struct PaneOpenPlugin;
+struct OpenPlugin;
 
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct PaneOpenSet;
-
-impl Plugin for PaneOpenPlugin {
+impl Plugin for OpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_pane_commands
-                .in_set(ReadAppCommands)
-                .in_set(PaneOpenSet),
-        )
-        .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
-        .add_message::<OpenBesideRequest>()
-        .add_systems(Update, handle_open_beside_requests);
+        app.add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
+            .add_message::<OpenBesideRequest>()
+            .add_systems(Update, handle_open_beside_requests);
     }
 }
 
@@ -182,196 +176,6 @@ pub fn first_stack_in_pane(
 ) -> Option<Entity> {
     let children = pane_children.get(pane).ok()?;
     children.iter().find(|&e| tab_q.contains(e))
-}
-
-fn handle_pane_commands(
-    mut reader: MessageReader<AppCommand>,
-    active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    child_of_q: Query<&ChildOf>,
-    split_dir_q: Query<&PaneSplit>,
-    mut commands: Commands,
-) {
-    for cmd in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
-            continue;
-        };
-        let active_tab = active_tab_param.get();
-        let (_, active_pane_opt, _active_stack_opt) = focused_stack(
-            active_tab,
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
-        let Some(active) = active_pane_opt else {
-            continue;
-        };
-
-        match pane_cmd {
-            PaneCommand::Close => {}
-            PaneCommand::Toggle => {}
-            PaneCommand::Zoom => {}
-            PaneCommand::SelectLeft => {}
-            PaneCommand::SelectRight => {}
-            PaneCommand::SelectUp => {}
-            PaneCommand::SelectDown => {}
-            PaneCommand::SwapPrev | PaneCommand::SwapNext => {
-                let Ok(co) = child_of_q.get(active) else {
-                    continue;
-                };
-                let parent = co.get();
-                if !split_dir_q.contains(parent) {
-                    continue;
-                }
-                let Ok(children) = all_children.get(parent) else {
-                    continue;
-                };
-                let kind_positions: Vec<usize> = children
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| leaf_panes.contains(*e) || split_dir_q.contains(*e))
-                    .map(|(i, _)| i)
-                    .collect();
-                let Some(active_idx) = find_kind_index(active, children, &kind_positions) else {
-                    continue;
-                };
-                let pair = if pane_cmd == PaneCommand::SwapPrev {
-                    resolve_prev(active_idx)
-                } else {
-                    resolve_next(active_idx, kind_positions.len())
-                };
-                if let Some((a, b)) = pair {
-                    swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
-                }
-            }
-            PaneCommand::RotateForward | PaneCommand::RotateBackward => {
-                let Some(tab) = active_tab else {
-                    continue;
-                };
-                PaneArrangement::rotate(
-                    tab,
-                    pane_cmd == PaneCommand::RotateForward,
-                    &all_children,
-                    &leaf_panes,
-                    &mut commands,
-                );
-            }
-            PaneCommand::Mirror | PaneCommand::MirrorHorizontal | PaneCommand::MirrorVertical => {
-                let Some(tab) = active_tab else {
-                    continue;
-                };
-                let direction = match pane_cmd {
-                    PaneCommand::Mirror => None,
-                    PaneCommand::MirrorHorizontal => Some(PaneSplitDirection::Row),
-                    PaneCommand::MirrorVertical => Some(PaneSplitDirection::Column),
-                    _ => unreachable!(),
-                };
-                PaneArrangement::mirror(tab, direction, &all_children, &split_dir_q, &mut commands);
-            }
-            PaneCommand::EqualizeSize => {}
-            PaneCommand::ResizeLeft
-            | PaneCommand::ResizeRight
-            | PaneCommand::ResizeUp
-            | PaneCommand::ResizeDown => {}
-        }
-    }
-}
-
-struct PaneArrangement;
-
-impl PaneArrangement {
-    fn rotate(
-        tab: Entity,
-        forward: bool,
-        children: &Query<&Children>,
-        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        commands: &mut Commands,
-    ) {
-        let mut panes = Vec::new();
-        Self::collect_leaves(tab, children, leaves, &mut panes);
-        if panes.len() <= 1 {
-            return;
-        }
-        let groups = panes
-            .iter()
-            .map(|pane| {
-                children
-                    .get(*pane)
-                    .map(|children| children.iter().collect::<Vec<_>>())
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
-        for group in &groups {
-            for child in group {
-                commands.entity(*child).remove::<ChildOf>();
-            }
-        }
-        for (index, group) in groups.into_iter().enumerate() {
-            let destination = if forward {
-                (index + 1) % panes.len()
-            } else {
-                (index + panes.len() - 1) % panes.len()
-            };
-            for child in group {
-                commands.entity(child).insert(ChildOf(panes[destination]));
-            }
-        }
-    }
-
-    fn mirror(
-        root: Entity,
-        direction: Option<PaneSplitDirection>,
-        children: &Query<&Children>,
-        splits: &Query<&PaneSplit>,
-        commands: &mut Commands,
-    ) {
-        let Ok(descendants) = children.get(root) else {
-            return;
-        };
-        let descendants = descendants.iter().collect::<Vec<_>>();
-        for child in descendants {
-            let Ok(split) = splits.get(child) else {
-                continue;
-            };
-            if direction.is_none_or(|direction| split.direction == direction)
-                && let Ok(split_children) = children.get(child)
-            {
-                let mut reversed = split_children.iter().collect::<Vec<_>>();
-                reversed.reverse();
-                for entity in &reversed {
-                    commands.entity(*entity).remove::<ChildOf>();
-                }
-                for entity in &reversed {
-                    commands.entity(*entity).insert(ChildOf(child));
-                }
-            }
-            Self::mirror(child, direction, children, splits, commands);
-        }
-    }
-
-    fn collect_leaves(
-        root: Entity,
-        children: &Query<&Children>,
-        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        output: &mut Vec<Entity>,
-    ) {
-        if leaves.contains(root) {
-            output.push(root);
-            return;
-        }
-        let Ok(descendants) = children.get(root) else {
-            return;
-        };
-        for child in descendants.iter() {
-            Self::collect_leaves(child, children, leaves, output);
-        }
-    }
 }
 
 pub fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
@@ -1386,7 +1190,6 @@ mod tests {
             FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
         },
     };
-    use bevy::ecs::system::RunSystemOnce;
     use vmux_command::{CommandPlugin, WriteAppCommands};
 
     fn test_settings() -> LayoutSettings {
@@ -1397,131 +1200,6 @@ mod tests {
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }
-    }
-
-    #[test]
-    fn rotate_moves_each_stack_to_the_next_leaf() {
-        let mut app = App::new();
-        let tab = app.world_mut().spawn_empty().id();
-        let left = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let middle = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let right = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let a = app.world_mut().spawn(ChildOf(left)).id();
-        let b = app.world_mut().spawn(ChildOf(middle)).id();
-        let c = app.world_mut().spawn(ChildOf(right)).id();
-
-        app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      leaves: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-                      mut commands: Commands| {
-                    PaneArrangement::rotate(tab, true, &children, &leaves, &mut commands);
-                },
-            )
-            .unwrap();
-
-        assert_eq!(app.world().get::<ChildOf>(a).unwrap().parent(), middle);
-        assert_eq!(app.world().get::<ChildOf>(b).unwrap().parent(), right);
-        assert_eq!(app.world().get::<ChildOf>(c).unwrap().parent(), left);
-    }
-
-    #[test]
-    fn horizontal_mirror_reverses_only_row_splits() {
-        let mut app = App::new();
-        let tab = app.world_mut().spawn_empty().id();
-        let row = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let left = app.world_mut().spawn((Pane, ChildOf(row))).id();
-        let right = app.world_mut().spawn((Pane, ChildOf(row))).id();
-
-        app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      splits: Query<&PaneSplit>,
-                      mut commands: Commands| {
-                    PaneArrangement::mirror(
-                        tab,
-                        Some(PaneSplitDirection::Row),
-                        &children,
-                        &splits,
-                        &mut commands,
-                    );
-                },
-            )
-            .unwrap();
-
-        assert_eq!(
-            app.world()
-                .get::<Children>(row)
-                .unwrap()
-                .iter()
-                .collect::<Vec<_>>(),
-            [right, left]
-        );
-    }
-
-    #[test]
-    fn mirror_reverses_every_split_axis() {
-        let mut app = App::new();
-        let tab = app.world_mut().spawn_empty().id();
-        let row = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let left = app.world_mut().spawn((Pane, ChildOf(row))).id();
-        let column = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Column,
-                },
-                ChildOf(row),
-            ))
-            .id();
-        let top = app.world_mut().spawn((Pane, ChildOf(column))).id();
-        let bottom = app.world_mut().spawn((Pane, ChildOf(column))).id();
-
-        app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      splits: Query<&PaneSplit>,
-                      mut commands: Commands| {
-                    PaneArrangement::mirror(tab, None, &children, &splits, &mut commands);
-                },
-            )
-            .unwrap();
-
-        assert_eq!(
-            app.world()
-                .get::<Children>(row)
-                .unwrap()
-                .iter()
-                .collect::<Vec<_>>(),
-            [column, left]
-        );
-        assert_eq!(
-            app.world()
-                .get::<Children>(column)
-                .unwrap()
-                .iter()
-                .collect::<Vec<_>>(),
-            [bottom, top]
-        );
     }
 
     #[test]
