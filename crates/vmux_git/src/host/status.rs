@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::thread::JoinHandle;
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
@@ -11,7 +11,7 @@ use crate::event::{FileStatus, GitErrorEvent, GitStatusRequest};
 use super::GitDiffSource;
 use super::GitUpdateSet;
 use super::job::Emit;
-use super::outbox::GitOutbox;
+use super::job_runner::GitJob;
 use super::watch::GitWatch;
 
 pub(super) struct StatusPlugin;
@@ -45,13 +45,15 @@ struct GitStatusRequestInput {
 #[derive(Component)]
 struct GitStatusTask {
     repo_root: PathBuf,
-    task: Task<Vec<(Entity, Vec<Emit>)>>,
+    webviews: Vec<Entity>,
+    thread: Option<JoinHandle<GitStatusResults>>,
 }
+
+struct GitStatusResults(Vec<(Entity, Vec<Emit>)>);
 
 fn on_status_request(
     trigger: On<BinReceive<GitStatusRequest>>,
     sources: Query<&GitDiffSource>,
-    outbox: Res<GitOutbox>,
     watch: Option<NonSendMut<GitWatch>>,
     mut commands: Commands,
 ) {
@@ -59,7 +61,8 @@ fn on_status_request(
     let path: PathBuf = trigger.event().payload.path.clone().into();
     if !super::runner::has_repository(&path) {
         commands.entity(webview).remove::<PendingGitStatus>();
-        outbox.events(
+        GitJob::deliver(
+            &mut commands,
             webview,
             vec![Emit::Status(super::runner::non_repository_status(&path))],
         );
@@ -80,22 +83,18 @@ fn on_status_request(
         }
         Err(error) => {
             commands.entity(webview).remove::<PendingGitStatus>();
-            outbox.error(webview, error.0);
+            GitJob::error(&mut commands, webview, error.0);
         }
     }
 }
 
-fn poll_status_tasks(
-    mut tasks: Query<(Entity, &mut GitStatusTask)>,
-    outbox: Res<GitOutbox>,
-    mut commands: Commands,
-) {
+fn poll_status_tasks(mut tasks: Query<(Entity, &mut GitStatusTask)>, mut commands: Commands) {
     for (entity, mut task) in &mut tasks {
-        let Some(results) = future::block_on(future::poll_once(&mut task.task)) else {
+        let Some(results) = task.poll() else {
             continue;
         };
-        for (webview, emits) in results {
-            outbox.events(webview, emits);
+        for (webview, emits) in results.0 {
+            GitJob::deliver(&mut commands, webview, emits);
         }
         commands.entity(entity).despawn();
     }
@@ -137,7 +136,8 @@ impl GitStatusTask {
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
     ) -> Self {
         let task_root = repo_root.clone();
-        let task = IoTaskPool::get().spawn(async move {
+        let webviews = requests.iter().map(|request| request.webview).collect();
+        let thread = std::thread::spawn(move || {
             let paths: Vec<PathBuf> = requests
                 .iter()
                 .map(|request| request.path.clone())
@@ -172,9 +172,36 @@ impl GitStatusTask {
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
-            results
+            GitStatusResults(results)
         });
-        Self { repo_root, task }
+        Self {
+            repo_root,
+            webviews,
+            thread: Some(thread),
+        }
+    }
+
+    fn poll(&mut self) -> Option<GitStatusResults> {
+        if !self.thread.as_ref().is_some_and(JoinHandle::is_finished) {
+            return None;
+        }
+        match self.thread.take().unwrap().join() {
+            Ok(results) => Some(results),
+            Err(_) => Some(GitStatusResults(
+                self.webviews
+                    .iter()
+                    .copied()
+                    .map(|webview| {
+                        (
+                            webview,
+                            vec![Emit::Error(GitErrorEvent {
+                                message: "Git status worker panicked".to_string(),
+                            })],
+                        )
+                    })
+                    .collect(),
+            )),
+        }
     }
 }
 
@@ -185,7 +212,6 @@ mod tests {
 
     #[test]
     fn status_task_batches_repository_paths_and_preserves_dirty_buffers() {
-        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = test_repo::init();
         let first = test_repo::write(repo.path(), "a.txt", "one\n");
         let second = test_repo::write(repo.path(), "b.txt", "two\n");
@@ -211,21 +237,21 @@ mod tests {
         );
 
         let results = loop {
-            if let Some(results) = future::block_on(future::poll_once(&mut task.task)) {
+            if let Some(results) = task.poll() {
                 break results;
             }
             std::thread::yield_now();
         };
 
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().any(|(webview, emits)| {
+        assert_eq!(results.0.len(), 2);
+        assert!(results.0.iter().any(|(webview, emits)| {
             *webview == first_webview
                 && matches!(
                     emits.as_slice(),
                     [Emit::Status(event)] if event.file_status == FileStatus::Modified
                 )
         }));
-        assert!(results.iter().any(|(webview, emits)| {
+        assert!(results.0.iter().any(|(webview, emits)| {
             *webview == second_webview
                 && matches!(
                     emits.as_slice(),

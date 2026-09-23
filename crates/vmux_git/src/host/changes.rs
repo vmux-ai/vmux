@@ -10,7 +10,7 @@ use crate::event::{
 };
 
 use super::job::JobKind;
-use super::outbox::GitOutbox;
+use super::job_runner::GitJob;
 
 pub(super) struct ChangesPlugin;
 
@@ -52,13 +52,14 @@ pub struct GitDiffSource {
 fn on_diff_request(
     trigger: On<BinReceive<GitDiffRequest>>,
     sources: Query<&GitDiffSource>,
-    outbox: Res<GitOutbox>,
+    mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Diff {
             repo_root,
@@ -76,39 +77,46 @@ fn on_diff_request(
     );
 }
 
-fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, outbox: Res<GitOutbox>) {
+fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    outbox.spawn(trigger.event().webview, JobKind::Stage { repo_root, path });
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Stage { repo_root, path },
+    );
 }
 
-fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, outbox: Res<GitOutbox>) {
+fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Unstage { repo_root, path },
     );
 }
 
-fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, outbox: Res<GitOutbox>) {
+fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Discard { repo_root, path },
     );
 }
 
-fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, outbox: Res<GitOutbox>) {
+fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Commit {
             path: request.path.clone().into(),
@@ -117,8 +125,9 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, outbox: Res<GitO
     );
 }
 
-fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, outbox: Res<GitOutbox>) {
-    outbox.spawn(
+fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, mut commands: Commands) {
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Fetch {
             path: trigger.event().payload.path.clone().into(),
@@ -126,9 +135,10 @@ fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, outbox: Res<GitOut
     );
 }
 
-fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, outbox: Res<GitOutbox>) {
+fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Operation {
             repo_root: request.repo_root.clone().into(),
@@ -137,8 +147,9 @@ fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, outbox: Re
     );
 }
 
-fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, outbox: Res<GitOutbox>) {
-    outbox.spawn(
+fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, mut commands: Commands) {
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Pull {
             path: trigger.event().payload.path.clone().into(),
@@ -146,8 +157,9 @@ fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, outbox: Res<GitOutbo
     );
 }
 
-fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbox>) {
-    outbox.spawn(
+fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, mut commands: Commands) {
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Push {
             path: trigger.event().payload.path.clone().into(),
@@ -155,8 +167,9 @@ fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbo
     );
 }
 
-fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, outbox: Res<GitOutbox>) {
-    outbox.spawn(
+fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, mut commands: Commands) {
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::StageAll {
             path: trigger.event().payload.path.clone().into(),
@@ -164,12 +177,13 @@ fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, outbox: Res
     );
 }
 
-fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbox>) {
+fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::Hunk {
             repo_root,

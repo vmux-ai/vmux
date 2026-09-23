@@ -6,7 +6,7 @@ use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use crate::event::{GitBranchLogRequest, GitRepositoryRequest};
 
 use super::job::JobKind;
-use super::outbox::GitOutbox;
+use super::job_runner::GitJob;
 use super::watch::GitWatch;
 
 pub(super) struct RepositoryPlugin;
@@ -21,9 +21,9 @@ impl Plugin for RepositoryPlugin {
 
 fn on_repository_request(
     trigger: On<BinReceive<GitRepositoryRequest>>,
-    outbox: Res<GitOutbox>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
@@ -31,7 +31,7 @@ fn on_repository_request(
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
-                outbox.error(webview, error.0);
+                GitJob::error(&mut commands, webview, error.0);
                 return;
             }
         }
@@ -39,7 +39,7 @@ fn on_repository_request(
         match super::runner::repo_root(&path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
-                outbox.error(webview, error.0);
+                GitJob::error(&mut commands, webview, error.0);
                 return;
             }
         }
@@ -50,12 +50,13 @@ fn on_repository_request(
     {
         page.url = url;
     }
-    outbox.spawn(webview, JobKind::Repository { path });
+    GitJob::enqueue(&mut commands, webview, JobKind::Repository { path });
 }
 
-fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, outbox: Res<GitOutbox>) {
+fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    outbox.spawn(
+    GitJob::enqueue(
+        &mut commands,
         trigger.event().webview,
         JobKind::BranchLog {
             repo_root: Path::new(&request.repo_root).to_path_buf(),

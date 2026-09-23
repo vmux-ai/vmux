@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::event::{DiffKind, DiffLine, FileStatus, GitFileEntry, StyledSpan};
 
+#[cfg(test)]
 pub struct ParsedStatus {
     pub branch: String,
     pub ahead: u32,
@@ -187,6 +188,7 @@ pub fn parse_porcelain_v2_statuses(out: &[u8]) -> ParsedStatuses {
     }
 }
 
+#[cfg(test)]
 pub fn parse_porcelain_v2(out: &[u8], target_rel: &[u8]) -> ParsedStatus {
     let parsed = parse_porcelain_v2_statuses(out);
     let file_status = parsed.file_status(target_rel);
