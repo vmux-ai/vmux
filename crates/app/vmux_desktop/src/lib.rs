@@ -65,7 +65,7 @@ impl Plugin for VmuxPlugin {
         let winit_settings = runtime::foreground_winit_settings(false, false);
         app.insert_resource(winit_settings).add_plugins((
             DefaultPlugins
-                .set(window_plugin())
+                .set(Self::window())
                 .set(bevy::log::LogPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     custom_layer: crate::log_forward::file_log_layer,
@@ -86,12 +86,14 @@ impl Plugin for VmuxPlugin {
     }
 }
 
-fn window_plugin() -> WindowPlugin {
-    WindowPlugin {
-        primary_window: Some(window_config(false)),
-        close_when_requested: false,
-        exit_condition: ExitCondition::DontExit,
-        ..default()
+impl VmuxPlugin {
+    fn window() -> WindowPlugin {
+        WindowPlugin {
+            primary_window: Some(window_config(false)),
+            close_when_requested: false,
+            exit_condition: ExitCondition::DontExit,
+            ..default()
+        }
     }
 }
 
@@ -172,7 +174,7 @@ mod tests {
 
     #[test]
     fn window_plugin_keeps_app_alive_after_last_window_closes() {
-        let plugin = window_plugin();
+        let plugin = VmuxPlugin::window();
 
         assert!(matches!(plugin.exit_condition, ExitCondition::DontExit));
         assert!(!plugin.close_when_requested);
