@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::{CommandCatalog, WriteCommandRequests};
+use vmux_command::{CommandCatalog, CommandInvocation, WriteCommandRequests};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -326,7 +326,7 @@ pub(crate) fn remote_agents(
 
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    mut command_catalog: CommandCatalog,
+    command_runtime: (Res<CommandCatalog>, MessageWriter<CommandInvocation>),
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
     mut browser_go_back_writer: MessageWriter<vmux_layout::BrowserGoBackRequest>,
     mut browser_go_forward_writer: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
@@ -350,6 +350,7 @@ fn handle_agent_commands(
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut writers: AgentSpaceWriters,
 ) {
+    let (command_catalog, mut command_invocations) = command_runtime;
     let (focus, command_bar, contributed_pages) = desktop;
     let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
@@ -390,12 +391,15 @@ fn handle_agent_commands(
                 };
                 let caller = caller.unwrap_or(Entity::PLACEHOLDER);
                 let result = if origin_is_agent(&request.origin) {
-                    command_catalog.invoke_agent(caller, id, args)
+                    command_catalog.resolve_agent(caller, id, args)
                 } else {
-                    command_catalog.invoke(caller, id, args)
+                    command_catalog.resolve(caller, id, args)
                 };
                 match result {
-                    Ok(()) => AgentCommandResult::Ok,
+                    Ok(invocation) => {
+                        command_invocations.write(invocation);
+                        AgentCommandResult::Ok
+                    }
                     Err(message) => AgentCommandResult::Error(message),
                 }
             }

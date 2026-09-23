@@ -3,7 +3,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandIssuer, CommandRuntimePlugin, CommandSpawner,
+    CommandDefinition, CommandDispatch, CommandIssuer, CommandRuntimePlugin,
     RegisterCommandDefinitions,
 };
 use vmux_core::event::{
@@ -32,7 +32,7 @@ impl Plugin for KeyPlugin {
 #[derive(Component)]
 struct FileKeyCommand(FileKey);
 
-fn spawn_commands(mut commands: CommandSpawner) {
+fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
         (
             CommandDefinition::new("file_toggle_explorer", "Toggle Explorer", "Editor")
@@ -84,7 +84,7 @@ fn spawn_commands(mut commands: CommandSpawner) {
             FileKey::FindInFiles,
         ),
     ] {
-        commands.spawn(definition, FileKeyCommand(key));
+        commands.spawn((definition, FileKeyCommand(key)));
     }
 }
 

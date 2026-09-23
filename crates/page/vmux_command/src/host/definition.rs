@@ -81,9 +81,11 @@ impl CommandDefinition {
         }));
         app.add_message::<T>().add_systems(
             Startup,
-            (move |mut commands: CommandSpawner| {
+            (move |mut commands: Commands| {
                 for definition in definitions() {
-                    commands.spawn_request(definition, RequestParser(request), validator.clone());
+                    commands
+                        .spawn((definition, RequestParser(request), validator.clone()))
+                        .observe(dispatch_request::<T>);
                 }
             })
             .in_set(RegisterCommandDefinitions),
@@ -235,10 +237,6 @@ impl CommandDefinition {
             .expect("agent access requires an MCP command definition");
         mcp.agent_access = AgentAccess::Allowed;
         self
-    }
-
-    fn matches(&self, id: &str) -> bool {
-        self.id == id || self.aliases.iter().any(|alias| alias == id)
     }
 
     fn validate_arguments(&self, arguments: &serde_json::Value) -> Result<(), String> {
@@ -476,7 +474,7 @@ pub struct CommandRuntimePlugin;
 
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CommandIndex>()
+        app.init_resource::<CommandCatalog>()
             .add_message::<CommandInvocation>()
             .configure_sets(
                 Update,
@@ -491,6 +489,7 @@ impl Plugin for CommandRuntimePlugin {
             .add_systems(
                 Update,
                 (
+                    index_command_definitions,
                     dispatch_command_invocations,
                     bevy::ecs::schedule::ApplyDeferred,
                 )
@@ -500,8 +499,52 @@ impl Plugin for CommandRuntimePlugin {
     }
 }
 
+#[derive(Clone)]
+struct RegisteredCommand {
+    definition: CommandDefinition,
+    validator: Option<RequestValidator>,
+}
+
 #[derive(Resource, Default)]
-struct CommandIndex(HashMap<String, Entity>);
+pub struct CommandCatalog {
+    ids: HashMap<String, Entity>,
+    commands: HashMap<Entity, RegisteredCommand>,
+}
+
+fn index_command_definitions(
+    definitions: Query<
+        (Entity, &CommandDefinition, Option<&RequestValidator>),
+        Added<CommandDefinition>,
+    >,
+    mut catalog: ResMut<CommandCatalog>,
+    mut commands: Commands,
+) {
+    for (entity, definition, validator) in &definitions {
+        let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
+        ids.push(definition.id.clone());
+        ids.extend(definition.aliases.iter().cloned());
+        let mut unique_ids = HashSet::with_capacity(ids.len());
+        for id in &ids {
+            assert!(
+                unique_ids.insert(id.as_str()) && !catalog.ids.contains_key(id),
+                "duplicate command id: {id}"
+            );
+        }
+        for id in ids {
+            catalog.ids.insert(id, entity);
+        }
+        catalog.commands.insert(
+            entity,
+            RegisteredCommand {
+                definition: definition.clone(),
+                validator: validator.cloned(),
+            },
+        );
+        commands
+            .entity(entity)
+            .insert(Name::new(definition.id.clone()));
+    }
+}
 
 #[derive(EntityEvent)]
 pub struct CommandDispatch {
@@ -520,46 +563,6 @@ impl CommandDispatch {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct CommandSpawner<'w, 's> {
-    commands: Commands<'w, 's>,
-    index: ResMut<'w, CommandIndex>,
-}
-
-impl CommandSpawner<'_, '_> {
-    pub fn spawn(&mut self, definition: CommandDefinition, bundle: impl Bundle) -> Entity {
-        let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
-        ids.push(definition.id.clone());
-        ids.extend(definition.aliases.iter().cloned());
-        let mut unique_ids = HashSet::with_capacity(ids.len());
-        for id in &ids {
-            assert!(
-                unique_ids.insert(id.as_str()) && !self.index.0.contains_key(id),
-                "duplicate command id: {id}"
-            );
-        }
-        let command = self
-            .commands
-            .spawn((Name::new(definition.id.clone()), definition, bundle))
-            .id();
-        for id in ids {
-            self.index.0.insert(id, command);
-        }
-        command
-    }
-
-    fn spawn_request<T: Message>(
-        &mut self,
-        definition: CommandDefinition,
-        parser: RequestParser<T>,
-        validator: RequestValidator,
-    ) -> Entity {
-        let command = self.spawn(definition, (parser, validator));
-        self.commands.entity(command).observe(dispatch_request::<T>);
-        command
-    }
-}
-
 #[derive(Component)]
 struct RequestParser<T: Message>(fn(&CommandInvocation) -> Option<T>);
 
@@ -568,61 +571,49 @@ type ValidateRequest = dyn Fn(&CommandInvocation) -> Result<(), String> + Send +
 #[derive(Component, Clone)]
 struct RequestValidator(Arc<ValidateRequest>);
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct CommandCatalog<'w, 's> {
-    definitions: Query<
-        'w,
-        's,
-        (
-            &'static CommandDefinition,
-            Option<&'static RequestValidator>,
-        ),
-    >,
-    invocations: MessageWriter<'w, CommandInvocation>,
-}
-
-impl CommandCatalog<'_, '_> {
+impl CommandCatalog {
     pub fn tools(&self) -> Vec<vmux_api::protocol::AgentCommandTool> {
         let mut tools = Vec::new();
-        for (definition, _) in &self.definitions {
-            tools.extend(definition.agent_tool());
+        for command in self.commands.values() {
+            tools.extend(command.definition.agent_tool());
         }
         tools.sort_by(|left, right| left.name.cmp(&right.name));
         tools
     }
 
-    pub fn invoke(
-        &mut self,
+    pub fn resolve(
+        &self,
         caller: Entity,
         id: &str,
         arguments: serde_json::Value,
-    ) -> Result<(), String> {
-        self.invoke_with_access(caller, id, arguments, false)
+    ) -> Result<CommandInvocation, String> {
+        self.resolve_with_access(caller, id, arguments, false)
     }
 
-    pub fn invoke_agent(
-        &mut self,
+    pub fn resolve_agent(
+        &self,
         caller: Entity,
         id: &str,
         arguments: serde_json::Value,
-    ) -> Result<(), String> {
-        self.invoke_with_access(caller, id, arguments, true)
+    ) -> Result<CommandInvocation, String> {
+        self.resolve_with_access(caller, id, arguments, true)
     }
 
-    fn invoke_with_access(
-        &mut self,
+    fn resolve_with_access(
+        &self,
         caller: Entity,
         id: &str,
         arguments: serde_json::Value,
         require_agent_access: bool,
-    ) -> Result<(), String> {
-        let Some((definition, validator)) = self
-            .definitions
-            .iter()
-            .find(|(definition, _)| definition.matches(id))
-        else {
+    ) -> Result<CommandInvocation, String> {
+        let Some(entity) = self.ids.get(id) else {
             return Err(format!("unknown app command: {id}"));
         };
+        let command = self
+            .commands
+            .get(entity)
+            .expect("indexed command entity must have a catalog entry");
+        let definition = &command.definition;
         let Some(mcp) = &definition.mcp else {
             return Err(format!("unknown app command: {id}"));
         };
@@ -631,27 +622,27 @@ impl CommandCatalog<'_, '_> {
         }
         definition.validate_arguments(&arguments)?;
         let invocation = CommandInvocation::new(caller, &definition.id).with_arguments(arguments);
-        if let Some(validator) = validator {
+        if let Some(validator) = &command.validator {
             validator.0(&invocation)?;
         }
-        self.invocations.write(invocation);
-        Ok(())
+        Ok(invocation)
     }
 }
 
 fn dispatch_command_invocations(
     mut invocations: MessageReader<CommandInvocation>,
-    index: Res<CommandIndex>,
-    definitions: Query<&CommandDefinition>,
+    catalog: Res<CommandCatalog>,
     mut commands: Commands,
 ) {
     for invocation in invocations.read() {
-        let Some(&command) = index.0.get(&invocation.id) else {
+        let Some(&command) = catalog.ids.get(&invocation.id) else {
             continue;
         };
-        let Ok(definition) = definitions.get(command) else {
-            continue;
-        };
+        let definition = &catalog
+            .commands
+            .get(&command)
+            .expect("indexed command entity must have a catalog entry")
+            .definition;
         let mut invocation = invocation.clone();
         invocation.id.clone_from(&definition.id);
         if let Some(mcp) = &definition.mcp
@@ -712,7 +703,6 @@ impl KeyCombo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
 
     #[derive(vmux_macro::CommandBar)]
     #[shortcut(direct = "Super+t")]
@@ -883,10 +873,7 @@ mod tests {
         UserOnlyRequest::register(&mut app);
         app.update();
 
-        let tools = app
-            .world_mut()
-            .run_system_once(|catalog: CommandCatalog| catalog.tools())
-            .unwrap();
+        let tools = app.world().resource::<CommandCatalog>().tools();
         assert_eq!(
             tools
                 .iter()
@@ -896,13 +883,14 @@ mod tests {
         );
 
         let caller = app.world_mut().spawn_empty().id();
-        let result = app
-            .world_mut()
-            .run_system_once(move |mut catalog: CommandCatalog| {
-                catalog.invoke_agent(caller, "agent_visible", serde_json::json!({}))
-            })
+        let invocation = app
+            .world()
+            .resource::<CommandCatalog>()
+            .resolve_agent(caller, "agent_visible", serde_json::json!({}))
             .unwrap();
-        assert_eq!(result, Ok(()));
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(invocation);
         app.update();
         assert_eq!(
             app.world_mut()
@@ -923,29 +911,27 @@ mod tests {
         let caller = app.world_mut().spawn_empty().id();
 
         let denied = app
-            .world_mut()
-            .run_system_once(move |mut catalog: CommandCatalog| {
-                catalog.invoke_agent(caller, "user_only", serde_json::json!({}))
-            })
-            .unwrap();
+            .world()
+            .resource::<CommandCatalog>()
+            .resolve_agent(caller, "user_only", serde_json::json!({}))
+            .unwrap_err();
         assert_eq!(
             denied,
-            Err("focus-changing app command is disabled for agents".to_string()),
+            "focus-changing app command is disabled for agents".to_string(),
         );
 
         let malformed = app
-            .world_mut()
-            .run_system_once(move |mut catalog: CommandCatalog| {
-                catalog.invoke_agent(
-                    caller,
-                    "agent_visible",
-                    serde_json::json!({"unexpected": true}),
-                )
-            })
-            .unwrap();
+            .world()
+            .resource::<CommandCatalog>()
+            .resolve_agent(
+                caller,
+                "agent_visible",
+                serde_json::json!({"unexpected": true}),
+            )
+            .unwrap_err();
         assert_eq!(
             malformed,
-            Err("agent_visible: invalid arguments: unknown argument unexpected".to_string()),
+            "agent_visible: invalid arguments: unknown argument unexpected".to_string(),
         );
     }
 }

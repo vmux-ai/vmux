@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 
 pub(super) struct TerminalToolPlugin;
@@ -31,21 +30,20 @@ struct TerminalSendArgs {
     enter: Option<bool>,
 }
 
-impl TerminalTool {
-    fn target(self, call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: TerminalSendArgs = call.parse("terminal_send")?;
-        let text = if args.enter.unwrap_or(false) {
-            format!("{}\r", args.text)
+impl TerminalSendArgs {
+    fn command(self) -> Result<AgentCommand, String> {
+        let text = if self.enter.unwrap_or(false) {
+            format!("{}\r", self.text)
         } else {
-            args.text
+            self.text
         };
         if text.is_empty() {
             return Err("terminal_send.text is empty".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::TerminalSend {
+        Ok(AgentCommand::TerminalSend {
             text,
-            terminal: args.terminal,
-        }))
+            terminal: self.terminal,
+        })
     }
 }
 
@@ -55,7 +53,11 @@ fn register(mut tools: ToolSpawner) {
 }
 
 fn dispatch(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
-    for (request, call, tool) in calls.iter() {
-        call.finish_dispatch(request, &mut commands, tool.target(call));
+    for (request, call, _) in calls.matching(TerminalTool::TerminalSend) {
+        let target = call
+            .parse::<TerminalSendArgs>("terminal_send")
+            .and_then(TerminalSendArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }

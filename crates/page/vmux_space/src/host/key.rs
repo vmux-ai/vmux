@@ -2,8 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_api::space::SpaceKey;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, CommandSpawner,
-    RegisterCommandDefinitions,
+    CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
 pub(crate) struct SpaceKeyPlugin;
@@ -21,7 +20,7 @@ impl Plugin for SpaceKeyPlugin {
 #[derive(Component)]
 struct SpaceKeyCommand(SpaceKey);
 
-fn spawn_commands(mut commands: CommandSpawner) {
+fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
         (
             CommandDefinition::new("space_next", "Next Space", "Layout > Space")
@@ -53,7 +52,7 @@ fn spawn_commands(mut commands: CommandSpawner) {
             SpaceKey::Delete,
         ),
     ] {
-        commands.spawn(definition, SpaceKeyCommand(key));
+        commands.spawn((definition, SpaceKeyCommand(key)));
     }
 }
 

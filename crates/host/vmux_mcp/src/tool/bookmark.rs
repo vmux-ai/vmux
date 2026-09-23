@@ -1,6 +1,5 @@
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -46,19 +45,16 @@ struct BookmarkAddArgs {
 }
 
 impl BookmarkAddArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("bookmark_add")?;
-        let url = RequiredText::get(args.url, "bookmark_add.url is required")?;
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-            AgentBookmarkCommand::Add {
-                page: AgentBookmarkPage {
-                    url,
-                    title: args.title,
-                    favicon_url: args.favicon_url,
-                },
-                folder: args.folder,
+    fn command(self) -> Result<AgentCommand, String> {
+        let url = RequiredText::get(self.url, "bookmark_add.url is required")?;
+        Ok(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
+            page: AgentBookmarkPage {
+                url,
+                title: self.title,
+                favicon_url: self.favicon_url,
             },
-        )))
+            folder: self.folder,
+        }))
     }
 }
 
@@ -69,12 +65,11 @@ struct BookmarkRemoveArgs {
 }
 
 impl BookmarkRemoveArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("bookmark_remove")?;
-        let uuid = RequiredText::get(args.uuid, "bookmark_remove.uuid is required")?;
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+    fn command(self) -> Result<AgentCommand, String> {
+        let uuid = RequiredText::get(self.uuid, "bookmark_remove.uuid is required")?;
+        Ok(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::Remove { uuid },
-        )))
+        ))
     }
 }
 
@@ -106,9 +101,8 @@ enum BookmarkPinArgs {
 }
 
 impl BookmarkPinArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("bookmark_pin")?;
-        let command = match args {
+    fn command(self) -> Result<AgentCommand, String> {
+        let command = match self {
             Self::Existing(args) => AgentBookmarkCommand::Pin {
                 uuid: RequiredText::get(args.uuid, "bookmark_pin.uuid is required")?,
             },
@@ -120,19 +114,16 @@ impl BookmarkPinArgs {
                 },
             },
         };
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-            command,
-        )))
+        Ok(AgentCommand::BookmarkCommand(command))
     }
 }
 
 impl BookmarkUnpinArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("bookmark_unpin")?;
-        let uuid = RequiredText::get(args.uuid, "bookmark_unpin.uuid is required")?;
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-            AgentBookmarkCommand::Unpin { uuid },
-        )))
+    fn command(self) -> Result<AgentCommand, String> {
+        let uuid = RequiredText::get(self.uuid, "bookmark_unpin.uuid is required")?;
+        Ok(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin {
+            uuid,
+        }))
     }
 }
 
@@ -143,12 +134,11 @@ struct BookmarkFolderCreateArgs {
 }
 
 impl BookmarkFolderCreateArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("bookmark_folder_create")?;
-        let name = RequiredText::get(args.name, "bookmark_folder_create.name is required")?;
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+    fn command(self) -> Result<AgentCommand, String> {
+        let name = RequiredText::get(self.name, "bookmark_folder_create.name is required")?;
+        Ok(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::CreateFolder { name },
-        )))
+        ))
     }
 }
 
@@ -164,35 +154,51 @@ fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn add(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, _) in calls.matching(BookmarkTool::BookmarkAdd) {
-        call.finish_dispatch(request, &mut commands, BookmarkAddArgs::target(call));
+        let target = call
+            .parse::<BookmarkAddArgs>("bookmark_add")
+            .and_then(BookmarkAddArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn remove(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, _) in calls.matching(BookmarkTool::BookmarkRemove) {
-        call.finish_dispatch(request, &mut commands, BookmarkRemoveArgs::target(call));
+        let target = call
+            .parse::<BookmarkRemoveArgs>("bookmark_remove")
+            .and_then(BookmarkRemoveArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn pin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, _) in calls.matching(BookmarkTool::BookmarkPin) {
-        call.finish_dispatch(request, &mut commands, BookmarkPinArgs::target(call));
+        let target = call
+            .parse::<BookmarkPinArgs>("bookmark_pin")
+            .and_then(BookmarkPinArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn unpin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, _) in calls.matching(BookmarkTool::BookmarkUnpin) {
-        call.finish_dispatch(request, &mut commands, BookmarkUnpinArgs::target(call));
+        let target = call
+            .parse::<BookmarkUnpinArgs>("bookmark_unpin")
+            .and_then(BookmarkUnpinArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn create_folder(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, _) in calls.matching(BookmarkTool::BookmarkFolderCreate) {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            BookmarkFolderCreateArgs::target(call),
-        );
+        let target = call
+            .parse::<BookmarkFolderCreateArgs>("bookmark_folder_create")
+            .and_then(BookmarkFolderCreateArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 

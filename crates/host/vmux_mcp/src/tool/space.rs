@@ -1,6 +1,5 @@
 use super::{
-    DispatchTarget, ToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolSpawner,
+    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
@@ -42,20 +41,17 @@ struct RenameSpaceArgs {
 }
 
 impl RenameSpaceArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("rename_space")?;
-        if args.space_id.trim().is_empty() {
+    fn command(self) -> Result<AgentCommand, String> {
+        if self.space_id.trim().is_empty() {
             return Err("rename_space.space_id is empty".to_string());
         }
-        if args.name.trim().is_empty() {
+        if self.name.trim().is_empty() {
             return Err("rename_space.name is empty".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-            AgentSpaceCommand::Rename {
-                space_id: args.space_id,
-                name: args.name,
-            },
-        )))
+        Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
+            space_id: self.space_id,
+            name: self.name,
+        }))
     }
 }
 
@@ -66,16 +62,13 @@ struct DeleteSpaceArgs {
 }
 
 impl DeleteSpaceArgs {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: Self = call.parse("delete_space")?;
-        if args.space_id.trim().is_empty() {
+    fn command(self) -> Result<AgentCommand, String> {
+        if self.space_id.trim().is_empty() {
             return Err("delete_space.space_id is empty".to_string());
         }
-        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-            AgentSpaceCommand::Delete {
-                space_id: args.space_id,
-            },
-        )))
+        Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
+            space_id: self.space_id,
+        }))
     }
 }
 
@@ -110,12 +103,20 @@ fn create(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
 
 fn rename(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
     for (request, call, _) in calls.matching(SpaceTool::RenameSpace) {
-        call.finish_dispatch(request, &mut commands, RenameSpaceArgs::target(call));
+        let target = call
+            .parse::<RenameSpaceArgs>("rename_space")
+            .and_then(RenameSpaceArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
 
 fn delete(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
     for (request, call, _) in calls.matching(SpaceTool::DeleteSpace) {
-        call.finish_dispatch(request, &mut commands, DeleteSpaceArgs::target(call));
+        let target = call
+            .parse::<DeleteSpaceArgs>("delete_space")
+            .and_then(DeleteSpaceArgs::command)
+            .map(DispatchTarget::Command);
+        call.finish_dispatch(request, &mut commands, target);
     }
 }
