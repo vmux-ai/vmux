@@ -7,8 +7,16 @@ pub(crate) struct WindowManagerPlugin;
 
 impl Plugin for WindowManagerPlugin {
     fn build(&self, app: &mut App) {
-        WindowRequest::register(app);
-        app.add_message::<CloseVmuxWindow>()
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<WindowRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(
+                Startup,
+                spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            )
+            .add_observer(issue_window_request)
             .add_systems(
                 Update,
                 handle_window_commands
@@ -28,30 +36,38 @@ enum WindowRequest {
     Close,
 }
 
-impl WindowRequest {
-    pub fn register(app: &mut App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
+#[derive(Component)]
+struct WindowCommandBinding(WindowRequest);
 
-    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
+fn spawn_window_commands(mut commands: Commands) {
+    for (definition, request) in [
+        (
             vmux_command::CommandDefinition::new("new_window", "New Window", "Layout > Window")
                 .accelerator("super+n")
                 .hidden()
                 .direct("Super+N"),
+            WindowRequest::New,
+        ),
+        (
             vmux_command::CommandDefinition::new("close_window", "Close Window", "Layout > Window")
                 .accelerator("super+shift+w")
                 .hidden(),
-        ]
+            WindowRequest::Close,
+        ),
+    ] {
+        commands.spawn((definition, WindowCommandBinding(request)));
     }
+}
 
-    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        match invocation.id.as_str() {
-            "new_window" => Some(Self::New),
-            "close_window" => Some(Self::Close),
-            _ => None,
-        }
-    }
+fn issue_window_request(
+    trigger: On<vmux_command::CommandDispatch>,
+    registered: Query<&WindowCommandBinding>,
+    mut requests: MessageWriter<WindowRequest>,
+) {
+    let Ok(request) = registered.get(trigger.event().command()) else {
+        return;
+    };
+    requests.write(request.0);
 }
 
 fn handle_window_commands(

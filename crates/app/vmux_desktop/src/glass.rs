@@ -7,8 +7,16 @@ pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
-        ToggleFullscreenRequest::register(app);
-        app.init_non_send::<GlassState>()
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<ToggleFullscreenRequest>()
+            .add_systems(
+                Startup,
+                spawn_toggle_fullscreen_command.in_set(vmux_command::RegisterCommandDefinitions),
+            )
+            .add_observer(issue_toggle_fullscreen)
+            .init_non_send::<GlassState>()
             .add_systems(PreUpdate, install_window_glass)
             .add_systems(
                 Update,
@@ -36,25 +44,29 @@ impl Plugin for GlassPlugin {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct ToggleFullscreenRequest;
 
-impl ToggleFullscreenRequest {
-    pub fn register(app: &mut App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
+#[derive(Component)]
+struct ToggleFullscreenBinding;
 
-    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new(
-                "toggle_fullscreen",
-                "Toggle Fullscreen",
-                "Layout > Window",
-            )
-            .accelerator("ctrl+super+f")
-            .hidden(),
-        ]
-    }
+fn spawn_toggle_fullscreen_command(mut commands: Commands) {
+    commands.spawn((
+        vmux_command::CommandDefinition::new(
+            "toggle_fullscreen",
+            "Toggle Fullscreen",
+            "Layout > Window",
+        )
+        .accelerator("ctrl+super+f")
+        .hidden(),
+        ToggleFullscreenBinding,
+    ));
+}
 
-    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        (invocation.id == "toggle_fullscreen").then_some(Self)
+fn issue_toggle_fullscreen(
+    trigger: On<vmux_command::CommandDispatch>,
+    registered: Query<(), With<ToggleFullscreenBinding>>,
+    mut requests: MessageWriter<ToggleFullscreenRequest>,
+) {
+    if registered.contains(trigger.event().command()) {
+        requests.write(ToggleFullscreenRequest);
     }
 }
 

@@ -18,7 +18,7 @@ impl Plugin for ChatKeyPlugin {
 }
 
 #[derive(Component)]
-struct ChatKeyCommand(ChatKey);
+struct ChatKeyBinding(ChatKey);
 
 fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
@@ -83,13 +83,13 @@ fn spawn_commands(mut commands: Commands) {
             ChatKey::Cancel,
         ),
     ] {
-        commands.spawn((definition, ChatKeyCommand(key)));
+        commands.spawn((definition, ChatKeyBinding(key)));
     }
 }
 
 fn echo_key_command(
     trigger: On<CommandDispatch>,
-    keys: Query<&ChatKeyCommand>,
+    keys: Query<&ChatKeyBinding>,
     mut commands: Commands,
 ) {
     let Ok(key) = keys.get(trigger.event().command()) else {
