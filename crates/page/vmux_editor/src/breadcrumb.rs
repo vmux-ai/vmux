@@ -8,7 +8,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::explorer::OutlineGlyph;
-use crate::ui_state::use_file_ui_state;
+use crate::ui_state::use_file_ui_events;
 
 const PATH_CRUMBS_MAX: usize = 4;
 
@@ -25,7 +25,7 @@ pub fn EditorBreadcrumbs(
         siblings: use_signal(Vec::<FileDirEntry>::new),
         pending: use_signal(|| false),
     };
-    use_file_ui_state::<FilePreviewEvent, _>(move |event| {
+    use_file_ui_events::<FilePreviewEvent, _>(move |event| {
         menus.receive(event);
     });
 

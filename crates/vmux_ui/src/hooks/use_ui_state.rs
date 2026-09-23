@@ -23,7 +23,35 @@ where
     state
 }
 
-pub fn use_ui_state_patch<S, T, F>(mut on_event: F)
+pub fn use_ui_state_patch<S, T>() -> ReadSignal<Option<T>>
+where
+    S: vmux_api::UiState,
+    S::Patch: vmux_api::UiStatePatch<T>,
+    T: Clone + 'static,
+{
+    let state = use_context::<Signal<S>>();
+    let mut value = use_signal(|| None);
+    let mut handled_sequence = use_signal(|| 0u64);
+    use_effect(move || {
+        let event = state();
+        if event.sequence() == 0 || event.sequence() == *handled_sequence.peek() {
+            return;
+        }
+        handled_sequence.set(event.sequence());
+        let Some(payload) = event
+            .patches()
+            .iter()
+            .rev()
+            .find_map(<S::Patch as vmux_api::UiStatePatch<T>>::payload)
+        else {
+            return;
+        };
+        value.set(Some(payload.clone()));
+    });
+    value.into()
+}
+
+pub fn use_ui_state_events<S, T, F>(mut on_event: F)
 where
     S: vmux_api::UiState,
     S::Patch: vmux_api::UiStatePatch<T>,
