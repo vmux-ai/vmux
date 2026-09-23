@@ -3,6 +3,7 @@ pub mod component;
 pub mod contract;
 pub mod launch;
 mod loading;
+mod mouse;
 pub mod pid;
 pub mod plugin;
 pub(crate) mod process_index;
