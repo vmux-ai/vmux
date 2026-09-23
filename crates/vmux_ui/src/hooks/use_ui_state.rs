@@ -1,5 +1,52 @@
 use crate::hooks::use_listener::use_listener;
 use dioxus::prelude::*;
+use std::marker::PhantomData;
+
+pub struct UiStatePatchBatch<S, T> {
+    state: Signal<S>,
+    handled_sequence: Signal<u64>,
+    payload: PhantomData<fn() -> T>,
+}
+
+impl<S, T> Clone for UiStatePatchBatch<S, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S, T> Copy for UiStatePatchBatch<S, T> {}
+
+impl<S, T> UiStatePatchBatch<S, T>
+where
+    S: vmux_api::UiState,
+    S::Patch: vmux_api::UiStatePatch<T>,
+    T: Clone + 'static,
+{
+    pub fn take(mut self) -> Vec<T> {
+        let (sequence, payloads) = {
+            let event = self.state.read();
+            let sequence = event.sequence();
+            if sequence == 0 || sequence == *self.handled_sequence.peek() {
+                return Vec::new();
+            }
+            let payloads = event
+                .patches()
+                .iter()
+                .filter_map(<S::Patch as vmux_api::UiStatePatch<T>>::payload)
+                .cloned()
+                .collect();
+            (sequence, payloads)
+        };
+        self.handled_sequence.set(sequence);
+        payloads
+    }
+
+    pub fn for_each(self, mut action: impl FnMut(T)) {
+        for payload in self.take() {
+            action(payload);
+        }
+    }
+}
 
 pub fn use_ui_state<T>() -> Signal<T>
 where
@@ -23,30 +70,16 @@ where
     state
 }
 
-pub fn use_ui_state_patch<S, T>() -> ReadSignal<Option<T>>
+pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>
 where
     S: vmux_api::UiState,
     S::Patch: vmux_api::UiStatePatch<T>,
     T: Clone + 'static,
 {
     let state = use_context::<Signal<S>>();
-    let mut value = use_signal(|| None);
-    let mut handled_sequence = use_signal(|| 0u64);
-    use_effect(move || {
-        let event = state();
-        if event.sequence() == 0 || event.sequence() == *handled_sequence.peek() {
-            return;
-        }
-        handled_sequence.set(event.sequence());
-        let Some(payload) = event
-            .patches()
-            .iter()
-            .rev()
-            .find_map(<S::Patch as vmux_api::UiStatePatch<T>>::payload)
-        else {
-            return;
-        };
-        value.set(Some(payload.clone()));
-    });
-    value.into()
+    UiStatePatchBatch {
+        state,
+        handled_sequence: use_signal(|| 0),
+        payload: PhantomData,
+    }
 }

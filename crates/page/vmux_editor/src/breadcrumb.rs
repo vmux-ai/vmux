@@ -27,10 +27,9 @@ pub fn EditorBreadcrumbs(
     };
     let preview = use_file_ui::<FilePreviewEvent>();
     use_effect(move || {
-        let Some(event) = preview() else {
-            return;
-        };
-        menus.receive(event);
+        preview.for_each(|event| {
+            menus.receive(event);
+        })
     });
 
     let trail = PathTrail::build(&display_path, &abs_path, leaf_is_dir);
