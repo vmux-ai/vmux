@@ -48,9 +48,9 @@ impl Plugin for CommandPlugin {
                 forward_history_open_intent.in_set(CommandSet::History),
                 handle_agent_tool_calls
                     .in_set(CommandSet::ToolCalls)
-                    .before(vmux_mcp::tools::ToolDispatchSet),
+                    .before(vmux_mcp::tool::ToolDispatchSet),
                 finish_agent_tool_calls
-                    .after(vmux_mcp::tools::ToolDispatchFlush)
+                    .after(vmux_mcp::tool::ToolDispatchFlush)
                     .before(CommandSet::Commands),
                 handle_agent_commands.in_set(CommandSet::Commands),
             ),
@@ -199,7 +199,7 @@ pub(crate) struct AgentSpaceWriters<'w, 's> {
 fn handle_agent_tool_calls(
     mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
-    tools: vmux_mcp::tools::ToolCatalog,
+    tools: vmux_mcp::tool::ToolCatalog,
     service: Option<Res<ServiceClient>>,
 ) {
     for req in reader.read() {
@@ -221,7 +221,7 @@ fn handle_agent_tool_calls(
             args,
             None,
             "",
-            vmux_mcp::tools::ToolCallPolicy::agent(),
+            vmux_mcp::tool::ToolCallPolicy::agent(),
         ) {
             Ok(call) => {
                 commands.spawn((
@@ -251,37 +251,44 @@ fn finish_agent_tool_calls(
         (
             Entity,
             &PendingAgentToolCall,
-            &vmux_mcp::tools::ToolDispatchResult,
+            Option<&vmux_mcp::tool::DispatchTarget>,
+            Option<&vmux_mcp::tool::ToolDispatchError>,
         ),
-        Added<vmux_mcp::tools::ToolDispatchResult>,
+        Or<(
+            Added<vmux_mcp::tool::DispatchTarget>,
+            Added<vmux_mcp::tool::ToolDispatchError>,
+        )>,
     >,
     mut command_writer: MessageWriter<AgentCommandRequest>,
     mut query_writer: MessageWriter<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
 ) {
-    for (entity, pending, result) in &calls {
-        match result.result() {
-            Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
+    for (entity, pending, target, error) in &calls {
+        match target {
+            Some(vmux_mcp::tool::DispatchTarget::Command(command)) => {
                 command_writer.write(AgentCommandRequest {
                     request_id: pending.request_id,
                     origin: CommandOrigin::Agent {
                         sid: Some(pending.sid.clone()),
                         anchor: None,
                     },
-                    command,
+                    command: command.clone(),
                 });
             }
-            Ok(vmux_mcp::tools::DispatchTarget::Query(query)) => {
+            Some(vmux_mcp::tool::DispatchTarget::Query(query)) => {
                 query_writer.write(AgentQueryRequest {
                     request_id: pending.request_id,
-                    query,
+                    query: query.clone(),
                 });
             }
-            Err(message) => {
+            None => {
                 if let Some(service) = service.as_ref() {
                     service.0.send(ClientMessage::AgentToolResult {
                         request_id: pending.request_id,
-                        content: message,
+                        content: error
+                            .map(vmux_mcp::tool::ToolDispatchError::message)
+                            .unwrap_or("tool dispatch produced no target")
+                            .to_string(),
                         is_error: true,
                     });
                 }
@@ -749,7 +756,7 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_mcp::tools::ToolPlugin))
+        app.add_plugins((MinimalPlugins, vmux_mcp::tool::ToolPlugin))
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
@@ -757,9 +764,9 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_agent_tool_calls.before(vmux_mcp::tools::ToolDispatchSet),
+                    handle_agent_tool_calls.before(vmux_mcp::tool::ToolDispatchSet),
                     finish_agent_tool_calls
-                        .after(vmux_mcp::tools::ToolDispatchFlush)
+                        .after(vmux_mcp::tool::ToolDispatchFlush)
                         .before(CapturedAgentCommands::read),
                     CapturedAgentCommands::read,
                 ),

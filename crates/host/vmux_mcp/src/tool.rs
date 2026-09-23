@@ -382,10 +382,34 @@ impl ToolDefinition {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Component, Clone, Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
     Query(AgentQuery),
+}
+
+impl DispatchTarget {
+    fn from_execution(
+        call: &ToolCall,
+        outcome: &Result<ToolExecution, String>,
+    ) -> Result<Self, String> {
+        match outcome {
+            Ok(ToolExecution::Dispatch { target, .. }) => Ok(target.clone()),
+            Ok(ToolExecution::Command {
+                name, arguments, ..
+            }) => Ok(Self::Command(AgentCommand::InvokeCommand {
+                id: name.clone(),
+                args: JsonValue::from(arguments.clone()),
+            })),
+            Ok(ToolExecution::Protocol { .. }) => {
+                Err(format!("tool {} requires MCP protocol context", call.name))
+            }
+            Ok(ToolExecution::List { .. }) => {
+                Err("tool listing is not a dispatchable tool".to_string())
+            }
+            Err(message) => Err(message.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Deserialize, Default)]
@@ -414,6 +438,7 @@ pub(crate) enum ProtocolTool {
     VaultStatus,
 }
 
+#[derive(Clone)]
 pub(crate) enum ToolExecution {
     List {
         definitions: Vec<ToolDefinition>,
@@ -461,31 +486,11 @@ pub(crate) struct ShellAware;
 pub(crate) struct ToolOutcome(pub(crate) Result<ToolExecution, String>);
 
 #[derive(Component, Clone, Debug)]
-pub struct ToolDispatchResult(Result<DispatchTarget, String>);
+pub struct ToolDispatchError(String);
 
-impl ToolDispatchResult {
-    pub fn result(&self) -> Result<DispatchTarget, String> {
-        self.0.clone()
-    }
-
-    fn from_execution(call: &ToolCall, outcome: &Result<ToolExecution, String>) -> Self {
-        let result = match outcome {
-            Ok(ToolExecution::Dispatch { target, .. }) => Ok(target.clone()),
-            Ok(ToolExecution::Command {
-                name, arguments, ..
-            }) => Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
-                id: name.clone(),
-                args: JsonValue::from(arguments.clone()),
-            })),
-            Ok(ToolExecution::Protocol { .. }) => {
-                Err(format!("tool {} requires MCP protocol context", call.name))
-            }
-            Ok(ToolExecution::List { .. }) => {
-                Err("tool listing is not a dispatchable tool".to_string())
-            }
-            Err(message) => Err(message.clone()),
-        };
-        Self(result)
+impl ToolDispatchError {
+    pub fn message(&self) -> &str {
+        &self.0
     }
 }
 
@@ -524,11 +529,17 @@ impl ToolCall {
         commands: &mut Commands,
         result: Result<ToolExecution, String>,
     ) {
-        let dispatch_result = ToolDispatchResult::from_execution(self, &result);
-        commands
-            .entity(request)
-            .remove::<Self>()
-            .insert((ToolOutcome(result), dispatch_result));
+        let dispatch = DispatchTarget::from_execution(self, &result);
+        let mut entity = commands.entity(request);
+        entity.remove::<Self>().insert(ToolOutcome(result));
+        match dispatch {
+            Ok(target) => {
+                entity.insert(target);
+            }
+            Err(message) => {
+                entity.insert(ToolDispatchError(message));
+            }
+        }
     }
 
     pub(super) fn finish_dispatch(

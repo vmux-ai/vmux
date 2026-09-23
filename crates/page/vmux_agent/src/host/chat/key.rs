@@ -1,96 +1,112 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_chat::event::ChatKey;
-use vmux_command::{CommandDefinition, CommandInvocation, ReadCommandRequests};
+use vmux_command::{
+    CommandDefinition, CommandDispatch, CommandRuntimePlugin, CommandSpawner,
+    RegisterCommandDefinitions,
+};
 
 pub(crate) struct ChatKeyPlugin;
 
 impl Plugin for ChatKeyPlugin {
     fn build(&self, app: &mut App) {
-        ChatKeyRequest::register(app);
-        app.add_systems(Update, echo_key_command.in_set(ReadCommandRequests));
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
+            .add_observer(echo_key_command);
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct ChatKeyRequest {
-    caller: Entity,
-    key: ChatKey,
-}
+#[derive(Component)]
+struct ChatKeyCommand(ChatKey);
 
-impl ChatKeyRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
-        vec![
+fn spawn_commands(mut commands: CommandSpawner) {
+    for (definition, key) in [
+        (
             CommandDefinition::new("chat_list_next", "Next Option", "Chat")
                 .hidden()
                 .direct_when("ArrowDown", Some("chat.list"))
                 .direct_when("Ctrl+n", Some("chat.list"))
                 .direct_when("Ctrl+j", Some("chat.list")),
+            ChatKey::ListNext,
+        ),
+        (
             CommandDefinition::new("chat_list_previous", "Previous Option", "Chat")
                 .hidden()
                 .direct_when("ArrowUp", Some("chat.list"))
                 .direct_when("Ctrl+p", Some("chat.list"))
                 .direct_when("Ctrl+k", Some("chat.list")),
+            ChatKey::ListPrevious,
+        ),
+        (
             CommandDefinition::new("chat_list_choose", "Choose Option", "Chat")
                 .hidden()
                 .direct_when("Enter", Some("chat.list")),
+            ChatKey::ListChoose,
+        ),
+        (
             CommandDefinition::new("chat_history_older", "Previous Prompt", "Chat")
                 .hidden()
                 .direct_when("ArrowUp", Some("chat && !chat.list"))
                 .direct_when("Ctrl+p", Some("chat && !chat.list")),
+            ChatKey::HistoryOlder,
+        ),
+        (
             CommandDefinition::new("chat_history_newer", "Next Prompt", "Chat")
                 .hidden()
                 .direct_when("ArrowDown", Some("chat && !chat.list"))
                 .direct_when("Ctrl+n", Some("chat && !chat.list")),
+            ChatKey::HistoryNewer,
+        ),
+        (
             CommandDefinition::new("chat_submit", "Send Prompt", "Chat")
                 .hidden()
                 .direct_when("Enter", Some("chat && !chat.list")),
+            ChatKey::Submit,
+        ),
+        (
             CommandDefinition::new("chat_dismiss_selector", "Close Picker", "Chat")
                 .hidden()
                 .direct_when("Escape", Some("chat.selector")),
+            ChatKey::DismissSelector,
+        ),
+        (
             CommandDefinition::new("chat_interrupt", "Send Queued Now", "Chat")
                 .hidden()
                 .direct_when("Escape", Some("chat && !chat.selector")),
+            ChatKey::Interrupt,
+        ),
+        (
             CommandDefinition::new("chat_cancel", "Stop Turn", "Chat")
                 .hidden()
                 .direct_when("Ctrl+c", Some("chat")),
-        ]
-    }
-
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        let key = match invocation.id.as_str() {
-            "chat_list_next" => ChatKey::ListNext,
-            "chat_list_previous" => ChatKey::ListPrevious,
-            "chat_list_choose" => ChatKey::ListChoose,
-            "chat_history_older" => ChatKey::HistoryOlder,
-            "chat_history_newer" => ChatKey::HistoryNewer,
-            "chat_submit" => ChatKey::Submit,
-            "chat_dismiss_selector" => ChatKey::DismissSelector,
-            "chat_interrupt" => ChatKey::Interrupt,
-            "chat_cancel" => ChatKey::Cancel,
-            _ => return None,
-        };
-        Some(Self {
-            caller: invocation.caller,
-            key,
-        })
+            ChatKey::Cancel,
+        ),
+    ] {
+        commands.spawn(definition, ChatKeyCommand(key));
     }
 }
 
-fn echo_key_command(mut requests: MessageReader<ChatKeyRequest>, mut commands: Commands) {
-    for request in requests.read() {
-        commands.trigger(BinHostEmitEvent::from_event(request.caller, &request.key));
-    }
+fn echo_key_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&ChatKeyCommand>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(BinHostEmitEvent::from_event(
+        trigger.event().invocation().caller,
+        &key.0,
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use vmux_api::BinEvent;
+    use vmux_command::CommandInvocation;
 
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
@@ -118,10 +134,10 @@ mod tests {
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, key: ChatKey) {
+        fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<ChatKeyRequest>>()
-                .write(ChatKeyRequest { caller, key });
+                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, id));
             app.update();
         }
     }
@@ -132,7 +148,7 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(&mut app, pressed, ChatKey::ListChoose);
+        Echo::issue(&mut app, pressed, "chat_list_choose");
 
         assert_eq!(
             app.world().resource::<Echoed>().0,

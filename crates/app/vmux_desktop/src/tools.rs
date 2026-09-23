@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -124,8 +124,7 @@ impl Plugin for ToolPlugin {
         vmux_core::register_host_spawn(app, "tools");
         vmux_core::register_host_spawn(app, "vault");
         app.init_resource::<ToolsState>()
-            .init_resource::<ToolRequestQueue>()
-            .init_resource::<VaultRequestQueue>()
+            .init_resource::<ActionRequestSequence>()
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
             .add_plugins(crate::mcp_connection::McpConnectionPlugin)
@@ -232,11 +231,48 @@ struct ToolActionTask {
 }
 
 #[derive(Resource, Default)]
-struct ToolRequestQueue(VecDeque<(Entity, ToolRequest)>);
+struct ActionRequestSequence(u64);
+
+impl ActionRequestSequence {
+    fn next(&mut self) -> u64 {
+        let order = self.0;
+        self.0 = self.0.wrapping_add(1);
+        order
+    }
+}
+
+#[derive(Component)]
+struct PendingToolAction {
+    order: u64,
+    target: Entity,
+    request: ToolRequest,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VaultActionTarget {
+    Webview(Entity),
+    Automatic,
+}
+
+impl VaultActionTarget {
+    fn webview(self) -> Option<Entity> {
+        match self {
+            Self::Webview(entity) => Some(entity),
+            Self::Automatic => None,
+        }
+    }
+}
+
+#[derive(Component)]
+struct PendingVaultAction {
+    order: u64,
+    target: VaultActionTarget,
+    request: VaultRequest,
+}
 
 #[derive(Component)]
 struct VaultActionTask {
-    target: Entity,
+    target: VaultActionTarget,
     request: VaultRequest,
     task: Task<Result<VaultActionOutput, String>>,
     progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
@@ -263,9 +299,6 @@ struct VaultAutoSync {
     initial_scan_complete: bool,
     remote_check: bool,
 }
-
-#[derive(Resource, Default)]
-struct VaultRequestQueue(VecDeque<(Entity, VaultRequest)>);
 
 #[derive(Resource)]
 struct VaultRecoveryState {
@@ -367,39 +400,54 @@ fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: R
 fn on_action_request(
     trigger: On<BinReceive<ToolRequest>>,
     mut state: ResMut<ToolsState>,
-    mut queue: ResMut<ToolRequestQueue>,
+    mut sequence: ResMut<ActionRequestSequence>,
+    mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
     state.subscribers.insert(target, 0);
-    queue.0.push_back((target, request));
+    commands.spawn(PendingToolAction {
+        order: sequence.next(),
+        target,
+        request,
+    });
 }
 
 fn on_vault_action_request(
     trigger: On<BinReceive<VaultRequest>>,
     mut state: ResMut<ToolsState>,
-    mut queue: ResMut<VaultRequestQueue>,
+    mut sequence: ResMut<ActionRequestSequence>,
+    pending: Query<(Entity, &PendingVaultAction)>,
     tasks: Query<&VaultActionTask>,
+    mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
     state.subscribers.insert(target, 0);
-    if tasks
-        .iter()
-        .any(|task| task.request.action == VaultAction::ConnectGithub)
-    {
-        for task in &tasks {
-            if task.request.action == VaultAction::ConnectGithub {
-                task.canceled.store(true, Ordering::Relaxed);
+    let mut connecting = false;
+    for task in &tasks {
+        if task.request.action != VaultAction::ConnectGithub {
+            continue;
+        }
+        connecting = true;
+        task.canceled.store(true, Ordering::Relaxed);
+    }
+    if connecting {
+        for (entity, _) in &pending {
+            commands.entity(entity).despawn();
+        }
+    } else if request.action == VaultAction::ConnectGithub {
+        for (entity, pending) in &pending {
+            if pending.request.action == VaultAction::ConnectGithub {
+                commands.entity(entity).despawn();
             }
         }
-        queue.0.clear();
-    } else if request.action == VaultAction::ConnectGithub {
-        queue
-            .0
-            .retain(|(_, queued)| queued.action != VaultAction::ConnectGithub);
     }
-    queue.0.push_back((target, request));
+    commands.spawn(PendingVaultAction {
+        order: sequence.next(),
+        target: VaultActionTarget::Webview(target),
+        request,
+    });
 }
 
 fn on_vault_refresh_request(
@@ -448,7 +496,9 @@ fn queue_vault_auto_sync(
     state: Res<ToolsState>,
     scans: Query<(), With<ToolsScanTask>>,
     tasks: Query<&VaultActionTask>,
-    mut queue: ResMut<VaultRequestQueue>,
+    pending: Query<&PendingVaultAction>,
+    mut sequence: ResMut<ActionRequestSequence>,
+    mut commands: Commands,
 ) {
     if !auto_sync.requested || state.dirty || !state.loaded || !scans.is_empty() {
         return;
@@ -464,25 +514,25 @@ fn queue_vault_auto_sync(
     if tasks
         .iter()
         .any(|task| task.request.action == VaultAction::Sync)
-        || queue
-            .0
+        || pending
             .iter()
-            .any(|(_, request)| request.action == VaultAction::Sync)
+            .any(|request| request.request.action == VaultAction::Sync)
     {
         auto_sync.requested = false;
         auto_sync.remote_check = false;
         return;
     }
-    queue.0.push_back((
-        Entity::PLACEHOLDER,
-        VaultRequest {
+    commands.spawn(PendingVaultAction {
+        order: sequence.next(),
+        target: VaultActionTarget::Automatic,
+        request: VaultRequest {
             action: VaultAction::Sync,
             repository: String::new(),
             private: true,
             folder_name: String::new(),
             recovery_key: String::new(),
         },
-    ));
+    });
     auto_sync.requested = false;
     auto_sync.remote_check = false;
 }
@@ -498,7 +548,7 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
 }
 
 fn start_tool_action(
-    mut queue: ResMut<ToolRequestQueue>,
+    pending: Query<(Entity, &PendingToolAction)>,
     tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
@@ -507,20 +557,35 @@ fn start_tool_action(
     if !tasks.is_empty() || !vault_tasks.is_empty() || !scans.is_empty() {
         return;
     }
-    let Some((target, request)) = queue.0.pop_front() else {
+    let mut next = None;
+    for (entity, request) in &pending {
+        match next {
+            Some((_, order)) if order <= request.order => {}
+            _ => next = Some((entity, request.order)),
+        }
+    }
+    let Some((entity, _)) = next else {
         return;
     };
+    let Ok((_, pending_action)) = pending.get(entity) else {
+        return;
+    };
+    let target = pending_action.target;
+    let request = pending_action.request.clone();
     let task_request = request.clone();
     let task = IoTaskPool::get().spawn(async move { perform_action(&task_request) });
-    commands.spawn(ToolActionTask {
-        target,
-        request,
-        task,
-    });
+    commands
+        .entity(entity)
+        .remove::<PendingToolAction>()
+        .insert(ToolActionTask {
+            target,
+            request,
+            task,
+        });
 }
 
 fn start_vault_action(
-    mut queue: ResMut<VaultRequestQueue>,
+    pending: Query<(Entity, &PendingVaultAction)>,
     mut recovery: ResMut<VaultRecoveryState>,
     tasks: Query<(), With<VaultActionTask>>,
     tool_tasks: Query<(), With<ToolActionTask>>,
@@ -531,9 +596,21 @@ fn start_vault_action(
     if !tasks.is_empty() || !tool_tasks.is_empty() || !scans.is_empty() {
         return;
     }
-    let Some((target, request)) = queue.0.pop_front() else {
+    let mut next = None;
+    for (entity, request) in &pending {
+        match next {
+            Some((_, order)) if order <= request.order => {}
+            _ => next = Some((entity, request.order)),
+        }
+    }
+    let Some((entity, _)) = next else {
         return;
     };
+    let Ok((_, pending_action)) = pending.get(entity) else {
+        return;
+    };
+    let target = pending_action.target;
+    let request = pending_action.request.clone();
     let (recovery, generated_recovery_key) = recovery.begin(request.action);
     let task_request = request.clone();
     let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -561,13 +638,16 @@ fn start_vault_action(
         }
         result
     });
-    commands.spawn(VaultActionTask {
-        target,
-        request,
-        task,
-        progress: Mutex::new(progress_receiver),
-        canceled,
-    });
+    commands
+        .entity(entity)
+        .remove::<PendingVaultAction>()
+        .insert(VaultActionTask {
+            target,
+            request,
+            task,
+            progress: Mutex::new(progress_receiver),
+            canceled,
+        });
 }
 
 fn start_tools_scan(
@@ -575,16 +655,16 @@ fn start_tools_scan(
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
-    queue: Res<ToolRequestQueue>,
-    vault_queue: Res<VaultRequestQueue>,
+    pending_actions: Query<(), With<PendingToolAction>>,
+    pending_vault_actions: Query<(), With<PendingVaultAction>>,
     mut commands: Commands,
 ) {
     if !state.dirty
         || !tasks.is_empty()
         || !action_tasks.is_empty()
         || !vault_tasks.is_empty()
-        || !queue.0.is_empty()
-        || !vault_queue.0.is_empty()
+        || !pending_actions.is_empty()
+        || !pending_vault_actions.is_empty()
     {
         return;
     }
@@ -684,12 +764,15 @@ fn drain_vault_actions(
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
+        let target = task.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
-            if browsers.can_emit_to(&task.target) {
+            if let Some(target) = target
+                && browsers.can_emit_to(&target)
+            {
                 stack_requests.write(vmux_layout::stack::StackRequest::Open {
                     url: Some(progress.url.clone()),
                 });
-                commands.trigger(BinHostEmitEvent::from_event(task.target, &progress));
+                commands.trigger(BinHostEmitEvent::from_event(target, &progress));
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
@@ -720,12 +803,14 @@ fn drain_vault_actions(
         if task.request.action == VaultAction::Sync {
             state.snapshot.vault.sync_failed = !success;
             state.revision = state.revision.wrapping_add(1);
-            if task.target == Entity::PLACEHOLDER && !success {
+            if task.target == VaultActionTarget::Automatic && !success {
                 continue;
             }
         }
-        if browsers.can_emit_to(&task.target) {
-            commands.trigger(BinHostEmitEvent::from_event(task.target, &event));
+        if let Some(target) = target
+            && browsers.can_emit_to(&target)
+        {
+            commands.trigger(BinHostEmitEvent::from_event(target, &event));
         }
         state.dirty = true;
         state.full_scan |= !state.loaded;
@@ -1817,6 +1902,33 @@ fn command_error(program: &str, output: &Output) -> String {
 mod tests {
     use super::*;
 
+    struct VaultAutoSyncScenario;
+
+    impl VaultAutoSyncScenario {
+        fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultActionTarget> {
+            let mut app = App::new();
+            app.init_resource::<ToolsState>()
+                .init_resource::<VaultAutoSync>()
+                .init_resource::<ActionRequestSequence>()
+                .add_systems(Update, queue_vault_auto_sync);
+            {
+                let mut state = app.world_mut().resource_mut::<ToolsState>();
+                state.loaded = true;
+                state.dirty = false;
+                state.snapshot.vault = vault;
+            }
+            let mut auto_sync = app.world_mut().resource_mut::<VaultAutoSync>();
+            auto_sync.requested = true;
+            auto_sync.remote_check = remote_check;
+
+            app.update();
+
+            let world = app.world_mut();
+            let mut query = world.query::<&PendingVaultAction>();
+            query.iter(world).map(|pending| pending.target).collect()
+        }
+    }
+
     #[test]
     fn tools_page_owns_provider_routes() {
         assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/extensions"));
@@ -1990,28 +2102,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_backup_queues_only_unlocked_vaults_needing_sync() {
-        fn queued(vault: VaultSnapshot, remote_check: bool) -> usize {
-            let mut app = App::new();
-            app.init_resource::<ToolsState>()
-                .init_resource::<VaultAutoSync>()
-                .init_resource::<VaultRequestQueue>()
-                .add_systems(Update, queue_vault_auto_sync);
-            {
-                let mut state = app.world_mut().resource_mut::<ToolsState>();
-                state.loaded = true;
-                state.dirty = false;
-                state.snapshot.vault = vault;
-            }
-            let mut auto_sync = app.world_mut().resource_mut::<VaultAutoSync>();
-            auto_sync.requested = true;
-            auto_sync.remote_check = remote_check;
-
-            app.update();
-
-            app.world().resource::<VaultRequestQueue>().0.len()
-        }
-
+    fn automatic_backup_creates_only_needed_pending_actions() {
         let connected = VaultSnapshot {
             initialized: true,
             unlocked: true,
@@ -2019,19 +2110,22 @@ mod tests {
             dirty: 1,
             ..Default::default()
         };
-        assert_eq!(queued(connected.clone(), false), 1);
         assert_eq!(
-            queued(
+            VaultAutoSyncScenario::pending_targets(connected.clone(), false),
+            [VaultActionTarget::Automatic]
+        );
+        assert_eq!(
+            VaultAutoSyncScenario::pending_targets(
                 VaultSnapshot {
                     unlocked: false,
                     ..connected.clone()
                 },
                 false
             ),
-            0
+            []
         );
         assert_eq!(
-            queued(
+            VaultAutoSyncScenario::pending_targets(
                 VaultSnapshot {
                     dirty: 0,
                     ahead: 1,
@@ -2039,27 +2133,27 @@ mod tests {
                 },
                 false
             ),
-            1
+            [VaultActionTarget::Automatic]
         );
         assert_eq!(
-            queued(
+            VaultAutoSyncScenario::pending_targets(
                 VaultSnapshot {
                     dirty: 0,
                     ..connected.clone()
                 },
                 false
             ),
-            0
+            []
         );
         assert_eq!(
-            queued(
+            VaultAutoSyncScenario::pending_targets(
                 VaultSnapshot {
                     dirty: 0,
                     ..connected
                 },
                 true,
             ),
-            1
+            [VaultActionTarget::Automatic]
         );
     }
 }
