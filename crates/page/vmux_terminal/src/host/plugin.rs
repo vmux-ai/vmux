@@ -11,7 +11,6 @@ use bevy_cef::prelude::*;
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::KeyStroke;
-use vmux_core::page::PageReady;
 use vmux_core::terminal::{
     ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
 };
@@ -32,6 +31,7 @@ use vmux_setting::AppSettings;
 use super::loading::AgentLoading;
 use super::mouse::MouseSelectionState;
 use super::prompt::PromptCapture;
+use super::view::{OwedSnapshot, TerminalGridSize};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::process_index::TerminalProcessIndex;
@@ -106,24 +106,9 @@ impl Plugin for TerminalInputPlugin {
         app.init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
-            .add_systems(
-                Update,
-                (
-                    format_terminal_url.after(pid::track_pid_inserts),
-                    resend_the_screen_a_page_missed.after(ServiceMessageSet),
-                ),
-            )
-            .add_plugins(UiEventPlugin::<(
-                TermResizeEvent,
-                TermScrollEvent,
-                TermLinkOpenRequest,
-            )>::default())
-            .add_plugins(super::mouse::MousePlugin)
-            .add_observer(on_term_ready)
-            .add_observer(on_term_resize)
-            .add_observer(on_term_scroll)
-            .add_observer(on_term_key)
-            .add_observer(on_term_link_open);
+            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_plugins((super::mouse::MousePlugin, super::view::ViewPlugin))
+            .add_observer(on_term_key);
     }
 }
 
@@ -285,18 +270,6 @@ pub struct TerminalModeFlags {
 
 #[derive(Component)]
 pub struct AgentFocusBlurred;
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct TerminalGridSize {
-    pub cols: u16,
-    pub rows: u16,
-}
-
-impl Default for TerminalGridSize {
-    fn default() -> Self {
-        Self { cols: 80, rows: 24 }
-    }
-}
 
 #[derive(Event)]
 pub struct RestartPty {
@@ -736,9 +709,6 @@ pub struct PendingTerminalInput {
 
 #[derive(Component)]
 pub(crate) struct ShellOutputSeen;
-
-#[derive(Component)]
-struct OwedSnapshot;
 
 fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
     has_content && cursor_col > 0
@@ -2248,37 +2218,6 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-fn on_term_scroll(
-    trigger: On<BinReceive<TermScrollEvent>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-    let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
-    service.0.send(ClientMessage::ScrollWindow {
-        process_id: *pid,
-        top_row: event.top_row,
-        follow: event.follow,
-    });
-}
-
-fn on_term_link_open(
-    trigger: On<BinReceive<TermLinkOpenRequest>>,
-    mut stack_requests: MessageWriter<StackRequest>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-) {
-    let url = trigger.payload.url.clone();
-    if url.is_empty() {
-        return;
-    }
-    stack_requests.write(StackRequest::Open { url: Some(url) });
-    if let Some(proxy) = proxy.as_ref() {
-        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
-    }
-}
-
 fn on_term_key(
     trigger: On<BinReceive<KeyStroke>>,
     terminals: Query<(), With<Terminal>>,
@@ -2397,90 +2336,6 @@ fn on_term_key(
             .0
             .send(ClientMessage::ProcessInput { process_id, data });
     }
-}
-
-fn on_term_ready(
-    trigger: On<BinReceive<PageReady>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let Ok(pid) = q.get(entity) else { return };
-    let Some(service) = service else {
-        commands.entity(entity).insert(OwedSnapshot);
-        return;
-    };
-    service
-        .0
-        .send(ClientMessage::RequestSnapshot { process_id: *pid });
-}
-
-fn resend_the_screen_a_page_missed(
-    owed: Query<(Entity, &ProcessId), (With<Terminal>, With<OwedSnapshot>)>,
-    browsers: NonSend<Browsers>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid) in &owed {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        service
-            .0
-            .send(ClientMessage::RequestSnapshot { process_id: *pid });
-        commands.entity(entity).remove::<OwedSnapshot>();
-    }
-}
-
-fn on_term_resize(
-    trigger: On<BinReceive<TermResizeEvent>>,
-    webview_q: Query<&WebviewSize, With<Terminal>>,
-    pid_q: Query<&ProcessId, With<Terminal>>,
-    mut grid_q: Query<&mut TerminalGridSize, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-
-    let Ok(webview_size) = webview_q.get(entity) else {
-        return;
-    };
-
-    if event.char_width <= 0.0 || event.char_height <= 0.0 {
-        return;
-    }
-
-    let vw = if event.viewport_width > 0.0 {
-        event.viewport_width
-    } else {
-        webview_size.0.x
-    };
-    let vh = if event.viewport_height > 0.0 {
-        event.viewport_height
-    } else {
-        webview_size.0.y
-    };
-
-    let cols = (vw / event.char_width).floor().max(1.0) as u16;
-    let rows = (vh / event.char_height).floor().max(1.0) as u16;
-
-    if let Ok(mut grid) = grid_q.get_mut(entity) {
-        grid.cols = cols;
-        grid.rows = rows;
-    }
-
-    let Some(service) = service else { return };
-    let Ok(pid) = pid_q.get(entity) else {
-        return;
-    };
-
-    service.0.send(ClientMessage::ResizeProcess {
-        process_id: *pid,
-        cols,
-        rows,
-    });
 }
 
 fn on_restart_pty(
@@ -2733,7 +2588,6 @@ mod tests {
     use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::schedule::Schedules;
     use vmux_core::input::KeyModifiers;
-    use vmux_core::page::PageReady;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -2830,43 +2684,6 @@ mod tests {
                 .unwrap()
                 .data,
             b"one\rtwo\r"
-        );
-    }
-
-    #[test]
-    fn term_link_open_emits_stack_open_request() {
-        #[derive(Resource, Default)]
-        struct Captured(Vec<StackRequest>);
-        fn capture(mut requests: MessageReader<StackRequest>, mut captured: ResMut<Captured>) {
-            for request in requests.read() {
-                captured.0.push(request.clone());
-            }
-        }
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<StackRequest>()
-            .init_resource::<Captured>()
-            .add_observer(on_term_link_open)
-            .add_systems(Update, capture);
-        let webview = app.world_mut().spawn(vmux_core::team::User).id();
-
-        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
-            webview,
-            payload: TermLinkOpenRequest {
-                url: "https://vmux.ai".into(),
-            },
-        });
-        app.update();
-
-        let captured = app.world().resource::<Captured>();
-        assert!(
-            captured.0.iter().any(|request| matches!(
-                request,
-                StackRequest::Open { url: Some(url) } if url == "https://vmux.ai"
-            )),
-            "expected stack open request, got {:?}",
-            captured.0
         );
     }
 
@@ -3853,24 +3670,6 @@ mod tests {
         assert!(
             !app.world().entities().contains(entity),
             "failed create must despawn the orphaned terminal so no system is left to drive or reap it"
-        );
-    }
-
-    #[test]
-    fn a_page_ready_before_the_service_is_owed_its_screen() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
-        let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
-
-        app.world_mut().trigger(BinReceive::<PageReady> {
-            webview,
-            payload: PageReady {},
-        });
-        app.update();
-
-        assert!(
-            app.world().get::<OwedSnapshot>(webview).is_some(),
-            "the snapshot request had nowhere to go, so the debt has to outlive the connection"
         );
     }
 
