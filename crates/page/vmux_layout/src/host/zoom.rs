@@ -2,19 +2,16 @@ use bevy::{
     ecs::{lifecycle::HookContext, relationship::Relationship, world::DeferredWorld},
     prelude::*,
 };
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
-};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::{
-    pane::{Pane, PaneSplit},
+    pane::{Pane, PaneRequest, PaneSplit},
     stack::{ActiveTabParam, Stack, focused_stack},
     tab::Tab,
 };
 
-use super::pane_arrangement::ArrangementSet;
+use super::{command::LayoutRequestSet, pane_arrangement::ArrangementSet};
 
 pub(crate) struct PaneZoomPlugin;
 
@@ -23,7 +20,7 @@ impl Plugin for PaneZoomPlugin {
         app.add_systems(
             Update,
             handle_zoom_command
-                .in_set(ReadAppCommands)
+                .in_set(LayoutRequestSet::Prepare)
                 .before(ArrangementSet),
         )
         .add_systems(
@@ -119,7 +116,7 @@ fn siblings_to_hide(
 }
 
 fn handle_zoom_command(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab: ActiveTabParam,
     children: Query<&Children>,
@@ -132,16 +129,10 @@ fn handle_zoom_command(
     zoomed: Query<(), With<Zoomed>>,
     mut commands: Commands,
 ) {
-    for command in reader.read() {
-        let unzoom_only = match command {
-            AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-                | PaneCommand::SelectRight
-                | PaneCommand::SelectUp
-                | PaneCommand::SelectDown,
-            )) => true,
-            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane { .. })) => true,
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)) => false,
+    for request in reader.read() {
+        let unzoom_only = match request {
+            PaneRequest::Focus(_) | PaneRequest::Open(_) => true,
+            PaneRequest::ToggleZoom => false,
             _ => continue,
         };
         let (_, active_pane, _) = focused_stack(

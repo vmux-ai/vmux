@@ -6,6 +6,12 @@ use crate::pane::{Pane, PaneSplit};
 use crate::stack::Stack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiblingDirection {
+    Previous,
+    Next,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserTarget {
     Pane(Entity),
     Stack(Entity),

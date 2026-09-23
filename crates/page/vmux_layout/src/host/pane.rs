@@ -10,11 +10,9 @@ use bevy::{
     window::PrimaryWindow,
 };
 use moonshine_save::prelude::*;
+use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 #[cfg(test)]
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand,
-    open::{PaneDirection, PaneOpenMode, PaneTarget},
-};
+use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand};
 #[cfg(test)]
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -22,6 +20,8 @@ use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
 
+#[cfg(test)]
+use super::command::LayoutCommandPlugin;
 use super::pane_arrangement::ArrangementPlugin;
 use super::pane_close::ClosePlugin;
 pub use super::pane_close::{ForcePaneClose, PendingPaneClose};
@@ -44,21 +44,61 @@ pub use super::pane_tree::{
     Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
     leaf_pane_bundle, split_leaf_into_two, split_or_extend, split_root_bundle,
 };
+use super::target::SiblingDirection;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneFocus {
+    Next,
+    Direction(PaneDirection),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneArrangement {
+    Swap(SiblingDirection),
+    Rotate(SiblingDirection),
+    Mirror(Option<PaneSplitDirection>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneResize {
+    Equalize,
+    Direction(PaneDirection),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneOpenRequest {
+    pub direction: PaneDirection,
+    pub target: PaneTarget,
+    pub mode: PaneOpenMode,
+    pub url: Option<String>,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub enum PaneRequest {
+    Open(PaneOpenRequest),
+    Close,
+    Focus(PaneFocus),
+    Arrange(PaneArrangement),
+    Resize(PaneResize),
+    ToggleZoom,
+}
 
 pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<SideSheetCardCollapsed>().add_plugins((
-            TreePlugin,
-            IdentityPlugin,
-            ArrangementPlugin,
-            OpenPlugin,
-            PaneZoomPlugin,
-            FocusPlugin,
-            ResizePlugin,
-            ClosePlugin,
-        ));
+        app.register_type::<SideSheetCardCollapsed>()
+            .add_message::<PaneRequest>()
+            .add_plugins((
+                TreePlugin,
+                IdentityPlugin,
+                ArrangementPlugin,
+                OpenPlugin,
+                PaneZoomPlugin,
+                FocusPlugin,
+                ResizePlugin,
+                ClosePlugin,
+            ));
     }
 }
 
@@ -1909,7 +1949,7 @@ mod tests {
     #[test]
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -1975,7 +2015,7 @@ mod tests {
     #[test]
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2040,7 +2080,7 @@ mod tests {
     #[test]
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2071,7 +2111,12 @@ mod tests {
     #[test]
     fn removing_zoomed_pane_clears_zoom_state() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, PaneZoomPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            LayoutCommandPlugin,
+            PaneZoomPlugin,
+        ));
 
         let leaf_a = app.world_mut().spawn((Pane, Node::default())).id();
         let leaf_b = app.world_mut().spawn((Pane, Node::default())).id();
@@ -2100,7 +2145,7 @@ mod tests {
     #[test]
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2176,7 +2221,7 @@ mod tests {
     #[test]
     fn select_command_auto_unzooms() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2247,7 +2292,12 @@ mod tests {
     #[test]
     fn removing_zoomed_restores_display_flex() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, PaneZoomPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            LayoutCommandPlugin,
+            PaneZoomPlugin,
+        ));
 
         let leaf = app.world_mut().spawn((Pane, Node::default())).id();
         let sib = app
@@ -2283,7 +2333,12 @@ mod tests {
     #[test]
     fn sync_zoom_visibility_sets_display_none_on_hidden_entities() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, PaneZoomPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            LayoutCommandPlugin,
+            PaneZoomPlugin,
+        ));
 
         let leaf = app.world_mut().spawn((Pane, Node::default())).id();
         let sib_a = app.world_mut().spawn((Pane, Node::default())).id();
@@ -2320,7 +2375,12 @@ mod tests {
     #[test]
     fn zoom_hides_siblings_at_each_split_ancestor() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, PaneZoomPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            LayoutCommandPlugin,
+            PaneZoomPlugin,
+        ));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
@@ -2407,7 +2467,7 @@ mod tests {
 
     fn build_in_pane_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()

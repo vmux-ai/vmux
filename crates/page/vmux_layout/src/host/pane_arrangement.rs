@@ -1,12 +1,13 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
 use vmux_history::LastActivatedAt;
 
 use crate::host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings};
 
 use super::{
-    pane::{Pane, PaneSplit, PaneSplitDirection},
+    command::LayoutRequestSet,
+    pane::{Pane, PaneArrangement, PaneRequest, PaneSplit, PaneSplitDirection},
     stack::{ActiveTabParam, Stack, focused_stack},
+    target::SiblingDirection,
 };
 
 pub(super) struct ArrangementPlugin;
@@ -19,14 +20,14 @@ impl Plugin for ArrangementPlugin {
         app.add_systems(
             Update,
             arrange_from_commands
-                .in_set(ReadAppCommands)
+                .in_set(LayoutRequestSet::Handle)
                 .in_set(ArrangementSet),
         );
     }
 }
 
 fn arrange_from_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -37,22 +38,10 @@ fn arrange_from_commands(
     splits: Query<&PaneSplit>,
     mut commands: Commands,
 ) {
-    for command in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Pane(command)) = *command else {
+    for request in reader.read() {
+        let PaneRequest::Arrange(arrangement) = *request else {
             continue;
         };
-        if !matches!(
-            command,
-            PaneCommand::SwapPrev
-                | PaneCommand::SwapNext
-                | PaneCommand::RotateForward
-                | PaneCommand::RotateBackward
-                | PaneCommand::Mirror
-                | PaneCommand::MirrorHorizontal
-                | PaneCommand::MirrorVertical
-        ) {
-            continue;
-        }
         let tab = active_tab.get();
         let (_, Some(active), _) = focused_stack(
             tab,
@@ -65,8 +54,8 @@ fn arrange_from_commands(
             continue;
         };
 
-        match command {
-            PaneCommand::SwapPrev | PaneCommand::SwapNext => {
+        match arrangement {
+            PaneArrangement::Swap(direction) => {
                 let Ok(parent) = parents.get(active).map(Relationship::get) else {
                     continue;
                 };
@@ -85,7 +74,7 @@ fn arrange_from_commands(
                 let Some(active_index) = find_kind_index(active, children, &pane_positions) else {
                     continue;
                 };
-                let pair = if command == PaneCommand::SwapPrev {
+                let pair = if direction == SiblingDirection::Previous {
                     resolve_prev(active_index)
                 } else {
                     resolve_next(active_index, pane_positions.len())
@@ -94,36 +83,27 @@ fn arrange_from_commands(
                     swap_siblings(&mut commands, parent, children, &pane_positions, from, to);
                 }
             }
-            PaneCommand::RotateForward | PaneCommand::RotateBackward => {
+            PaneArrangement::Rotate(direction) => {
                 let Some(tab) = tab else {
                     continue;
                 };
                 PaneArrangement::rotate(
                     tab,
-                    command == PaneCommand::RotateForward,
+                    direction == SiblingDirection::Next,
                     &all_children,
                     &leaf_panes,
                     &mut commands,
                 );
             }
-            PaneCommand::Mirror | PaneCommand::MirrorHorizontal | PaneCommand::MirrorVertical => {
+            PaneArrangement::Mirror(direction) => {
                 let Some(tab) = tab else {
                     continue;
                 };
-                let direction = match command {
-                    PaneCommand::Mirror => None,
-                    PaneCommand::MirrorHorizontal => Some(PaneSplitDirection::Row),
-                    PaneCommand::MirrorVertical => Some(PaneSplitDirection::Column),
-                    _ => unreachable!(),
-                };
                 PaneArrangement::mirror(tab, direction, &all_children, &splits, &mut commands);
             }
-            _ => {}
         }
     }
 }
-
-struct PaneArrangement;
 
 impl PaneArrangement {
     fn rotate(

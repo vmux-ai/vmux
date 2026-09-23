@@ -1,13 +1,14 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
+use vmux_api::open_target::PaneDirection;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
 use super::{
-    pane::{Pane, PaneSplit, PaneSplitDirection},
+    command::LayoutRequestSet,
+    pane::{Pane, PaneRequest, PaneResize, PaneSplit, PaneSplitDirection},
     stack::{ActiveTabParam, Stack, focused_stack},
 };
 
@@ -19,7 +20,10 @@ pub(super) struct ResizePlugin;
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PaneSize>()
-            .add_systems(Update, resize_from_commands.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                resize_from_commands.in_set(LayoutRequestSet::Handle),
+            )
             .add_systems(Update, resize_from_pointer)
             .add_systems(PostUpdate, sync_split_gaps);
     }
@@ -74,7 +78,7 @@ pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32) {
 }
 
 fn resize_from_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -85,20 +89,10 @@ fn resize_from_commands(
     splits: Query<&PaneSplit>,
     mut sizes: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>)>,
 ) {
-    for command in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Pane(command)) = *command else {
+    for request in reader.read() {
+        let PaneRequest::Resize(resize) = *request else {
             continue;
         };
-        if !matches!(
-            command,
-            PaneCommand::EqualizeSize
-                | PaneCommand::ResizeLeft
-                | PaneCommand::ResizeRight
-                | PaneCommand::ResizeUp
-                | PaneCommand::ResizeDown
-        ) {
-            continue;
-        }
         let (_, Some(active), _) = focused_stack(
             active_tab.get(),
             &all_children,
@@ -110,18 +104,21 @@ fn resize_from_commands(
             continue;
         };
 
-        if command == PaneCommand::EqualizeSize {
-            equalize_siblings(active, &parents, &splits, &all_children, &mut sizes);
-            continue;
+        match resize {
+            PaneResize::Equalize => {
+                equalize_siblings(active, &parents, &splits, &all_children, &mut sizes);
+            }
+            PaneResize::Direction(direction) => {
+                resize_active_pane(
+                    active,
+                    direction,
+                    &parents,
+                    &splits,
+                    &all_children,
+                    &mut sizes,
+                );
+            }
         }
-        resize_active_pane(
-            active,
-            command,
-            &parents,
-            &splits,
-            &all_children,
-            &mut sizes,
-        );
     }
 }
 
@@ -160,18 +157,17 @@ fn equalize_siblings(
 
 fn resize_active_pane(
     active: Entity,
-    command: PaneCommand,
+    direction: PaneDirection,
     parents: &Query<&ChildOf>,
     splits: &Query<&PaneSplit>,
     all_children: &Query<&Children>,
     sizes: &mut ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>)>,
 ) {
-    let axis = match command {
-        PaneCommand::ResizeLeft | PaneCommand::ResizeRight => PaneSplitDirection::Row,
-        PaneCommand::ResizeUp | PaneCommand::ResizeDown => PaneSplitDirection::Column,
-        _ => return,
+    let axis = match direction {
+        PaneDirection::Left | PaneDirection::Right => PaneSplitDirection::Row,
+        PaneDirection::Top | PaneDirection::Bottom => PaneSplitDirection::Column,
     };
-    let grows = matches!(command, PaneCommand::ResizeRight | PaneCommand::ResizeDown);
+    let after = matches!(direction, PaneDirection::Right | PaneDirection::Bottom);
     let mut child = active;
     let mut parent = None;
     for _ in 0..10 {
@@ -197,7 +193,7 @@ fn resize_active_pane(
     let Some(index) = siblings.iter().position(|entity| *entity == child) else {
         return;
     };
-    let sibling = if grows {
+    let sibling = if after {
         let Some(sibling) = siblings.get(index + 1) else {
             return;
         };
@@ -398,7 +394,6 @@ mod tests {
     use super::*;
     use crate::tab::Tab;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandPlugin, WriteAppCommands};
 
     struct ResizeFixture {
         app: App,
@@ -409,8 +404,9 @@ mod tests {
     impl ResizeFixture {
         fn new(left_grow: f32, right_grow: f32) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, CommandPlugin))
-                .add_systems(Update, resize_from_commands.in_set(WriteAppCommands));
+            app.add_plugins(MinimalPlugins)
+                .add_message::<PaneRequest>()
+                .add_systems(Update, resize_from_commands);
             let tab = app
                 .world_mut()
                 .spawn((Tab::default(), LastActivatedAt::now()))
@@ -456,11 +452,11 @@ mod tests {
             pane
         }
 
-        fn send(&mut self, command: PaneCommand) {
+        fn send(&mut self, resize: PaneResize) {
             self.app
                 .world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Layout(LayoutCommand::Pane(command)));
+                .resource_mut::<Messages<PaneRequest>>()
+                .write(PaneRequest::Resize(resize));
             self.app.update();
         }
 
@@ -504,7 +500,7 @@ mod tests {
     fn resize_command_updates_node_and_persisted_size() {
         let mut fixture = ResizeFixture::new(1.0, 1.0);
 
-        fixture.send(PaneCommand::ResizeRight);
+        fixture.send(PaneResize::Direction(PaneDirection::Right));
 
         let left = fixture.grows(fixture.left);
         let right = fixture.grows(fixture.right);
@@ -518,7 +514,7 @@ mod tests {
     fn equalize_command_updates_node_and_persisted_size() {
         let mut fixture = ResizeFixture::new(2.0, 1.0);
 
-        fixture.send(PaneCommand::EqualizeSize);
+        fixture.send(PaneResize::Equalize);
 
         assert_eq!(fixture.grows(fixture.left), (1.0, 1.0));
         assert_eq!(fixture.grows(fixture.right), (1.0, 1.0));

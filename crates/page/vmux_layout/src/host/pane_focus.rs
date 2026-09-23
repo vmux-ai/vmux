@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use std::time::Instant;
-use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{
-    pane::{Pane, PaneDrag, PaneSplit},
+    command::LayoutRequestSet,
+    pane::{Pane, PaneDrag, PaneFocus, PaneRequest, PaneSplit},
     stack::{ActiveTabParam, Stack, active_among, active_pane_in_tab, active_stack_in_pane},
 };
 
@@ -19,7 +19,7 @@ impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
+            .add_systems(Update, on_pane_select.in_set(LayoutRequestSet::Handle))
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
         #[cfg(target_os = "macos")]
         app.add_systems(
@@ -46,7 +46,7 @@ pub struct PendingCursorWarp {
 }
 
 fn on_pane_select(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<PaneRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -56,17 +56,9 @@ fn on_pane_select(
     mut pending_warp: ResMut<PendingCursorWarp>,
     mut commands: Commands,
 ) {
-    for command in reader.read() {
-        let direction = match command {
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)) => {
-                Vec2::new(-1.0, 0.0)
-            }
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight)) => {
-                Vec2::new(1.0, 0.0)
-            }
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectUp)) => Vec2::new(0.0, -1.0),
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown)) => Vec2::new(0.0, 1.0),
-            _ => continue,
+    for request in reader.read() {
+        let PaneRequest::Focus(focus) = request else {
+            continue;
         };
 
         let Some(tab) = active_tab_param.get() else {
@@ -80,37 +72,52 @@ fn on_pane_select(
         else {
             continue;
         };
-        let Ok(&current_layout) = pane_layout.get(current) else {
-            continue;
-        };
-
-        let mut candidates = Vec::new();
-        for pane in panes {
-            if pane == current {
-                continue;
+        let target = match focus {
+            PaneFocus::Next => {
+                let Some(index) = panes.iter().position(|pane| *pane == current) else {
+                    continue;
+                };
+                panes[(index + 1) % panes.len()]
             }
-            let Ok(&candidate_layout) = pane_layout.get(pane) else {
-                continue;
-            };
-            if (candidate_layout.center - current_layout.center).dot(direction) <= 0.0 {
-                continue;
+            PaneFocus::Direction(direction) => {
+                let direction = match direction {
+                    vmux_api::open_target::PaneDirection::Left => Vec2::new(-1.0, 0.0),
+                    vmux_api::open_target::PaneDirection::Right => Vec2::new(1.0, 0.0),
+                    vmux_api::open_target::PaneDirection::Top => Vec2::new(0.0, -1.0),
+                    vmux_api::open_target::PaneDirection::Bottom => Vec2::new(0.0, 1.0),
+                };
+                let Ok(&current_layout) = pane_layout.get(current) else {
+                    continue;
+                };
+                let mut candidates = Vec::new();
+                for pane in &panes {
+                    if *pane == current {
+                        continue;
+                    }
+                    let Ok(&candidate_layout) = pane_layout.get(*pane) else {
+                        continue;
+                    };
+                    if (candidate_layout.center - current_layout.center).dot(direction) <= 0.0 {
+                        continue;
+                    }
+                    let overlaps = if direction.x.abs() > 0.5 {
+                        current_layout.overlaps_rows(candidate_layout)
+                    } else {
+                        current_layout.overlaps_columns(candidate_layout)
+                    };
+                    if overlaps {
+                        candidates.push(*pane);
+                    }
+                }
+                let Some(target) = active_among(
+                    candidates
+                        .iter()
+                        .filter_map(|&entity| pane_activity.get(entity).ok()),
+                ) else {
+                    continue;
+                };
+                target
             }
-            let overlaps = if direction.x.abs() > 0.5 {
-                current_layout.overlaps_rows(candidate_layout)
-            } else {
-                current_layout.overlaps_columns(candidate_layout)
-            };
-            if overlaps {
-                candidates.push(pane);
-            }
-        }
-
-        let Some(target) = active_among(
-            candidates
-                .iter()
-                .filter_map(|&entity| pane_activity.get(entity).ok()),
-        ) else {
-            continue;
         };
         hover_intent.target = None;
         hover_intent.last_activation = Some(Instant::now());
@@ -341,7 +348,7 @@ mod tests {
     use super::*;
     use crate::{pane::PaneSplitDirection, tab::Tab};
     use bevy::{ecs::message::Messages, window::PrimaryWindow};
-    use vmux_command::{CommandPlugin, WriteAppCommands};
+    use vmux_api::open_target::PaneDirection;
 
     struct FocusFixture {
         app: App,
@@ -350,10 +357,11 @@ mod tests {
     impl FocusFixture {
         fn selection() -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, CommandPlugin))
+            app.add_plugins(MinimalPlugins)
+                .add_message::<PaneRequest>()
                 .init_resource::<PaneHoverIntent>()
                 .init_resource::<PendingCursorWarp>()
-                .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+                .add_systems(Update, on_pane_select);
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
         }
@@ -389,11 +397,11 @@ mod tests {
             pane
         }
 
-        fn select(&mut self, command: PaneCommand) {
+        fn select(&mut self, direction: PaneDirection) {
             self.app
                 .world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Layout(LayoutCommand::Pane(command)));
+                .resource_mut::<Messages<PaneRequest>>()
+                .write(PaneRequest::Focus(PaneFocus::Direction(direction)));
             self.app.update();
         }
     }
@@ -459,7 +467,7 @@ mod tests {
             .0;
         assert!(previous_top > previous_bottom);
 
-        fixture.select(PaneCommand::SelectRight);
+        fixture.select(PaneDirection::Right);
 
         assert!(fixture.app.world().get::<LastActivatedAt>(top).unwrap().0 > previous_top);
         assert_eq!(
@@ -524,7 +532,7 @@ mod tests {
             .insert(LastActivatedAt(0));
         let previous_left = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
 
-        fixture.select(PaneCommand::SelectLeft);
+        fixture.select(PaneDirection::Left);
 
         assert!(fixture.app.world().get::<LastActivatedAt>(left).unwrap().0 > previous_left);
     }
@@ -558,7 +566,7 @@ mod tests {
             .insert(LastActivatedAt::now());
         std::thread::sleep(std::time::Duration::from_millis(2));
 
-        fixture.select(PaneCommand::SelectLeft);
+        fixture.select(PaneDirection::Left);
 
         let left_activity = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
         let right_activity = fixture.app.world().get::<LastActivatedAt>(right).unwrap().0;
