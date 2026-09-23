@@ -22,6 +22,15 @@ pub struct AgentCommandRequest {
     pub command: AgentCommand,
 }
 
+impl AgentCommandRequest {
+    pub fn response(&self, result: AgentCommandResult) -> crate::protocol::ClientMessage {
+        crate::protocol::ClientMessage::AgentCommandResponse {
+            request_id: self.request_id,
+            result,
+        }
+    }
+}
+
 #[derive(Message)]
 pub struct AgentQueryRequest {
     pub request_id: AgentRequestId,
