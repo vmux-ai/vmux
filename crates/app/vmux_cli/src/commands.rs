@@ -7,7 +7,7 @@ pub mod notify_turn_end;
 pub mod open;
 pub mod remote;
 pub mod service;
-pub mod tools;
+pub mod tool;
 
 #[derive(Debug, Parser)]
 #[command(name = "vmux", version, about = "Vmux command-line interface")]
@@ -48,7 +48,7 @@ pub enum Command {
         #[arg(long)]
         anchor: Option<String>,
     },
-    Tools(tools::ToolsArgs),
+    Tools(tool::ToolArgs),
     Service(service::ServiceArgs),
     Remote(remote::RemoteArgs),
 }

@@ -30,7 +30,7 @@ impl Plugin for KeyPlugin {
 }
 
 #[derive(Component)]
-struct FileKeyCommand(FileKey);
+struct FileKeyBinding(FileKey);
 
 fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
@@ -84,13 +84,13 @@ fn spawn_commands(mut commands: Commands) {
             FileKey::FindInFiles,
         ),
     ] {
-        commands.spawn((definition, FileKeyCommand(key)));
+        commands.spawn((definition, FileKeyBinding(key)));
     }
 }
 
 fn echo_key_command(
     trigger: On<CommandDispatch>,
-    keys: Query<&FileKeyCommand>,
+    keys: Query<&FileKeyBinding>,
     mut commands: Commands,
 ) {
     let Ok(key) = keys.get(trigger.event().command()) else {

@@ -16,7 +16,7 @@ impl Plugin for KeyPlugin {
 }
 
 #[derive(Component)]
-struct CommandBarKeyCommand(CommandBarKey);
+struct CommandBarKeyBinding(CommandBarKey);
 
 fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
@@ -50,13 +50,13 @@ fn spawn_commands(mut commands: Commands) {
             CommandBarKey::Dismiss,
         ),
     ] {
-        commands.spawn((definition, CommandBarKeyCommand(key)));
+        commands.spawn((definition, CommandBarKeyBinding(key)));
     }
 }
 
 fn echo_key_command(
     trigger: On<CommandDispatch>,
-    keys: Query<&CommandBarKeyCommand>,
+    keys: Query<&CommandBarKeyBinding>,
     mut commands: Commands,
 ) {
     let Ok(key) = keys.get(trigger.event().command()) else {

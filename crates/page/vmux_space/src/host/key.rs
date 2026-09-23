@@ -18,7 +18,7 @@ impl Plugin for SpaceKeyPlugin {
 }
 
 #[derive(Component)]
-struct SpaceKeyCommand(SpaceKey);
+struct SpaceKeyBinding(SpaceKey);
 
 fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
@@ -52,13 +52,13 @@ fn spawn_commands(mut commands: Commands) {
             SpaceKey::Delete,
         ),
     ] {
-        commands.spawn((definition, SpaceKeyCommand(key)));
+        commands.spawn((definition, SpaceKeyBinding(key)));
     }
 }
 
 fn echo_key_command(
     trigger: On<CommandDispatch>,
-    keys: Query<&SpaceKeyCommand>,
+    keys: Query<&SpaceKeyBinding>,
     mut commands: Commands,
 ) {
     let Ok(key) = keys.get(trigger.event().command()) else {

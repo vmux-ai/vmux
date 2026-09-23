@@ -36,25 +36,29 @@ use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct ReopenClosedPage;
 
-impl ReopenClosedPage {
-    fn register(app: &mut App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
+#[derive(Component)]
+struct ReopenClosedPageBinding;
 
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new(
-                "stack_reopen",
-                "Reopen Closed Page",
-                "Layout > Stack",
-            )
-            .accelerator("super+shift+t")
-            .direct("Ctrl+Shift+T"),
-        ]
-    }
+fn spawn_reopen_closed_page_command(mut commands: Commands) {
+    commands.spawn((
+        vmux_command::CommandDefinition::new(
+            "stack_reopen",
+            "Reopen Closed Page",
+            "Layout > Stack",
+        )
+        .accelerator("super+shift+t")
+        .direct("Ctrl+Shift+T"),
+        ReopenClosedPageBinding,
+    ));
+}
 
-    fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        (invocation.id == "stack_reopen").then_some(Self)
+fn issue_reopen_closed_page(
+    trigger: On<vmux_command::CommandDispatch>,
+    registered: Query<(), With<ReopenClosedPageBinding>>,
+    mut requests: MessageWriter<ReopenClosedPage>,
+) {
+    if registered.contains(trigger.event().command()) {
+        requests.write(ReopenClosedPage);
     }
 }
 
@@ -62,8 +66,16 @@ pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
-        ReopenClosedPage::register(app);
-        app.add_message::<PageArchiveRequest>()
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<ReopenClosedPage>()
+            .add_message::<PageArchiveRequest>()
+            .add_systems(
+                Startup,
+                spawn_reopen_closed_page_command.in_set(vmux_command::RegisterCommandDefinitions),
+            )
+            .add_observer(issue_reopen_closed_page)
             .add_systems(Update, (capture_archived_pages, maintain_archive))
             .add_systems(
                 Update,

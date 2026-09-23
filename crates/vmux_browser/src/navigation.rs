@@ -1,7 +1,10 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
-use vmux_command::{CommandDefinition, CommandInvocation, ReadCommandRequests};
+use vmux_command::{
+    CommandDefinition, CommandDispatch, CommandRuntimePlugin, ReadCommandRequests,
+    RegisterCommandDefinitions,
+};
 use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -22,45 +25,57 @@ pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        OpenHistoryRequest::register(app);
-        app.add_systems(
-            Update,
-            (
-                drain_committed_navigation,
-                handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
-                handle_browser_go_back_requests,
-                handle_browser_go_forward_requests,
-                handle_open_in_new_stack_requests,
-                handle_browser_open_history.in_set(ReadCommandRequests),
-            ),
-        )
-        .add_systems(
-            Update,
-            (sync_page_metadata_to_tab, spawn_visit_on_navigation)
-                .chain()
-                .after(vmux_layout::apply_cef_state_from_webview),
-        );
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_message::<OpenHistoryRequest>()
+            .add_systems(
+                Startup,
+                spawn_history_command.in_set(RegisterCommandDefinitions),
+            )
+            .add_observer(issue_open_history)
+            .add_systems(
+                Update,
+                (
+                    drain_committed_navigation,
+                    handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
+                    handle_browser_go_back_requests,
+                    handle_browser_go_forward_requests,
+                    handle_open_in_new_stack_requests,
+                    handle_browser_open_history.in_set(ReadCommandRequests),
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_page_metadata_to_tab, spawn_visit_on_navigation)
+                    .chain()
+                    .after(vmux_layout::apply_cef_state_from_webview),
+            );
     }
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpenHistoryRequest;
 
-impl OpenHistoryRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
+#[derive(Component)]
+struct OpenHistoryBinding;
 
-    pub fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("browser_open_history", "History", "Browser > Bar")
-                .accelerator("super+y")
-                .expose_to_mcp(),
-        ]
-    }
+fn spawn_history_command(mut commands: Commands) {
+    commands.spawn((
+        CommandDefinition::new("browser_open_history", "History", "Browser > Bar")
+            .accelerator("super+y")
+            .expose_to_mcp(),
+        OpenHistoryBinding,
+    ));
+}
 
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        (invocation.id == "browser_open_history").then_some(Self)
+fn issue_open_history(
+    trigger: On<CommandDispatch>,
+    registered: Query<(), With<OpenHistoryBinding>>,
+    mut requests: MessageWriter<OpenHistoryRequest>,
+) {
+    if registered.contains(trigger.event().command()) {
+        requests.write(OpenHistoryRequest);
     }
 }
 
@@ -504,12 +519,21 @@ mod committed_navigation_tests {
 #[cfg(test)]
 mod command_definition_tests {
     use super::*;
+    use vmux_command::CommandInvocation;
 
     #[test]
     fn history_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = OpenHistoryRequest::definitions();
-        let tools = definitions
-            .iter()
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CommandRuntimePlugin)
+            .add_message::<OpenHistoryRequest>()
+            .add_systems(Startup, spawn_history_command)
+            .add_observer(issue_open_history);
+        app.update();
+
+        let mut query = app.world_mut().query::<&CommandDefinition>();
+        let tools = query
+            .iter(app.world())
             .filter_map(CommandDefinition::agent_tool)
             .collect::<Vec<_>>();
         assert_eq!(
@@ -519,7 +543,20 @@ mod command_definition_tests {
                 .collect::<Vec<_>>(),
             ["browser_open_history"],
         );
-        let invocation = CommandInvocation::new(Entity::PLACEHOLDER, "browser_open_history");
-        assert!(OpenHistoryRequest::from_invocation(&invocation).is_some());
+
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(
+                Entity::PLACEHOLDER,
+                "browser_open_history",
+            ));
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<OpenHistoryRequest>>()
+                .drain()
+                .count(),
+            1,
+        );
     }
 }

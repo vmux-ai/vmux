@@ -22,8 +22,16 @@ pub struct SettingsViewPlugin;
 
 impl Plugin for SettingsViewPlugin {
     fn build(&self, app: &mut App) {
-        OpenSettingsRequest::register(app);
-        app.init_resource::<CurrentUpdateCheckStatus>()
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<OpenSettingsRequest>()
+            .add_systems(
+                Startup,
+                spawn_open_settings_command.in_set(vmux_command::RegisterCommandDefinitions),
+            )
+            .add_observer(issue_open_settings)
+            .init_resource::<CurrentUpdateCheckStatus>()
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
                 vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
@@ -56,21 +64,25 @@ pub struct Settings;
 #[derive(Message)]
 struct OpenSettingsRequest;
 
-impl OpenSettingsRequest {
-    fn register(app: &mut App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
+#[derive(Component)]
+struct OpenSettingsBinding;
 
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new("open_settings", "Settings", "Layout > Window")
-                .hidden()
-                .direct("Super+,"),
-        ]
-    }
+fn spawn_open_settings_command(mut commands: Commands) {
+    commands.spawn((
+        vmux_command::CommandDefinition::new("open_settings", "Settings", "Layout > Window")
+            .hidden()
+            .direct("Super+,"),
+        OpenSettingsBinding,
+    ));
+}
 
-    fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        (invocation.id == "open_settings").then_some(Self)
+fn issue_open_settings(
+    trigger: On<vmux_command::CommandDispatch>,
+    registered: Query<(), With<OpenSettingsBinding>>,
+    mut requests: MessageWriter<OpenSettingsRequest>,
+) {
+    if registered.contains(trigger.event().command()) {
+        requests.write(OpenSettingsRequest);
     }
 }
 
