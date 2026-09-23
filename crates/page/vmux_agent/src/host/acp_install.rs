@@ -52,11 +52,17 @@ struct AcpInstallKey {
 }
 
 #[derive(Component)]
+#[relationship(relationship_target = AcpInstallWaiters)]
 struct AcpInstallWaiter {
+    #[relationship]
     job: Entity,
     sid: String,
     agent_id: String,
 }
+
+#[derive(Component)]
+#[relationship_target(relationship = AcpInstallWaiter)]
+struct AcpInstallWaiters(Vec<Entity>);
 
 struct AcpInstallRequest {
     agent_id: String,
@@ -166,36 +172,40 @@ fn poll_acp_installs(
     mut swaps: MessageReader<vmux_core::agent::SwapStackSession>,
     service: Option<Res<ServiceClient>>,
     settings: Option<Res<AppSettings>>,
-    mut jobs: Query<(Entity, &AcpInstallKey, &mut AcpInstallJob)>,
+    mut jobs: Query<(
+        Entity,
+        &AcpInstallKey,
+        &mut AcpInstallJob,
+        Option<&AcpInstallWaiters>,
+    )>,
     mut waiters: Query<(Entity, &AcpSession, &AcpInstallWaiter, &mut AgentRunState)>,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
 ) {
     let swapping: std::collections::HashSet<Entity> =
         swaps.read().map(|request| request.stack).collect();
-    let active_jobs: std::collections::HashSet<Entity> =
-        jobs.iter().map(|(entity, _, _)| entity).collect();
     let mut invalid_waiters = std::collections::HashSet::new();
     for (entity, session, waiter, _) in &mut waiters {
-        if swapping.contains(&entity)
-            || !waiter.matches(session)
-            || !active_jobs.contains(&waiter.job)
-        {
+        if swapping.contains(&entity) || !waiter.matches(session) || !jobs.contains(waiter.job) {
             invalid_waiters.insert(entity);
             commands
                 .entity(entity)
                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
         }
     }
-    for (job_entity, key, mut job) in &mut jobs {
+    for (job_entity, key, mut job, related_waiters) in &mut jobs {
+        let related_waiters = related_waiters
+            .map(|related| related.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
         if let Some(progress) = job.take_progress() {
-            for (entity, session, waiter, mut state) in &mut waiters {
-                if waiter.job == job_entity
-                    && !invalid_waiters.contains(&entity)
-                    && waiter.matches(session)
-                {
-                    progress.apply(&mut state);
+            for entity in related_waiters.iter().copied() {
+                let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
+                    continue;
+                };
+                if invalid_waiters.contains(&entity) || !waiter.matches(session) {
+                    continue;
                 }
+                progress.apply(&mut state);
             }
         }
         job.poll();
@@ -212,20 +222,20 @@ fn poll_acp_installs(
             });
             job.package_reported = true;
         }
-        let has_waiters = waiters.iter().any(|(entity, session, waiter, _)| {
-            waiter.job == job_entity
-                && !invalid_waiters.contains(&entity)
-                && waiter.matches(session)
+        let has_waiters = related_waiters.iter().any(|entity| {
+            waiters.get(*entity).is_ok_and(|(_, session, waiter, _)| {
+                !invalid_waiters.contains(entity) && waiter.matches(session)
+            })
         });
         if has_waiters && launch_ready && service.is_none() {
             continue;
         }
         let outcome = job.outcome.take().unwrap();
-        for (entity, session, waiter, mut state) in &mut waiters {
-            if waiter.job != job_entity
-                || invalid_waiters.contains(&entity)
-                || !waiter.matches(session)
-            {
+        for entity in related_waiters {
+            let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
+                continue;
+            };
+            if invalid_waiters.contains(&entity) || !waiter.matches(session) {
                 continue;
             }
             match &outcome.launch {
@@ -1720,6 +1730,23 @@ mod tests {
             AcpLaunchStarted::ready_message(Some("session-1")),
             "Loading session history…"
         );
+    }
+
+    #[test]
+    fn install_job_tracks_waiting_sessions_through_relationship() {
+        let mut app = App::new();
+        let job = app.world_mut().spawn_empty().id();
+        let stack = app
+            .world_mut()
+            .spawn(AcpInstallWaiter {
+                job,
+                sid: "session".to_string(),
+                agent_id: "agent".to_string(),
+            })
+            .id();
+
+        let waiters = app.world().get::<AcpInstallWaiters>(job).unwrap();
+        assert_eq!(waiters.iter().collect::<Vec<_>>(), vec![stack]);
     }
 
     #[test]
