@@ -14,12 +14,15 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::time::Instant;
-use vmux_command::open::OpenCommand;
-use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
+use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
+
+use super::{command::LayoutRequestSet, target::SiblingDirection};
+
+pub struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
@@ -30,21 +33,22 @@ impl Plugin for TabPlugin {
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .init_resource::<crate::window::FocusedWindow>()
+            .add_message::<TabRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_plugins(UiEventPlugin::<(TabsRequest,)>::default())
             .add_observer(on_tabs_request)
             .add_systems(
                 Update,
-                handle_tab_commands
-                    .in_set(ReadAppCommands)
+                handle_tab_requests
+                    .in_set(LayoutRequestSet::Handle)
                     .in_set(TabCommandSet)
                     .after(crate::settings::EffectiveStartupDirSet),
             )
             .add_systems(
                 Update,
                 crate::archive::handle_close_tab_requests
-                    .in_set(ReadAppCommands)
+                    .in_set(LayoutRequestSet::Handle)
                     .after(TabCommandSet)
                     .after(crate::stack::StackCommandSet),
             )
@@ -76,7 +80,21 @@ fn dismiss_launcher_over_new_surfaces(
     }
 }
 
-pub struct TabPlugin;
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub enum TabRequest {
+    Open { url: Option<String> },
+    Create,
+    Close,
+    Focus(TabFocus),
+    Move(SiblingDirection),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabFocus {
+    Sibling(SiblingDirection),
+    Index(usize),
+    Last,
+}
 
 #[derive(Message, Clone, Copy)]
 pub struct CloseTabRequest {
@@ -159,8 +177,8 @@ pub fn tab_bundle() -> impl Bundle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_tab_commands(
-    mut reader: MessageReader<AppCommand>,
+fn handle_tab_requests(
+    mut reader: MessageReader<TabRequest>,
     mut new_tabs: MessageReader<crate::NewTabRequest>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
@@ -174,14 +192,14 @@ fn handle_tab_commands(
     mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
+    for request in reader.read() {
         let Some(window) = focused_window.0 else {
             continue;
         };
         let active_tab = active_tab_param.get();
 
-        match cmd {
-            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
+        match request {
+            TabRequest::Open { url } => {
                 let Some((space, startup_dir)) = effective_startup_dir
                     .as_deref()
                     .and_then(|effective| effective.0.clone())
@@ -213,113 +231,87 @@ fn handle_tab_commands(
                     focus: true,
                 });
             }
-            AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
-                TabCommand::Close => {
-                    let Some(active) = active_tab else { continue };
-                    close_requests.write(CloseTabRequest { tab: active });
+            TabRequest::Close => {
+                let Some(active) = active_tab else { continue };
+                close_requests.write(CloseTabRequest { tab: active });
+            }
+            TabRequest::Create => {
+                let Some((space, startup_dir)) = effective_startup_dir
+                    .as_deref()
+                    .and_then(|effective| effective.0.clone())
+                else {
+                    continue;
+                };
+                let name = format!("Tab {}", tabs.iter().count() + 1);
+                layout_requests.write(TabLayoutSpawnRequest {
+                    space,
+                    primary_window: window,
+                    name: Some(name),
+                    startup_dir: startup_dir.clone(),
+                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                    clear_pending_stack: true,
+                    focus: true,
+                });
+            }
+            TabRequest::Focus(focus) => {
+                let Some(active) = active_tab else { continue };
+                let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                if siblings.is_empty() {
+                    continue;
                 }
-                TabCommand::New => {
-                    let Some((space, startup_dir)) = effective_startup_dir
-                        .as_deref()
-                        .and_then(|effective| effective.0.clone())
-                    else {
-                        continue;
-                    };
-                    let name = format!("Tab {}", tabs.iter().count() + 1);
-                    layout_requests.write(TabLayoutSpawnRequest {
-                        space,
-                        primary_window: window,
-                        name: Some(name),
-                        startup_dir: startup_dir.clone(),
-                        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
-                        clear_pending_stack: true,
-                        focus: true,
-                    });
+                let target_idx = match focus {
+                    TabFocus::Sibling(direction) => {
+                        if siblings.len() <= 1 {
+                            continue;
+                        }
+                        let Some(index) = siblings.iter().position(|entity| *entity == active)
+                        else {
+                            continue;
+                        };
+                        if *direction == SiblingDirection::Next {
+                            (index + 1) % siblings.len()
+                        } else {
+                            (index + siblings.len() - 1) % siblings.len()
+                        }
+                    }
+                    TabFocus::Index(index) => *index,
+                    TabFocus::Last => siblings.len() - 1,
+                };
+                if target_idx >= siblings.len() {
+                    continue;
                 }
-                TabCommand::Next | TabCommand::Previous => {
-                    let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
-                    if siblings.len() <= 1 {
-                        continue;
-                    }
-                    let Some(idx) = siblings.iter().position(|e| *e == active) else {
-                        continue;
-                    };
-                    let target_idx = if *tab_cmd == TabCommand::Next {
-                        (idx + 1) % siblings.len()
-                    } else {
-                        (idx + siblings.len() - 1) % siblings.len()
-                    };
-                    let target = siblings[target_idx];
-                    if target != active {
-                        commands.entity(target).insert(LastActivatedAt::now());
-                    }
+                let target = siblings[target_idx];
+                if target != active {
+                    commands.entity(target).insert(LastActivatedAt::now());
                 }
-                TabCommand::Rename => {}
-                TabCommand::SelectIndex1
-                | TabCommand::SelectIndex2
-                | TabCommand::SelectIndex3
-                | TabCommand::SelectIndex4
-                | TabCommand::SelectIndex5
-                | TabCommand::SelectIndex6
-                | TabCommand::SelectIndex7
-                | TabCommand::SelectIndex8
-                | TabCommand::SelectLast => {
-                    let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
-                    if siblings.is_empty() {
-                        continue;
-                    }
-                    let target_idx = match tab_cmd {
-                        TabCommand::SelectIndex1 => 0,
-                        TabCommand::SelectIndex2 => 1,
-                        TabCommand::SelectIndex3 => 2,
-                        TabCommand::SelectIndex4 => 3,
-                        TabCommand::SelectIndex5 => 4,
-                        TabCommand::SelectIndex6 => 5,
-                        TabCommand::SelectIndex7 => 6,
-                        TabCommand::SelectIndex8 => 7,
-                        TabCommand::SelectLast => siblings.len() - 1,
-                        _ => continue,
-                    };
-                    if target_idx >= siblings.len() {
-                        continue;
-                    }
-                    let target = siblings[target_idx];
-                    if target != active {
-                        commands.entity(target).insert(LastActivatedAt::now());
-                    }
+            }
+            TabRequest::Move(direction) => {
+                let Some(active) = active_tab else { continue };
+                let Ok(co) = child_of_q.get(active) else {
+                    continue;
+                };
+                let parent = co.get();
+                let Ok(children) = all_children.get(parent) else {
+                    continue;
+                };
+                let kind_positions: Vec<usize> = children
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| tab_q.contains(*e))
+                    .map(|(i, _)| i)
+                    .collect();
+                let Some(active_idx) = find_kind_index(active, children, &kind_positions) else {
+                    continue;
+                };
+                let pair = if *direction == SiblingDirection::Previous {
+                    resolve_prev(active_idx)
+                } else {
+                    resolve_next(active_idx, kind_positions.len())
+                };
+                if let Some((a, b)) = pair {
+                    swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
                 }
-                TabCommand::SwapPrev | TabCommand::SwapNext => {
-                    let Some(active) = active_tab else { continue };
-                    let Ok(co) = child_of_q.get(active) else {
-                        continue;
-                    };
-                    let parent = co.get();
-                    let Ok(children) = all_children.get(parent) else {
-                        continue;
-                    };
-                    let kind_positions: Vec<usize> = children
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, e)| tab_q.contains(*e))
-                        .map(|(i, _)| i)
-                        .collect();
-                    let Some(active_idx) = find_kind_index(active, children, &kind_positions)
-                    else {
-                        continue;
-                    };
-                    let pair = if *tab_cmd == TabCommand::SwapPrev {
-                        resolve_prev(active_idx)
-                    } else {
-                        resolve_next(active_idx, kind_positions.len())
-                    };
-                    if let Some((a, b)) = pair {
-                        swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
-                    }
-                }
-            },
-            _ => continue,
+            }
         }
     }
 
@@ -757,7 +749,8 @@ mod tests {
 
     fn build_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TabRequest>()
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<crate::NewTabRequest>()
@@ -771,7 +764,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_tab_commands.in_set(ReadAppCommands),
+                    handle_tab_requests,
                     crate::window::spawn_requested_tab_layouts,
                     collect_spawn_requests,
                 )
@@ -810,12 +803,10 @@ mod tests {
         build_main_and_tab(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab {
-                    url: Some("https://example.com".into()),
-                },
-            )));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Open {
+                url: Some("https://example.com".into()),
+            });
 
         app.update();
 
@@ -863,10 +854,8 @@ mod tests {
         build_main_and_tab(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab { url: None },
-            )));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Open { url: None });
 
         app.update();
 
@@ -881,10 +870,8 @@ mod tests {
         build_main_and_tab(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab { url: None },
-            )));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Open { url: None });
 
         app.update();
 
@@ -927,8 +914,8 @@ mod tests {
         ));
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Create);
 
         app.update();
 
@@ -960,8 +947,8 @@ mod tests {
         ))));
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Create);
 
         app.update();
 
@@ -1008,10 +995,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab { url: None },
-            )));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Open { url: None });
 
         app.update();
 
@@ -1181,24 +1166,20 @@ mod tests {
     #[test]
     fn closing_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            CommandPlugin,
-            crate::space::SpaceLayoutPlugin,
-        ))
-        .add_message::<crate::TabLayoutSpawnRequest>()
-        .add_message::<crate::NewTabRequest>()
-        .add_message::<CloseTabRequest>()
-        .init_resource::<LastTabCloseAt>()
-        .add_systems(
-            Update,
-            (
-                handle_tab_commands,
-                crate::archive::handle_close_tab_requests,
-            )
-                .chain()
-                .in_set(ReadAppCommands),
-        );
+        app.add_plugins((MinimalPlugins, crate::space::SpaceLayoutPlugin))
+            .add_message::<TabRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<crate::NewTabRequest>()
+            .add_message::<CloseTabRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_systems(
+                Update,
+                (
+                    handle_tab_requests,
+                    crate::archive::handle_close_tab_requests,
+                )
+                    .chain(),
+            );
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         app.insert_resource(crate::window::FocusedWindow(Some(window)));
@@ -1226,8 +1207,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::Close)));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Close);
 
         app.update();
         app.update();
@@ -1314,16 +1295,13 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
+            crate::host::command::LayoutCommandPlugin,
             crate::space::SpaceLayoutPlugin,
+            TabPlugin,
         ))
+        .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
         .add_message::<crate::TabLayoutSpawnRequest>()
-        .add_message::<crate::NewTabRequest>()
-        .add_message::<CloseTabRequest>()
-        .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
-        .add_systems(
-            PostUpdate,
-            sync_tab_visibility.before(LayoutSystems::Layout),
-        );
+        .add_message::<PageOpenRequest>();
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         app.insert_resource(crate::window::FocusedWindow(Some(window)));
@@ -1347,8 +1325,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::Next)));
+            .resource_mut::<Messages<TabRequest>>()
+            .write(TabRequest::Focus(TabFocus::Sibling(SiblingDirection::Next)));
 
         app.update();
 

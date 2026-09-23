@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
-    ServiceCommand, StackCommand,
+    ServiceCommand, StackCommand, TabCommand,
 };
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
         PaneArrangement, PaneFocus, PaneOpenRequest, PaneRequest, PaneResize, PaneSplitDirection,
     },
     stack::StackRequest,
+    tab::{TabFocus, TabRequest},
     target::SiblingDirection,
 };
 
@@ -26,6 +27,7 @@ impl Plugin for LayoutCommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PaneRequest>()
             .add_message::<StackRequest>()
+            .add_message::<TabRequest>()
             .add_message::<ReopenClosedPage>()
             .configure_sets(
                 Update,
@@ -97,6 +99,7 @@ fn dispatch_commands(
     mut commands: MessageReader<AppCommand>,
     mut pane_requests: MessageWriter<PaneRequest>,
     mut stack_requests: MessageWriter<StackRequest>,
+    mut tab_requests: MessageWriter<TabRequest>,
     mut reopen_requests: MessageWriter<ReopenClosedPage>,
 ) {
     for command in commands.read() {
@@ -141,8 +144,42 @@ fn dispatch_commands(
             AppCommand::Service(ServiceCommand::Open) => {
                 stack_requests.write(StackRequest::OpenServices);
             }
+            AppCommand::Layout(LayoutCommand::Tab(command)) => {
+                if let Ok(request) = TabRequest::try_from(*command) {
+                    tab_requests.write(request);
+                }
+            }
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
+                tab_requests.write(TabRequest::Open { url: url.clone() });
+            }
             _ => {}
         }
+    }
+}
+
+impl TryFrom<TabCommand> for TabRequest {
+    type Error = ();
+
+    fn try_from(command: TabCommand) -> Result<Self, Self::Error> {
+        let request = match command {
+            TabCommand::Close => Self::Close,
+            TabCommand::New => Self::Create,
+            TabCommand::Next => Self::Focus(TabFocus::Sibling(SiblingDirection::Next)),
+            TabCommand::Previous => Self::Focus(TabFocus::Sibling(SiblingDirection::Previous)),
+            TabCommand::SelectIndex1 => Self::Focus(TabFocus::Index(0)),
+            TabCommand::SelectIndex2 => Self::Focus(TabFocus::Index(1)),
+            TabCommand::SelectIndex3 => Self::Focus(TabFocus::Index(2)),
+            TabCommand::SelectIndex4 => Self::Focus(TabFocus::Index(3)),
+            TabCommand::SelectIndex5 => Self::Focus(TabFocus::Index(4)),
+            TabCommand::SelectIndex6 => Self::Focus(TabFocus::Index(5)),
+            TabCommand::SelectIndex7 => Self::Focus(TabFocus::Index(6)),
+            TabCommand::SelectIndex8 => Self::Focus(TabFocus::Index(7)),
+            TabCommand::SelectLast => Self::Focus(TabFocus::Last),
+            TabCommand::SwapPrev => Self::Move(SiblingDirection::Previous),
+            TabCommand::SwapNext => Self::Move(SiblingDirection::Next),
+            TabCommand::Rename => return Err(()),
+        };
+        Ok(request)
     }
 }
 
@@ -313,5 +350,74 @@ mod tests {
             .drain()
             .collect();
         assert_eq!(reopen_requests, [ReopenClosedPage]);
+    }
+
+    #[test]
+    fn tab_commands_route_to_owned_requests() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppCommand>()
+            .add_plugins(LayoutCommandPlugin);
+        let commands = [
+            TabCommand::Close,
+            TabCommand::New,
+            TabCommand::Next,
+            TabCommand::Previous,
+            TabCommand::Rename,
+            TabCommand::SelectIndex1,
+            TabCommand::SelectIndex2,
+            TabCommand::SelectIndex3,
+            TabCommand::SelectIndex4,
+            TabCommand::SelectIndex5,
+            TabCommand::SelectIndex6,
+            TabCommand::SelectIndex7,
+            TabCommand::SelectIndex8,
+            TabCommand::SelectLast,
+            TabCommand::SwapPrev,
+            TabCommand::SwapNext,
+        ];
+        for command in commands {
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Layout(LayoutCommand::Tab(command)));
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab {
+                    url: Some("https://example.com".to_string()),
+                },
+            )));
+
+        app.update();
+
+        let requests: Vec<TabRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<TabRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            requests,
+            [
+                TabRequest::Close,
+                TabRequest::Create,
+                TabRequest::Focus(TabFocus::Sibling(SiblingDirection::Next)),
+                TabRequest::Focus(TabFocus::Sibling(SiblingDirection::Previous)),
+                TabRequest::Focus(TabFocus::Index(0)),
+                TabRequest::Focus(TabFocus::Index(1)),
+                TabRequest::Focus(TabFocus::Index(2)),
+                TabRequest::Focus(TabFocus::Index(3)),
+                TabRequest::Focus(TabFocus::Index(4)),
+                TabRequest::Focus(TabFocus::Index(5)),
+                TabRequest::Focus(TabFocus::Index(6)),
+                TabRequest::Focus(TabFocus::Index(7)),
+                TabRequest::Focus(TabFocus::Last),
+                TabRequest::Move(SiblingDirection::Previous),
+                TabRequest::Move(SiblingDirection::Next),
+                TabRequest::Open {
+                    url: Some("https://example.com".to_string()),
+                },
+            ]
+        );
     }
 }
