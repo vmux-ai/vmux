@@ -9,8 +9,12 @@ pub struct WriteAppCommands;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReadAppCommands;
 
-pub fn build_native_root_menu(menu: &mut muda::Menu) -> Result<(), muda::Error> {
-    AppCommand::build_native_root_menu(menu)
+pub fn build_native_root_menu(
+    menu: &mut muda::Menu,
+    definitions: &[crate::CommandDefinition],
+) -> Result<(), muda::Error> {
+    AppCommand::build_native_root_menu(menu)?;
+    crate::CommandDefinition::append_native_menus(definitions, menu)
 }
 
 #[derive(Message, OsMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
@@ -27,10 +31,6 @@ pub enum AppCommand {
 
     #[menu(label = "Service")]
     Service(ServiceCommand),
-
-    #[menu(label = "Bookmark")]
-    #[mcp(skip)]
-    Bookmark(BookmarkCommand),
 
     #[menu(label = "Command Bar")]
     #[mcp(skip)]
@@ -186,9 +186,6 @@ impl From<CommandBarKeyCommand> for crate::event::CommandBarKey {
 pub enum LayoutCommand {
     #[menu(label = "Window")]
     Window(WindowCommand),
-
-    #[menu(label = "Layout")]
-    ToggleLayout(ToggleLayoutCommand),
 
     #[menu(label = "Tab")]
     Tab(TabCommand),
@@ -427,23 +424,6 @@ pub enum ServiceCommand {
     Open,
 }
 
-#[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BookmarkCommand {
-    #[default]
-    #[menu(
-        id = "bookmark_toggle_active",
-        label = "Bookmark Page",
-        accel = "super+d"
-    )]
-    #[shortcut(direct = "Super+d")]
-    ToggleActive,
-    #[menu(id = "bookmark_pin_active", label = "Pin Page")]
-    PinActive,
-    #[menu(id = "bookmark_new_folder", label = "New Folder", hidden)]
-    NewFolder,
-}
-
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
@@ -621,15 +601,6 @@ pub enum TabCommand {
 
 #[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ToggleLayoutCommand {
-    #[default]
-    #[menu(id = "toggle_layout", label = "Toggle Layout", accel = "super+shift+s")]
-    #[shortcut(direct = "Super+Shift+S")]
-    Toggle,
-}
-
-#[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowCommand {
     #[default]
     #[menu(id = "new_window", label = "New Window", accel = "super+n", hidden)]
@@ -642,8 +613,6 @@ pub enum WindowCommand {
         hidden
     )]
     CloseWindow,
-    #[menu(id = "minimize_window", label = "Minimize", accel = "super+m")]
-    Minimize,
     #[menu(
         id = "toggle_fullscreen",
         label = "Toggle Fullscreen",
@@ -683,10 +652,6 @@ mod tests {
             has_super(KeyCode::KeyW),
             "cmd+W (close stack) must be a global shortcut"
         );
-        assert!(
-            has_super(KeyCode::KeyD),
-            "cmd+D (bookmark page) must be a global shortcut"
-        );
         assert_eq!(
             AppCommand::from_menu_id("open_in_new_tab"),
             Some(AppCommand::Browser(BrowserCommand::Open(
@@ -715,7 +680,7 @@ mod tests {
         assert_eq!(keymap.direct(&escape), None);
         assert_eq!(
             keymap.in_context(&bar).scoped(&escape),
-            Some(AppCommand::CommandBar(CommandBarKeyCommand::Dismiss))
+            Some("command_bar_dismiss".to_string())
         );
     }
 
@@ -730,45 +695,43 @@ mod tests {
                 modifiers: Modifiers::default(),
             })
         };
-        let chat = |command| Some(AppCommand::Chat(command));
-
         let quiet = ["chat"];
         let listing = ["chat", "chat.list"];
         let picking = ["chat", "chat.list", "chat.selector"];
 
         assert_eq!(
             resolved(&quiet, KeyCode::Enter),
-            chat(ChatKeyCommand::Submit)
+            Some("chat_submit".to_string())
         );
         assert_eq!(
             resolved(&listing, KeyCode::Enter),
-            chat(ChatKeyCommand::ListChoose)
+            Some("chat_list_choose".to_string())
         );
         assert_eq!(
             resolved(&picking, KeyCode::Enter),
-            chat(ChatKeyCommand::ListChoose)
+            Some("chat_list_choose".to_string())
         );
 
         assert_eq!(
             resolved(&quiet, KeyCode::Escape),
-            chat(ChatKeyCommand::Interrupt)
+            Some("chat_interrupt".to_string())
         );
         assert_eq!(
             resolved(&listing, KeyCode::Escape),
-            chat(ChatKeyCommand::Interrupt)
+            Some("chat_interrupt".to_string())
         );
         assert_eq!(
             resolved(&picking, KeyCode::Escape),
-            chat(ChatKeyCommand::DismissSelector)
+            Some("chat_dismiss_selector".to_string())
         );
 
         assert_eq!(
             resolved(&quiet, KeyCode::ArrowUp),
-            chat(ChatKeyCommand::HistoryOlder)
+            Some("chat_history_older".to_string())
         );
         assert_eq!(
             resolved(&listing, KeyCode::ArrowUp),
-            chat(ChatKeyCommand::ListPrevious)
+            Some("chat_list_previous".to_string())
         );
 
         assert_eq!(
@@ -809,13 +772,13 @@ mod tests {
         let surfaces = [
             (
                 ["command-bar"].as_slice(),
-                AppCommand::CommandBar(CommandBarKeyCommand::Next),
-                AppCommand::CommandBar(CommandBarKeyCommand::Previous),
+                "command_bar_next",
+                "command_bar_previous",
             ),
             (
                 ["chat", "chat.list"].as_slice(),
-                AppCommand::Chat(ChatKeyCommand::ListNext),
-                AppCommand::Chat(ChatKeyCommand::ListPrevious),
+                "chat_list_next",
+                "chat_list_previous",
             ),
         ];
 
@@ -825,8 +788,8 @@ mod tests {
             for (combos, expected) in [(&forward, &next), (&backward, &previous)] {
                 for combo in combos {
                     assert_eq!(
-                        keymap.in_context(&context).scoped(combo).as_ref(),
-                        Some(expected),
+                        keymap.in_context(&context).scoped(combo).as_deref(),
+                        Some(*expected),
                         "{keys:?} should navigate on {combo:?}"
                     );
                 }
@@ -1150,12 +1113,6 @@ mod tests {
         assert_eq!(
             AppCommand::from_menu_id("toggle_pane"),
             Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Toggle)))
-        );
-        assert_eq!(
-            AppCommand::from_menu_id("toggle_layout"),
-            Some(AppCommand::Layout(LayoutCommand::ToggleLayout(
-                ToggleLayoutCommand::Toggle
-            )))
         );
         assert_eq!(
             AppCommand::from_menu_id("space_open"),

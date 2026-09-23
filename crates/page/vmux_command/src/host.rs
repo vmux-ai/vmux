@@ -4,6 +4,7 @@ pub use plugin::CommandPlugin;
 pub mod bundle;
 pub mod command;
 pub mod command_bar;
+pub mod definition;
 pub mod issued;
 pub mod open;
 pub mod page_key;
@@ -15,6 +16,10 @@ pub mod surface;
 
 pub use bundle::CommandBar;
 pub use command::*;
+pub use definition::{
+    CommandDefinition, CommandInvocation, CommandRequestPlugin, CommandShortcut,
+    DispatchCommandInvocations, RegisterCommandDefinitions, RegisteredCommand, ShortcutDefinition,
+};
 pub use issued::{CommandIssued, CommandIssuer, ExLineSubmitted, FileStatusPicked};
 pub use open::*;
 pub use page_key::{KeyPlugin, ScopedKeys};

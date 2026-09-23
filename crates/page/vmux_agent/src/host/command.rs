@@ -176,7 +176,6 @@ pub(crate) fn agent_may_dispatch_app_command(command: &AppCommand) -> bool {
         | AppCommand::Browser(BrowserCommand::Open(_))
         | AppCommand::Browser(BrowserCommand::Bar(_))
         | AppCommand::Service(_)
-        | AppCommand::Bookmark(_)
         | AppCommand::CommandBar(_)
         | AppCommand::Chat(_)
         | AppCommand::File(_) => false,

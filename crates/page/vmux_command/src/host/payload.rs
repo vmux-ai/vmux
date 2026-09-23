@@ -1,4 +1,4 @@
-use crate::command::AppCommand;
+use crate::definition::CommandDefinition;
 use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
@@ -85,6 +85,7 @@ pub fn build_command_bar_open_payload(
     active_stack_count: usize,
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
+    definitions: &[CommandDefinition],
 ) -> CommandBarOpenEvent {
     let mut contributed = Vec::new();
     for command in contributed_commands {
@@ -107,7 +108,7 @@ pub fn build_command_bar_open_payload(
             page.title = locale.translate(message_id);
         }
         if let Some(command_id) = entry.replaces_command.as_deref() {
-            page.shortcut = command_shortcut(command_id);
+            page.shortcut = command_shortcut(command_id, definitions);
             superseded.push(command_id);
         }
         pages.push(page);
@@ -115,14 +116,15 @@ pub fn build_command_bar_open_payload(
     for entry in ContributedPage::sorted(contributed_pages) {
         pages.push(entry.page);
     }
-    let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed, &superseded)
-        .into_iter()
-        .map(|e| CommandBarCommandEntry {
-            id: e.id,
-            name: e.name,
-            shortcut: e.shortcut,
-        })
-        .collect();
+    let commands: Vec<CommandBarCommandEntry> =
+        command_list(locale, contributed, &superseded, definitions)
+            .into_iter()
+            .map(|e| CommandBarCommandEntry {
+                id: e.id,
+                name: e.name,
+                shortcut: e.shortcut,
+            })
+            .collect();
     let spaces = spaces_snapshot
         .spaces
         .iter()
@@ -162,16 +164,21 @@ pub fn command_list(
     locale: &Locale,
     contributed: Vec<CommandBarEntry>,
     superseded: &[&str],
+    definitions: &[CommandDefinition],
 ) -> Vec<CommandBarEntry> {
     let mut entries = Vec::new();
-    for (id, name, shortcut) in AppCommand::command_bar_entries() {
-        if superseded.contains(&id) {
+    for definition in definitions {
+        if definition.hidden || superseded.contains(&definition.id.as_str()) {
             continue;
         }
         entries.push(CommandBarEntry {
-            id: id.to_string(),
-            name: localized_command_name(locale.as_str(), id, name),
-            shortcut: shortcut.to_string(),
+            id: definition.id.to_string(),
+            name: localized_command_name(
+                locale.as_str(),
+                &definition.id,
+                definition.command_bar_name(),
+            ),
+            shortcut: definition.shortcut_label(),
         });
     }
     entries.extend(contributed);
@@ -204,11 +211,11 @@ pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> Strin
     segments.join(" > ")
 }
 
-pub(crate) fn command_shortcut(id: &str) -> String {
-    AppCommand::command_bar_entries()
-        .into_iter()
-        .find(|(entry_id, _, _)| *entry_id == id)
-        .map(|(_, _, shortcut)| shortcut.to_string())
+pub(crate) fn command_shortcut(id: &str, definitions: &[CommandDefinition]) -> String {
+    definitions
+        .iter()
+        .find(|definition| definition.id == id)
+        .map(CommandDefinition::shortcut_label)
         .unwrap_or_default()
 }
 

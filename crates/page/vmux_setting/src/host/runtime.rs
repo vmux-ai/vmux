@@ -776,10 +776,17 @@ pub enum ShortcutDef {
 
 impl ShortcutSettings {
     pub fn keymap(&self) -> vmux_command::shortcut::Keymap {
+        self.keymap_with(&[])
+    }
+
+    pub fn keymap_with(
+        &self,
+        definitions: &[vmux_command::CommandDefinition],
+    ) -> vmux_command::shortcut::Keymap {
         use vmux_command::shortcut::{Binding, Keymap, Source, When};
 
         let leader = self.leader.to_key_combo();
-        let mut keymap = Keymap::defaults();
+        let mut keymap = Keymap::defaults_with(definitions);
         keymap.chord_timeout_ms = self.chord_timeout_ms;
         if let Some(leader) = &leader {
             keymap.set_leader(leader);

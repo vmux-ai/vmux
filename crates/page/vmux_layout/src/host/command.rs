@@ -1,20 +1,17 @@
 use bevy::prelude::*;
 use vmux_command::{
-    AppCommand, BookmarkCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand,
-    ReadAppCommands, ServiceCommand, StackCommand, TabCommand, ToggleLayoutCommand, WindowCommand,
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
+    ServiceCommand, StackCommand, TabCommand,
 };
 
 use crate::{
     archive::ReopenClosedPage,
-    bookmark::{CreateFolderRequest, PinActiveRequest, ToggleActiveRequest},
     pane::{
         PaneArrangement, PaneFocus, PaneOpenRequest, PaneRequest, PaneResize, PaneSplitDirection,
     },
     stack::StackRequest,
     tab::{TabFocus, TabRequest},
     target::SiblingDirection,
-    toggle::LayoutVisibilityRequest,
-    window::MinimizeFocusedWindow,
 };
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,11 +29,6 @@ impl Plugin for LayoutCommandPlugin {
             .add_message::<StackRequest>()
             .add_message::<TabRequest>()
             .add_message::<ReopenClosedPage>()
-            .add_message::<ToggleActiveRequest>()
-            .add_message::<PinActiveRequest>()
-            .add_message::<CreateFolderRequest>()
-            .add_message::<LayoutVisibilityRequest>()
-            .add_message::<MinimizeFocusedWindow>()
             .configure_sets(
                 Update,
                 (
@@ -109,11 +101,6 @@ fn dispatch_commands(
     mut stack_requests: MessageWriter<StackRequest>,
     mut tab_requests: MessageWriter<TabRequest>,
     mut reopen_requests: MessageWriter<ReopenClosedPage>,
-    mut bookmark_toggles: MessageWriter<ToggleActiveRequest>,
-    mut bookmark_pins: MessageWriter<PinActiveRequest>,
-    mut bookmark_folders: MessageWriter<CreateFolderRequest>,
-    mut visibility_requests: MessageWriter<LayoutVisibilityRequest>,
-    mut minimize_requests: MessageWriter<MinimizeFocusedWindow>,
 ) {
     for command in commands.read() {
         match command {
@@ -164,21 +151,6 @@ fn dispatch_commands(
             }
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
                 tab_requests.write(TabRequest::Open { url: url.clone() });
-            }
-            AppCommand::Bookmark(BookmarkCommand::ToggleActive) => {
-                bookmark_toggles.write(ToggleActiveRequest);
-            }
-            AppCommand::Bookmark(BookmarkCommand::PinActive) => {
-                bookmark_pins.write(PinActiveRequest);
-            }
-            AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
-                bookmark_folders.write(CreateFolderRequest);
-            }
-            AppCommand::Layout(LayoutCommand::ToggleLayout(ToggleLayoutCommand::Toggle)) => {
-                visibility_requests.write(LayoutVisibilityRequest::Toggle);
-            }
-            AppCommand::Layout(LayoutCommand::Window(WindowCommand::Minimize)) => {
-                minimize_requests.write(MinimizeFocusedWindow);
             }
             _ => {}
         }
@@ -447,58 +419,5 @@ mod tests {
                 },
             ]
         );
-    }
-
-    #[test]
-    fn bookmark_visibility_and_window_commands_route_to_owned_requests() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AppCommand>()
-            .add_plugins(LayoutCommandPlugin);
-        let commands = [
-            AppCommand::Bookmark(BookmarkCommand::ToggleActive),
-            AppCommand::Bookmark(BookmarkCommand::PinActive),
-            AppCommand::Bookmark(BookmarkCommand::NewFolder),
-            AppCommand::Layout(LayoutCommand::ToggleLayout(ToggleLayoutCommand::Toggle)),
-            AppCommand::Layout(LayoutCommand::Window(WindowCommand::Minimize)),
-        ];
-        for command in commands {
-            app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(command);
-        }
-
-        app.update();
-
-        let toggle_requests: Vec<ToggleActiveRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<ToggleActiveRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(toggle_requests, [ToggleActiveRequest]);
-        let pin_requests: Vec<PinActiveRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<PinActiveRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(pin_requests, [PinActiveRequest]);
-        let folder_requests: Vec<CreateFolderRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<CreateFolderRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(folder_requests, [CreateFolderRequest]);
-        let visibility_requests: Vec<LayoutVisibilityRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<LayoutVisibilityRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(visibility_requests, [LayoutVisibilityRequest::Toggle]);
-        let minimize_requests: Vec<MinimizeFocusedWindow> = app
-            .world_mut()
-            .resource_mut::<Messages<MinimizeFocusedWindow>>()
-            .drain()
-            .collect();
-        assert_eq!(minimize_requests, [MinimizeFocusedWindow]);
     }
 }

@@ -22,8 +22,8 @@ use crate::snapshot::{
     ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use crate::{
-    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
-    SpaceCommand, StackCommand,
+    AppCommand, BrowserBarCommand, BrowserCommand, CommandInvocation, LayoutCommand, PaneCommand,
+    ReadAppCommands, SpaceCommand, StackCommand,
 };
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
@@ -143,10 +143,6 @@ const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
-pub fn match_command(id: &str) -> Option<AppCommand> {
-    AppCommand::from_menu_id(id)
-}
 
 pub fn is_command_bar_open(modal_q: &CommandBarStateQuery) -> bool {
     command_bar_state(modal_q).owns_input()
@@ -462,6 +458,7 @@ fn handle_open_command_bar(
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     contributed_pages: Query<&ContributedPage>,
     contributed_commands: Query<&ContributedCommand>,
+    definitions: Query<&crate::CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
@@ -482,6 +479,7 @@ fn handle_open_command_bar(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
 
     let request = command_bar_open_request(reader.read().cloned());
     let should_toggle = request.should_toggle;
@@ -542,6 +540,7 @@ fn handle_open_command_bar(
         active_stack_count,
         bar_tabs,
         target,
+        &definitions,
     );
     payload.picker = picker;
     if let Some(picker) = picker {
@@ -652,6 +651,7 @@ fn on_command_bar_request(
     mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
     mut picked: MessageWriter<crate::host::FileStatusPicked>,
     mut issued: MessageWriter<crate::CommandIssued>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -861,12 +861,8 @@ fn on_command_bar_request(
                 });
                 writer_params.p0().write(cmd);
                 custom_keyboard_restore = true;
-            } else if let Some(cmd) = match_command(id) {
-                issued.write(crate::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-                writer_params.p0().write(cmd);
+            } else {
+                command_invocations.write(CommandInvocation::new(caller, id));
             }
         }
         CommandBarRequest::Space { id } => {
@@ -1083,6 +1079,16 @@ mod tests {
         let payload = world
             .run_system_once(
                 |pages: Query<&ContributedPage>, commands: Query<&ContributedCommand>| {
+                    let definitions = [crate::CommandDefinition {
+                        id: "test_command".to_string(),
+                        label: "Test Command".to_string(),
+                        group: "Test".to_string(),
+                        accelerator: None,
+                        hidden: false,
+                        native_menu: false,
+                        shortcut_label: None,
+                        shortcuts: Vec::new(),
+                    }];
                     build_command_bar_open_payload(
                         OpenId(7),
                         false,
@@ -1097,6 +1103,7 @@ mod tests {
                         0,
                         Vec::new(),
                         Some(OpenTarget::InPlace),
+                        &definitions,
                     )
                 },
             )

@@ -119,6 +119,15 @@ pub fn derive_command_bar(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(CommandBarRequest, attributes(command_bar, shortcut))]
+pub fn derive_command_bar_request(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match impl_command_bar_request(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_derive(DefaultShortcuts, attributes(shortcut, menu))]
 pub fn derive_default_shortcuts(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -1168,6 +1177,143 @@ fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         impl_command_bar_leaf(ident, data)
     } else {
         impl_command_bar_root(ident, data)
+    }
+}
+
+fn impl_command_bar_request(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+    let Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "CommandBarRequest only supports structs",
+        ));
+    };
+    if !matches!(data.fields, Fields::Unit) {
+        return Err(syn::Error::new_spanned(
+            &data.fields,
+            "CommandBarRequest currently supports unit structs",
+        ));
+    }
+
+    let props = CommandBarRequestProps::from_attrs(&input.attrs)?;
+    let bind_props = BindProps::from_attrs(&input.attrs)?;
+    if bind_props.expand.is_some()
+        || !bind_props.extra_chords.is_empty()
+        || !bind_props.direction_keys.is_empty()
+    {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "CommandBarRequest does not support expanded shortcuts",
+        ));
+    }
+
+    let id = props.id;
+    let label = props.label;
+    let group = props.group;
+    let hidden = props.hidden;
+    let accelerator = match props.accel {
+        Some(accel) => {
+            quote! { ::core::option::Option::Some(::std::string::String::from(#accel)) }
+        }
+        None => quote! { ::core::option::Option::None },
+    };
+    let mut shortcuts = Vec::new();
+    for scoped in bind_props.bindings {
+        let shortcut = match scoped.binding {
+            Binding::Direct(value) => {
+                quote! { ::vmux_command::ShortcutDefinition::Direct(::std::string::String::from(#value)) }
+            }
+            Binding::Chord(value) => {
+                quote! { ::vmux_command::ShortcutDefinition::Chord(::std::string::String::from(#value)) }
+            }
+        };
+        let when = match scoped.when {
+            Some(value) => {
+                quote! { ::core::option::Option::Some(::std::string::String::from(#value)) }
+            }
+            None => quote! { ::core::option::Option::None },
+        };
+        shortcuts.push(quote! {
+            ::vmux_command::CommandShortcut {
+                shortcut: #shortcut,
+                when: #when,
+            }
+        });
+    }
+
+    Ok(quote! {
+        impl ::vmux_command::RegisteredCommand for #ident {
+            fn definition() -> ::vmux_command::CommandDefinition {
+                ::vmux_command::CommandDefinition {
+                    id: ::std::string::String::from(#id),
+                    label: ::std::string::String::from(#label),
+                    group: ::std::string::String::from(#group),
+                    accelerator: #accelerator,
+                    hidden: #hidden,
+                    native_menu: true,
+                    shortcut_label: ::core::option::Option::None,
+                    shortcuts: ::std::vec![#(#shortcuts),*],
+                }
+            }
+
+            fn from_invocation(
+                invocation: &::vmux_command::CommandInvocation,
+            ) -> ::core::option::Option<Self> {
+                (invocation.id == #id).then_some(Self)
+            }
+        }
+    })
+}
+
+struct CommandBarRequestProps {
+    id: String,
+    label: String,
+    group: String,
+    accel: Option<String>,
+    hidden: bool,
+}
+
+impl CommandBarRequestProps {
+    fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut id = None;
+        let mut label = None;
+        let mut group = None;
+        let mut accel = None;
+        let mut hidden = false;
+        for attr in attrs {
+            if !attr.path().is_ident("command_bar") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("id") {
+                    id = Some(meta.value()?.parse::<LitStr>()?.value());
+                } else if meta.path.is_ident("label") {
+                    label = Some(meta.value()?.parse::<LitStr>()?.value());
+                } else if meta.path.is_ident("group") {
+                    group = Some(meta.value()?.parse::<LitStr>()?.value());
+                } else if meta.path.is_ident("accel") {
+                    accel = Some(meta.value()?.parse::<LitStr>()?.value());
+                } else if meta.path.is_ident("hidden") {
+                    hidden = true;
+                } else {
+                    return Err(meta.error("unsupported command_bar property"));
+                }
+                Ok(())
+            })?;
+        }
+        Ok(Self {
+            id: id.ok_or_else(|| {
+                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar id")
+            })?,
+            label: label.ok_or_else(|| {
+                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar label")
+            })?,
+            group: group.ok_or_else(|| {
+                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar group")
+            })?,
+            accel,
+            hidden,
+        })
     }
 }
 

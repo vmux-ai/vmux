@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::command::AppCommand;
+use crate::definition::CommandInvocation;
 
 #[derive(Message, Clone)]
 pub struct CommandIssued {
@@ -24,6 +25,7 @@ pub struct FileStatusPicked {
 pub struct CommandIssuer<'w> {
     pub app: MessageWriter<'w, AppCommand>,
     pub issued: MessageWriter<'w, CommandIssued>,
+    pub invocations: MessageWriter<'w, CommandInvocation>,
 }
 
 impl CommandIssuer<'_> {
@@ -33,6 +35,11 @@ impl CommandIssuer<'_> {
             command: command.clone(),
         });
         self.app.write(command);
+    }
+
+    pub fn issue_id(&mut self, caller: Entity, id: impl Into<String>) {
+        self.invocations
+            .write(CommandInvocation::new(caller, id.into()));
     }
 }
 
@@ -47,7 +54,8 @@ mod tests {
     fn issue_writes_both_buses() {
         let mut app = App::new();
         app.add_message::<AppCommand>()
-            .add_message::<CommandIssued>();
+            .add_message::<CommandIssued>()
+            .add_message::<CommandInvocation>();
         let caller = app.world_mut().spawn_empty().id();
         let mut state = SystemState::<CommandIssuer>::new(app.world_mut());
         {

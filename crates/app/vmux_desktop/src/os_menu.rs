@@ -17,8 +17,8 @@ use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
 use vmux_command::ReadAppCommands;
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, StackCommand, WriteAppCommands,
-    build_native_root_menu, open::OpenCommand,
+    AppCommand, BrowserCommand, CommandDefinition, CommandInvocation, LayoutCommand, StackCommand,
+    WriteAppCommands, build_native_root_menu, open::OpenCommand,
 };
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
@@ -32,7 +32,12 @@ impl Plugin for OsMenuPlugin {
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
             .init_resource::<CloseMenuItemEnabled>()
-            .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
+            .add_systems(
+                Startup,
+                setup
+                    .after(vmux_setting::SettingsLoadSet)
+                    .after(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(
                 Update,
                 (
@@ -83,14 +88,18 @@ struct OsMenuResource {
 }
 
 fn setup(world: &mut World) {
+    let definitions = {
+        let mut query = world.query::<&CommandDefinition>();
+        query.iter(world).cloned().collect::<Vec<_>>()
+    };
     let mut menu = Menu::new();
-    build_native_root_menu(&mut menu).unwrap();
+    build_native_root_menu(&mut menu, &definitions).unwrap();
     append_standard_edit_menu(&menu);
     let locale = world
         .get_resource::<vmux_setting::AppSettings>()
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
-    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale);
+    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale, &definitions);
     let close_window = find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
@@ -121,6 +130,7 @@ fn setup(world: &mut World) {
 fn sync_menu_locale(
     settings: Option<Res<vmux_setting::AppSettings>>,
     menu: Option<NonSendMut<OsMenuResource>>,
+    definitions: Query<&CommandDefinition>,
 ) {
     let (Some(settings), Some(mut menu)) = (settings, menu) else {
         return;
@@ -129,21 +139,32 @@ fn sync_menu_locale(
     if menu.locale == locale {
         return;
     }
-    localize_root_menu(&menu.menu, &menu.locale, &locale);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
+    localize_root_menu(&menu.menu, &menu.locale, &locale, &definitions);
     menu.locale = locale;
 }
 
-fn localize_root_menu(menu: &Menu, previous_locale: &Locale, locale: &Locale) {
-    localize_menu_items(menu.items(), previous_locale, locale);
+fn localize_root_menu(
+    menu: &Menu,
+    previous_locale: &Locale,
+    locale: &Locale,
+    definitions: &[CommandDefinition],
+) {
+    localize_menu_items(menu.items(), previous_locale, locale, definitions);
 }
 
-fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, locale: &Locale) {
+fn localize_menu_items(
+    items: Vec<MenuItemKind>,
+    previous_locale: &Locale,
+    locale: &Locale,
+    definitions: &[CommandDefinition],
+) {
     for item in items {
         let id = item.id().0.clone();
         if let Some(menu_item) = item.as_menuitem() {
             if id == "app_quit" {
                 menu_item.set_text(locale.translate("menu-close-vmux"));
-            } else if AppCommand::from_menu_id(&id).is_some() {
+            } else if definitions.iter().any(|definition| definition.id == id) {
                 let current = menu_item.text();
                 let suffix = current
                     .split_once('\t')
@@ -158,7 +179,7 @@ fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, local
             if let Some(title) = localized_submenu_title(&submenu.text(), previous_locale, locale) {
                 submenu.set_text(title);
             }
-            localize_menu_items(submenu.items(), previous_locale, locale);
+            localize_menu_items(submenu.items(), previous_locale, locale, definitions);
         }
     }
 }
@@ -338,24 +359,27 @@ fn forward_menu_events(world: &mut World) {
     if !drained.is_empty() {
         world.resource_mut::<LastMenuCommandAt>().0 = Some(std::time::Instant::now());
     }
+    let definitions = {
+        let mut query = world.query::<&CommandDefinition>();
+        query.iter(world).cloned().collect::<Vec<_>>()
+    };
     for event_id in drained {
         if crate::bookmark_menu::forward_menu_event(world, &event_id) {
             continue;
         }
         if event_id == "app_quit" {
             handle_quit_request(world);
-        } else if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
+        } else if definitions
+            .iter()
+            .any(|definition| definition.id == event_id)
+        {
             let caller = {
                 let mut q = world.query_filtered::<Entity, With<vmux_core::team::User>>();
                 q.iter(world).next().unwrap_or(Entity::PLACEHOLDER)
             };
             world
-                .resource_mut::<Messages<vmux_command::CommandIssued>>()
-                .write(vmux_command::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-            world.resource_mut::<Messages<AppCommand>>().write(cmd);
+                .resource_mut::<Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, event_id));
         } else {
             #[cfg(feature = "tray")]
             crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
