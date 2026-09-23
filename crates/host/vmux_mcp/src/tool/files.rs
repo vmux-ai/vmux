@@ -46,7 +46,7 @@ fn read_file(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, _) in calls.matching(FileTool::ReadFile) {
         let result = call
             .parse::<ReadFileArgs>("read_file")
-            .and_then(ToolCall::arguments)
+            .and_then(ToolCall::serialize_arguments)
             .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::ReadFile,
                 arguments,
@@ -60,7 +60,7 @@ fn grep(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, _) in calls.matching(FileTool::Grep) {
         let result = call
             .parse::<GrepArgs>("grep")
-            .and_then(ToolCall::arguments)
+            .and_then(ToolCall::serialize_arguments)
             .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::Grep,
                 arguments,

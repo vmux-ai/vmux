@@ -38,7 +38,7 @@ mod remote;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
-mod tools;
+mod tool;
 
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;

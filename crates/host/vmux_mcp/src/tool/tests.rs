@@ -40,9 +40,9 @@ impl Plugin for ExtensionToolPlugin {
 
 fn dispatch_extension_tools(
     mut commands: Commands,
-    mut requests: MessageReader<McpToolRequest<ExtensionTool>>,
+    requests: Query<(Entity, &McpToolRequest<ExtensionTool>), Added<McpToolRequest<ExtensionTool>>>,
 ) {
-    for request in requests.read() {
+    for (entity, request) in &requests {
         let result = match request.tool() {
             ExtensionTool::Echo => request.parse::<EchoArgs>().map(|args| {
                 DispatchTarget::Command(AgentCommand::Notify {
@@ -51,7 +51,7 @@ fn dispatch_extension_tools(
                 })
             }),
         };
-        request.finish(&mut commands, result);
+        request.finish(entity, &mut commands, result);
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin, tools::ToolPlugin,
+    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin, tool::ToolPlugin,
     window_state::WindowStatePlugin,
 };
 use bevy::app::PluginGroupBuilder;

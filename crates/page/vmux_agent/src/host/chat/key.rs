@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_chat::event::ChatKey;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
+    CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
 pub(crate) struct ChatKeyPlugin;
@@ -21,68 +21,8 @@ impl Plugin for ChatKeyPlugin {
 struct ChatKeyBinding(ChatKey);
 
 fn spawn_commands(mut commands: Commands) {
-    for (definition, key) in [
-        (
-            CommandDefinition::new("chat_list_next", "Next Option", "Chat")
-                .hidden()
-                .direct_when("ArrowDown", Some("chat.list"))
-                .direct_when("Ctrl+n", Some("chat.list"))
-                .direct_when("Ctrl+j", Some("chat.list")),
-            ChatKey::ListNext,
-        ),
-        (
-            CommandDefinition::new("chat_list_previous", "Previous Option", "Chat")
-                .hidden()
-                .direct_when("ArrowUp", Some("chat.list"))
-                .direct_when("Ctrl+p", Some("chat.list"))
-                .direct_when("Ctrl+k", Some("chat.list")),
-            ChatKey::ListPrevious,
-        ),
-        (
-            CommandDefinition::new("chat_list_choose", "Choose Option", "Chat")
-                .hidden()
-                .direct_when("Enter", Some("chat.list")),
-            ChatKey::ListChoose,
-        ),
-        (
-            CommandDefinition::new("chat_history_older", "Previous Prompt", "Chat")
-                .hidden()
-                .direct_when("ArrowUp", Some("chat && !chat.list"))
-                .direct_when("Ctrl+p", Some("chat && !chat.list")),
-            ChatKey::HistoryOlder,
-        ),
-        (
-            CommandDefinition::new("chat_history_newer", "Next Prompt", "Chat")
-                .hidden()
-                .direct_when("ArrowDown", Some("chat && !chat.list"))
-                .direct_when("Ctrl+n", Some("chat && !chat.list")),
-            ChatKey::HistoryNewer,
-        ),
-        (
-            CommandDefinition::new("chat_submit", "Send Prompt", "Chat")
-                .hidden()
-                .direct_when("Enter", Some("chat && !chat.list")),
-            ChatKey::Submit,
-        ),
-        (
-            CommandDefinition::new("chat_dismiss_selector", "Close Picker", "Chat")
-                .hidden()
-                .direct_when("Escape", Some("chat.selector")),
-            ChatKey::DismissSelector,
-        ),
-        (
-            CommandDefinition::new("chat_interrupt", "Send Queued Now", "Chat")
-                .hidden()
-                .direct_when("Escape", Some("chat && !chat.selector")),
-            ChatKey::Interrupt,
-        ),
-        (
-            CommandDefinition::new("chat_cancel", "Stop Turn", "Chat")
-                .hidden()
-                .direct_when("Ctrl+c", Some("chat")),
-            ChatKey::Cancel,
-        ),
-    ] {
+    let manifest = CommandManifest::<ChatKey>::from_ron(include_str!("key.ron"));
+    for (definition, key) in manifest.into_commands() {
         commands.spawn((definition, ChatKeyBinding(key)));
     }
 }
