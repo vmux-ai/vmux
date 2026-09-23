@@ -1,15 +1,15 @@
 mod app;
 mod changes;
 mod directory;
-mod outbox;
+mod job;
+mod job_runner;
 mod repository;
 mod repository_picker;
 mod status;
 mod watch;
 
-pub mod highlight;
-pub mod job;
-pub mod parse;
+mod highlight;
+mod parse;
 pub mod runner;
 pub mod worktree;
 
@@ -23,7 +23,7 @@ pub use watch::RepoInfoCache;
 use crate::host::app::AppPlugin;
 use crate::host::changes::ChangesPlugin;
 use crate::host::directory::DirectoryPlugin;
-use crate::host::outbox::OutboxPlugin;
+use crate::host::job_runner::JobPlugin;
 use crate::host::repository::RepositoryPlugin;
 use crate::host::repository_picker::RepositoryPickerPlugin;
 use crate::host::status::StatusPlugin;
@@ -45,15 +45,15 @@ impl Plugin for GitPlugin {
             Update,
             (
                 GitUpdateSet::Watch,
-                GitUpdateSet::Outbox,
                 GitUpdateSet::Status,
+                GitUpdateSet::Jobs,
             )
                 .chain(),
         )
         .add_plugins((
             WatchPlugin,
-            OutboxPlugin,
             StatusPlugin,
+            JobPlugin,
             AppPlugin,
             ChangesPlugin,
             DirectoryPlugin,
@@ -66,8 +66,8 @@ impl Plugin for GitPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum GitUpdateSet {
     Watch,
-    Outbox,
     Status,
+    Jobs,
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
