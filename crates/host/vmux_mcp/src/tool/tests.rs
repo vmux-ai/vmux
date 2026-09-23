@@ -112,14 +112,9 @@ fn owning_world_dispatches_tool_entities() {
     let request = app.world_mut().spawn(call).id();
     app.update();
 
-    let result = app
-        .world()
-        .get::<ToolDispatchResult>(request)
-        .unwrap()
-        .result()
-        .unwrap();
+    let target = app.world().get::<DispatchTarget>(request).cloned().unwrap();
     assert!(matches!(
-        result,
+        target,
         DispatchTarget::Command(AgentCommand::Notify {
             title: None,
             body: Some(body),

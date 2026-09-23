@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::definition::{
-    CommandDefinition, CommandInvocation, DispatchCommandInvocations, WriteCommandRequests,
+    CommandInvocation, CommandRuntimePlugin, DispatchCommandInvocations, WriteCommandRequests,
 };
 use crate::page_key::KeyPlugin;
 use crate::snapshot::UiStatePlugin;
@@ -12,7 +12,9 @@ pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        CommandDefinition::install_runtime(app);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
         app.add_plugins((KeyPlugin, UiStatePlugin, SurfacePlugin))
             .add_message::<crate::host::ExLineSubmitted>()
             .add_message::<crate::host::FileStatusPicked>()

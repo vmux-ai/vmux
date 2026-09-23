@@ -89,7 +89,7 @@ mod tests {
     struct TestApp;
 
     impl TestApp {
-        fn new() -> App {
+        fn app() -> App {
             let mut app = App::new();
             app.add_plugins(bevy::app::TaskPoolPlugin::default())
                 .add_message::<AgentToast>()
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn errored_transition_fires_toast() {
-        let mut app = TestApp::new();
+        let mut app = TestApp::app();
         app.world_mut().spawn((
             TestApp::session(),
             LastRunStateKind::default(),
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn acp_errored_transition_fires_toast() {
-        let mut app = TestApp::new();
+        let mut app = TestApp::app();
         app.world_mut().spawn((
             AcpSession {
                 agent_id: "mistral-vibe".into(),
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn no_op_when_state_kind_unchanged() {
-        let mut app = TestApp::new();
+        let mut app = TestApp::app();
         app.world_mut().spawn((
             TestApp::session(),
             LastRunStateKind(AgentRunStateKind::Errored),

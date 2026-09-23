@@ -71,7 +71,9 @@ impl CommandDefinition {
         definitions: fn() -> Vec<Self>,
         request: fn(&CommandInvocation) -> Option<T>,
     ) {
-        Self::install_runtime(app);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
         let validator = RequestValidator(Arc::new(move |invocation| {
             request(invocation)
                 .map(drop)
@@ -79,62 +81,13 @@ impl CommandDefinition {
         }));
         app.add_message::<T>().add_systems(
             Startup,
-            (move |mut index: ResMut<CommandIndex>, mut commands: Commands| {
+            (move |mut commands: CommandSpawner| {
                 for definition in definitions() {
-                    let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
-                    ids.push(definition.id.clone());
-                    ids.extend(definition.aliases.iter().cloned());
-                    let mut unique_ids = HashSet::with_capacity(ids.len());
-                    for id in &ids {
-                        assert!(
-                            unique_ids.insert(id.as_str()) && !index.0.contains_key(id),
-                            "duplicate command id: {id}"
-                        );
-                    }
-                    let command = commands
-                        .spawn((
-                            Name::new(definition.id.clone()),
-                            definition,
-                            RequestParser(request),
-                            validator.clone(),
-                        ))
-                        .observe(dispatch_request::<T>)
-                        .id();
-                    for id in ids {
-                        index.0.insert(id, command);
-                    }
+                    commands.spawn_request(definition, RequestParser(request), validator.clone());
                 }
             })
             .in_set(RegisterCommandDefinitions),
         );
-    }
-
-    pub(crate) fn install_runtime(app: &mut App) {
-        if app.world().contains_resource::<CommandRuntime>() {
-            return;
-        }
-        app.insert_resource(CommandRuntime)
-            .init_resource::<CommandIndex>()
-            .add_message::<CommandInvocation>()
-            .configure_sets(
-                Update,
-                (
-                    WriteCommandRequests,
-                    DispatchCommandInvocations,
-                    crate::snapshot::WriteCommandBarSnapshots,
-                    ReadCommandRequests,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Update,
-                (
-                    dispatch_command_invocations,
-                    bevy::ecs::schedule::ApplyDeferred,
-                )
-                    .chain()
-                    .in_set(DispatchCommandInvocations),
-            );
     }
 
     pub fn inferred(module_path: &str, request_type: &str) -> Self {
@@ -519,17 +472,92 @@ pub struct DispatchCommandInvocations;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RegisterCommandDefinitions;
 
+pub struct CommandRuntimePlugin;
+
+impl Plugin for CommandRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<CommandIndex>()
+            .add_message::<CommandInvocation>()
+            .configure_sets(
+                Update,
+                (
+                    WriteCommandRequests,
+                    DispatchCommandInvocations,
+                    crate::snapshot::WriteCommandBarSnapshots,
+                    ReadCommandRequests,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    dispatch_command_invocations,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(DispatchCommandInvocations),
+            );
+    }
+}
+
 #[derive(Resource, Default)]
 struct CommandIndex(HashMap<String, Entity>);
 
-#[derive(Resource)]
-struct CommandRuntime;
-
 #[derive(EntityEvent)]
-struct InvokeCommand {
+pub struct CommandDispatch {
     #[event_target]
     command: Entity,
     invocation: CommandInvocation,
+}
+
+impl CommandDispatch {
+    pub fn command(&self) -> Entity {
+        self.command
+    }
+
+    pub fn invocation(&self) -> &CommandInvocation {
+        &self.invocation
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct CommandSpawner<'w, 's> {
+    commands: Commands<'w, 's>,
+    index: ResMut<'w, CommandIndex>,
+}
+
+impl CommandSpawner<'_, '_> {
+    pub fn spawn(&mut self, definition: CommandDefinition, bundle: impl Bundle) -> Entity {
+        let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
+        ids.push(definition.id.clone());
+        ids.extend(definition.aliases.iter().cloned());
+        let mut unique_ids = HashSet::with_capacity(ids.len());
+        for id in &ids {
+            assert!(
+                unique_ids.insert(id.as_str()) && !self.index.0.contains_key(id),
+                "duplicate command id: {id}"
+            );
+        }
+        let command = self
+            .commands
+            .spawn((Name::new(definition.id.clone()), definition, bundle))
+            .id();
+        for id in ids {
+            self.index.0.insert(id, command);
+        }
+        command
+    }
+
+    fn spawn_request<T: Message>(
+        &mut self,
+        definition: CommandDefinition,
+        parser: RequestParser<T>,
+        validator: RequestValidator,
+    ) -> Entity {
+        let command = self.spawn(definition, (parser, validator));
+        self.commands.entity(command).observe(dispatch_request::<T>);
+        command
+    }
 }
 
 #[derive(Component)]
@@ -542,7 +570,14 @@ struct RequestValidator(Arc<ValidateRequest>);
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommandCatalog<'w, 's> {
-    definitions: Query<'w, 's, (&'static CommandDefinition, &'static RequestValidator)>,
+    definitions: Query<
+        'w,
+        's,
+        (
+            &'static CommandDefinition,
+            Option<&'static RequestValidator>,
+        ),
+    >,
     invocations: MessageWriter<'w, CommandInvocation>,
 }
 
@@ -596,7 +631,9 @@ impl CommandCatalog<'_, '_> {
         }
         definition.validate_arguments(&arguments)?;
         let invocation = CommandInvocation::new(caller, &definition.id).with_arguments(arguments);
-        validator.0(&invocation)?;
+        if let Some(validator) = validator {
+            validator.0(&invocation)?;
+        }
         self.invocations.write(invocation);
         Ok(())
     }
@@ -623,7 +660,7 @@ fn dispatch_command_invocations(
             warn!(command = %definition.id, %error, "invalid command arguments");
             continue;
         }
-        commands.trigger(InvokeCommand {
+        commands.trigger(CommandDispatch {
             command,
             invocation,
         });
@@ -631,7 +668,7 @@ fn dispatch_command_invocations(
 }
 
 fn dispatch_request<T: Message>(
-    trigger: On<InvokeCommand>,
+    trigger: On<CommandDispatch>,
     parsers: Query<&RequestParser<T>>,
     mut requests: MessageWriter<T>,
 ) {

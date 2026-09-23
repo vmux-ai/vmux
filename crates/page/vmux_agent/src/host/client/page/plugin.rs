@@ -79,7 +79,7 @@ fn attach_last_run_state_kind(
 fn spawn_page_session_on_add(
     q: Query<(&AgentSession, Option<&AgentApprovalPolicy>), Added<AgentSession>>,
     service: Option<Res<ServiceClient>>,
-    tools: vmux_mcp::tools::ToolCatalog,
+    tools: vmux_mcp::tool::ToolCatalog,
     commands: Query<&vmux_command::CommandDefinition>,
 ) {
     let Some(service) = service else {
@@ -96,7 +96,7 @@ fn spawn_page_session_on_add(
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
             .collect();
-        let definitions = match vmux_mcp::tools::ToolDefinition::merge_commands(
+        let definitions = match vmux_mcp::tool::ToolDefinition::merge_commands(
             tools.definitions(false, false, ""),
             command_tools,
         ) {

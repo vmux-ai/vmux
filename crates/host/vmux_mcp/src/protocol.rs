@@ -2,6 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -17,17 +18,17 @@ pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::tools::ToolPlugin>() {
-            app.add_plugins(crate::tools::ToolPlugin);
+        if !app.is_plugin_added::<crate::tool::ToolPlugin>() {
+            app.add_plugins(crate::tool::ToolPlugin);
         }
         app.init_resource::<NextRequestSequence>()
             .configure_sets(
                 Update,
                 (
                     McpSet::Route,
-                    crate::tools::ToolRequestSet,
-                    crate::tools::ToolDispatchSet,
-                    crate::tools::ToolDispatchFlush,
+                    crate::tool::ToolRequestSet,
+                    crate::tool::ToolDispatchSet,
+                    crate::tool::ToolDispatchFlush,
                     McpSet::StartTasks,
                     McpSet::BuildResponses,
                 )
@@ -37,7 +38,18 @@ impl Plugin for McpPlugin {
                 Update,
                 (
                     route_request.in_set(McpSet::Route),
-                    start_tool_tasks.in_set(McpSet::StartTasks),
+                    (
+                        route_tool_outcomes,
+                        bevy_ecs::schedule::ApplyDeferred,
+                        start_list_tools,
+                        start_commands,
+                        start_protocol_tools,
+                        start_dispatches,
+                        bevy_ecs::schedule::ApplyDeferred,
+                        poll_tool_tasks,
+                    )
+                        .chain()
+                        .in_set(McpSet::StartTasks),
                     build_responses.in_set(McpSet::BuildResponses),
                 ),
             );
@@ -127,54 +139,30 @@ impl McpServer {
             ))
             .id();
 
-        self.app.update();
-        if let Some(response) = self
-            .app
-            .world_mut()
-            .entity_mut(request)
-            .take::<McpResponse>()
-        {
-            self.app.world_mut().despawn(request);
-            return Some(response.0);
-        }
-
-        let Some(task) = self.app.world_mut().entity_mut(request).take::<McpTask>() else {
-            self.app.world_mut().despawn(request);
-            return Some(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {
-                    "code": -32603,
-                    "message": "request did not produce a response"
-                }
-            }));
-        };
-        let result = task.0.await.unwrap_or_else(|_| {
-            Err("MCP tool task stopped before producing a response".to_string())
-        });
-        self.app
-            .world_mut()
-            .entity_mut(request)
-            .insert(McpReply::Result(result));
-        self.app.update();
-        let response = self
-            .app
-            .world_mut()
-            .entity_mut(request)
-            .take::<McpResponse>()
-            .map(|response| response.0)
-            .unwrap_or_else(|| {
-                json!({
+        loop {
+            self.app.update();
+            if let Some(response) = self
+                .app
+                .world_mut()
+                .entity_mut(request)
+                .take::<McpResponse>()
+            {
+                self.app.world_mut().despawn(request);
+                return Some(response.0);
+            }
+            if !self.app.world().entity(request).contains::<McpTask>() {
+                self.app.world_mut().despawn(request);
+                return Some(json!({
                     "jsonrpc": "2.0",
                     "id": id,
                     "error": {
                         "code": -32603,
-                        "message": "request result did not produce a response"
+                        "message": "request did not produce a response"
                     }
-                })
-            });
-        self.app.world_mut().despawn(request);
-        Some(response)
+                }));
+            }
+            tokio::task::yield_now().await;
+        }
     }
 }
 
@@ -210,6 +198,114 @@ struct McpRouted;
 
 #[derive(Component)]
 struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
+
+impl McpTask {
+    fn start(
+        commands: &mut Commands,
+        entity: Entity,
+        future: impl Future<Output = Result<Value, String>> + Send + 'static,
+    ) {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        drop(tokio::spawn(async move {
+            let _ = sender.send(future.await);
+        }));
+        commands.entity(entity).insert(Self(receiver));
+    }
+}
+
+#[derive(Component)]
+struct ListToolsExecution {
+    definitions: Vec<crate::tool::ToolDefinition>,
+}
+
+impl ListToolsExecution {
+    async fn run(mut self) -> Result<Value, String> {
+        if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
+            && let Ok(AgentQueryResult::Commands(commands)) =
+                agent_query(&connection, AgentQuery::ListCommands).await
+        {
+            self.definitions =
+                crate::tool::ToolDefinition::merge_commands(self.definitions, commands)?;
+        }
+        Ok(json!({ "tools": self.definitions }))
+    }
+}
+
+#[derive(Component)]
+struct CommandExecution {
+    name: String,
+    arguments: Value,
+    anchor: Option<vmux_client::protocol::ProcessId>,
+}
+
+impl CommandExecution {
+    async fn run(self) -> Result<Value, String> {
+        run_agent_command(
+            AgentCommand::InvokeCommand {
+                id: self.name,
+                args: vmux_client::protocol::JsonValue::from(self.arguments),
+            },
+            self.anchor,
+        )
+        .await
+    }
+}
+
+#[derive(Component)]
+struct ProtocolExecution {
+    tool: crate::tool::ProtocolTool,
+    arguments: Value,
+    anchor: Option<vmux_client::protocol::ProcessId>,
+}
+
+impl ProtocolExecution {
+    async fn run(self) -> Result<Value, String> {
+        match self.tool {
+            crate::tool::ProtocolTool::ReadFile => {
+                read_file_result(&self.arguments, self.anchor).await
+            }
+            crate::tool::ProtocolTool::Grep => grep_result(&self.arguments, self.anchor).await,
+            crate::tool::ProtocolTool::VaultStatus => {
+                run_agent_query(AgentQuery::VaultStatus).await
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct DispatchExecution {
+    target: crate::tool::DispatchTarget,
+    name: String,
+    arguments: Value,
+    anchor: Option<vmux_client::protocol::ProcessId>,
+}
+
+impl DispatchExecution {
+    async fn run(self, config: McpConfig) -> Result<Value, String> {
+        if self.name == "open_file" {
+            let path = self
+                .arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or("open_file.path is required")?;
+            if !Path::new(path).is_absolute() {
+                return Err("open_file.path must be an absolute path".to_string());
+            }
+            scoped_existing_path(self.anchor, Path::new(path), "open_file").await?;
+        }
+
+        match self.target {
+            crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
+            | crate::tool::DispatchTarget::Command(
+                command @ AgentCommand::RunWithPlacementOverride { .. },
+            ) => run_blocking(command, config.run_block_timeout).await,
+            crate::tool::DispatchTarget::Command(command) => {
+                run_agent_command(command, self.anchor).await
+            }
+            crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
+        }
+    }
+}
 
 #[derive(Component)]
 enum McpReply {
@@ -289,7 +385,7 @@ async fn handle_message(
 fn route_request(
     mut commands: Commands,
     requests: PendingRequests,
-    tools: crate::tools::ToolCatalog,
+    tools: crate::tool::ToolCatalog,
     config: Res<McpConfig>,
 ) {
     let Some((entity, method, params, _)) =
@@ -308,8 +404,8 @@ fn route_request(
         "tools/list" => {
             let definitions =
                 tools.definitions(config.acp_session, config.acp_terminals, &config.shell);
-            commands.entity(entity).insert(crate::tools::ToolOutcome(Ok(
-                crate::tools::ToolExecution::List { definitions },
+            commands.entity(entity).insert(crate::tool::ToolOutcome(Ok(
+                crate::tool::ToolExecution::List { definitions },
             )));
         }
         "tools/call" => {
@@ -319,7 +415,7 @@ fn route_request(
                     .insert(McpReply::Result(Err("tools/call missing name".to_string())));
                 return;
             };
-            let normalized = crate::tools::canonical_tool_name(name);
+            let normalized = crate::tool::canonical_tool_name(name);
             let arguments = params
                 .0
                 .get("arguments")
@@ -330,7 +426,7 @@ fn route_request(
                 arguments,
                 config.anchor,
                 &config.shell,
-                crate::tools::ToolCallPolicy::mcp(config.acp_session, config.acp_terminals),
+                crate::tool::ToolCallPolicy::mcp(config.acp_session, config.acp_terminals),
             ) {
                 Ok(call) => {
                     commands.entity(entity).insert(call);
@@ -351,31 +447,132 @@ fn route_request(
     }
 }
 
-fn start_tool_tasks(world: &mut World) {
-    let entities = {
-        let mut query = world.query_filtered::<Entity, With<crate::tools::ToolOutcome>>();
-        query.iter(world).collect::<Vec<_>>()
-    };
-    let config = world.resource::<McpConfig>().clone();
-    for entity in entities {
-        let Some(outcome) = world.entity_mut(entity).take::<crate::tools::ToolOutcome>() else {
-            continue;
-        };
-        let execution = match outcome.0 {
-            Ok(execution) => execution,
+fn route_tool_outcomes(
+    mut commands: Commands,
+    outcomes: Query<(Entity, &crate::tool::ToolOutcome), Added<crate::tool::ToolOutcome>>,
+) {
+    for (entity, outcome) in &outcomes {
+        let mut request = commands.entity(entity);
+        request.remove::<crate::tool::ToolOutcome>();
+        match outcome.0.clone() {
             Err(message) => {
-                world
-                    .entity_mut(entity)
-                    .insert(McpReply::Result(Err(message)));
-                continue;
+                request.insert(McpReply::Result(Err(message)));
+            }
+            Ok(crate::tool::ToolExecution::List { definitions }) => {
+                request.insert(ListToolsExecution { definitions });
+            }
+            Ok(crate::tool::ToolExecution::Command {
+                name,
+                arguments,
+                anchor,
+            }) => {
+                request.insert(CommandExecution {
+                    name,
+                    arguments,
+                    anchor,
+                });
+            }
+            Ok(crate::tool::ToolExecution::Protocol {
+                tool,
+                arguments,
+                anchor,
+            }) => {
+                request.insert(ProtocolExecution {
+                    tool,
+                    arguments,
+                    anchor,
+                });
+            }
+            Ok(crate::tool::ToolExecution::Dispatch {
+                target,
+                name,
+                arguments,
+                anchor,
+            }) => {
+                request.insert(DispatchExecution {
+                    target,
+                    name,
+                    arguments,
+                    anchor,
+                });
+            }
+        }
+    }
+}
+
+fn start_list_tools(
+    mut commands: Commands,
+    requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
+) {
+    for (entity, request) in &requests {
+        let execution = ListToolsExecution {
+            definitions: request.definitions.clone(),
+        };
+        commands.entity(entity).remove::<ListToolsExecution>();
+        McpTask::start(&mut commands, entity, execution.run());
+    }
+}
+
+fn start_commands(
+    mut commands: Commands,
+    requests: Query<(Entity, &CommandExecution), Added<CommandExecution>>,
+) {
+    for (entity, request) in &requests {
+        let execution = CommandExecution {
+            name: request.name.clone(),
+            arguments: request.arguments.clone(),
+            anchor: request.anchor,
+        };
+        commands.entity(entity).remove::<CommandExecution>();
+        McpTask::start(&mut commands, entity, execution.run());
+    }
+}
+
+fn start_protocol_tools(
+    mut commands: Commands,
+    requests: Query<(Entity, &ProtocolExecution), Added<ProtocolExecution>>,
+) {
+    for (entity, request) in &requests {
+        let execution = ProtocolExecution {
+            tool: request.tool,
+            arguments: request.arguments.clone(),
+            anchor: request.anchor,
+        };
+        commands.entity(entity).remove::<ProtocolExecution>();
+        McpTask::start(&mut commands, entity, execution.run());
+    }
+}
+
+fn start_dispatches(
+    mut commands: Commands,
+    requests: Query<(Entity, &DispatchExecution), Added<DispatchExecution>>,
+    config: Res<McpConfig>,
+) {
+    for (entity, request) in &requests {
+        let execution = DispatchExecution {
+            target: request.target.clone(),
+            name: request.name.clone(),
+            arguments: request.arguments.clone(),
+            anchor: request.anchor,
+        };
+        commands.entity(entity).remove::<DispatchExecution>();
+        McpTask::start(&mut commands, entity, execution.run(config.clone()));
+    }
+}
+
+fn poll_tool_tasks(mut commands: Commands, mut tasks: Query<(Entity, &mut McpTask)>) {
+    for (entity, mut task) in &mut tasks {
+        let result = match task.0.try_recv() {
+            Ok(result) => result,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => continue,
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                Err("MCP tool task stopped before producing a response".to_string())
             }
         };
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        let task_config = config.clone();
-        drop(tokio::spawn(async move {
-            let _ = sender.send(execution.execute(task_config).await);
-        }));
-        world.entity_mut(entity).insert(McpTask(receiver));
+        commands
+            .entity(entity)
+            .remove::<McpTask>()
+            .insert(McpReply::Result(result));
     }
 }
 
@@ -423,79 +620,6 @@ fn initialize_result(params: &Value) -> Value {
             "version": env!("CARGO_PKG_VERSION")
         }
     })
-}
-
-impl crate::tools::ToolExecution {
-    async fn execute(self, config: McpConfig) -> Result<Value, String> {
-        match self {
-            Self::List { mut definitions } => {
-                if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
-                    && let Ok(AgentQueryResult::Commands(commands)) =
-                        agent_query(&connection, AgentQuery::ListCommands).await
-                {
-                    definitions =
-                        crate::tools::ToolDefinition::merge_commands(definitions, commands)?;
-                }
-                Ok(json!({ "tools": definitions }))
-            }
-            Self::Command {
-                name,
-                arguments,
-                anchor,
-            } => {
-                run_agent_command(
-                    AgentCommand::InvokeCommand {
-                        id: name,
-                        args: vmux_client::protocol::JsonValue::from(arguments),
-                    },
-                    anchor,
-                )
-                .await
-            }
-            Self::Protocol {
-                tool: crate::tools::ProtocolTool::ReadFile,
-                arguments,
-                anchor,
-            } => read_file_result(&arguments, anchor).await,
-            Self::Protocol {
-                tool: crate::tools::ProtocolTool::Grep,
-                arguments,
-                anchor,
-            } => grep_result(&arguments, anchor).await,
-            Self::Protocol {
-                tool: crate::tools::ProtocolTool::VaultStatus,
-                ..
-            } => run_agent_query(AgentQuery::VaultStatus).await,
-            Self::Dispatch {
-                target,
-                name,
-                arguments,
-                anchor,
-            } => {
-                if name == "open_file" {
-                    let path = arguments
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .ok_or("open_file.path is required")?;
-                    if !Path::new(path).is_absolute() {
-                        return Err("open_file.path must be an absolute path".to_string());
-                    }
-                    scoped_existing_path(anchor, Path::new(path), "open_file").await?;
-                }
-
-                match target {
-                    crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
-                    | crate::tools::DispatchTarget::Command(
-                        command @ AgentCommand::RunWithPlacementOverride { .. },
-                    ) => run_blocking(command, config.run_block_timeout).await,
-                    crate::tools::DispatchTarget::Command(command) => {
-                        run_agent_command(command, anchor).await
-                    }
-                    crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
-                }
-            }
-        }
-    }
 }
 
 async fn agent_working_directory(
