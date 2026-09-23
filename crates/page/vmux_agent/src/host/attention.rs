@@ -25,7 +25,7 @@ impl Plugin for AttentionPlugin {
             (mark_agent_done, clear_agent_done)
                 .chain()
                 .after(vmux_layout::stack::ComputeFocusSet)
-                .after(super::follow::tidy_on_agent_attention),
+                .after(crate::tidy::TidySet),
         );
     }
 }

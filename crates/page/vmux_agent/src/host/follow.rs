@@ -29,16 +29,6 @@ impl Plugin for FollowPlugin {
                 .in_set(WriteAppCommands)
                 .after(ServiceMessageSet)
                 .after(super::command::CommandSet::Commands),
-        )
-        .add_systems(
-            Update,
-            tidy_on_agent_attention
-                .after(vmux_layout::stack::ComputeFocusSet)
-                .after(super::attention::TurnEndedSet),
-        )
-        .add_systems(
-            Update,
-            (tidy_acp_on_idle, tidy_page_on_idle).after(vmux_layout::stack::ComputeFocusSet),
         );
     }
 }
@@ -49,6 +39,11 @@ pub(crate) struct AgentFileResolve<'w, 's> {
     page_open: MessageWriter<'w, vmux_core::PageOpenRequest>,
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
     observations: MessageWriter<'w, vmux_layout::worktree::TabDirectoryObserved>,
+    layout: AgentFileLayout<'w, 's>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentFileLayout<'w, 's> {
     agent_terms: Query<
         'w,
         's,
@@ -91,8 +86,8 @@ pub(crate) struct PendingFilePreview {
     kind: vmux_service::protocol::FileTouchKind,
 }
 
-impl AgentFileResolve<'_, '_> {
-    fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+impl AgentFileLayout<'_, '_> {
+    pub(crate) fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         let (_, _, term_co) = self
             .agent_terms
             .iter()
@@ -227,7 +222,7 @@ impl AgentFileResolve<'_, '_> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn file_stacks_for(
+    pub(crate) fn file_stacks_for(
         &self,
         agent_pane: Entity,
     ) -> Option<(Entity, Vec<(Entity, Entity, String)>)> {
@@ -303,10 +298,10 @@ fn handle_agent_file_touch(
         {
             continue;
         }
-        let Some(agent_pane) = resolve.agent_pane(*anchor) else {
+        let Some(agent_pane) = resolve.layout.agent_pane(*anchor) else {
             continue;
         };
-        if let Some(tab) = resolve.ancestor_tab(agent_pane) {
+        if let Some(tab) = resolve.layout.ancestor_tab(agent_pane) {
             let kind = match kind {
                 vmux_service::protocol::FileTouchKind::Read => {
                     vmux_layout::worktree::TabDirectoryObservationKind::Read
@@ -366,9 +361,13 @@ fn handle_agent_file_touch(
         let open_as_tabs = deduped.len() > 1;
         for preview in deduped {
             let anchor = preview.anchor;
-            let existing = resolve.file_page_for(preview.agent_pane);
+            let existing = resolve.layout.file_page_for(preview.agent_pane);
             let target = (!open_as_tabs)
-                .then(|| resolve.file_page_target(preview.agent_pane, &preview.url))
+                .then(|| {
+                    resolve
+                        .layout
+                        .file_page_target(preview.agent_pane, &preview.url)
+                })
                 .flatten();
             if let Some(target) = target {
                 if target.navigate {
@@ -391,7 +390,7 @@ fn handle_agent_file_touch(
                 .map(|target| target.pane)
                 .or(existing.map(|(_, pane)| pane))
             {
-                let kind = resolve.agent_kind(anchor);
+                let kind = resolve.layout.agent_kind(anchor);
                 resolve
                     .activate
                     .write(vmux_layout::active_panes::ActivatePane {
@@ -462,167 +461,11 @@ impl SearchGrouping {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn tidy_follow_pane(
-    agent_pane: Entity,
-    settings: &AppSettings,
-    resolve: &AgentFileResolve,
-    last_activated: &Query<&vmux_core::LastActivatedAt>,
-    pending: &Query<(), With<crate::tidy::PendingTidy>>,
-    close: &mut MessageWriter<vmux_layout::CloseStackRequest>,
-    commands: &mut Commands,
-) {
-    let Some((follow_pane, stacks)) = resolve.file_stacks_for(agent_pane) else {
-        return;
-    };
-    if pending.get(follow_pane).is_ok() {
-        return;
-    }
-    let mut repos: Vec<(std::path::PathBuf, std::collections::HashSet<String>)> = Vec::new();
-    let rows: Vec<(Entity, i64, bool)> = stacks
-        .iter()
-        .map(|(stack, _page, url)| {
-            let ts = last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN);
-            let changed = crate::tidy::path_from_file_url(url)
-                .map(|abs| crate::tidy::is_changed(&abs, &mut repos))
-                .unwrap_or(false);
-            (*stack, ts, changed)
-        })
-        .collect();
-    let closable = crate::tidy::decide_closable(&rows, settings.agent.tidy_files_max);
-    if closable.is_empty() {
-        return;
-    }
-    if settings.agent.tidy_files_auto {
-        for stack in closable {
-            close.write(vmux_layout::CloseStackRequest::tidying(stack));
-        }
-        return;
-    }
-    let count = closable.len() as u32;
-    let active_page = stacks
-        .iter()
-        .max_by_key(|(stack, _, _)| last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN))
-        .map(|(_, page, _)| *page);
-    if let Some(page) = active_page {
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            page,
-            &vmux_core::event::FileTidyPromptEvent { count },
-        ));
-        commands
-            .entity(follow_pane)
-            .insert(crate::tidy::PendingTidy { closable });
-    }
-}
-
-pub(super) fn tidy_on_agent_attention(
-    mut reader: MessageReader<vmux_core::notify::AgentAttention>,
-    settings: Res<AppSettings>,
-    agents: Query<&vmux_service::protocol::ProcessId, With<vmux_core::team::Agent>>,
-    resolve: AgentFileResolve,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
-    pending: Query<(), With<crate::tidy::PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
-    mut commands: Commands,
-) {
-    if !settings.agent.tidy_files {
-        for _ in reader.read() {}
-        return;
-    }
-    for att in reader.read() {
-        let Ok(pid) = agents.get(att.entity) else {
-            continue;
-        };
-        let Some(agent_pane) = resolve.agent_pane(*pid) else {
-            continue;
-        };
-        tidy_follow_pane(
-            agent_pane,
-            &settings,
-            &resolve,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
-    }
-}
-
-fn tidy_acp_on_idle(
-    settings: Res<AppSettings>,
-    sessions: Query<
-        (&vmux_session::AcpSession, &crate::AgentRunState),
-        Changed<crate::AgentRunState>,
-    >,
-    resolve: AgentFileResolve,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
-    pending: Query<(), With<crate::tidy::PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
-    mut commands: Commands,
-) {
-    if !settings.agent.tidy_files {
-        return;
-    }
-    for (acp, state) in &sessions {
-        if !matches!(state, crate::AgentRunState::Idle) {
-            continue;
-        }
-        let Some(agent_pane) = resolve.agent_pane(acp.anchor) else {
-            continue;
-        };
-        tidy_follow_pane(
-            agent_pane,
-            &settings,
-            &resolve,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
-    }
-}
-
-fn tidy_page_on_idle(
-    settings: Res<AppSettings>,
-    sessions: Query<
-        (&ChildOf, &crate::AgentRunState),
-        (
-            With<vmux_session::AgentSession>,
-            Changed<crate::AgentRunState>,
-        ),
-    >,
-    resolve: AgentFileResolve,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
-    pending: Query<(), With<crate::tidy::PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
-    mut commands: Commands,
-) {
-    if !settings.agent.tidy_files {
-        return;
-    }
-    for (parent, state) in &sessions {
-        if !matches!(state, crate::AgentRunState::Idle) {
-            continue;
-        }
-        tidy_follow_pane(
-            parent.get(),
-            &settings,
-            &resolve,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::host::run_terminal::AgentCwd;
-    use crate::host::test_support::{
-        close_stack_requests, spawn_file_preview_stack, test_settings,
-    };
+    use crate::host::test_support::test_settings;
     use vmux_layout::pane::PaneSplit;
     use vmux_service::protocol::{AgentRequestId, ProcessId};
 
@@ -1336,66 +1179,6 @@ mod tests {
         assert_eq!(
             app.world().resource::<CapturedRunCwd>().0.as_deref(),
             Some(observed.path().canonicalize().unwrap().as_path())
-        );
-    }
-
-    #[test]
-    pub(crate) fn tidy_page_on_idle_closes_clean_previews_for_native_chat_cli() {
-        let mut settings = test_settings();
-        settings.agent.tidy_files_auto = true;
-
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<vmux_core::PageOpenRequest>()
-            .insert_resource(settings)
-            .add_systems(Update, tidy_page_on_idle);
-
-        let parent = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
-        let agent_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
-        let agent_stack = app
-            .world_mut()
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_session::AgentSession {
-                    kind: vmux_core::agent::AgentKind::Claude,
-                    variant: crate::AgentVariant::Cli,
-                    sid: "sid-1".to_string(),
-                    provider: "claude".to_string(),
-                    model: "cli".to_string(),
-                },
-                crate::AgentRunState::Streaming,
-                ChildOf(agent_pane),
-            ))
-            .id();
-        let file_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
-        let previews: Vec<Entity> = (0..6)
-            .map(|i| {
-                spawn_file_preview_stack(&mut app, file_pane, i, &format!("file:///clean/f{i}.rs"))
-            })
-            .collect();
-
-        app.update();
-        assert!(
-            close_stack_requests(&app).is_empty(),
-            "streaming (not idle) must not tidy"
-        );
-
-        *app.world_mut()
-            .get_mut::<crate::AgentRunState>(agent_stack)
-            .unwrap() = crate::AgentRunState::Idle;
-        app.update();
-
-        let mut closed = close_stack_requests(&app);
-        closed.sort();
-        let mut expected = previews[0..5].to_vec();
-        expected.sort();
-        assert_eq!(
-            closed, expected,
-            "clean non-active previews close; the active (max LastActivatedAt) preview is kept"
-        );
-        assert!(
-            !closed.contains(&previews[5]),
-            "active preview must be kept"
         );
     }
 }
