@@ -29,6 +29,8 @@ use vmux_service::{
 };
 use vmux_setting::AppSettings;
 
+use super::loading::AgentLoading;
+use super::prompt::PromptCapture;
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::process_index::TerminalProcessIndex;
@@ -61,8 +63,9 @@ impl Plugin for TerminalPlugin {
                 TerminalServicePlugin,
                 TerminalInputPlugin,
                 crate::processes_monitor::ProcessesMonitorPlugin,
+                super::loading::LoadingPlugin,
+                super::prompt::PromptPlugin,
                 crate::snapshot_updater::SnapshotPlugin,
-                TerminalLoadingPlugin,
                 crate::theme::TerminalThemePlugin,
             ));
     }
@@ -86,6 +89,10 @@ impl Plugin for TerminalServicePlugin {
                 (respond_terminal_spawn, respond_processes_monitor_spawn)
                     .in_set(vmux_command::ReadCommandRequests),
             )
+            .add_systems(
+                Update,
+                prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
+            )
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed);
     }
@@ -99,7 +106,13 @@ impl Plugin for TerminalInputPlugin {
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
-            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_systems(
+                Update,
+                (
+                    format_terminal_url.after(pid::track_pid_inserts),
+                    resend_the_screen_a_page_missed.after(ServiceMessageSet),
+                ),
+            )
             .add_plugins(UiEventPlugin::<(
                 TermResizeEvent,
                 TermMouseEvent,
@@ -112,30 +125,6 @@ impl Plugin for TerminalInputPlugin {
             .add_observer(on_term_scroll)
             .add_observer(on_term_key)
             .add_observer(on_term_link_open);
-    }
-}
-
-struct TerminalLoadingPlugin;
-
-impl Plugin for TerminalLoadingPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                arm_agent_loading,
-                arm_agent_loading_on_restart,
-                announce_slow_shell_boot.after(poll_service_messages),
-                clear_agent_loading.after(poll_service_messages),
-                resend_the_screen_a_page_missed.after(poll_service_messages),
-                flush_buffered_agent_prompt.after(poll_service_messages),
-                reset_terminal_title_on_agent_removed,
-                set_terminal_shell_icon,
-            ),
-        )
-        .add_systems(
-            Update,
-            prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
-        );
     }
 }
 
@@ -217,6 +206,14 @@ pub struct TerminalModeMap {
     pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
 }
 
+impl TerminalModeMap {
+    pub(crate) fn agent_ready(&self, process_id: &ProcessId) -> bool {
+        self.modes
+            .get(process_id)
+            .is_some_and(|mode| mode.alt_screen || mode.mouse_capture || mode.focus_reporting)
+    }
+}
+
 #[derive(Resource, Default)]
 struct LocalCopyModeState {
     active: std::collections::HashSet<ProcessId>,
@@ -280,99 +277,6 @@ pub struct TerminalModeFlags {
 
 #[derive(Component)]
 pub struct AgentFocusBlurred;
-
-const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
-const SHELL_BOOT_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct AgentLoading {
-    pub since: Instant,
-    pub announced: bool,
-}
-
-impl AgentLoading {
-    fn armed(announced: bool) -> Self {
-        Self {
-            since: Instant::now(),
-            announced,
-        }
-    }
-}
-
-#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
-pub struct BufferedAgentPrompt {
-    pub text: String,
-    pub submit: bool,
-}
-
-#[derive(Component, Debug, Clone, Default)]
-pub struct PromptCapture {
-    pub draft: String,
-    pub skipped: bool,
-}
-
-impl PromptCapture {
-    fn wants_paste(event: &KeyStroke) -> bool {
-        event.mods.super_key && event.code == "KeyV"
-    }
-
-    fn apply(&mut self, event: &KeyStroke, pasted: Option<String>) -> bool {
-        if event.mods.ctrl && event.code == "KeyC" {
-            self.draft.clear();
-            self.skipped = false;
-            return true;
-        }
-        if Self::wants_paste(event) {
-            let Some(pasted) = pasted else { return false };
-            if !self.draft.is_empty() && !self.draft.ends_with(char::is_whitespace) {
-                self.draft.push(' ');
-            }
-            self.draft.push_str(&pasted);
-            self.skipped = false;
-            return true;
-        }
-        match event.key.as_str() {
-            "Escape" => {
-                self.draft.clear();
-                self.skipped = true;
-                true
-            }
-            "Backspace" => self.draft.pop().is_some(),
-            _ if event.is_text_input() => {
-                self.draft.push_str(event.typed_text());
-                self.skipped = false;
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-fn agent_prompt_flush_bytes(alt_screen: bool, buf: &BufferedAgentPrompt) -> Option<Vec<u8>> {
-    if !alt_screen {
-        return None;
-    }
-    let bytes = crate::shell_input::bracketed_paste_input(&buf.text, buf.submit);
-    (!bytes.is_empty()).then_some(bytes)
-}
-
-fn flush_buffered_agent_prompt(
-    q: Query<(Entity, &ProcessId, &BufferedAgentPrompt), With<vmux_core::agent::AgentSession>>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid, buf) in &q {
-        if let Some(data) = agent_prompt_flush_bytes(true, buf) {
-            service.0.send(ClientMessage::ProcessInput {
-                process_id: *pid,
-                data,
-            });
-        }
-        commands.entity(entity).remove::<BufferedAgentPrompt>();
-    }
-}
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct TerminalGridSize {
@@ -439,22 +343,6 @@ pub fn format_terminal_url(
         };
         if meta.url != next {
             meta.url = next;
-        }
-    }
-}
-
-fn set_terminal_shell_icon(
-    mut q: Query<(&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata), With<Terminal>>,
-) {
-    for (launch, mut meta) in &mut q {
-        if !matches!(launch.kind, crate::launch::TerminalKind::Plain) {
-            continue;
-        }
-        if !meta.icon.is_none() {
-            continue;
-        }
-        if let Some(icon) = vmux_core::BuiltinIcon::for_shell(&launch.command) {
-            meta.icon = vmux_core::PageIcon::Builtin(icon);
         }
     }
 }
@@ -839,7 +727,7 @@ pub struct PendingTerminalInput {
 }
 
 #[derive(Component)]
-struct ShellOutputSeen;
+pub(crate) struct ShellOutputSeen;
 
 #[derive(Component)]
 struct OwedSnapshot;
@@ -2738,205 +2626,6 @@ fn on_term_key(
     }
 }
 
-fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> (String, String) {
-    match session {
-        Some(s) => (
-            s.kind.display_name().to_string(),
-            s.kind.as_url_segment().to_string(),
-        ),
-        None => ("Terminal".to_string(), "terminal".to_string()),
-    }
-}
-
-fn arm_agent_loading(
-    newly_ready: Query<
-        (
-            Entity,
-            Option<&vmux_core::agent::AgentSession>,
-            Option<&PromptCapture>,
-            Has<ShellOutputSeen>,
-        ),
-        (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, session, capture, output_seen) in &newly_ready {
-        if session.is_none() && output_seen {
-            continue;
-        }
-        let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
-        if session.is_some() && capture.is_none() {
-            commands.entity(entity).insert(PromptCapture::default());
-        }
-        if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_event(
-                entity,
-                &AgentPromptDraftEvent {
-                    draft: capture.draft.clone(),
-                    skipped: capture.skipped,
-                },
-            ));
-        }
-        if !announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn announce_slow_shell_boot(
-    mut waiting: Query<
-        (Entity, &mut AgentLoading),
-        (
-            With<Terminal>,
-            Without<vmux_core::agent::AgentSession>,
-            Without<ShellOutputSeen>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, mut loading) in &mut waiting {
-        if loading.announced || loading.since.elapsed() < SHELL_BOOT_GRACE {
-            continue;
-        }
-        loading.announced = true;
-        let (label, segment) = terminal_loading_labels(None);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn arm_agent_loading_on_restart(
-    restarted: Query<
-        (
-            Entity,
-            Option<&vmux_core::agent::AgentSession>,
-            Option<&PromptCapture>,
-        ),
-        (
-            With<Terminal>,
-            With<PageReady>,
-            Without<AgentLoading>,
-            Changed<ProcessId>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, session, capture) in &restarted {
-        let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
-        if session.is_some() && capture.is_none() {
-            commands.entity(entity).insert(PromptCapture::default());
-        }
-        if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_event(
-                entity,
-                &AgentPromptDraftEvent {
-                    draft: capture.draft.clone(),
-                    skipped: capture.skipped,
-                },
-            ));
-        }
-        if !announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn clear_agent_loading(
-    loading_q: Query<
-        (
-            Entity,
-            &ProcessId,
-            Option<&vmux_core::agent::AgentSession>,
-            &AgentLoading,
-            Option<&PromptCapture>,
-            Has<ShellOutputSeen>,
-        ),
-        With<Terminal>,
-    >,
-    mode_map: Res<TerminalModeMap>,
-    mut commands: Commands,
-) {
-    for (entity, pid, session, loading, capture, output_seen) in &loading_q {
-        let ready = match session {
-            Some(_) => mode_map
-                .modes
-                .get(pid)
-                .map(|m| m.alt_screen || m.mouse_capture || m.focus_reporting)
-                .unwrap_or(false),
-            None => output_seen,
-        };
-        if !ready && loading.since.elapsed() < AGENT_LOADING_TIMEOUT {
-            continue;
-        }
-        if let Some(capture) = capture {
-            if !capture.skipped && !capture.draft.trim().is_empty() {
-                commands.entity(entity).insert(BufferedAgentPrompt {
-                    text: capture.draft.clone(),
-                    submit: true,
-                });
-            }
-            commands.entity(entity).remove::<PromptCapture>();
-        }
-        commands.entity(entity).remove::<AgentLoading>();
-        if !loading.announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
-            entity,
-            &crate::event::TermLoadingEvent {
-                loading: false,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn reset_terminal_title_on_agent_removed(
-    mut removed: RemovedComponents<vmux_core::agent::AgentSession>,
-    mut q: Query<(&ProcessId, &mut PageMetadata), With<Terminal>>,
-) {
-    for entity in removed.read() {
-        if let Ok((pid, mut meta)) = q.get_mut(entity) {
-            let title = format!("Terminal ({})", &pid.to_string()[..8]);
-            if meta.title != title {
-                meta.title = title;
-            }
-        }
-    }
-}
-
 fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -3295,99 +2984,10 @@ fn update_local_copy_mode_for_mouse_action(
 }
 
 #[cfg(test)]
-mod prompt_capture_tests {
-    use super::PromptCapture;
-    use vmux_core::input::{KeyModifiers, KeyStroke};
-
-    const CTRL: KeyModifiers = KeyModifiers {
-        ctrl: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-    const SUPER: KeyModifiers = KeyModifiers {
-        ctrl: false,
-        shift: false,
-        alt: false,
-        super_key: true,
-    };
-
-    fn press(key: &str, code: &str, mods: KeyModifiers) -> KeyStroke {
-        KeyStroke {
-            key: key.to_string(),
-            code: code.to_string(),
-            mods,
-            text: None,
-            repeat: false,
-        }
-    }
-
-    fn typed(key: &str, code: &str) -> KeyStroke {
-        press(key, code, KeyModifiers::default())
-    }
-
-    #[test]
-    fn the_draft_takes_text_and_refuses_everything_else() {
-        let mut capture = PromptCapture::default();
-
-        assert!(capture.apply(&typed("h", "KeyH"), None));
-        assert!(capture.apply(&typed("i", "KeyI"), None));
-        assert_eq!(capture.draft, "hi");
-
-        assert!(!capture.apply(&press("i", "KeyI", CTRL), None));
-        assert!(!capture.apply(&typed("Enter", "Enter"), None));
-        assert!(!capture.apply(&typed("F5", "F5"), None));
-        assert_eq!(capture.draft, "hi", "a chord or a bare action is not text");
-
-        assert!(capture.apply(&typed("Backspace", "Backspace"), None));
-        assert_eq!(capture.draft, "h");
-    }
-
-    #[test]
-    fn escape_declines_the_prompt_and_ctrl_c_only_clears_it() {
-        let mut capture = PromptCapture::default();
-        capture.apply(&typed("h", "KeyH"), None);
-
-        assert!(capture.apply(&typed("Escape", "Escape"), None));
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("", true));
-
-        capture.apply(&typed("h", "KeyH"), None);
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("h", false));
-
-        assert!(capture.apply(&press("c", "KeyC", CTRL), None));
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("", false));
-    }
-
-    #[test]
-    fn a_press_that_changes_nothing_reports_no_change() {
-        let mut capture = PromptCapture::default();
-
-        assert!(!capture.apply(&typed("Backspace", "Backspace"), None));
-        assert!(!capture.apply(&typed("Shift", "ShiftLeft"), None));
-        assert!(capture.draft.is_empty());
-    }
-
-    #[test]
-    fn paste_is_separated_from_the_draft_it_joins() {
-        let paste = press("v", "KeyV", SUPER);
-        let mut capture = PromptCapture::default();
-        capture.apply(&typed("g", "KeyG"), None);
-
-        assert!(capture.apply(&paste, Some("o run".to_string())));
-        assert_eq!(capture.draft, "g o run");
-
-        assert!(!capture.apply(&paste, None));
-        assert_eq!(capture.draft, "g o run");
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::schedule::Schedules;
-    use std::time::{Duration, Instant};
-    use vmux_core::agent::{AgentKind, AgentSession};
     use vmux_core::input::KeyModifiers;
     use vmux_core::page::PageReady;
     use vmux_layout::settings::{
@@ -4628,38 +4228,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_terminal_armed_loading_on_page_ready() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PageReady {},
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn a_shell_already_at_its_prompt_is_shown_without_arming_loading() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((Terminal, ShellOutputSeen, PageReady {}))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
     fn a_page_ready_before_the_service_is_owed_its_screen() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
@@ -4675,334 +4243,6 @@ mod tests {
             app.world().get::<OwedSnapshot>(webview).is_some(),
             "the snapshot request had nowhere to go, so the debt has to outlive the connection"
         );
-    }
-
-    #[test]
-    fn a_plain_terminal_holds_its_boot_screen_back_until_the_shell_is_late() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (arm_agent_loading, announce_slow_shell_boot).chain(),
-        );
-        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
-
-        app.update();
-        assert!(
-            !app.world().get::<AgentLoading>(e).unwrap().announced,
-            "a shell that may still beat the grace period must not have been announced"
-        );
-
-        let mut loading = app.world_mut().get_mut::<AgentLoading>(e).unwrap();
-        loading.since = Instant::now() - SHELL_BOOT_GRACE - Duration::from_millis(1);
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
-    }
-
-    #[test]
-    fn an_agent_announces_its_boot_screen_at_once() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PageReady {},
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
-    }
-
-    #[test]
-    fn agent_loading_preserves_initial_prompt_capture() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PromptCapture {
-                    draft: "@asdfas".to_string(),
-                    skipped: false,
-                },
-                PageReady {},
-            ))
-            .id();
-
-        app.update();
-
-        let capture = app.world().get::<PromptCapture>(e).unwrap();
-        assert_eq!(capture.draft, "@asdfas");
-        assert!(!capture.skipped);
-    }
-
-    #[test]
-    fn agent_loading_armed_on_pty_restart() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading_on_restart);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                ProcessId::new(),
-            ))
-            .id();
-
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-
-        app.world_mut().entity_mut(e).insert(PageReady {});
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-
-        *app.world_mut().get_mut::<ProcessId>(e).unwrap() = ProcessId::new();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn agent_loading_cleared_when_alt_screen_active() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                pid,
-                TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    fn clear_with_capture(capture: PromptCapture) -> (App, Entity) {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Claude,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-                capture,
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                pid,
-                TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
-        app.update();
-        (app, e)
-    }
-
-    #[test]
-    fn ready_flips_capture_into_buffered_prompt() {
-        let (app, e) = clear_with_capture(PromptCapture {
-            draft: "find me a hotel".to_string(),
-            skipped: false,
-        });
-        assert!(app.world().get::<PromptCapture>(e).is_none());
-        let buffered = app.world().get::<BufferedAgentPrompt>(e).unwrap();
-        assert_eq!(buffered.text, "find me a hotel");
-        assert!(buffered.submit);
-    }
-
-    #[test]
-    fn ready_with_skipped_capture_delivers_nothing() {
-        let (app, e) = clear_with_capture(PromptCapture {
-            draft: "ignored".to_string(),
-            skipped: true,
-        });
-        assert!(app.world().get::<PromptCapture>(e).is_none());
-        assert!(app.world().get::<BufferedAgentPrompt>(e).is_none());
-    }
-
-    #[test]
-    fn agent_loading_cleared_after_timeout() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now() - AGENT_LOADING_TIMEOUT - Duration::from_secs(1),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
-    fn agent_loading_retained_while_starting() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn arm_loading_arms_plain_terminal() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn plain_terminal_loading_retained_before_min_display() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ProcessId::new(),
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn plain_terminal_loading_cleared_once_the_shell_prompt_lands() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ProcessId::new(),
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-
-        app.world_mut().entity_mut(e).insert(ShellOutputSeen);
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
-    fn terminal_title_resets_to_plain_when_agent_session_removed() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, reset_terminal_title_on_agent_removed);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                pid,
-                PageMetadata {
-                    title: "Vibe (abc12345)".to_string(),
-                    url: "vmux://sessions/vibe/abc12345".to_string(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-            ))
-            .id();
-        app.update();
-        app.world_mut().entity_mut(e).remove::<AgentSession>();
-        app.update();
-        let expected = format!("Terminal ({})", &pid.to_string()[..8]);
-        let title = app.world().get::<PageMetadata>(e).unwrap().title.clone();
-        assert_eq!(title, expected);
     }
 
     #[test]
