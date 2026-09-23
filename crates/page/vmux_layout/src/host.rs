@@ -16,6 +16,7 @@ pub mod pane;
 mod pane_close;
 mod pane_focus;
 mod pane_identity;
+mod pane_resize;
 pub mod pending_stack;
 pub mod placement;
 pub mod plugin;
