@@ -17,6 +17,7 @@ mod pane_arrangement;
 mod pane_close;
 mod pane_focus;
 mod pane_identity;
+mod pane_open;
 mod pane_resize;
 mod pane_tree;
 pub mod pending_stack;
@@ -49,7 +50,7 @@ pub use cef::{
 };
 pub use contract::LayoutContractPlugin;
 pub use header::Header;
-pub use pane::{OpenBesideRequest, handle_open_beside_requests};
+pub use pane::OpenBesideRequest;
 pub use plugin::LayoutPlugin;
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
