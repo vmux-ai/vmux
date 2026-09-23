@@ -178,8 +178,8 @@ pub struct AcpCatalog {
     pub agents: Vec<crate::acp_registry::RegistryAgent>,
 }
 
-#[derive(Resource)]
-struct AcpCatalogChannel {
+#[derive(Component)]
+struct AcpCatalogFetch {
     rx: Receiver<Vec<crate::acp_registry::RegistryAgent>>,
 }
 
@@ -193,15 +193,20 @@ fn start_catalog_fetch(mut commands: Commands) {
             .unwrap_or_default();
         let _ = tx.send(agents);
     });
-    commands.insert_resource(AcpCatalogChannel { rx });
+    commands.spawn(AcpCatalogFetch { rx });
 }
 
-fn receive_catalog(channel: Option<Res<AcpCatalogChannel>>, mut catalog: ResMut<AcpCatalog>) {
-    let Some(channel) = channel else {
-        return;
-    };
-    if let Ok(agents) = channel.rx.try_recv() {
+fn receive_catalog(
+    fetches: Query<(Entity, &AcpCatalogFetch)>,
+    mut catalog: ResMut<AcpCatalog>,
+    mut commands: Commands,
+) {
+    for (entity, fetch) in &fetches {
+        let Ok(agents) = fetch.rx.try_recv() else {
+            continue;
+        };
         catalog.agents = agents;
+        commands.entity(entity).despawn();
     }
 }
 
@@ -696,6 +701,30 @@ mod tests {
             &queue,
             true
         ));
+    }
+
+    #[test]
+    fn catalog_fetch_entity_is_consumed_after_delivery() {
+        let mut app = App::new();
+        app.init_resource::<AcpCatalog>()
+            .add_systems(Update, receive_catalog);
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let fetch = app.world_mut().spawn(AcpCatalogFetch { rx }).id();
+        tx.send(vec![crate::acp_registry::RegistryAgent {
+            id: "agent".into(),
+            name: "Agent".into(),
+            version: None,
+            description: None,
+            icon: None,
+            repository: None,
+            distribution: crate::acp_registry::Distribution::default(),
+        }])
+        .unwrap();
+
+        app.update();
+
+        assert!(app.world().get_entity(fetch).is_err());
+        assert_eq!(app.world().resource::<AcpCatalog>().agents[0].id, "agent");
     }
 
     #[test]
