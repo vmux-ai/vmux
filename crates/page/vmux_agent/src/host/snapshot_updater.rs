@@ -20,7 +20,7 @@ pub(crate) fn update_agents_snapshot(
     >,
     page_idx: Option<Res<PageStrategyIndex>>,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
-    install_generation: Option<Res<crate::client::acp::AcpInstallGeneration>>,
+    installed: Query<(), Added<crate::acp_install::AcpPackageReady>>,
     mut state: ResMut<CommandBarUiState>,
 ) {
     let providers_changed = !changed_q.is_empty();
@@ -32,10 +32,7 @@ pub(crate) fn update_agents_snapshot(
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
-    let installs_changed = install_generation
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
+    let installs_changed = !installed.is_empty();
     if !providers_changed
         && !idx_changed
         && !catalog_changed

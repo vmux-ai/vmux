@@ -634,7 +634,8 @@ fn handle_swap_stack_session(
         commands
             .entity(ev.stack)
             .remove::<vmux_session::AcpSession>()
-            .remove::<crate::client::acp::AcpInstallStarted>()
+            .remove::<crate::acp_install::AcpInstallStarted>()
+            .remove::<crate::acp_install::AcpPackageReady>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
@@ -1099,7 +1100,7 @@ mod tests {
         let (stack, _child) = spawn_stack_child(&mut app);
         app.world_mut()
             .entity_mut(stack)
-            .insert(crate::client::acp::AcpInstallStarted);
+            .insert(crate::acp_install::AcpInstallStarted);
         app.world_mut()
             .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
             .write(vmux_core::agent::SwapStackSession {
@@ -1113,7 +1114,7 @@ mod tests {
 
         assert!(
             app.world()
-                .get::<crate::client::acp::AcpInstallStarted>(stack)
+                .get::<crate::acp_install::AcpInstallStarted>(stack)
                 .is_none()
         );
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();

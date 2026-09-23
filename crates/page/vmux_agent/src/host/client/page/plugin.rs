@@ -33,8 +33,7 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
-            .add_plugins(UiEventPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
-            .add_observer(crate::host::on_tidy_request)
+            .add_plugins(crate::tidy::TidyPlugin)
             .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)
             .add_systems(

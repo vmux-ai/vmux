@@ -616,44 +616,6 @@ fn tidy_page_on_idle(
     }
 }
 
-pub(crate) fn on_tidy_request(
-    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyRequest>>,
-    child_of: Query<&ChildOf>,
-    pending: Query<&crate::tidy::PendingTidy>,
-    mut settings: ResMut<AppSettings>,
-    mut save: MessageWriter<vmux_setting::SettingsSaveRequest>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok(stack) = child_of.get(webview).map(Relationship::get) else {
-        return;
-    };
-    let Ok(pane) = child_of.get(stack).map(Relationship::get) else {
-        return;
-    };
-    let Ok(pending_tidy) = pending.get(pane) else {
-        return;
-    };
-    let closable = pending_tidy.closable.clone();
-    commands.entity(pane).remove::<crate::tidy::PendingTidy>();
-    match trigger.event().payload.choice {
-        vmux_core::event::TidyChoice::Dismiss => {}
-        vmux_core::event::TidyChoice::Always => {
-            settings.agent.tidy_files_auto = true;
-            save.write(vmux_setting::SettingsSaveRequest);
-            for stack in closable {
-                close.write(vmux_layout::CloseStackRequest::tidying(stack));
-            }
-        }
-        vmux_core::event::TidyChoice::Tidy => {
-            for stack in closable {
-                close.write(vmux_layout::CloseStackRequest::tidying(stack));
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
