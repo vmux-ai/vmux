@@ -2,36 +2,32 @@ use bevy::prelude::*;
 
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
-use crate::page_key::PageKeyPlugin;
-use crate::snapshot::{CommandBarSnapshotPlugin, WriteCommandBarSnapshots};
-use crate::surface::CommandBarSurfacePlugin;
+use crate::page_key::KeyPlugin;
+use crate::snapshot::{UiStatePlugin, WriteCommandBarSnapshots};
+use crate::surface::SurfacePlugin;
 use vmux_core::team::{Profile, User};
 
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            PageKeyPlugin,
-            CommandBarSnapshotPlugin,
-            CommandBarSurfacePlugin,
-        ))
-        .add_message::<AppCommand>()
-        .add_message::<CommandIssued>()
-        .add_message::<crate::host::ExLineSubmitted>()
-        .add_message::<crate::host::FileStatusPicked>()
-        .configure_sets(
-            Update,
-            (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
-        )
-        .init_resource::<CommandSettle>()
-        .add_systems(
-            Update,
-            log_app_commands
-                .after(WriteAppCommands)
-                .before(ReadAppCommands),
-        )
-        .add_systems(Last, CommandSettle::keep_frames_coming);
+        app.add_plugins((KeyPlugin, UiStatePlugin, SurfacePlugin))
+            .add_message::<AppCommand>()
+            .add_message::<CommandIssued>()
+            .add_message::<crate::host::ExLineSubmitted>()
+            .add_message::<crate::host::FileStatusPicked>()
+            .configure_sets(
+                Update,
+                (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
+            )
+            .init_resource::<CommandSettle>()
+            .add_systems(
+                Update,
+                log_app_commands
+                    .after(WriteAppCommands)
+                    .before(ReadAppCommands),
+            )
+            .add_systems(Last, CommandSettle::keep_frames_coming);
     }
 }
 

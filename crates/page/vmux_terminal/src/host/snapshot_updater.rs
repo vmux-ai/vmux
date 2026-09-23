@@ -5,9 +5,9 @@ use vmux_layout::event::TERMINAL_PAGE_URL;
 
 use crate::pid::{Pid, PidToEntity};
 
-pub struct TerminalSnapshotPlugin;
+pub struct SnapshotPlugin;
 
-impl Plugin for TerminalSnapshotPlugin {
+impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

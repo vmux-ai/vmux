@@ -274,10 +274,8 @@ mod tests {
     use crate::host::edit::{EditCommand, EditMode};
     use crate::host::editing::{ClipboardHandle, EditExecutionPlugin};
     use crate::host::explorer::ExplorerTrees;
-    use crate::host::file_lifecycle::{
-        EditorFileLifecyclePlugin, FileBuffer, FileLoadTask, LoadFailure,
-    };
-    use crate::host::navigation::EditorNavigationPlugin;
+    use crate::host::file_lifecycle::{FileBuffer, FileLifecyclePlugin, FileLoadTask, LoadFailure};
+    use crate::host::navigation::NavigationPlugin;
 
     struct Session {
         app: App,
@@ -290,10 +288,10 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(EditorNavigationPlugin)
+                .add_plugins(NavigationPlugin)
                 .init_resource::<ExplorerTrees>()
-                .add_plugins(EditorFileLifecyclePlugin)
-                .add_plugins((EditExecutionPlugin, crate::encoding::EditorEncodingPlugin))
+                .add_plugins(FileLifecyclePlugin)
+                .add_plugins((EditExecutionPlugin, crate::encoding::EncodingPlugin))
                 .init_resource::<BinIpcEventRawBuffer>();
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut().insert_non_send(ClipboardHandle(None));

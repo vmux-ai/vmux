@@ -685,7 +685,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             vmux_layout::LayoutContractPlugin,
-            vmux_editor::EditorContractPlugin,
+            vmux_editor::ContractPlugin,
         ))
         .add_message::<AgentCommandRequest>()
         .add_message::<vmux_core::PageOpenRequest>()
@@ -858,7 +858,7 @@ mod tests {
     #[test]
     pub(crate) fn file_search_forwards_results_to_editor() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_editor::EditorContractPlugin))
+        app.add_plugins((MinimalPlugins, vmux_editor::ContractPlugin))
             .add_message::<AgentCommandRequest>()
             .add_systems(Update, handle_agent_file_search);
         let anchor = ProcessId::new();
@@ -1035,7 +1035,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             vmux_layout::LayoutContractPlugin,
-            vmux_editor::EditorContractPlugin,
+            vmux_editor::ContractPlugin,
         ))
         .add_message::<AgentCommandRequest>()
         .add_message::<vmux_core::PageOpenRequest>()
@@ -1091,7 +1091,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             vmux_layout::LayoutContractPlugin,
-            vmux_editor::EditorContractPlugin,
+            vmux_editor::ContractPlugin,
         ))
         .add_message::<AgentCommandRequest>()
         .add_message::<vmux_core::PageOpenRequest>()
@@ -1160,7 +1160,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             vmux_layout::LayoutContractPlugin,
-            vmux_editor::EditorContractPlugin,
+            vmux_editor::ContractPlugin,
         ))
         .add_message::<AgentCommandRequest>()
         .add_message::<vmux_core::PageOpenRequest>()
@@ -1292,7 +1292,7 @@ mod tests {
             MinimalPlugins,
             vmux_layout::worktree::WorktreePlugin,
             vmux_layout::LayoutContractPlugin,
-            vmux_editor::EditorContractPlugin,
+            vmux_editor::ContractPlugin,
         ))
         .add_message::<AgentCommandRequest>()
         .add_message::<vmux_core::PageOpenRequest>()

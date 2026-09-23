@@ -5,11 +5,11 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
-use super::{ExplorerState, ExplorerTabsPlugin, OpenEditorsDirty};
+use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
 use crate::host::editor::{Editor, FileView, ParkedEdits};
 use crate::host::viewport::FileViewport;
 
-impl Plugin for ExplorerTabsPlugin {
+impl Plugin for TabsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_layout::CloseStackRequest>()
             .add_systems(Update, (sync_open_editors, emit_open_editors))

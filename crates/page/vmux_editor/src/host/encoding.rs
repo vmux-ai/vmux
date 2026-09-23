@@ -10,9 +10,9 @@ use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{FileBuffer, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
 
-pub(super) struct EditorEncodingPlugin;
+pub(super) struct EncodingPlugin;
 
-impl Plugin for EditorEncodingPlugin {
+impl Plugin for EncodingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(FileEncodingSet,)>::default())
             .add_observer(on_file_encoding_set);

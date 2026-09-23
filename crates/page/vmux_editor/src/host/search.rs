@@ -16,9 +16,9 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_FILES_SCANNED: usize = 40_000;
 const MAX_PREVIEW_CHARS: usize = 240;
 
-pub(crate) struct ProjectSearchPlugin;
+pub(crate) struct SearchPlugin;
 
-impl Plugin for ProjectSearchPlugin {
+impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ExplorerSearchRequest,)>::default())
             .add_observer(start_project_search)

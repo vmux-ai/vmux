@@ -18,12 +18,12 @@ use crate::dir::{list_dir, parent_listing};
 use crate::edit::{EditCore, highlight_cache::HighlightCache};
 use crate::media::FileMedia;
 
-pub(super) struct EditorFileLifecyclePlugin;
+pub(super) struct FileLifecyclePlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct EditorFileLoadedSet;
 
-impl Plugin for EditorFileLifecyclePlugin {
+impl Plugin for FileLifecyclePlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = mpsc::channel();
         let proxy = app
@@ -593,7 +593,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<ExplorerTrees>()
-            .add_plugins(EditorFileLifecyclePlugin);
+            .add_plugins(FileLifecyclePlugin);
         app.world_mut().insert_non_send(Browsers::default());
         app.world_mut()
             .insert_resource(crate::lsp::manager::LspManager::new(

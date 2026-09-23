@@ -7,26 +7,26 @@ impl Plugin for EditorPlugin {
         app.world_mut().spawn(FILES_PAGE_MANIFEST);
         app.world_mut().spawn(PROJECTS_PAGE_MANIFEST);
         app.add_plugins((
-            contract::EditorContractPlugin,
+            contract::ContractPlugin,
             lsp::LspPlugin,
-            app_key::FileKeyPlugin,
-            search::ProjectSearchPlugin,
+            app_key::KeyPlugin,
+            search::SearchPlugin,
         ))
         .add_plugins((
-            page_open::EditorPageOpenPlugin,
-            file_lifecycle::EditorFileLifecyclePlugin,
-            workspace_edit::EditorWorkspaceEditPlugin,
-            status::EditorStatusPlugin,
-            viewport::EditorViewportPlugin,
-            media::EditorMediaPlugin,
-            note::EditorNotePlugin,
-            editing::EditorEditingPlugin,
-            language::EditorLanguagePlugin,
-            shape::EditorShapePlugin,
-            encoding::EditorEncodingPlugin,
-            navigation::EditorNavigationPlugin,
-            history::EditorHistoryPlugin,
-            explorer::EditorExplorerPlugin,
+            page_open::PageOpenPlugin,
+            file_lifecycle::FileLifecyclePlugin,
+            workspace_edit::WorkspaceEditPlugin,
+            status::StatusPlugin,
+            viewport::ViewportPlugin,
+            media::MediaPlugin,
+            note::NotePlugin,
+            editing::EditingPlugin,
+            language::LanguagePlugin,
+            shape::ShapePlugin,
+            encoding::EncodingPlugin,
+            navigation::NavigationPlugin,
+            history::HistoryPlugin,
+            explorer::ExplorerPlugin,
         ));
     }
 }
@@ -83,7 +83,7 @@ pub(crate) mod viewport;
 pub(crate) mod workspace_edit;
 pub(crate) mod wrap;
 
-pub use contract::EditorContractPlugin;
+pub use contract::ContractPlugin;
 pub use editor::FileView;
 pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
 pub use lsp::LspPlugin;

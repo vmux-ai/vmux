@@ -13,9 +13,9 @@ use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
 use crate::host::preview;
 use crate::host::status::FileInitialMetaSent;
 
-pub(crate) struct EditorMediaPlugin;
+pub(crate) struct MediaPlugin;
 
-impl Plugin for EditorMediaPlugin {
+impl Plugin for MediaPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             FilePreviewRequest,

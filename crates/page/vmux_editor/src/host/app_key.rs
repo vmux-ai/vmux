@@ -13,9 +13,9 @@ use vmux_core::event::{
 use crate::host::editor::{Editor, FileView};
 use crate::host::shape::BufferShape;
 
-pub(crate) struct FileKeyPlugin;
+pub(crate) struct KeyPlugin;
 
-impl Plugin for FileKeyPlugin {
+impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
             .add_systems(Update, echo_key_command.in_set(ReadAppCommands))
@@ -155,7 +155,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(FileKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()
@@ -230,7 +230,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(FileKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()

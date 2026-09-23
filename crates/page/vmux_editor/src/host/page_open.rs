@@ -12,9 +12,9 @@ use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
 use super::viewport::FileViewport;
 
-pub(super) struct EditorPageOpenPlugin;
+pub(super) struct PageOpenPlugin;
 
-impl Plugin for EditorPageOpenPlugin {
+impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_core::event::RecordVisitRequest>()
             .add_systems(
@@ -203,23 +203,17 @@ mod tests {
     use vmux_core::PageOpenId;
     use vmux_core::event::FileOpenEvent;
 
-    use super::super::explorer::ExplorerState;
-    use super::super::explorer::ExplorerTabsPlugin;
+    use super::super::explorer::{ExplorerState, TabsPlugin};
     use super::super::file_lifecycle::FileDir;
-    use crate::navigation::EditorNavigationPlugin;
+    use crate::navigation::NavigationPlugin;
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            EditorNavigationPlugin,
-            ExplorerTabsPlugin,
-            EditorPageOpenPlugin,
-        ))
-        .insert_resource(crate::lsp::manager::LspManager::new(
-            crate::lsp::LspOutbox::default(),
-            crate::lsp::server_request::ServerEvents::default().sender(),
-        ));
+        app.add_plugins((MinimalPlugins, NavigationPlugin, TabsPlugin, PageOpenPlugin))
+            .insert_resource(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspOutbox::default(),
+                crate::lsp::server_request::ServerEvents::default().sender(),
+            ));
         app
     }
 

@@ -56,7 +56,7 @@ impl Plugin for SpacePlugin {
                 HostedPagePlugin::<Spaces>::default(),
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
-                crate::snapshot_updater::SpaceSnapshotPlugin,
+                crate::snapshot_updater::SnapshotPlugin,
                 UiEventPlugin::<(
                     SpaceRequest,
                     ProjectRequest,

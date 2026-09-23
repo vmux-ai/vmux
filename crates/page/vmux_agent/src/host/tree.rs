@@ -62,7 +62,7 @@ impl Plugin for AgentSessionPlugin {
         app.insert_resource(strategies)
             .add_plugins((
                 vmux_layout::LayoutContractPlugin,
-                vmux_editor::EditorContractPlugin,
+                vmux_editor::ContractPlugin,
                 vmux_terminal::TerminalContractPlugin,
             ))
             .add_plugins((

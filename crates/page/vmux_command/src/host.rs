@@ -17,7 +17,7 @@ pub use bundle::CommandBar;
 pub use command::*;
 pub use issued::{CommandIssued, CommandIssuer, ExLineSubmitted, FileStatusPicked};
 pub use open::*;
-pub use page_key::{PageKeyPlugin, ScopedKeys};
+pub use page_key::{KeyPlugin, ScopedKeys};
 pub use payload::{
     CommandBarEntry, CommandBarPicks, build_command_bar_open_payload, command_bar_open_payload,
     command_list, localized_command_name,

@@ -9,9 +9,9 @@ use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
 use crate::page_model::DisplayCells;
 
-pub(super) struct EditorLanguagePlugin;
+pub(super) struct LanguagePlugin;
 
-impl Plugin for EditorLanguagePlugin {
+impl Plugin for LanguagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             FileHoverRequest,

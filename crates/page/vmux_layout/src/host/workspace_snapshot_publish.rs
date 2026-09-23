@@ -7,9 +7,9 @@ use vmux_ui::i18n::Locale;
 use crate::settings::ResolvedLocale;
 use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 
-pub(crate) struct WorkspaceSnapshotPlugin;
+pub(crate) struct SnapshotPlugin;
 
-impl Plugin for WorkspaceSnapshotPlugin {
+impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

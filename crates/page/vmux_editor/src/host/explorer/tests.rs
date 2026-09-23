@@ -84,7 +84,7 @@ impl ExplorerApp {
 
     fn with(default_visible: bool) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, ExplorerTreePlugin))
+        app.add_plugins((MinimalPlugins, TreePlugin))
             .insert_resource(ExplorerPanelDefaults {
                 default_visible,
                 width: 240,
@@ -518,7 +518,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
 #[test]
 fn showing_the_panel_reveals_without_taking_the_caret() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
+    app.add_plugins((MinimalPlugins, PanelPlugin))
         .init_resource::<ExplorerTrees>()
         .insert_resource(ExplorerPanelDefaults {
             default_visible: false,
@@ -560,7 +560,7 @@ fn showing_the_panel_reveals_without_taking_the_caret() {
 #[test]
 fn panel_visibility_is_shared_only_within_stack() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
+    app.add_plugins((MinimalPlugins, PanelPlugin))
         .init_resource::<ExplorerTrees>();
     let first_stack = app
         .world_mut()
@@ -650,7 +650,7 @@ fn panel_open_reveals_current_file() {
     let tmp = git_repo();
     let file = tmp.path().join("src").join("lib.rs");
     let mut app = ExplorerApp::hidden();
-    app.add_plugins(ExplorerPanelPlugin);
+    app.add_plugins(PanelPlugin);
     let stack = app
         .world_mut()
         .spawn(StackExplorerVisibility { visible: false })
@@ -686,7 +686,7 @@ fn panel_open_reveals_current_file() {
 #[test]
 fn panel_width_clamps() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ExplorerPanelPlugin))
+    app.add_plugins((MinimalPlugins, PanelPlugin))
         .insert_resource(ExplorerPanelDefaults {
             default_visible: true,
             width: 240,
@@ -710,7 +710,7 @@ fn open_editors_track_on_navigate_and_close() {
     let dir = tmp.path().join("src");
     std::fs::create_dir(&dir).unwrap();
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ExplorerTabsPlugin))
+    app.add_plugins((MinimalPlugins, TabsPlugin))
         .insert_resource(crate::lsp::manager::LspManager::new(
             crate::lsp::LspOutbox::default(),
             crate::lsp::server_request::ServerEvents::default().sender(),

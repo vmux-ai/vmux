@@ -13,9 +13,9 @@ use crate::host::keymap::{EditorKeymap, Keymap};
 
 const STICKY_SCROLL_DEPTH: usize = 5;
 
-pub(crate) struct EditorViewportPlugin;
+pub(crate) struct ViewportPlugin;
 
-impl Plugin for EditorViewportPlugin {
+impl Plugin for ViewportPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
             .add_systems(
