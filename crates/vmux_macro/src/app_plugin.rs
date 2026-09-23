@@ -12,16 +12,22 @@ struct PluginOption {
     field: Ident,
     feature: LitStr,
     presets: Vec<Ident>,
+    requires: Vec<Ident>,
 }
 
 impl PluginOption {
-    fn matches(&self, feature: &LitStr, presets: &[Ident]) -> bool {
+    fn matches(&self, feature: &LitStr, presets: &[Ident], requires: &[Ident]) -> bool {
         self.feature.value() == feature.value()
             && self.presets.len() == presets.len()
             && self
                 .presets
                 .iter()
                 .all(|preset| presets.iter().any(|found| found == preset))
+            && self.requires.len() == requires.len()
+            && self
+                .requires
+                .iter()
+                .all(|required| requires.iter().any(|found| found == required))
     }
 }
 
@@ -70,6 +76,7 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
         let mut feature = None;
         let mut option = None;
         let mut presets = Vec::new();
+        let mut requires = Vec::new();
         for attribute in &variant.attrs {
             if !attribute.path().is_ident("plugin") {
                 continue;
@@ -87,6 +94,16 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
                         return Err(meta.error("duplicate option"));
                     }
                     option = Some(meta.value()?.parse::<Ident>()?);
+                    return Ok(());
+                }
+                if meta.path.is_ident("requires") {
+                    meta.parse_nested_meta(|dependency| {
+                        let Some(required) = dependency.path.get_ident() else {
+                            return Err(dependency.error("dependency must be an identifier"));
+                        };
+                        requires.push(required.clone());
+                        Ok(())
+                    })?;
                     return Ok(());
                 }
                 let Some(preset) = meta.path.get_ident() else {
@@ -112,10 +129,10 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             .iter()
             .find(|entry: &&PluginOption| entry.field == option)
         {
-            if !existing.matches(&feature, &presets) {
+            if !existing.matches(&feature, &presets, &requires) {
                 return Err(syn::Error::new_spanned(
                     variant,
-                    "shared option must use the same feature and presets",
+                    "shared option must use the same feature, presets, and dependencies",
                 ));
             }
         } else {
@@ -131,6 +148,7 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
                 field: option.clone(),
                 feature: feature.clone(),
                 presets,
+                requires,
             });
         }
         installs.push(PluginInstall {
@@ -144,6 +162,9 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             ident,
             "app plugin enum cannot be empty",
         ));
+    }
+    for option in &plugin_options {
+        dependency_closure(option, &plugin_options)?;
     }
 
     let option_fields = plugin_options.iter().map(|entry| {
@@ -162,17 +183,47 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             #field: false,
         }
     });
-    let option_setters = plugin_options.iter().map(|entry| {
-        let field = &entry.field;
-        let feature = &entry.feature;
-        quote! {
+    let option_setters = plugin_options
+        .iter()
+        .map(|entry| {
+            let dependencies = dependency_closure(entry, &plugin_options)?;
+            let dependents = dependent_closure(entry, &plugin_options)?;
+            let enable_dependencies = dependencies.iter().map(|dependency| {
+                let field = &dependency.field;
+                let feature = &dependency.feature;
+                quote! {
+                    #[cfg(feature = #feature)]
+                    {
+                        self.#field = true;
+                    }
+                }
+            });
+            let disable_dependents = dependents.iter().map(|dependent| {
+                let field = &dependent.field;
+                let feature = &dependent.feature;
+                quote! {
+                    #[cfg(feature = #feature)]
+                    {
+                        self.#field = false;
+                    }
+                }
+            });
+            let field = &entry.field;
+            let feature = &entry.feature;
+            Ok::<_, syn::Error>(quote! {
             #[cfg(feature = #feature)]
             pub const fn #field(mut self, enabled: bool) -> Self {
                 self.#field = enabled;
+                if enabled {
+                    #(#enable_dependencies)*
+                } else {
+                    #(#disable_dependents)*
+                }
                 self
             }
-        }
-    });
+            })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
     let builder_setters = plugin_options.iter().map(|entry| {
         let field = &entry.field;
         let feature = &entry.feature;
@@ -197,21 +248,25 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     });
     let option_presets = preset_names.iter().map(|preset| {
         let preset_feature = LitStr::new(&preset.to_string(), preset.span());
-        let values = plugin_options.iter().map(|entry| {
+        let enables = plugin_options.iter().filter_map(|entry| {
             let field = &entry.field;
             let feature = &entry.feature;
             let enabled = entry.presets.iter().any(|found| found == preset);
-            quote! {
-                #[cfg(feature = #feature)]
-                #field: #enabled,
-            }
+            enabled.then(|| {
+                quote! {
+                    #[cfg(feature = #feature)]
+                    {
+                        options = options.#field(true);
+                    }
+                }
+            })
         });
         quote! {
             #[cfg(feature = #preset_feature)]
             pub const fn #preset() -> Self {
-                Self {
-                    #(#values)*
-                }
+                let mut options = Self::none();
+                #(#enables)*
+                options
             }
         }
     });
@@ -296,6 +351,62 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
     })
+}
+
+fn dependency_closure<'a>(
+    option: &'a PluginOption,
+    options: &'a [PluginOption],
+) -> syn::Result<Vec<&'a PluginOption>> {
+    let mut path = vec![option.field.clone()];
+    let mut found = Vec::new();
+    collect_dependencies(option, options, &mut path, &mut found)?;
+    Ok(found)
+}
+
+fn collect_dependencies<'a>(
+    option: &'a PluginOption,
+    options: &'a [PluginOption],
+    path: &mut Vec<Ident>,
+    found: &mut Vec<&'a PluginOption>,
+) -> syn::Result<()> {
+    for required in &option.requires {
+        if path.iter().any(|field| field == required) {
+            return Err(syn::Error::new_spanned(
+                required,
+                "plugin option dependency cycle",
+            ));
+        }
+        let Some(dependency) = options.iter().find(|entry| entry.field == *required) else {
+            return Err(syn::Error::new_spanned(
+                required,
+                "unknown plugin option dependency",
+            ));
+        };
+        if found.iter().any(|entry| entry.field == dependency.field) {
+            continue;
+        }
+        path.push(required.clone());
+        collect_dependencies(dependency, options, path, found)?;
+        path.pop();
+        found.push(dependency);
+    }
+    Ok(())
+}
+
+fn dependent_closure<'a>(
+    option: &'a PluginOption,
+    options: &'a [PluginOption],
+) -> syn::Result<Vec<&'a PluginOption>> {
+    let mut found = Vec::new();
+    for candidate in options {
+        if dependency_closure(candidate, options)?
+            .iter()
+            .any(|dependency| dependency.field == option.field)
+        {
+            found.push(candidate);
+        }
+    }
+    Ok(found)
 }
 
 fn snake_case(name: &str) -> String {
